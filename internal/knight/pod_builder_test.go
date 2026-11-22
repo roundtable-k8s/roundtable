@@ -261,8 +261,43 @@ var _ = Describe("PodBuilder", func() {
 			}
 			Expect(envMap["GITSYNC_REPO"]).To(Equal("https://github.com/roundtable-k8s/arsenal"))
 			Expect(envMap["GITSYNC_REF"]).To(Equal("main"))
-			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal"))
+			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal/.sync/arsenal"))
+			Expect(envMap["GITSYNC_LINK"]).To(Equal("/arsenal/arsenal"))
 			Expect(envMap["GITSYNC_PERIOD"]).To(Equal("300s"))
+		})
+
+		It("adds one git-sync sidecar per arsenal with isolated roots", func() {
+			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
+			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+				{Name: "personal", Repo: "https://github.com/someone/roundtable-arsenal.git", Ref: "dev"},
+			}
+			builder.WithGitSync()
+
+			Expect(builder.sidecars).To(HaveLen(2))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[1].Name).To(Equal("git-sync-personal"))
+
+			envMap := make(map[string]string)
+			for _, e := range builder.sidecars[1].Env {
+				envMap[e.Name] = e.Value
+			}
+			Expect(envMap["GITSYNC_REPO"]).To(Equal("https://github.com/someone/roundtable-arsenal.git"))
+			Expect(envMap["GITSYNC_REF"]).To(Equal("dev"))
+			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal/.sync/personal"))
+			Expect(envMap["GITSYNC_LINK"]).To(Equal("/arsenal/personal"))
+			Expect(envMap["GITSYNC_PERIOD"]).To(Equal("300s"))
+		})
+
+		It("supports arsenals without a primary arsenal and dedupes derived names", func() {
+			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+				{Repo: "https://github.com/a/skills"},
+				{Repo: "https://github.com/b/skills.git"},
+			}
+			builder.WithGitSync()
+
+			Expect(builder.sidecars).To(HaveLen(2))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync-skills"))
+			Expect(builder.sidecars[1].Name).To(Equal("git-sync-skills-2"))
 		})
 
 		It("uses custom arsenal configuration", func() {

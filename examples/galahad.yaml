@@ -12,11 +12,14 @@ spec:
     - security
     - shared
 
-  # roundtable-k8s/arsenal (the default) only ships the platform tiers
-  # (shared, project, watch, coding). Domain packs like security/ live in
-  # your own skills repo — point the knight at it:
-  # arsenal:
-  #   repo: https://github.com/<you>/<your-skills-repo>
+  # Skills merge from every arsenal, per skill (later entries win on a
+  # <category>/<skill> clash). roundtable-k8s/arsenal provides the platform
+  # tiers (shared, project, watch, coding); domain packs like security/ come
+  # from your own skills repo.
+  arsenal: {}                     # roundtable-k8s/arsenal (default)
+  arsenals:
+    - name: personal
+      repo: https://github.com/<you>/<your-skills-repo>
 
   tools:
     apt:

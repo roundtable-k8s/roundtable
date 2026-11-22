@@ -142,6 +142,16 @@ type KnightSpec struct {
 	// +optional
 	Arsenal *KnightArsenal `json:"arsenal,omitempty"`
 
+	// arsenals lists additional skill arsenals merged into /skills alongside
+	// arsenal. Merging is per skill: /skills/<category>/<skill> links to the
+	// LAST arsenal (in order: arsenal first, then arsenals) that provides that
+	// skill, so later entries override earlier ones. Each entry runs its own
+	// git-sync sidecar.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=8
+	Arsenals []KnightArsenal `json:"arsenals,omitempty"`
+
 	// workspace configures the knight's persistent workspace.
 	// +optional
 	Workspace *KnightWorkspace `json:"workspace,omitempty"`
@@ -158,6 +168,14 @@ type KnightSpec struct {
 
 // KnightArsenal configures the git-sync sidecar for the skill arsenal.
 type KnightArsenal struct {
+	// name identifies this arsenal: it becomes the sync path /arsenal/<name>
+	// and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+	// a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+	// +kubebuilder:validation:MaxLength=40
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	Name string `json:"name,omitempty"`
+
 	// repo is the git repository URL containing skills.
 	// +kubebuilder:default="https://github.com/roundtable-k8s/arsenal"
 	// +optional
