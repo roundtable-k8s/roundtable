@@ -73,7 +73,17 @@ type KnightReconciler struct {
 	// The controller selects the backend based on knight.Spec.Runtime.
 	// If nil or the key is missing, falls back to RuntimeBackend.
 	RuntimeBackends map[string]rtruntime.RuntimeBackend
+
+	// SandboxEnabled reports whether the agent-sandbox v1alpha1 API is served
+	// and the sandbox backend is registered. When false, the controller does
+	// not watch Sandbox objects (the watch would never sync and the manager
+	// would exit, see #186) and knights with runtime: sandbox are parked with
+	// RuntimeAvailable=False instead of being reconciled.
+	SandboxEnabled bool
 }
+
+// runtimeSandbox is the spec.runtime value for the agent-sandbox backend.
+const runtimeSandbox = "sandbox"
 
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights/status,verbs=get;update;patch
@@ -125,6 +135,12 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := r.Status().Update(ctx, knight); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// A sandbox knight without the sandbox backend can't be reconciled. Park it
+	// with a clear condition and leave any existing runtime resources alone.
+	if knight.Spec.Runtime == runtimeSandbox && !r.SandboxEnabled {
+		return r.reconcileRuntimeUnavailable(ctx, knight)
 	}
 
 	// Resolve the runtime backend for this knight
@@ -212,7 +228,7 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 	log := logf.FromContext(ctx)
 	nn := types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}
 
-	if knight.Spec.Runtime == "sandbox" {
+	if knight.Spec.Runtime == runtimeSandbox {
 		// Sandbox runtime — clean up any stale Deployment
 		deploy := &appsv1.Deployment{}
 		if err := r.Get(ctx, nn, deploy); err == nil {
@@ -222,8 +238,9 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 				return fmt.Errorf("failed to delete stale deployment during runtime transition: %w", err)
 			}
 		}
-	} else {
-		// Deployment runtime (default) — clean up any stale Sandbox
+	} else if r.SandboxEnabled {
+		// Deployment runtime (default) — clean up any stale Sandbox. Skipped
+		// when the Sandbox API isn't served: there can be nothing to clean up.
 		sandbox := &sandboxv1alpha1.Sandbox{}
 		if err := r.Get(ctx, nn, sandbox); err == nil {
 			log.Info("Runtime transition: deleting stale Sandbox for deployment knight",
@@ -235,6 +252,51 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 	}
 
 	return nil
+}
+
+// reconcileRuntimeUnavailable marks a knight whose runtime backend is not
+// enabled (runtime: sandbox without the agent-sandbox v1alpha1 API) and
+// requeues slowly. The status is only written when it changes.
+func (r *KnightReconciler) reconcileRuntimeUnavailable(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	msg := fmt.Sprintf("Knight requests runtime %q, but the operator started without the sandbox backend: "+
+		"%s Sandbox is not served by the API server (or --enable-sandbox-backend=false). "+
+		"Install agent-sandbox with the v1alpha1 CRDs and restart the operator, or set spec.runtime to \"deployment\".",
+		knight.Spec.Runtime, sandboxv1alpha1.GroupVersion)
+
+	changed := meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
+		Status:             metav1.ConditionFalse,
+		Reason:             aiv1alpha1.ReasonSandboxUnavailable,
+		Message:            msg,
+		ObservedGeneration: knight.Generation,
+	})
+	if meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightAvailable,
+		Status:             metav1.ConditionFalse,
+		Reason:             aiv1alpha1.ReasonSandboxUnavailable,
+		Message:            msg,
+		ObservedGeneration: knight.Generation,
+	}) {
+		changed = true
+	}
+	if knight.Status.Phase != aiv1alpha1.KnightPhaseDegraded || knight.Status.Ready ||
+		knight.Status.ObservedGeneration != knight.Generation {
+		changed = true
+	}
+
+	if changed {
+		log.Info("Sandbox runtime unavailable; knight parked", "knight", knight.Name)
+		r.Recorder.Event(knight, corev1.EventTypeWarning, aiv1alpha1.ReasonSandboxUnavailable, msg)
+		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
+		knight.Status.Ready = false
+		knight.Status.ObservedGeneration = knight.Generation
+		if err := r.Status().Update(ctx, knight); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{RequeueAfter: RequeueVerySlow}, nil
 }
 
 // reconcileSuspended scales the deployment to 0 and updates status.
@@ -648,6 +710,14 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		})
 	}
 
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonRuntimeBackendAvailable,
+		Message:            fmt.Sprintf("Runtime backend %q is enabled", runtimeName(knight)),
+		ObservedGeneration: knight.Generation,
+	})
+
 	// Set NATS consumer name in status
 	consumerName := knight.Spec.NATS.ConsumerName
 	if consumerName == "" {
@@ -681,17 +751,28 @@ func (r *KnightReconciler) runtimeBackendFor(knight *aiv1alpha1.Knight) rtruntim
 	return r.RuntimeBackend
 }
 
+// runtimeName returns the effective spec.runtime (empty means deployment).
+func runtimeName(knight *aiv1alpha1.Knight) string {
+	if knight.Spec.Runtime == "" {
+		return "deployment"
+	}
+	return knight.Spec.Runtime
+}
+
 // SetupWithManager sets up the controller with the Manager.
+// Sandbox objects are only watched when SandboxEnabled is true: a watch on a
+// kind the API server doesn't serve never syncs, and the manager exits.
 func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Knight{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&batchv1.Job{}).
-		Owns(&corev1.ConfigMap{}).
-		Owns(&sandboxv1alpha1.Sandbox{}).
-		Named("knight").
-		Complete(r)
+		Owns(&corev1.ConfigMap{})
+	if r.SandboxEnabled {
+		b = b.Owns(&sandboxv1alpha1.Sandbox{})
+	}
+	return b.Named("knight").Complete(r)
 }
 
 // deriveResultsPrefix is a re-export from the knight package for backward compatibility with tests.

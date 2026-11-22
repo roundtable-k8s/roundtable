@@ -38,6 +38,8 @@ spec:
             {{- if .Values.leaderElect }}
             - --leader-elect
             {{- end }}
+            {{- /* YAML may parse true/false as bools; keep them, default only when unset */}}
+            - --enable-sandbox-backend={{ if kindIs "bool" .Values.sandboxBackend }}{{ .Values.sandboxBackend }}{{ else }}{{ .Values.sandboxBackend | default "auto" }}{{ end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}
