@@ -276,7 +276,7 @@ spec:
                               description: ref is the git ref to sync.
                               type: string
                             repo:
-                              default: https://github.com/dapperdivers/roundtable-arsenal
+                              default: https://github.com/roundtable-k8s/arsenal
                               description: repo is the git repository URL containing
                                 skills.
                               type: string
@@ -1048,7 +1048,7 @@ spec:
                               description: ref is the git ref to sync.
                               type: string
                             repo:
-                              default: https://github.com/dapperdivers/roundtable-arsenal
+                              default: https://github.com/roundtable-k8s/arsenal
                               description: repo is the git repository URL containing
                                 skills.
                               type: string
@@ -1579,7 +1579,7 @@ spec:
                               description: ref is the git ref to sync.
                               type: string
                             repo:
-                              default: https://github.com/dapperdivers/roundtable-arsenal
+                              default: https://github.com/roundtable-k8s/arsenal
                               description: repo is the git repository URL containing
                                 skills.
                               type: string
@@ -2427,7 +2427,7 @@ spec:
                             description: ref is the git ref to sync.
                             type: string
                           repo:
-                            default: https://github.com/dapperdivers/roundtable-arsenal
+                            default: https://github.com/roundtable-k8s/arsenal
                             description: repo is the git repository URL containing
                               skills.
                             type: string
@@ -2995,7 +2995,7 @@ spec:
                             description: ref is the git ref to sync.
                             type: string
                           repo:
-                            default: https://github.com/dapperdivers/roundtable-arsenal
+                            default: https://github.com/roundtable-k8s/arsenal
                             description: repo is the git repository URL containing
                               skills.
                             type: string
