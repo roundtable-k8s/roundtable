@@ -69,7 +69,7 @@ spec:
       skills:
       - security
       - nmap
-      image: ghcr.io/dapperdivers/roundtable-knight:v0.6.0
+      image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 2
       taskTimeout: 300
       nats:

@@ -75,6 +75,12 @@ knights:
     nats:
       subjects: ["fleet-a.tasks.security.>"]
     taskTimeout: 300
+    # Platform skills from roundtable-k8s/arsenal, domain packs from your own repo.
+    # Merged per skill into /skills; later arsenals win on a clash.
+    arsenal: {}
+    arsenals:
+      - name: personal
+        repo: https://github.com/<you>/<your-skills>
 ```
 
 ### Planner
@@ -88,6 +94,7 @@ knights:
 | `planner.concurrency` | int | `1` | Max concurrent tasks |
 | `planner.taskTimeout` | int | `600` | Task timeout in seconds |
 | `planner.arsenal.repo` | string | `https://github.com/roundtable-k8s/arsenal.git` | Skills git repo |
+| `planner.arsenals` | list | `[]` | Extra skill repos merged after `arsenal` (`name`, `repo`, `ref`, `period`; per-skill merge, later wins) |
 
 ### Scheduling
 

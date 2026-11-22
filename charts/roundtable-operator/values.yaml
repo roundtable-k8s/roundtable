@@ -146,3 +146,7 @@ planner:
     repo: https://github.com/roundtable-k8s/arsenal.git
     ref: main
     period: 5m
+  # Extra skill repos merged into /skills after `arsenal` (per skill; later wins).
+  # arsenals:
+  #   - name: personal
+  #     repo: https://github.com/<you>/<your-skills>.git
