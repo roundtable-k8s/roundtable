@@ -160,6 +160,12 @@ type KnightSpec struct {
 	// +optional
 	Lifecycle *KnightLifecycle `json:"lifecycle,omitempty"`
 
+	// github configures GitHub credentials for the knight. When
+	// github.tokenSecretRef is set it overrides the RoundTable's
+	// spec.github.tokenSecretRef.
+	// +optional
+	GitHub *GitHubConfig `json:"github,omitempty"`
+
 	// suspended, if true, scales the knight deployment to 0 replicas.
 	// +kubebuilder:default=false
 	// +optional
@@ -223,6 +229,31 @@ type KnightLifecycle struct {
 	// Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
 	// +optional
 	IdleTimeout string `json:"idleTimeout,omitempty"`
+}
+
+// GitHubConfig configures GitHub credentials for knights.
+type GitHubConfig struct {
+	// tokenSecretRef names a Secret holding a GitHub token (for example a
+	// GitHub App installation token that an external controller refreshes).
+	// The operator mounts it read-only into the knight at
+	// /var/run/secrets/roundtable/github/token and sets
+	// GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
+	// var, the kubelet refreshes the file in place when the Secret changes.
+	// +optional
+	TokenSecretRef *GitHubTokenSecretRef `json:"tokenSecretRef,omitempty"`
+}
+
+// GitHubTokenSecretRef selects a key of a Secret in the knight's namespace.
+type GitHubTokenSecretRef struct {
+	// name of the Secret.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// key within the Secret that holds the token.
+	// +kubebuilder:default=token
+	// +optional
+	Key string `json:"key,omitempty"`
 }
 
 // KnightCapabilities defines optional runtime capabilities for the knight pod.
