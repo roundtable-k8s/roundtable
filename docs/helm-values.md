@@ -27,6 +27,7 @@ helm install roundtable charts/roundtable-operator \
 | `resources.requests.memory` | string | `64Mi` | Memory request |
 | `resources.limits.cpu` | string | `200m` | CPU limit |
 | `resources.limits.memory` | string | `128Mi` | Memory limit |
+| `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1alpha1` Sandbox is served), `true`, or `false` |
 | `extraArgs` | list | `[]` | Additional args for the manager binary |
 
 ### Service Account

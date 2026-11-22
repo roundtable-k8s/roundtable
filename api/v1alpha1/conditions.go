@@ -39,6 +39,12 @@ const (
 	// Status=False means the knight is suspended, degraded, or provisioning.
 	ConditionKnightAvailable = "Available"
 
+	// ConditionKnightRuntimeAvailable indicates whether the runtime backend
+	// selected by spec.runtime is enabled in this operator.
+	// Status=False means the knight cannot be scheduled until the backend is
+	// available (e.g. runtime: sandbox without the agent-sandbox v1alpha1 API).
+	ConditionKnightRuntimeAvailable = "RuntimeAvailable"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
@@ -105,6 +111,13 @@ const (
 
 	// ReasonKnightReconcileError indicates the knight reconcile encountered an error.
 	ReasonKnightReconcileError = "ReconcileError"
+
+	// ReasonRuntimeBackendAvailable indicates the knight's runtime backend is enabled.
+	ReasonRuntimeBackendAvailable = "BackendAvailable"
+
+	// ReasonSandboxUnavailable indicates the knight requests runtime: sandbox but
+	// the operator started without the sandbox backend.
+	ReasonSandboxUnavailable = "SandboxUnavailable"
 
 	// ===== RoundTable Condition Reasons =====
 

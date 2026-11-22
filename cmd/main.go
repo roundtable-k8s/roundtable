@@ -31,6 +31,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -59,7 +60,6 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(aiv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(sandboxv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -73,6 +73,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var sandboxBackendMode string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -90,6 +91,9 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&sandboxBackendMode, "enable-sandbox-backend", string(rtruntime.SandboxModeAuto),
+		"Enable the agent-sandbox runtime backend: auto (only if agents.x-k8s.io/v1alpha1 Sandbox is served), "+
+			"true or false. When disabled, knights with runtime: sandbox report RuntimeAvailable=False.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -165,7 +169,37 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	sandboxMode, err := rtruntime.ParseSandboxMode(sandboxBackendMode)
+	if err != nil {
+		setupLog.Error(err, "Invalid --enable-sandbox-backend")
+		os.Exit(1)
+	}
+
+	restConfig := ctrl.GetConfigOrDie()
+
+	// The sandbox backend watches agents.x-k8s.io/v1alpha1 Sandbox objects. If
+	// that kind isn't served, the watch never syncs and the manager exits after
+	// the cache-sync timeout, taking every Knight down with it (#186). Probe
+	// discovery once at startup and only wire the backend in when it's served.
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restConfig)
+	if err != nil {
+		setupLog.Error(err, "Failed to create discovery client")
+		os.Exit(1)
+	}
+	sandboxEnabled, sandboxReason, err := rtruntime.ResolveSandboxBackend(sandboxMode, discoveryClient)
+	if err != nil {
+		setupLog.Error(err, "Failed to detect the agent-sandbox API")
+		os.Exit(1)
+	}
+	if sandboxEnabled {
+		utilruntime.Must(sandboxv1alpha1.AddToScheme(scheme))
+		setupLog.Info("Runtime backends enabled", "backends", []string{"deployment", "sandbox"}, "reason", sandboxReason)
+	} else {
+		setupLog.Info("Runtime backends enabled", "backends", []string{"deployment"},
+			"reason", sandboxReason+"; knights with runtime: sandbox will report RuntimeAvailable=False")
+	}
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -226,6 +260,7 @@ func main() {
 		Recorder:       mgr.GetEventRecorderFor("knight-controller"),
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
+		SandboxEnabled: sandboxEnabled,
 	}
 
 	// Create runtime backends
@@ -235,18 +270,19 @@ func main() {
 		defaultImage,
 		knightReconciler.BuildDeploymentSpec,
 	)
-	sandboxBackend := rtruntime.NewSandboxBackend(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		defaultImage,
-		knightReconciler.BuildPodSpec,
-	)
 
 	// Register backends by runtime type name
 	knightReconciler.RuntimeBackend = deploymentBackend // default
 	knightReconciler.RuntimeBackends = map[string]rtruntime.RuntimeBackend{
 		"deployment": deploymentBackend,
-		"sandbox":    sandboxBackend,
+	}
+	if sandboxEnabled {
+		knightReconciler.RuntimeBackends["sandbox"] = rtruntime.NewSandboxBackend(
+			mgr.GetClient(),
+			mgr.GetScheme(),
+			defaultImage,
+			knightReconciler.BuildPodSpec,
+		)
 	}
 
 	if err := knightReconciler.SetupWithManager(mgr); err != nil {
