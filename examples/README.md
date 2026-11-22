@@ -14,7 +14,7 @@ Real-world examples of Round Table resources.
 
 ```bash
 # 1. Install the operator
-helm install roundtable oci://ghcr.io/dapperdivers/charts/roundtable-operator \
+helm install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --namespace roundtable --create-namespace
 
 # 2. Create a fleet

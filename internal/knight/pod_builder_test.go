@@ -57,7 +57,7 @@ var _ = Describe("PodBuilder", func() {
 				},
 			},
 		}
-		builder = NewPodBuilder(knight, "ghcr.io/dapperdivers/pi-knight:latest")
+		builder = NewPodBuilder(knight, "ghcr.io/roundtable-k8s/pi-knight:latest")
 	})
 
 	Describe("WithWorkspace", func() {
@@ -328,7 +328,7 @@ var _ = Describe("PodBuilder", func() {
 			mainContainer := spec.Containers[0]
 
 			Expect(mainContainer.Name).To(Equal("app"))
-			Expect(mainContainer.Image).To(Equal("ghcr.io/dapperdivers/pi-knight:latest"))
+			Expect(mainContainer.Image).To(Equal("ghcr.io/roundtable-k8s/pi-knight:latest"))
 
 			// Check env vars
 			envMap := make(map[string]string)

@@ -12,7 +12,7 @@ Deploy your first AI agent fleet in 5 minutes.
 ## 1. Install the Operator
 
 ```bash
-helm install roundtable oci://ghcr.io/dapperdivers/charts/roundtable-operator \
+helm install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --namespace roundtable --create-namespace \
   --set images.piKnight.tag=latest
 ```

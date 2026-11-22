@@ -465,7 +465,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		image = b.defaultImg
 	}
 	if image == "" {
-		image = "ghcr.io/dapperdivers/pi-knight:latest"
+		image = "ghcr.io/roundtable-k8s/pi-knight:latest"
 	}
 
 	// Build environment variables

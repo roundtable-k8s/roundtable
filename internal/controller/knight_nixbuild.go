@@ -106,7 +106,7 @@ func (r *KnightReconciler) buildNixBuildJob(knight *aiv1alpha1.Knight, hash, job
 		image = r.DefaultImage
 	}
 	if image == "" {
-		image = "ghcr.io/dapperdivers/pi-knight:latest"
+		image = "ghcr.io/roundtable-k8s/pi-knight:latest"
 	}
 
 	labels := map[string]string{

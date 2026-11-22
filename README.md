@@ -232,7 +232,7 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
 ```bash
 # Add the OCI chart
 helm install roundtable-operator \
-  oci://ghcr.io/dapperdivers/charts/roundtable-operator \
+  oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --namespace roundtable --create-namespace \
   --set image.tag=latest \
   --set images.piKnight.tag=latest
@@ -255,7 +255,7 @@ git clone https://github.com/roundtable-k8s/roundtable.git
 cd roundtable
 
 make install   # CRDs
-make deploy IMG=ghcr.io/dapperdivers/roundtable:latest
+make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 ```
 
 ### What Happens
@@ -286,7 +286,7 @@ make run
 make test
 
 # Build the operator image
-make docker-build docker-push IMG=ghcr.io/dapperdivers/roundtable:latest
+make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
 ```
 
 ## Roadmap
