@@ -267,6 +267,14 @@ spec:
                               description: image overrides the git-sync container
                                 image.
                               type: string
+                            name:
+                              description: |-
+                                name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                              maxLength: 40
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
                             period:
                               default: 300s
                               description: period is how often to sync (e.g., "300s").
@@ -281,6 +289,47 @@ spec:
                                 skills.
                               type: string
                           type: object
+                        arsenals:
+                          description: |-
+                            arsenals lists additional skill arsenals merged into /skills alongside
+                            arsenal. Merging is per skill: /skills/<category>/<skill> links to the
+                            LAST arsenal (in order: arsenal first, then arsenals) that provides that
+                            skill, so later entries override earlier ones. Each entry runs its own
+                            git-sync sidecar.
+                          items:
+                            description: KnightArsenal configures the git-sync sidecar
+                              for the skill arsenal.
+                            properties:
+                              image:
+                                default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                                description: image overrides the git-sync container
+                                  image.
+                                type: string
+                              name:
+                                description: |-
+                                  name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                  and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                  a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                                maxLength: 40
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              period:
+                                default: 300s
+                                description: period is how often to sync (e.g., "300s").
+                                type: string
+                              ref:
+                                default: main
+                                description: ref is the git ref to sync.
+                                type: string
+                              repo:
+                                default: https://github.com/roundtable-k8s/arsenal
+                                description: repo is the git repository URL containing
+                                  skills.
+                                type: string
+                            type: object
+                          maxItems: 8
+                          type: array
+                          x-kubernetes-list-type: atomic
                         capabilities:
                           description: capabilities configures optional runtime capabilities
                             for the knight pod.
@@ -1039,6 +1088,14 @@ spec:
                               description: image overrides the git-sync container
                                 image.
                               type: string
+                            name:
+                              description: |-
+                                name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                              maxLength: 40
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
                             period:
                               default: 300s
                               description: period is how often to sync (e.g., "300s").
@@ -1053,6 +1110,47 @@ spec:
                                 skills.
                               type: string
                           type: object
+                        arsenals:
+                          description: |-
+                            arsenals lists additional skill arsenals merged into /skills alongside
+                            arsenal. Merging is per skill: /skills/<category>/<skill> links to the
+                            LAST arsenal (in order: arsenal first, then arsenals) that provides that
+                            skill, so later entries override earlier ones. Each entry runs its own
+                            git-sync sidecar.
+                          items:
+                            description: KnightArsenal configures the git-sync sidecar
+                              for the skill arsenal.
+                            properties:
+                              image:
+                                default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                                description: image overrides the git-sync container
+                                  image.
+                                type: string
+                              name:
+                                description: |-
+                                  name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                  and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                  a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                                maxLength: 40
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              period:
+                                default: 300s
+                                description: period is how often to sync (e.g., "300s").
+                                type: string
+                              ref:
+                                default: main
+                                description: ref is the git ref to sync.
+                                type: string
+                              repo:
+                                default: https://github.com/roundtable-k8s/arsenal
+                                description: repo is the git repository URL containing
+                                  skills.
+                                type: string
+                            type: object
+                          maxItems: 8
+                          type: array
+                          x-kubernetes-list-type: atomic
                         capabilities:
                           description: capabilities configures optional runtime capabilities
                             for the knight pod.
@@ -1570,6 +1668,14 @@ spec:
                               description: image overrides the git-sync container
                                 image.
                               type: string
+                            name:
+                              description: |-
+                                name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                              maxLength: 40
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
                             period:
                               default: 300s
                               description: period is how often to sync (e.g., "300s").
@@ -1584,6 +1690,47 @@ spec:
                                 skills.
                               type: string
                           type: object
+                        arsenals:
+                          description: |-
+                            arsenals lists additional skill arsenals merged into /skills alongside
+                            arsenal. Merging is per skill: /skills/<category>/<skill> links to the
+                            LAST arsenal (in order: arsenal first, then arsenals) that provides that
+                            skill, so later entries override earlier ones. Each entry runs its own
+                            git-sync sidecar.
+                          items:
+                            description: KnightArsenal configures the git-sync sidecar
+                              for the skill arsenal.
+                            properties:
+                              image:
+                                default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                                description: image overrides the git-sync container
+                                  image.
+                                type: string
+                              name:
+                                description: |-
+                                  name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                  and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                  a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                                maxLength: 40
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              period:
+                                default: 300s
+                                description: period is how often to sync (e.g., "300s").
+                                type: string
+                              ref:
+                                default: main
+                                description: ref is the git ref to sync.
+                                type: string
+                              repo:
+                                default: https://github.com/roundtable-k8s/arsenal
+                                description: repo is the git repository URL containing
+                                  skills.
+                                type: string
+                            type: object
+                          maxItems: 8
+                          type: array
+                          x-kubernetes-list-type: atomic
                         capabilities:
                           description: capabilities configures optional runtime capabilities
                             for the knight pod.
@@ -2418,6 +2565,14 @@ spec:
                             default: registry.k8s.io/git-sync/git-sync:v4.4.0
                             description: image overrides the git-sync container image.
                             type: string
+                          name:
+                            description: |-
+                              name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                              and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                              a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                            maxLength: 40
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
                           period:
                             default: 300s
                             description: period is how often to sync (e.g., "300s").
@@ -2432,6 +2587,47 @@ spec:
                               skills.
                             type: string
                         type: object
+                      arsenals:
+                        description: |-
+                          arsenals lists additional skill arsenals merged into /skills alongside
+                          arsenal. Merging is per skill: /skills/<category>/<skill> links to the
+                          LAST arsenal (in order: arsenal first, then arsenals) that provides that
+                          skill, so later entries override earlier ones. Each entry runs its own
+                          git-sync sidecar.
+                        items:
+                          description: KnightArsenal configures the git-sync sidecar
+                            for the skill arsenal.
+                          properties:
+                            image:
+                              default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                              description: image overrides the git-sync container
+                                image.
+                              type: string
+                            name:
+                              description: |-
+                                name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                                and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                                a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                              maxLength: 40
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            period:
+                              default: 300s
+                              description: period is how often to sync (e.g., "300s").
+                              type: string
+                            ref:
+                              default: main
+                              description: ref is the git ref to sync.
+                              type: string
+                            repo:
+                              default: https://github.com/roundtable-k8s/arsenal
+                              description: repo is the git repository URL containing
+                                skills.
+                              type: string
+                          type: object
+                        maxItems: 8
+                        type: array
+                        x-kubernetes-list-type: atomic
                       capabilities:
                         description: capabilities configures optional runtime capabilities
                           for the knight pod.
@@ -2985,6 +3181,14 @@ spec:
                           image:
                             default: registry.k8s.io/git-sync/git-sync:v4.4.0
                             description: image overrides the git-sync container image.
+                            type: string
+                          name:
+                            description: |-
+                              name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                              and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                              a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                            maxLength: 40
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                             type: string
                           period:
                             default: 300s

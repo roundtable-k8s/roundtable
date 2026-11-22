@@ -286,58 +286,154 @@ func (b *PodBuilder) WithArsenal() *PodBuilder {
 	return b
 }
 
-// WithSkillFilter adds the skill-filter sidecar container.
+const (
+	defaultArsenalRepo   = "https://github.com/roundtable-k8s/arsenal"
+	defaultArsenalRef    = "main"
+	defaultArsenalPeriod = "300s"
+	defaultGitSyncImage  = "registry.k8s.io/git-sync/git-sync:v4.4.0"
+)
+
+// resolvedArsenal is a KnightArsenal with defaults applied and its on-disk path.
+type resolvedArsenal struct {
+	aiv1alpha1.KnightArsenal
+	// path is where the synced tree appears inside the arsenal volume.
+	path string
+	// primary is true for spec.arsenal, whose sidecar keeps the name "git-sync".
+	primary bool
+}
+
+// arsenalName derives a DNS-label-ish name from a repo URL's basename.
+func arsenalName(repo string) string {
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(repo, "/"), ".git"), "/")
+	name := strings.ToLower(parts[len(parts)-1])
+	var sb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('-')
+		}
+	}
+	name = strings.Trim(sb.String(), "-")
+	if name == "" {
+		name = "arsenal"
+	}
+	if len(name) > 40 {
+		name = strings.TrimRight(name[:40], "-")
+	}
+	return name
+}
+
+// arsenals returns spec.arsenal (if set) followed by spec.arsenals, with
+// defaults applied, in merge order. Duplicate names get a numeric suffix.
+func (b *PodBuilder) arsenals() []resolvedArsenal {
+	var in []aiv1alpha1.KnightArsenal
+	primary := b.knight.Spec.Arsenal != nil
+	if primary {
+		in = append(in, *b.knight.Spec.Arsenal)
+	}
+	in = append(in, b.knight.Spec.Arsenals...)
+
+	out := make([]resolvedArsenal, 0, len(in))
+	seen := map[string]int{}
+	for i, a := range in {
+		if a.Repo == "" {
+			a.Repo = defaultArsenalRepo
+		}
+		if a.Ref == "" {
+			a.Ref = defaultArsenalRef
+		}
+		if a.Period == "" {
+			a.Period = defaultArsenalPeriod
+		}
+		if a.Image == "" {
+			a.Image = defaultGitSyncImage
+		}
+		if a.Name == "" {
+			a.Name = arsenalName(a.Repo)
+		}
+		if n := seen[a.Name]; n > 0 {
+			seen[a.Name] = n + 1
+			a.Name = fmt.Sprintf("%s-%d", a.Name, n+1)
+		} else {
+			seen[a.Name] = 1
+		}
+		out = append(out, resolvedArsenal{
+			KnightArsenal: a,
+			path:          "/arsenal/" + a.Name,
+			primary:       primary && i == 0,
+		})
+	}
+	return out
+}
+
+// WithSkillFilter adds the skill-filter sidecar container. It merges every
+// arsenal into /skills per skill: /skills/<category>/<skill> is a symlink into
+// the last arsenal (in merge order) that provides <category>/<skill>.
 func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 	skillCategories := strings.Join(b.knight.Spec.Skills, " ")
 
-	// Arsenal path: git-sync creates /arsenal/<repo-name> symlink
-	arsenalPath := "/arsenal"
-	if b.knight.Spec.Arsenal != nil {
-		repo := b.knight.Spec.Arsenal.Repo
-		if repo == "" {
-			repo = "https://github.com/roundtable-k8s/arsenal"
-		}
-		parts := strings.Split(strings.TrimSuffix(repo, ".git"), "/")
-		arsenalPath = "/arsenal/" + parts[len(parts)-1]
+	paths := []string{}
+	for _, a := range b.arsenals() {
+		paths = append(paths, a.path)
+	}
+	if len(paths) == 0 {
+		// No arsenal configured: nothing syncs, but keep the sidecar so a
+		// manually populated /arsenal still works.
+		paths = []string{"/arsenal"}
 	}
 
 	skillFilterScript := fmt.Sprintf(`
-ARSENAL="%s"
+ARSENALS="%s"
 TARGET="/skills"
-SKILL_CATEGORIES="%s"`, arsenalPath, skillCategories) + `
-EXPECTED=$(echo $SKILL_CATEGORIES | wc -w)
-LINKED=0
-while [ "$LINKED" -lt "$EXPECTED" ]; do
-  LINKED=0
-  if [ -d "$ARSENAL" ]; then
-    for cat in $SKILL_CATEGORIES; do
-      src="$ARSENAL/$cat"
-      dst="$TARGET/$cat"
-      if [ -d "$src" ] && [ ! -L "$dst" ]; then
-        ln -sf "$src" "$dst"
-        echo "Linked $cat"
-      fi
-      [ -L "$dst" ] && LINKED=$((LINKED + 1))
-    done
-  fi
-  [ "$LINKED" -lt "$EXPECTED" ] && sleep 2
+SKILL_CATEGORIES="%s"`, strings.Join(paths, " "), skillCategories) + `
+# Wait until every arsenal has completed its first sync.
+until ready=1; for a in $ARSENALS; do [ -d "$a" ] || ready=0; done; [ "$ready" = 1 ]; do
+  sleep 2
 done
-echo "All categories linked ($LINKED/$EXPECTED)"
-while true; do
-  if [ -d "$ARSENAL" ]; then
-    for cat in $SKILL_CATEGORIES; do
-      src="$ARSENAL/$cat"
-      dst="$TARGET/$cat"
-      if [ -d "$src" ]; then
-        current=$(readlink "$dst" 2>/dev/null || echo "")
-        if [ "$current" != "$src" ]; then
-          ln -sf "$src" "$dst"
-          echo "Re-linked $cat"
-        fi
+echo "Arsenals synced: $ARSENALS"
+sync_skills() {
+  for cat in $SKILL_CATEGORIES; do
+    dst_dir="$TARGET/$cat"
+    # Older layouts linked the whole category; replace with a real dir.
+    [ -L "$dst_dir" ] && rm -f "$dst_dir"
+    mkdir -p "$dst_dir"
+    # Later arsenals override earlier ones: record the winning source per entry.
+    want=""
+    for a in $ARSENALS; do
+      [ -d "$a/$cat" ] || continue
+      for src in "$a/$cat"/*; do
+        [ -e "$src" ] || continue
+        name="${src##*/}"
+        want="$(echo "$want" | awk -v n="$name" '$1 != n')
+$name $src"
+      done
+    done
+    echo "$want" | while read -r name src; do
+      [ -n "$name" ] || continue
+      current=$(readlink "$dst_dir/$name" 2>/dev/null || echo "")
+      if [ "$current" != "$src" ]; then
+        ln -sfn "$src" "$dst_dir/$name"
+        echo "Linked $cat/$name -> $src"
       fi
     done
-  fi
+    # Prune links for skills no arsenal provides any more.
+    for link in "$dst_dir"/*; do
+      [ -L "$link" ] || continue
+      name="${link##*/}"
+      echo "$want" | awk -v n="$name" '$1 == n {f=1} END {exit !f}' || { rm -f "$link"; echo "Unlinked $cat/$name"; }
+    done
+  done
+}
+sync_skills
+for cat in $SKILL_CATEGORIES; do
+  [ -n "$(ls -A "$TARGET/$cat" 2>/dev/null)" ] || echo "WARN: category $cat not found in any arsenal"
+done
+echo "Skills linked"
+[ -n "$SKILL_FILTER_ONCE" ] && exit 0
+while true; do
   sleep 60
+  sync_skills
 done`
 
 	skillFilterContainer := corev1.Container{
@@ -368,56 +464,44 @@ done`
 	return b
 }
 
-// WithGitSync adds the git-sync sidecar container for the arsenal.
+// WithGitSync adds one git-sync sidecar per arsenal. Each syncs under
+// /arsenal/.sync/<name> and exposes the current tree at /arsenal/<name>
+// (the same path the single-arsenal layout used). spec.arsenal's sidecar
+// keeps the name "git-sync"; spec.arsenals entries are "git-sync-<name>".
 func (b *PodBuilder) WithGitSync() *PodBuilder {
-	if b.knight.Spec.Arsenal == nil {
-		return b
-	}
+	for _, a := range b.arsenals() {
+		name := "git-sync-" + a.Name
+		if a.primary {
+			name = "git-sync"
+		}
+		// Each arsenal gets its own git-sync root: git-sync may wipe a root
+		// that isn't a clean repo, so roots must never nest or be shared.
+		env := []corev1.EnvVar{
+			{Name: "GITSYNC_REPO", Value: a.Repo},
+			{Name: "GITSYNC_REF", Value: a.Ref},
+			{Name: "GITSYNC_ROOT", Value: "/arsenal/.sync/" + a.Name},
+			{Name: "GITSYNC_LINK", Value: a.path},
+			{Name: "GITSYNC_PERIOD", Value: a.Period},
+		}
 
-	arsenalRepo := b.knight.Spec.Arsenal.Repo
-	if arsenalRepo == "" {
-		arsenalRepo = "https://github.com/roundtable-k8s/arsenal"
-	}
-
-	arsenalRef := b.knight.Spec.Arsenal.Ref
-	if arsenalRef == "" {
-		arsenalRef = "main"
-	}
-
-	arsenalPeriod := b.knight.Spec.Arsenal.Period
-	if arsenalPeriod == "" {
-		arsenalPeriod = "300s"
-	}
-
-	arsenalImage := b.knight.Spec.Arsenal.Image
-	if arsenalImage == "" {
-		arsenalImage = "registry.k8s.io/git-sync/git-sync:v4.4.0"
-	}
-
-	gitSyncContainer := corev1.Container{
-		Name:  "git-sync",
-		Image: arsenalImage,
-		Env: []corev1.EnvVar{
-			{Name: "GITSYNC_REPO", Value: arsenalRepo},
-			{Name: "GITSYNC_REF", Value: arsenalRef},
-			{Name: "GITSYNC_ROOT", Value: "/arsenal"},
-			{Name: "GITSYNC_PERIOD", Value: arsenalPeriod},
-		},
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("32Mi"),
-				corev1.ResourceCPU:    resource.MustParse("10m"),
+		b.sidecars = append(b.sidecars, corev1.Container{
+			Name:  name,
+			Image: a.Image,
+			Env:   env,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("32Mi"),
+					corev1.ResourceCPU:    resource.MustParse("10m"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("64Mi"),
+				},
 			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "arsenal", MountPath: "/arsenal"},
 			},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: "arsenal", MountPath: "/arsenal"},
-		},
+		})
 	}
-
-	b.sidecars = append(b.sidecars, gitSyncContainer)
 	return b
 }
 

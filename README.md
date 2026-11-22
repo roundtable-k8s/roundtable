@@ -261,8 +261,8 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 ### What Happens
 
 1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime
-2. A skill-filter sidecar mounts only the skills matching `spec.skills`
-3. A git-sync sidecar pulls the latest arsenal (skill definitions)
+2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenal`, plus any `spec.arsenals`)
+3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash
 4. A NATS JetStream consumer is configured with the knight's filter subjects
 5. The knight starts consuming tasks from the stream
 

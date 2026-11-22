@@ -497,6 +497,11 @@ func (in *KnightSpec) DeepCopyInto(out *KnightSpec) {
 		*out = new(KnightArsenal)
 		**out = **in
 	}
+	if in.Arsenals != nil {
+		in, out := &in.Arsenals, &out.Arsenals
+		*out = make([]KnightArsenal, len(*in))
+		copy(*out, *in)
+	}
 	if in.Workspace != nil {
 		in, out := &in.Workspace, &out.Workspace
 		*out = new(KnightWorkspace)
