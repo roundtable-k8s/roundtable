@@ -10,7 +10,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 // TestApplyPlanKnightRefPrefixing covers the fix for the InvalidKnightRef bug:

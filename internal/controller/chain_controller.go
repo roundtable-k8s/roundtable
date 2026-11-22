@@ -26,8 +26,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/dapperdivers/roundtable/internal/util"
 	"github.com/robfig/cron/v3"
+	"github.com/roundtable-k8s/roundtable/internal/util"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -42,10 +42,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	"github.com/dapperdivers/roundtable/internal/notify"
-	"github.com/dapperdivers/roundtable/pkg/metrics"
-	natspkg "github.com/dapperdivers/roundtable/pkg/nats"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/notify"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 const (

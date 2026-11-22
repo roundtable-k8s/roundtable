@@ -3,7 +3,7 @@ package controller
 import (
 	"testing"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 func TestValidateTemplates(t *testing.T) {

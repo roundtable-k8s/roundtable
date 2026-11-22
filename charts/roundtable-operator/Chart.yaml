@@ -10,8 +10,8 @@ keywords:
   - operator
   - multi-agent
   - orchestration
-home: https://github.com/dapperdivers/roundtable
+home: https://github.com/roundtable-k8s/roundtable
 sources:
-  - https://github.com/dapperdivers/roundtable
+  - https://github.com/roundtable-k8s/roundtable
 maintainers:
   - name: dapperdivers

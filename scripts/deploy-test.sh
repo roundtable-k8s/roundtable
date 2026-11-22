@@ -4,7 +4,7 @@
 set -euo pipefail
 
 NAMESPACE="roundtable"
-REPO="https://raw.githubusercontent.com/dapperdivers/roundtable/main"
+REPO="https://raw.githubusercontent.com/roundtable-k8s/roundtable/main"
 
 echo "🏰 Knights of the Round Table — Deployment"
 echo "============================================"

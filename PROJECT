@@ -7,7 +7,7 @@ domain: roundtable.io
 layout:
 - go.kubebuilder.io/v4
 projectName: roundtable-operator
-repo: github.com/dapperdivers/roundtable
+repo: github.com/roundtable-k8s/roundtable
 resources:
 - api:
     crdVersion: v1
@@ -16,6 +16,6 @@ resources:
   domain: roundtable.io
   group: ai
   kind: Knight
-  path: github.com/dapperdivers/roundtable/api/v1alpha1
+  path: github.com/roundtable-k8s/roundtable/api/v1alpha1
   version: v1alpha1
 version: "3"

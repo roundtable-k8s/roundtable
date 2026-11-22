@@ -27,7 +27,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	// Register custom Prometheus metrics
-	_ "github.com/dapperdivers/roundtable/pkg/metrics"
+	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -39,13 +39,13 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	"github.com/dapperdivers/roundtable/internal/controller"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
-	"github.com/dapperdivers/roundtable/internal/mission"
-	notifypkg "github.com/dapperdivers/roundtable/internal/notify"
-	natspkg "github.com/dapperdivers/roundtable/pkg/nats"
-	rtruntime "github.com/dapperdivers/roundtable/pkg/runtime"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/controller"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	"github.com/roundtable-k8s/roundtable/internal/mission"
+	notifypkg "github.com/roundtable-k8s/roundtable/internal/notify"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
+	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )

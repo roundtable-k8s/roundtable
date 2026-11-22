@@ -28,8 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	"github.com/dapperdivers/roundtable/internal/util"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/util"
 )
 
 // knightToolPATH returns the container PATH for a knight, set as a pod-spec env

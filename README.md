@@ -4,7 +4,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/dapperdivers/roundtable/actions/workflows/ci.yml/badge.svg)](https://github.com/dapperdivers/roundtable/actions)
+[![CI](https://github.com/roundtable-k8s/roundtable/actions/workflows/ci.yml/badge.svg)](https://github.com/roundtable-k8s/roundtable/actions)
 
 > *"We are the knights who say... `kubectl apply`!"*
 
@@ -47,7 +47,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 
 📦 **Arsenal** — git-synced skill repository, auto-distributed to knights via sidecar
 
-🖥️ **Dashboard** — real-time fleet monitoring, chain visualization, mission tracking ([roundtable-ui](https://github.com/dapperdivers/roundtable-ui))
+🖥️ **Dashboard** — real-time fleet monitoring, chain visualization, mission tracking ([roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui))
 
 🔄 **GitOps-Native** — CRDs reconcile through Flux or ArgoCD, same as any other cluster workload
 
@@ -214,10 +214,10 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
 
 | Component | Description | Repo |
 |-----------|-------------|------|
-| **roundtable** | Operator + CRDs + controllers | [dapperdivers/roundtable](https://github.com/dapperdivers/roundtable) |
-| **pi-knight** | Knight runtime (Node.js agent that consumes NATS tasks) | [dapperdivers/pi-knight](https://github.com/dapperdivers/pi-knight) |
-| **roundtable-ui** | Dashboard for fleet monitoring and chain visualization | [dapperdivers/roundtable-ui](https://github.com/dapperdivers/roundtable-ui) |
-| **roundtable-arsenal** | Skill repository (git-synced to knights via sidecar) | [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal) |
+| **roundtable** | Operator + CRDs + controllers | [roundtable-k8s/roundtable](https://github.com/roundtable-k8s/roundtable) |
+| **pi-knight** | Knight runtime (Node.js agent that consumes NATS tasks) | [roundtable-k8s/pi-knight](https://github.com/roundtable-k8s/pi-knight) |
+| **roundtable-ui** | Dashboard for fleet monitoring and chain visualization | [roundtable-k8s/roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui) |
+| **arsenal** | Skill repository (git-synced to knights via sidecar) | [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal) |
 
 ## Quick Start
 
@@ -251,7 +251,7 @@ The chart installs CRDs, the operator, and the [dashboard](#ecosystem) in one sh
 ### Install from source
 
 ```bash
-git clone https://github.com/dapperdivers/roundtable.git
+git clone https://github.com/roundtable-k8s/roundtable.git
 cd roundtable
 
 make install   # CRDs

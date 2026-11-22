@@ -30,8 +30,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	missionpkg "github.com/dapperdivers/roundtable/internal/mission"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 )
 
 var _ = Describe("Mission Integration Tests", func() {

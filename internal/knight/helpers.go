@@ -25,7 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 )
 

@@ -1,7 +1,7 @@
 package mission
 
 import (
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 // PlannerOutput represents the JSON output from the planner knight.

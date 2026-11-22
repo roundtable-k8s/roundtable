@@ -19,7 +19,7 @@ package runtime
 import (
 	"context"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 // RuntimeBackend abstracts how Knight pods are created and managed.

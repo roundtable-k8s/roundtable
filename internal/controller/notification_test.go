@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	"github.com/dapperdivers/roundtable/internal/notify"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/notify"
 )
 
 // notifySink is an httptest receiver that counts deliveries and captures the

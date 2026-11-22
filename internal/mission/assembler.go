@@ -18,9 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	"github.com/dapperdivers/roundtable/internal/status"
-	natspkg "github.com/dapperdivers/roundtable/pkg/nats"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/status"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // KnightAssembler handles knight assembly and provisioning for missions.
