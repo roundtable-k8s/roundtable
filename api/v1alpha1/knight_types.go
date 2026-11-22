@@ -159,7 +159,7 @@ type KnightSpec struct {
 // KnightArsenal configures the git-sync sidecar for the skill arsenal.
 type KnightArsenal struct {
 	// repo is the git repository URL containing skills.
-	// +kubebuilder:default="https://github.com/dapperdivers/roundtable-arsenal"
+	// +kubebuilder:default="https://github.com/roundtable-k8s/arsenal"
 	// +optional
 	Repo string `json:"repo,omitempty"`
 

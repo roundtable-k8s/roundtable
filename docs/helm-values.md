@@ -87,7 +87,7 @@ knights:
 | `planner.skills` | list | `[operator, shared]` | Planner skills |
 | `planner.concurrency` | int | `1` | Max concurrent tasks |
 | `planner.taskTimeout` | int | `600` | Task timeout in seconds |
-| `planner.arsenal.repo` | string | `https://github.com/dapperdivers/roundtable-arsenal.git` | Skills git repo |
+| `planner.arsenal.repo` | string | `https://github.com/roundtable-k8s/arsenal.git` | Skills git repo |
 
 ### Scheduling
 

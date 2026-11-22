@@ -217,7 +217,7 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
 | **roundtable** | Operator + CRDs + controllers | [dapperdivers/roundtable](https://github.com/dapperdivers/roundtable) |
 | **pi-knight** | Knight runtime (Node.js agent that consumes NATS tasks) | [dapperdivers/pi-knight](https://github.com/dapperdivers/pi-knight) |
 | **roundtable-ui** | Dashboard for fleet monitoring and chain visualization | [dapperdivers/roundtable-ui](https://github.com/dapperdivers/roundtable-ui) |
-| **roundtable-arsenal** | Skill repository (git-synced to knights via sidecar) | [dapperdivers/roundtable-arsenal](https://github.com/dapperdivers/roundtable-arsenal) |
+| **roundtable-arsenal** | Skill repository (git-synced to knights via sidecar) | [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal) |
 
 ## Quick Start
 

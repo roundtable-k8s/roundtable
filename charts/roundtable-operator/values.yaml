@@ -2,7 +2,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/dapperdivers/roundtable
+  repository: ghcr.io/roundtable-k8s/roundtable
   tag: latest
   pullPolicy: Always
 
@@ -143,6 +143,6 @@ planner:
   concurrency: 1
   taskTimeout: 600
   arsenal:
-    repo: https://github.com/dapperdivers/roundtable-arsenal.git
+    repo: https://github.com/roundtable-k8s/arsenal.git
     ref: main
     period: 5m

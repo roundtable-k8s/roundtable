@@ -259,7 +259,7 @@ var _ = Describe("PodBuilder", func() {
 			for _, e := range builder.sidecars[0].Env {
 				envMap[e.Name] = e.Value
 			}
-			Expect(envMap["GITSYNC_REPO"]).To(Equal("https://github.com/dapperdivers/roundtable-arsenal"))
+			Expect(envMap["GITSYNC_REPO"]).To(Equal("https://github.com/roundtable-k8s/arsenal"))
 			Expect(envMap["GITSYNC_REF"]).To(Equal("main"))
 			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal"))
 			Expect(envMap["GITSYNC_PERIOD"]).To(Equal("300s"))

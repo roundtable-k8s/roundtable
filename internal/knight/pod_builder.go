@@ -295,7 +295,7 @@ func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 	if b.knight.Spec.Arsenal != nil {
 		repo := b.knight.Spec.Arsenal.Repo
 		if repo == "" {
-			repo = "https://github.com/dapperdivers/roundtable-arsenal"
+			repo = "https://github.com/roundtable-k8s/arsenal"
 		}
 		parts := strings.Split(strings.TrimSuffix(repo, ".git"), "/")
 		arsenalPath = "/arsenal/" + parts[len(parts)-1]
@@ -376,7 +376,7 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 
 	arsenalRepo := b.knight.Spec.Arsenal.Repo
 	if arsenalRepo == "" {
-		arsenalRepo = "https://github.com/dapperdivers/roundtable-arsenal"
+		arsenalRepo = "https://github.com/roundtable-k8s/arsenal"
 	}
 
 	arsenalRef := b.knight.Spec.Arsenal.Ref

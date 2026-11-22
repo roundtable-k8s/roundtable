@@ -77,8 +77,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/dapperdivers/roundtable:latest
-            ghcr.io/dapperdivers/roundtable:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
 
   helm:
     needs: build
@@ -123,4 +123,4 @@ jobs:
       - name: Package and push chart
         run: |
           helm package charts/roundtable-operator
-          helm push roundtable-operator-*.tgz oci://ghcr.io/dapperdivers/charts
+          helm push roundtable-operator-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
