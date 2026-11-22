@@ -212,7 +212,11 @@ spec:
       roundtable.ai.roundtable.io/fleet: fleet-a
   secrets:
     - name: anthropic-api-key
-    - name: github-token
+  # Short-lived GitHub token, mounted as a refreshing file (GITHUB_TOKEN_FILE).
+  github:
+    tokenSecretRef:
+      name: roundtable-github-token
+      key: token
   vault:
     claimName: obsidian-vault
     readOnly: true

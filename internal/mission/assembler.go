@@ -504,6 +504,12 @@ func (a *KnightAssembler) buildEphemeralKnight(
 		appendSecretEnvFrom(spec, secretRef)
 	}
 
+	// Inherit the table's GitHub token Secret unless the template/inline
+	// spec names its own.
+	if (spec.GitHub == nil || spec.GitHub.TokenSecretRef == nil) && rt.Spec.GitHub != nil {
+		spec.GitHub = rt.Spec.GitHub.DeepCopy()
+	}
+
 	// Ephemeral knights don't get persistent workspace
 	spec.Workspace = nil
 
@@ -693,6 +699,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	// Get parent RoundTable for defaults (if specified)
 	var parentDefaults *aiv1alpha1.RoundTableDefaults
 	var parentPolicies *aiv1alpha1.RoundTablePolicies
+	var parentGitHub *aiv1alpha1.GitHubConfig
 	natsURL := "nats://nats.database.svc.cluster.local:4222" // Default
 
 	if mission.Spec.RoundTableRef != "" {
@@ -708,6 +715,9 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 			}
 			if parentRT.Spec.NATS.URL != "" {
 				natsURL = parentRT.Spec.NATS.URL
+			}
+			if parentRT.Spec.GitHub != nil {
+				parentGitHub = parentRT.Spec.GitHub.DeepCopy()
 			}
 		}
 	}
@@ -749,6 +759,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 				CreateStreams:   true,
 				StreamRetention: "WorkQueue", // ALWAYS WorkQueue for ephemeral
 			},
+			GitHub: parentGitHub,
 		},
 	}
 

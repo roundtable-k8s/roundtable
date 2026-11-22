@@ -82,6 +82,10 @@ knights:
     arsenals:
       - name: personal
         repo: https://github.com/<you>/<your-skills>
+    # Mount a refreshing GitHub token file instead of a frozen env token.
+    github:
+      tokenSecretRef:
+        name: roundtable-github-token  # key defaults to "token"
 ```
 
 ### Planner
@@ -96,6 +100,24 @@ knights:
 | `planner.taskTimeout` | int | `600` | Task timeout in seconds |
 | `planner.arsenal.repo` | string | `https://github.com/roundtable-k8s/arsenal.git` | Skills git repo |
 | `planner.arsenals` | list | `[]` | Extra skill repos merged after `arsenal` (`name`, `repo`, `ref`, `period`; per-skill merge, later wins) |
+| `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). The planner belongs to no RoundTable, so it is configured here |
+| `planner.github.tokenSecretRef.key` | string | `token` | Key within that Secret |
+
+### GitHub token file
+
+GitHub App installation tokens expire after an hour, but env vars are frozen at
+pod start. Set `github.tokenSecretRef` (on a RoundTable, a Knight, or
+`planner.github` here) and the operator mounts that Secret read-only at
+`/var/run/secrets/roundtable/github/token` and sets
+`GITHUB_TOKEN_FILE` to that path. The kubelet refreshes the file when the
+Secret rotates (about a minute later). The knight images' git credential helper
+and `gh` shim read the file on every call. The token is never put in the env.
+
+Resolution order: the Knight's own `spec.github.tokenSecretRef`, then the
+RoundTable named by the knight's `ai.roundtable.io/round-table` label (or the
+older `ai.roundtable.io/table` label). Mission and warm-pool knights get the
+table's value copied into their spec, and a mission's ephemeral RoundTable
+inherits it from `spec.roundTableRef`.
 
 ### Scheduling
 

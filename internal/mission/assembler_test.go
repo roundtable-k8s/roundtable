@@ -6,6 +6,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -118,3 +120,68 @@ func TestBuildEphemeralKnightDedupesSecrets(t *testing.T) {
 		t.Errorf("roundtable-secret referenced %d times in envFrom, want 1", count)
 	}
 }
+
+// ─── GitHub token inheritance ───────────────────────────────────────────────
+
+func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
+	mission, mk, rt := ephemeralFixtures()
+	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: testGitHubTokenSecret, Key: "token"},
+	}
+	a := &KnightAssembler{}
+
+	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	if err != nil {
+		t.Fatalf("buildEphemeralKnight: %v", err)
+	}
+	if knight.Spec.GitHub == nil || knight.Spec.GitHub.TokenSecretRef == nil ||
+		knight.Spec.GitHub.TokenSecretRef.Name != testGitHubTokenSecret {
+		t.Fatalf("github = %+v, want tokenSecretRef roundtable-github-token", knight.Spec.GitHub)
+	}
+	// Must be a copy, not an alias of the table's spec.
+	knight.Spec.GitHub.TokenSecretRef.Name = "mutated"
+	if rt.Spec.GitHub.TokenSecretRef.Name != testGitHubTokenSecret {
+		t.Error("knight spec aliases the RoundTable's github config")
+	}
+}
+
+func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
+	mission, mk, rt := ephemeralFixtures()
+	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "table-token"},
+	}
+	tmpl := rt.Spec.KnightTemplates["base"]
+	tmpl.GitHub = &aiv1alpha1.GitHubConfig{
+		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "template-token"},
+	}
+	rt.Spec.KnightTemplates["base"] = tmpl
+	a := &KnightAssembler{}
+
+	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	if err != nil {
+		t.Fatalf("buildEphemeralKnight: %v", err)
+	}
+	if got := knight.Spec.GitHub.TokenSecretRef.Name; got != "template-token" {
+		t.Errorf("tokenSecretRef = %q, want template-token", got)
+	}
+}
+
+func TestBuildEphemeralRoundTableInheritsParentGitHub(t *testing.T) {
+	mission, _, parent := ephemeralFixtures()
+	parent.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: testGitHubTokenSecret, Key: "token"},
+	}
+	s := k8sruntime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	a := &KnightAssembler{Client: fake.NewClientBuilder().WithScheme(s).WithObjects(parent).Build()}
+
+	rt := a.BuildEphemeralRoundTable(context.Background(), mission, "msn-itertest", "msn-itertest", "t", "r")
+	if rt.Spec.GitHub == nil || rt.Spec.GitHub.TokenSecretRef == nil ||
+		rt.Spec.GitHub.TokenSecretRef.Name != testGitHubTokenSecret {
+		t.Fatalf("ephemeral table github = %+v, want parent's tokenSecretRef", rt.Spec.GitHub)
+	}
+}
+
+const testGitHubTokenSecret = "roundtable-github-token"
