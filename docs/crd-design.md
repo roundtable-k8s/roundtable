@@ -198,7 +198,7 @@ spec:
     streamRetention: "WorkQueue"
   defaults:
     model: "claude-sonnet-4-20250514"
-    image: "ghcr.io/dapperdivers/pi-knight:latest"
+    image: "ghcr.io/roundtable-k8s/pi-knight:latest"
     taskTimeout: 120
     concurrency: 2
   policies:
@@ -319,7 +319,7 @@ spec:
       ephemeralSpec:
         domain: forensics
         model: "claude-sonnet-4-20250514"
-        image: "ghcr.io/dapperdivers/pi-knight:latest"
+        image: "ghcr.io/roundtable-k8s/pi-knight:latest"
         skills: ["forensics", "networking", "linux"]
         tools:
           nix: ["tcpdump", "wireshark-cli", "volatility3"]

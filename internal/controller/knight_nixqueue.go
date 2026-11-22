@@ -27,8 +27,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 // buildQueueDir returns the mount path of the RWX build-queue PVC the operator

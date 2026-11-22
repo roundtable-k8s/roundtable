@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dapperdivers/roundtable/internal/util"
+	"github.com/roundtable-k8s/roundtable/internal/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	natspkg "github.com/dapperdivers/roundtable/pkg/nats"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // Planner encapsulates all planning logic extracted from MissionReconciler.

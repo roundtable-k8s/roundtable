@@ -22,7 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/dapperdivers/roundtable/internal/util"
+	"github.com/roundtable-k8s/roundtable/internal/util"
 )
 
 // PodSecurity is the single source of truth for the pod-level security context

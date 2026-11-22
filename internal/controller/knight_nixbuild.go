@@ -29,8 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 // nixBuildJobTTL keeps finished build Jobs around briefly for log inspection
@@ -106,7 +106,7 @@ func (r *KnightReconciler) buildNixBuildJob(knight *aiv1alpha1.Knight, hash, job
 		image = r.DefaultImage
 	}
 	if image == "" {
-		image = "ghcr.io/dapperdivers/pi-knight:latest"
+		image = "ghcr.io/roundtable-k8s/pi-knight:latest"
 	}
 
 	labels := map[string]string{

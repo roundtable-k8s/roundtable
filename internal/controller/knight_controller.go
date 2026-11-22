@@ -37,10 +37,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
-	rtmetrics "github.com/dapperdivers/roundtable/pkg/metrics"
-	rtruntime "github.com/dapperdivers/roundtable/pkg/runtime"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
+	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
 

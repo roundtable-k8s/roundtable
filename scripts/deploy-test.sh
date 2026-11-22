@@ -4,7 +4,7 @@
 set -euo pipefail
 
 NAMESPACE="roundtable"
-REPO="https://raw.githubusercontent.com/dapperdivers/roundtable/main"
+REPO="https://raw.githubusercontent.com/roundtable-k8s/roundtable/main"
 
 echo "🏰 Knights of the Round Table — Deployment"
 echo "============================================"
@@ -92,7 +92,7 @@ spec:
       automountServiceAccountToken: true
       containers:
         - name: manager
-          image: ghcr.io/dapperdivers/roundtable:latest
+          image: ghcr.io/roundtable-k8s/roundtable:latest
           args:
             - --leader-elect
           resources:
@@ -128,7 +128,7 @@ metadata:
 spec:
   domain: testing
   model: claude-haiku-35-20241022
-  image: ghcr.io/dapperdivers/pi-knight:latest
+  image: ghcr.io/roundtable-k8s/pi-knight:latest
   skills:
     - shared
   nats:

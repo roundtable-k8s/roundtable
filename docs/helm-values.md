@@ -4,7 +4,7 @@
 
 ```bash
 # From OCI registry
-helm install roundtable oci://ghcr.io/dapperdivers/charts/roundtable-operator \
+helm install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --namespace roundtable --create-namespace
 
 # From local chart
@@ -19,7 +19,7 @@ helm install roundtable charts/roundtable-operator \
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `replicaCount` | int | `1` | Operator replicas (leader election handles HA) |
-| `image.repository` | string | `ghcr.io/dapperdivers/roundtable` | Operator image |
+| `image.repository` | string | `ghcr.io/roundtable-k8s/roundtable` | Operator image |
 | `image.tag` | string | `latest` | Operator image tag |
 | `image.pullPolicy` | string | `Always` | Image pull policy |
 | `leaderElect` | bool | `true` | Enable leader election for HA |
@@ -41,9 +41,9 @@ helm install roundtable charts/roundtable-operator \
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `images.piKnight.repository` | string | `ghcr.io/dapperdivers/pi-knight` | Default pi-knight image for all knights |
+| `images.piKnight.repository` | string | `ghcr.io/roundtable-k8s/pi-knight` | Default pi-knight image for all knights |
 | `images.piKnight.tag` | string | `latest` | pi-knight image tag |
-| `images.dashboard.repository` | string | `ghcr.io/dapperdivers/roundtable-ui` | Dashboard image |
+| `images.dashboard.repository` | string | `ghcr.io/roundtable-k8s/roundtable-ui` | Dashboard image |
 | `images.dashboard.tag` | string | `latest` | Dashboard image tag |
 
 ### Dashboard

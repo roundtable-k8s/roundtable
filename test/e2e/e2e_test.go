@@ -30,7 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/dapperdivers/roundtable/test/utils"
+	"github.com/roundtable-k8s/roundtable/test/utils"
 )
 
 // namespace where the project is deployed in

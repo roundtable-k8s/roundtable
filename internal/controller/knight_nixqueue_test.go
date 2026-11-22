@@ -25,8 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 func nixQueueKnight() *aiv1alpha1.Knight {

@@ -27,8 +27,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	aiv1alpha1 "github.com/dapperdivers/roundtable/api/v1alpha1"
-	knightpkg "github.com/dapperdivers/roundtable/internal/knight"
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 var _ = Describe("Knight Nix build Job", func() {
@@ -45,7 +45,7 @@ var _ = Describe("Knight Nix build Job", func() {
 	// ── buildNixBuildJob (pure) ───────────────────────────────────────────
 	Describe("buildNixBuildJob", func() {
 		It("mounts the shared store, knight ConfigMap, and a scratch emptyDir", func() {
-			r := &KnightReconciler{DefaultImage: "ghcr.io/dapperdivers/pi-knight:test"}
+			r := &KnightReconciler{DefaultImage: "ghcr.io/roundtable-k8s/pi-knight:test"}
 			k := newKnight("galahad", []string{"nmap"})
 			job := r.buildNixBuildJob(k, "abc123", "galahad-nixbuild-abc123")
 
@@ -54,7 +54,7 @@ var _ = Describe("Knight Nix build Job", func() {
 			Expect(pod.Containers).To(HaveLen(1))
 
 			c := pod.Containers[0]
-			Expect(c.Image).To(Equal("ghcr.io/dapperdivers/pi-knight:test"))
+			Expect(c.Image).To(Equal("ghcr.io/roundtable-k8s/pi-knight:test"))
 			Expect(c.Command).To(Equal([]string{"/app/scripts/nix-build.sh"}))
 
 			// shared store mounted RW (no ReadOnly flag), config + scratch present
@@ -105,7 +105,7 @@ var _ = Describe("Knight Nix build Job", func() {
 				Client:       k8sClient,
 				Scheme:       k8sClient.Scheme(),
 				Recorder:     record.NewFakeRecorder(10),
-				DefaultImage: "ghcr.io/dapperdivers/pi-knight:test",
+				DefaultImage: "ghcr.io/roundtable-k8s/pi-knight:test",
 			}
 		})
 

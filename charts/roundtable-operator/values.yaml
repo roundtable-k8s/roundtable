@@ -45,10 +45,10 @@ notify:
 # version in dapper-cluster
 images:
   piKnight:
-    repository: ghcr.io/dapperdivers/pi-knight
+    repository: ghcr.io/roundtable-k8s/pi-knight
     tag: a220890c7271135da415d7ebfabe9b08df2a711b
   dashboard:
-    repository: ghcr.io/dapperdivers/roundtable-ui
+    repository: ghcr.io/roundtable-k8s/roundtable-ui
     tag: 5d8702fa9e45701834b516e45e6bf020bb5a1d07
 
 # Pod-level security context for all knight-owned pods — knight Deployments
