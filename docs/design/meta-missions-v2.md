@@ -28,7 +28,7 @@ That's it. The operator does the rest.
 
 ### Built-in Planner Knight
 - Permanent knight deployed by the operator chart (like the dashboard)
-- Skilled via `roundtable-arsenal/operator/planner.md`
+- Skilled via `operator/planner.md` in [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal)
 - Communicates over NATS like every other knight
 - Operator dispatches planning tasks when `metaMission: true`
 
@@ -56,7 +56,7 @@ No predefined catalogs. No template shopping. Pure reasoning about capabilities.
 ### What's Baked In
 Only three things:
 1. The planner knight — ships with the operator chart, always running
-2. The planner skill — `roundtable-arsenal/operator/planner.md`
+2. The planner skill — `operator/planner.md` in [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal)
 3. The output JSON schema — so the operator can parse and validate
 
 Everything else is generated per-mission.

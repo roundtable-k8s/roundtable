@@ -24,6 +24,10 @@ spec:
   arsenal:
     {{- toYaml .Values.planner.arsenal | nindent 4 }}
   {{- end }}
+  {{- if .Values.planner.arsenals }}
+  arsenals:
+    {{- toYaml .Values.planner.arsenals | nindent 4 }}
+  {{- end }}
   {{- if .Values.planner.envFrom }}
   envFrom:
     {{- toYaml .Values.planner.envFrom | nindent 4 }}
