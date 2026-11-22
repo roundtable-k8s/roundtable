@@ -6,11 +6,17 @@ metadata:
 spec:
   domain: security
   model: anthropic/claude-sonnet-4-5
-  image: ghcr.io/roundtable-k8s/pi-knight:3ea8f80dcb2d5cd2b68eb4013f10b31c219d2681
+  image: ghcr.io/roundtable-k8s/pi-knight:0f16ecd09dc5a04555ec9d055e65d02054d6e5b7
 
   skills:
     - security
     - shared
+
+  # roundtable-k8s/arsenal (the default) only ships the platform tiers
+  # (shared, project, watch, coding). Domain packs like security/ live in
+  # your own skills repo — point the knight at it:
+  # arsenal:
+  #   repo: https://github.com/<you>/<your-skills-repo>
 
   tools:
     apt:
