@@ -241,10 +241,10 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: ns},
 			Spec: aiv1alpha1.ChainSpec{
-				RoundTableRef: rtName,
+				RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
 				Input:         `{"repo": "x/y", "issue": 1}`,
 				Schedule:      "0 * * * *",
-				Steps:         []aiv1alpha1.ChainStep{{Name: "plan", KnightRef: "lead", Task: "plan {{ .Input }}", Timeout: 120}},
+				Steps:         []aiv1alpha1.ChainStep{{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: "lead"}, Task: "plan {{ .Input }}", TimeoutSeconds: 120}},
 			},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.RoundTable{
@@ -253,7 +253,7 @@ var _ = Describe("IssuePickup controller", func() {
 				NATS: aiv1alpha1.RoundTableNATS{
 					URL: "nats://localhost:4222", SubjectPrefix: "pick", TasksStream: "pick_tasks", ResultsStream: "pick_results",
 				},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "pickup-gh", Key: "token"}},
+				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pickup-gh"}, Key: "token"}},
 				IssuePickup: &aiv1alpha1.IssuePickupSpec{
 					Repos:     []string{repo},
 					ChainRef:  corev1.LocalObjectReference{Name: tmplName},

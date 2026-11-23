@@ -85,7 +85,7 @@ func (r *IssuePickupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	spec := rt.Spec.IssuePickup
-	if spec == nil || spec.Suspend || rt.Spec.Suspended || !rt.DeletionTimestamp.IsZero() {
+	if spec == nil || spec.Suspend || rt.Spec.Suspend || !rt.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
@@ -265,7 +265,7 @@ func (r *IssuePickupReconciler) startChain(ctx context.Context, rt *aiv1alpha1.R
 	spec.Input = string(input)
 	spec.Schedule = ""
 	spec.StartingDeadlineSeconds = nil
-	spec.Suspended = false
+	spec.Suspend = false
 
 	if existing != nil {
 		orig := existing.DeepCopy()

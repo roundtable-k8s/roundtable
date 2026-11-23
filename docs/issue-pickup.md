@@ -81,6 +81,14 @@ Prerequisites:
   contents/pull_requests/issues, is enough). It does not need workflows,
   projects or administration permissions.
 
+## Who may trigger pickup
+
+Anyone who can apply the ready label (`rt:ready` by default) on a listed repo
+can start a pipeline run: that is triage/write access on the repo. Treat label
+rights on a listed repo as pipeline access, because the issue text becomes the
+knights' task. List only repos whose label rights you trust, and never list a
+repo where untrusted users can label issues.
+
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
 kind: RoundTable
