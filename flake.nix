@@ -26,6 +26,11 @@
         envtest = "1.35.0";
       };
 
+      # Outputs: devShells.default (nix develop) and packages.<system>.knight-tools,
+      # a buildEnv of the same tool list (shared via `devTools`, so they cannot
+      # drift) plus the envtest assets at share/envtest. Use
+      # KUBEBUILDER_ASSETS=$(nix build .#knight-tools --print-out-paths)/share/envtest.
+      #
       # Prebuilt upstream release binaries, pinned by hash, so the exact
       # versions are used regardless of what the nixpkgs revision ships.
       # (They are static Go binaries, nothing to patch.)
@@ -113,6 +118,42 @@
               fetch "${gh}/kubernetes-sigs/controller-tools/releases/download/envtest-v${versions.envtest}/envtest-v${versions.envtest}-${src.os}-${src.arch}.tar.gz" src.envtest
             } --strip-components=2 -C $out controller-tools/envtest
           '';
+
+          # The single list of dev tools, shared by devShells.default and
+          # packages.knight-tools so the two can never drift apart.
+          devTools = [
+            # go.mod: `go 1.26.1`, toolchain go1.26.3; nixpkgs-unstable's go
+            # is >= that, and the Makefile's GO_TOOLCHAIN=...+auto never
+            # accepts an older one.
+            pkgs.go
+            golangci-lint
+            helm
+            kustomize
+            controller-gen
+            pkgs.setup-envtest
+            pkgs.kubectl
+            pkgs.kind
+            pkgs.gnumake
+            pkgs.git
+            pkgs.jq
+            pkgs.yq-go
+            pkgs.gh
+          ];
+
+          # envtest assets exposed at share/envtest so they can be merged
+          # into an environment next to bin/.
+          envtest-share = pkgs.runCommand "envtest-share-${versions.envtest}" { } ''
+            mkdir -p $out/share
+            ln -s ${envtest-assets} $out/share/envtest
+          '';
+
+          # Everything in devShells.default as one installable environment:
+          # <env>/bin/* plus the pinned envtest assets at <env>/share/envtest
+          # (point KUBEBUILDER_ASSETS there). Intended for knight images.
+          knight-tools = pkgs.buildEnv {
+            name = "knight-tools";
+            paths = devTools ++ [ envtest-share ];
+          };
         in
         {
           inherit
@@ -121,6 +162,8 @@
             kustomize
             controller-gen
             envtest-assets
+            devTools
+            knight-tools
             ;
         };
     in
@@ -130,7 +173,17 @@
         let
           t = toolsFor pkgs;
         in
-        t // { default = t.envtest-assets; }
+        {
+          inherit (t)
+            golangci-lint
+            helm
+            kustomize
+            controller-gen
+            envtest-assets
+            knight-tools
+            ;
+          default = t.envtest-assets;
+        }
       );
 
       devShells = forAllSystems (
@@ -140,24 +193,7 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [
-              # go.mod: `go 1.26.1`, toolchain go1.26.3; nixpkgs-unstable's go
-              # is >= that, and the Makefile's GO_TOOLCHAIN=...+auto never
-              # accepts an older one.
-              pkgs.go
-              t.golangci-lint
-              t.helm
-              t.kustomize
-              t.controller-gen
-              pkgs.setup-envtest
-              pkgs.kubectl
-              pkgs.kind
-              pkgs.gnumake
-              pkgs.git
-              pkgs.jq
-              pkgs.yq-go
-              pkgs.gh
-            ];
+            packages = t.devTools;
 
             # Used by `make test` instead of downloading assets with setup-envtest.
             KUBEBUILDER_ASSETS = "${t.envtest-assets}";
@@ -182,6 +218,13 @@
             ${expect "controller-gen" "${t.controller-gen}/bin/controller-gen --version" "v${versions.controllerGen}"}
             test -x ${t.envtest-assets}/kube-apiserver
             test -x ${t.envtest-assets}/etcd
+            # knight-tools: same tools as the dev shell, envtest at share/envtest.
+            test -x ${t.knight-tools}/share/envtest/kube-apiserver
+            test -x ${t.knight-tools}/share/envtest/etcd
+            for bin in go golangci-lint helm kustomize controller-gen setup-envtest kubectl kind make git jq yq gh; do
+              test -x ${t.knight-tools}/bin/$bin || { echo "knight-tools: missing bin/$bin" >&2; exit 1; }
+            done
+            ${expect "knight-tools helm" "${t.knight-tools}/bin/helm version --short" "v${versions.helm}"}
             touch $out
           '';
         }

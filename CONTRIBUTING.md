@@ -38,6 +38,16 @@ so Nix is optional. When changing a `*_VERSION` in the Makefile, update the
 matching version and hashes in `flake.nix` (`nix flake check` verifies them).
 Humans and knights should use the same shell.
 
+The same toolchain is also available as an installable environment,
+`packages.<system>.knight-tools` (a `buildEnv` sharing the tool list with the
+dev shell, so versions cannot drift), with the envtest assets linked at
+`share/envtest`:
+
+```bash
+out=$(nix build .#knight-tools --no-link --print-out-paths)
+PATH=$out/bin:$PATH KUBEBUILDER_ASSETS=$out/share/envtest make test
+```
+
 ### Build & Test
 
 ```bash
