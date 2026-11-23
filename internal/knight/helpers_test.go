@@ -17,7 +17,6 @@ limitations under the License.
 package knight
 
 import (
-	"strings"
 	"testing"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -36,35 +35,5 @@ func TestNixpkgsRefDefaultAndOverride(t *testing.T) {
 	t.Setenv("KNIGHT_NIXPKGS_REF", "abc123")
 	if NixpkgsRef() != "abc123" {
 		t.Errorf("override = %s, want abc123", NixpkgsRef())
-	}
-}
-
-func TestGenerateFlakeNixIsPinned(t *testing.T) {
-	flake := GenerateFlakeNix(knightWithNix("nmap"))
-	if !strings.Contains(flake, "github:NixOS/nixpkgs/"+defaultNixpkgsRef) {
-		t.Errorf("flake should pin nixpkgs to %s; got:\n%s", defaultNixpkgsRef, flake)
-	}
-	if strings.Contains(flake, "nixos-unstable") {
-		t.Error("flake should not reference the moving nixos-unstable branch")
-	}
-	// allowUnfree retained (security/pentest tools)
-	if !strings.Contains(flake, "allowUnfree = true") {
-		t.Error("flake should set allowUnfree = true")
-	}
-}
-
-func TestNixToolsHashChangesWithRef(t *testing.T) {
-	k := knightWithNix("nmap", "jq")
-	h1 := NixToolsHash(k)
-
-	t.Setenv("KNIGHT_NIXPKGS_REF", "different-ref")
-	h2 := NixToolsHash(k)
-	if h1 == h2 {
-		t.Error("hash must change when the pinned nixpkgs ref changes (so a pin bump triggers rebuilds)")
-	}
-
-	// No tools → empty hash regardless of ref.
-	if NixToolsHash(&aiv1alpha1.Knight{}) != "" {
-		t.Error("knight with no nix tools should hash to empty")
 	}
 }

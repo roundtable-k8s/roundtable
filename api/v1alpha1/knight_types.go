@@ -120,8 +120,8 @@ type KnightSpec struct {
 	// +optional
 	TaskTimeout int32 `json:"taskTimeout,omitempty"`
 
-	// nixPackages lists nix packages to install during knight bootstrap.
-	// Packages are installed via: nix profile install nixpkgs#<pkg>
+	// nixPackages is deprecated and ignored. Use tools.nix, which the operator
+	// builds into a tools image the knight mounts read-only.
 	// +optional
 	NixPackages []string `json:"nixPackages,omitempty"`
 
@@ -266,8 +266,10 @@ type KnightCapabilities struct {
 
 // KnightTools defines system-level tools the knight needs installed.
 type KnightTools struct {
-	// nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-	// These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+	// nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+	// The operator builds each unique list once into an OCI tools image and
+	// the knight mounts it read-only at /nix. Requires the operator to be
+	// configured with a tools image repository.
 	// +optional
 	Nix []string `json:"nix,omitempty"`
 
@@ -403,16 +405,10 @@ type KnightStatus struct {
 	// +optional
 	NATSConsumer string `json:"natsConsumer,omitempty"`
 
-	// nixToolsHash is the tools hash whose flake has been successfully built
-	// and published to the shared Nix store. Empty until the first build
-	// completes; used to avoid rebuilding unchanged tool sets.
-	// +optional
-	NixToolsHash string `json:"nixToolsHash,omitempty"`
-
 	// toolsImage is the tools image reference that has been built and pushed
 	// for this knight's current Nix tool list. Empty until the build Job
-	// succeeds; used to avoid rebuilding unchanged tool lists. Only set when
-	// the operator is configured with a tools image repository.
+	// succeeds; used to avoid rebuilding unchanged tool lists and as the
+	// image the knight's pod mounts.
 	// +optional
 	ToolsImage string `json:"toolsImage,omitempty"`
 

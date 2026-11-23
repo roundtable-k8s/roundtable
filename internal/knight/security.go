@@ -26,11 +26,8 @@ import (
 )
 
 // PodSecurity is the single source of truth for the pod-level security context
-// applied to every knight-owned pod — both knight Deployments and the Nix
-// build Jobs. The chart sets these once (operator env vars) and the operator
-// reuses them everywhere, so the knight pods and the shared-store builder
-// always agree (notably on fsGroup/FSGroupChangePolicy, which the read-only
-// shared Nix store depends on).
+// applied to knight pods. The chart sets these once (operator env vars) and
+// the operator reuses them for every knight.
 type PodSecurity struct {
 	RunAsUser           int64
 	RunAsGroup          int64
@@ -39,8 +36,8 @@ type PodSecurity struct {
 }
 
 // DefaultPodSecurity is the built-in default: uid/gid/fsGroup 1000 with
-// OnRootMismatch so kubelet does not recursively chown the (large) shared Nix
-// store on every mount.
+// OnRootMismatch so kubelet does not recursively chown a knight's volumes on
+// every mount.
 func DefaultPodSecurity() PodSecurity {
 	return PodSecurity{
 		RunAsUser:           1000,
