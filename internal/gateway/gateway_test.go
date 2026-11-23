@@ -55,10 +55,13 @@ type fakeKnight struct {
 	t       *testing.T
 	nc      *nats.Conn
 	release chan struct{}
+	done    chan struct{} // closed on cleanup; stops held answers
+	wg      sync.WaitGroup
 
-	mu   sync.Mutex
-	seen map[string]natspkg.TaskPayload // by subject's knight token
-	last natspkg.TaskPayload
+	mu      sync.Mutex
+	stopped bool
+	seen    map[string]natspkg.TaskPayload // by subject's knight token
+	last    natspkg.TaskPayload
 }
 
 func startFakeKnight(t *testing.T, url string) *fakeKnight {
@@ -71,7 +74,7 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := &fakeKnight{t: t, nc: nc, release: make(chan struct{}), seen: map[string]natspkg.TaskPayload{}}
+	k := &fakeKnight{t: t, nc: nc, release: make(chan struct{}), done: make(chan struct{}), seen: map[string]natspkg.TaskPayload{}}
 	// Real knights consume the tasks stream through a durable consumer.
 	sub, err := js.Subscribe(prefix+".tasks.>", func(m *nats.Msg) {
 		_ = m.Ack()
@@ -83,19 +86,42 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 		k.mu.Lock()
 		k.last = p
 		k.seen[m.Subject] = p
+		if k.stopped {
+			k.mu.Unlock()
+			return
+		}
+		k.wg.Add(1)
 		k.mu.Unlock()
-		go k.answer(js, p)
+		go func() {
+			defer k.wg.Done()
+			k.answer(js, p)
+		}()
 	}, nats.Durable("Fake-consumer"), nats.ManualAck(), nats.BindStream("rt_dev_tasks"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = sub.Unsubscribe(); nc.Close() })
+	// Cleanup runs before the NATS server shuts down (LIFO): stop accepting
+	// tasks, release held answers and wait for every goroutine so none can
+	// touch t after the test returns.
+	t.Cleanup(func() {
+		_ = sub.Unsubscribe()
+		k.mu.Lock()
+		k.stopped = true
+		k.mu.Unlock()
+		close(k.done)
+		k.wg.Wait()
+		nc.Close()
+	})
 	return k
 }
 
 func (k *fakeKnight) answer(js nats.JetStreamContext, p natspkg.TaskPayload) {
 	if strings.Contains(p.Task, "hold") {
-		<-k.release
+		select {
+		case <-k.release:
+		case <-k.done:
+			return
+		}
 	}
 	model := p.Model
 	if model == "" {
