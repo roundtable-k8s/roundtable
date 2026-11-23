@@ -166,7 +166,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 			}
 
 			// No warm knight available — cold start
-			knight, err := a.buildEphemeralKnight(ctx, mission, mk, resolvedRT)
+			knight, err := a.buildEphemeralKnight(mission, mk, resolvedRT)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to build ephemeral knight %q: %w", mk.Name, err)
 			}
@@ -212,10 +212,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 	// Note: Caller should update status
 
 	// Check assembly timeout (Timeout/3, floored at minAssemblyTimeout)
-	assemblyTimeout := time.Duration(mission.Spec.Timeout/3) * time.Second
-	if assemblyTimeout < minAssemblyTimeout {
-		assemblyTimeout = minAssemblyTimeout
-	}
+	assemblyTimeout := max(time.Duration(mission.Spec.Timeout/3)*time.Second, minAssemblyTimeout)
 	if mission.Status.StartedAt != nil && time.Since(mission.Status.StartedAt.Time) > assemblyTimeout {
 		log.Info("Assembly timeout exceeded",
 			"timeout", assemblyTimeout,
@@ -338,7 +335,7 @@ func (a *KnightAssembler) claimWarmKnight(
 
 		// Create the mission knight under its prefixed name so chain steps
 		// (which reference "<mission>-<knight>") resolve to a real CR.
-		missionKnight, err := a.buildEphemeralKnight(ctx, mission, mk, rt)
+		missionKnight, err := a.buildEphemeralKnight(mission, mk, rt)
 		if err != nil {
 			return false, fmt.Errorf("failed to build mission knight for warm claim: %w", err)
 		}
@@ -464,7 +461,6 @@ func appendSecretEnvFrom(spec *aiv1alpha1.KnightSpec, secretRef corev1.LocalObje
 
 // buildEphemeralKnight creates a Knight CR for an ephemeral mission knight.
 func (a *KnightAssembler) buildEphemeralKnight(
-	ctx context.Context,
 	mission *aiv1alpha1.Mission,
 	mk aiv1alpha1.MissionKnight,
 	rt *aiv1alpha1.RoundTable,
@@ -643,7 +639,7 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(4222)),
+							Port:     new(intstr.FromInt(4222)),
 						},
 					},
 				},
@@ -666,11 +662,11 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolUDP),
-							Port:     ptr.To(intstr.FromInt(53)),
+							Port:     new(intstr.FromInt(53)),
 						},
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(53)),
+							Port:     new(intstr.FromInt(53)),
 						},
 					},
 				},
@@ -681,7 +677,7 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(443)),
+							Port:     new(intstr.FromInt(443)),
 						},
 					},
 				},

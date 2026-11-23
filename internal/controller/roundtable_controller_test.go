@@ -119,7 +119,7 @@ var _ = Describe("RoundTable Controller - Warm Pool", func() {
 			}
 
 			// Reconcile multiple times to ensure knights are created
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: rtNN})
 				Expect(err).NotTo(HaveOccurred())
 				time.Sleep(100 * time.Millisecond)

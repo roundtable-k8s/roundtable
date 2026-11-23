@@ -174,7 +174,7 @@ var _ = Describe("Mission Controller", func() {
 	// driveToPhase reconciles until the mission reaches targetPhase or maxIter is exceeded.
 	// Optional beforeReconcile callback runs before each reconcile (e.g., to make knights ready).
 	driveToPhase := func(r *MissionReconciler, targetPhase aiv1alpha1.MissionPhase, maxIter int, beforeReconcile ...func(aiv1alpha1.MissionPhase)) {
-		for i := 0; i < maxIter; i++ {
+		for range maxIter {
 			// Run callbacks before reconciling (e.g., make knights ready)
 			m := &aiv1alpha1.Mission{}
 			if err := k8sClient.Get(ctx, missionNN, m); err == nil {
@@ -766,7 +766,7 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Assembling — it won't progress further since knight doesn't exist
 			driveToPhase(r, aiv1alpha1.MissionPhaseAssembling, 10, readyOnProvisioning())
 			// A few more reconciles to set KnightsReady condition (stays in Assembling)
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			}
 
@@ -989,7 +989,7 @@ var _ = Describe("Mission Controller", func() {
 				r := newReconciler()
 
 				// Reconcile until Assembling creates the ephemeral knight
-				for i := 0; i < 15; i++ {
+				for range 15 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 					makeEphemeralKnightsReady()
 				}
@@ -1041,7 +1041,7 @@ var _ = Describe("Mission Controller", func() {
 				})
 
 				r := newReconciler()
-				for i := 0; i < 15; i++ {
+				for range 15 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 					makeEphemeralKnightsReady()
 				}
@@ -1152,7 +1152,7 @@ var _ = Describe("Mission Controller", func() {
 				})
 
 				r := newReconciler()
-				for i := 0; i < 15; i++ {
+				for range 15 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 					makeEphemeralKnightsReady()
 				}
@@ -1214,7 +1214,7 @@ var _ = Describe("Mission Controller", func() {
 
 				// Reconcile should fail or set an error condition
 				// Drive a few iterations to let the controller process
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				}
 
@@ -1250,7 +1250,7 @@ var _ = Describe("Mission Controller", func() {
 				r := newReconciler()
 
 				// Reconcile should fail
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				}
 
@@ -1314,7 +1314,7 @@ var _ = Describe("Mission Controller", func() {
 				r := newReconciler()
 
 				// Reconcile should fail gracefully
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				}
 
@@ -1535,7 +1535,7 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 			// Drive through Assembling — the warm pool claim recreates the knight
 			// under its mission-prefixed name, which starts not-ready; mark it
 			// ready as it appears so the mission can advance.
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
 				// Mark the recreated mission knight ready once it appears
@@ -1622,7 +1622,7 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 			}
 
 			// Drive to assembling phase
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
 				mission := &aiv1alpha1.Mission{}
@@ -1742,7 +1742,7 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 			}
 
 			// Drive to assembling phase
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
 				mission := &aiv1alpha1.Mission{}
@@ -1856,7 +1856,7 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 			}
 
 			// Drive to assembling phase
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
 				mission := &aiv1alpha1.Mission{}
@@ -2016,7 +2016,7 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 			}
 
 			// Reconcile a few times to create the mission-scoped chain
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
 				time.Sleep(100 * time.Millisecond)

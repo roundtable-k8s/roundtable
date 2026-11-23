@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -37,7 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/internal/mission"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 	"github.com/roundtable-k8s/roundtable/internal/status"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -45,6 +44,10 @@ import (
 
 const (
 	missionFinalizer = "ai.roundtable.io/mission-finalizer"
+	// defaultRoundTableRef is the RoundTable used when a mission does not name one.
+	defaultRoundTableRef = "default"
+	// cleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes the mission after its TTL.
+	cleanupPolicyDelete = "Delete"
 )
 
 // MissionReconciler reconciles a Mission object.
@@ -55,9 +58,8 @@ type MissionReconciler struct {
 
 	NATS      *natspkg.Provider
 	Notify    *notify.Notifier
-	Planner   *mission.Planner
-	Assembler *mission.KnightAssembler
-	mu        sync.Mutex
+	Planner   *missionpkg.Planner
+	Assembler *missionpkg.KnightAssembler
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -849,7 +851,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 
 		// Step 2: Delete NATS consumers (best effort)
 		log.Info("Deleting NATS consumers")
-		if err := r.deleteNATSConsumers(ctx, mission); err != nil {
+		if err := r.deleteNATSConsumers(mission); err != nil {
 			log.Error(err, "Failed to delete NATS consumers (best effort, continuing)")
 			// Continue even if this fails - consumers will be deleted when stream is deleted
 		}
@@ -859,7 +861,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			log.Info("Deleting NATS streams",
 				"tasksStream", mission.Status.NATSTasksStream,
 				"resultsStream", mission.Status.NATSResultsStream)
-			if err := r.deleteNATSStreams(ctx, mission); err != nil {
+			if err := r.deleteNATSStreams(mission); err != nil {
 				log.Error(err, "Failed to delete NATS streams, retrying with backoff")
 				return ctrl.Result{RequeueAfter: RequeueModerate}, nil
 			}
@@ -902,7 +904,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// Self-delete if cleanupPolicy=Delete and TTL expired
-	if mission.Spec.CleanupPolicy == "Delete" &&
+	if mission.Spec.CleanupPolicy == cleanupPolicyDelete &&
 		mission.Status.ExpiresAt != nil &&
 		time.Now().After(mission.Status.ExpiresAt.Time) {
 		log.Info("Deleting expired mission", "mission", mission.Name)
@@ -913,7 +915,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// If cleanupPolicy=Delete but TTL hasn't expired yet, requeue
-	if mission.Spec.CleanupPolicy == "Delete" && mission.Status.ExpiresAt != nil {
+	if mission.Spec.CleanupPolicy == cleanupPolicyDelete && mission.Status.ExpiresAt != nil {
 		remaining := time.Until(mission.Status.ExpiresAt.Time)
 		if remaining > 0 {
 			return ctrl.Result{RequeueAfter: remaining}, nil
@@ -951,7 +953,7 @@ func (r *MissionReconciler) updateKnightStatuses(ctx context.Context, mission *a
 func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return err
 	}
@@ -1005,7 +1007,7 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 			}
 		}
 		taskSubject := natspkg.TaskSubject(briefingPrefix, knight.Spec.Domain, mk.Name)
-		if err := client.PublishJSON(taskSubject, taskPayload); err != nil {
+		if err := natsCli.PublishJSON(taskSubject, taskPayload); err != nil {
 			log.Error(err, "Failed to publish briefing to knight", "knight", mk.Name, "subject", taskSubject)
 			continue
 		}
@@ -1028,8 +1030,8 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
-	if err != nil || !client.IsConnected() {
+	natsCli, err := r.natsClient()
+	if err != nil || !natsCli.IsConnected() {
 		log.Info("NATS not available, skipping KV results storage")
 		return fmt.Errorf("NATS client not available: %w", err)
 	}
@@ -1045,8 +1047,8 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 	}
 
 	// Build complete results document
-	results := map[string]interface{}{
-		"summary": map[string]interface{}{
+	results := map[string]any{
+		"summary": map[string]any{
 			"mission":   mission.Name,
 			"objective": mission.Spec.Objective,
 			"phase":     string(mission.Status.Phase),
@@ -1054,17 +1056,17 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 			"duration":  duration,
 			"totalCost": mission.Status.TotalCost,
 		},
-		"timeline": map[string]interface{}{
+		"timeline": map[string]any{
 			"started":   "",
 			"completed": "",
 			"phases":    []map[string]string{},
 		},
-		"chains":  map[string]interface{}{},
-		"knights": []map[string]interface{}{},
+		"chains":  map[string]any{},
+		"knights": []map[string]any{},
 	}
 
 	// Timeline
-	timeline := results["timeline"].(map[string]interface{})
+	timeline := results["timeline"].(map[string]any)
 	if mission.Status.StartedAt != nil {
 		timeline["started"] = mission.Status.StartedAt.Format(time.RFC3339)
 	}
@@ -1081,7 +1083,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 	}
 
 	// Chain results
-	chains := results["chains"].(map[string]interface{})
+	chains := results["chains"].(map[string]any)
 	for _, cs := range mission.Status.ChainStatuses {
 		chain := &aiv1alpha1.Chain{}
 		if err := r.Get(ctx, types.NamespacedName{
@@ -1092,14 +1094,14 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 			continue
 		}
 
-		chainResult := map[string]interface{}{
+		chainResult := map[string]any{
 			"name":   cs.Name,
 			"phase":  string(cs.Phase),
-			"steps":  []map[string]interface{}{},
+			"steps":  []map[string]any{},
 			"output": "",
 		}
 		for _, stepStatus := range chain.Status.StepStatuses {
-			chainResult["steps"] = append(chainResult["steps"].([]map[string]interface{}), map[string]interface{}{
+			chainResult["steps"] = append(chainResult["steps"].([]map[string]any), map[string]any{
 				"name":   stepStatus.Name,
 				"output": stepStatus.Output,
 				"error":  stepStatus.Error,
@@ -1113,7 +1115,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 
 	// Knight statuses
 	for _, ks := range mission.Status.KnightStatuses {
-		results["knights"] = append(results["knights"].([]map[string]interface{}), map[string]interface{}{
+		results["knights"] = append(results["knights"].([]map[string]any), map[string]any{
 			"name":      ks.Name,
 			"ready":     ks.Ready,
 			"ephemeral": ks.Ephemeral,
@@ -1122,7 +1124,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 
 	// Cost breakdown
 	if len(mission.Status.CostBreakdown) > 0 {
-		results["costs"] = map[string]interface{}{
+		results["costs"] = map[string]any{
 			"breakdown": mission.Status.CostBreakdown,
 			"total":     mission.Status.TotalCost,
 		}
@@ -1134,7 +1136,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
 
-	if err := client.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
+	if err := natsCli.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
 		return fmt.Errorf("failed to store results in NATS KV: %w", err)
 	}
 
@@ -1145,6 +1147,8 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 }
 
 // suspendMissionChains suspends all mission-owned chains to prevent further cost accumulation.
+//
+//nolint:unparam // error return kept so failures can propagate without a caller change
 func (r *MissionReconciler) suspendMissionChains(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
@@ -1265,7 +1269,7 @@ func (r *MissionReconciler) ensureMissionChain(ctx context.Context, mission *aiv
 	// Get RoundTable reference for this mission
 	rtRef := mission.Spec.RoundTableRef
 	if rtRef == "" {
-		rtRef = "default" // fallback to default if not specified
+		rtRef = defaultRoundTableRef // fallback to default if not specified
 	}
 
 	// Create the mission-scoped chain
@@ -1401,7 +1405,7 @@ func terminalOutcome(mission *aiv1alpha1.Mission) aiv1alpha1.MissionPhase {
 // shouldDeleteResources determines if resources should be deleted based on cleanup policy and mission outcome.
 func (r *MissionReconciler) shouldDeleteResources(mission *aiv1alpha1.Mission) bool {
 	switch mission.Spec.CleanupPolicy {
-	case "Delete":
+	case cleanupPolicyDelete:
 		return true
 	case "Retain":
 		return false
@@ -1441,8 +1445,10 @@ func (r *MissionReconciler) deleteEphemeralKnights(ctx context.Context, mission 
 }
 
 // deleteNATSConsumers deletes all NATS consumers for this mission's streams (best effort).
-func (r *MissionReconciler) deleteNATSConsumers(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	client, err := r.natsClient()
+//
+//nolint:unparam // error return kept so failures can propagate without a caller change
+func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) error {
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
 	}
@@ -1459,12 +1465,12 @@ func (r *MissionReconciler) deleteNATSConsumers(ctx context.Context, mission *ai
 
 		// Delete from tasks stream (best effort)
 		if tasksStream != "" {
-			_ = client.DeleteConsumer(tasksStream, consumerName)
+			_ = natsCli.DeleteConsumer(tasksStream, consumerName)
 		}
 
 		// Delete from results stream (best effort)
 		if resultsStream != "" {
-			_ = client.DeleteConsumer(resultsStream, consumerName)
+			_ = natsCli.DeleteConsumer(resultsStream, consumerName)
 		}
 	}
 
@@ -1472,22 +1478,22 @@ func (r *MissionReconciler) deleteNATSConsumers(ctx context.Context, mission *ai
 }
 
 // deleteNATSStreams deletes the mission's task and result streams.
-func (r *MissionReconciler) deleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	client, err := r.natsClient()
+func (r *MissionReconciler) deleteNATSStreams(mission *aiv1alpha1.Mission) error {
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
 	}
 
 	// Delete tasks stream
 	if mission.Status.NATSTasksStream != "" {
-		if err := client.DeleteStream(mission.Status.NATSTasksStream); err != nil {
+		if err := natsCli.DeleteStream(mission.Status.NATSTasksStream); err != nil {
 			return fmt.Errorf("failed to delete tasks stream: %w", err)
 		}
 	}
 
 	// Delete results stream
 	if mission.Status.NATSResultsStream != "" {
-		if err := client.DeleteStream(mission.Status.NATSResultsStream); err != nil {
+		if err := natsCli.DeleteStream(mission.Status.NATSResultsStream); err != nil {
 			return fmt.Errorf("failed to delete results stream: %w", err)
 		}
 	}

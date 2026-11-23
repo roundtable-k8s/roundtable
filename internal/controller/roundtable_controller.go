@@ -40,6 +40,9 @@ import (
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
+// labelValueTrue is the label value used for boolean-style labels.
+const labelValueTrue = "true"
+
 // RoundTableReconciler reconciles a RoundTable object.
 type RoundTableReconciler struct {
 	client.Client
@@ -132,7 +135,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// 3. NATS Stream Management
 	if rt.Spec.NATS.CreateStreams {
-		if err := r.ensureStreams(ctx, rt); err != nil {
+		if err := r.ensureStreams(rt); err != nil {
 			log.Error(err, "Failed to ensure NATS streams")
 			meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionNATSReady,
@@ -264,7 +267,7 @@ func (r *RoundTableReconciler) discoverKnights(ctx context.Context, rt *aiv1alph
 	if !rt.Spec.Ephemeral {
 		filtered := make([]aiv1alpha1.Knight, 0, len(knightList.Items))
 		for _, knight := range knightList.Items {
-			if knight.Labels[aiv1alpha1.LabelEphemeral] != "true" {
+			if knight.Labels[aiv1alpha1.LabelEphemeral] != labelValueTrue {
 				filtered = append(filtered, knight)
 			}
 		}
@@ -315,9 +318,9 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 }
 
 // ensureStreams creates or verifies JetStream streams for this RoundTable.
-func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1.RoundTable) error {
+func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 	// Get shared NATS client
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -339,7 +342,7 @@ func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := client.CreateStream(tasksStreamConfig); err != nil {
+	if err := natsCli.CreateStream(tasksStreamConfig); err != nil {
 		return fmt.Errorf("tasks stream: %w", err)
 	}
 
@@ -351,7 +354,7 @@ func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := client.CreateStream(resultsStreamConfig); err != nil {
+	if err := natsCli.CreateStream(resultsStreamConfig); err != nil {
 		return fmt.Errorf("results stream: %w", err)
 	}
 
@@ -465,11 +468,8 @@ func (r *RoundTableReconciler) reconcileWarmPool(ctx context.Context, rt *aiv1al
 
 	// Create new warm knights if pool is under capacity (burst-limited)
 	const maxWarmCreationsPerReconcile int32 = 5
-	deficit := wp.Size - (available + provisioning)
-	if deficit > maxWarmCreationsPerReconcile {
-		deficit = maxWarmCreationsPerReconcile
-	}
-	for i := int32(0); i < deficit; i++ {
+	deficit := min(wp.Size-(available+provisioning), maxWarmCreationsPerReconcile)
+	for range deficit {
 		if err := r.createWarmKnight(ctx, rt); err != nil {
 			log.Error(err, "Failed to create warm pool knight")
 			return err
@@ -508,12 +508,12 @@ func (r *RoundTableReconciler) listWarmPoolKnights(ctx context.Context, rt *aiv1
 	knightList := &aiv1alpha1.KnightList{}
 	claimedVal := "false"
 	if claimed {
-		claimedVal = "true"
+		claimedVal = labelValueTrue
 	}
 	if err := r.List(ctx, knightList,
 		client.InNamespace(rt.Namespace),
 		client.MatchingLabels{
-			aiv1alpha1.LabelWarmPool:        "true",
+			aiv1alpha1.LabelWarmPool:        labelValueTrue,
 			aiv1alpha1.LabelWarmPoolClaimed: claimedVal,
 			aiv1alpha1.LabelRoundTable:      rt.Name,
 		},
@@ -576,7 +576,7 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 			Name:      name,
 			Namespace: rt.Namespace,
 			Labels: map[string]string{
-				aiv1alpha1.LabelWarmPool:        "true",
+				aiv1alpha1.LabelWarmPool:        labelValueTrue,
 				aiv1alpha1.LabelWarmPoolClaimed: "false",
 				aiv1alpha1.LabelRoundTable:      rt.Name,
 			},

@@ -41,11 +41,11 @@ type Client interface {
 	Publish(subject string, data []byte) error
 
 	// PublishJSON publishes a JSON-encoded value to a subject.
-	PublishJSON(subject string, v interface{}) error
+	PublishJSON(subject string, v any) error
 
 	// PublishJSONSeq publishes a JSON-encoded value and returns the stream
 	// sequence number JetStream assigned to it.
-	PublishJSONSeq(subject string, v interface{}) (uint64, error)
+	PublishJSONSeq(subject string, v any) (uint64, error)
 
 	// ConsumerAckFloor returns the stream sequence at or below which every
 	// message has been acknowledged by the named consumer.
@@ -180,7 +180,7 @@ func (c *JetStreamClient) Publish(subject string, data []byte) error {
 }
 
 // PublishJSON publishes a JSON-encoded value to a subject.
-func (c *JetStreamClient) PublishJSON(subject string, v interface{}) error {
+func (c *JetStreamClient) PublishJSON(subject string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal JSON payload: %w", err)
@@ -189,7 +189,7 @@ func (c *JetStreamClient) PublishJSON(subject string, v interface{}) error {
 }
 
 // PublishJSONSeq publishes a JSON-encoded value and returns its stream sequence.
-func (c *JetStreamClient) PublishJSONSeq(subject string, v interface{}) (uint64, error) {
+func (c *JetStreamClient) PublishJSONSeq(subject string, v any) (uint64, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return 0, fmt.Errorf("marshal JSON payload: %w", err)
@@ -407,12 +407,14 @@ func (c *JetStreamClient) DeleteConsumer(stream, consumer string) error {
 }
 
 // PollMessage polls for a single message with a timeout.
-func (c *JetStreamClient) PollMessage(subject string, timeout time.Duration, opts ...SubscribeOption) (*nats.Msg, error) {
+func (c *JetStreamClient) PollMessage(
+	subject string, timeout time.Duration, opts ...SubscribeOption,
+) (*nats.Msg, error) {
 	sub, err := c.Subscribe(subject, opts...)
 	if err != nil {
 		return nil, err
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	msg, err := sub.NextMsg(timeout)
 	if err != nil {

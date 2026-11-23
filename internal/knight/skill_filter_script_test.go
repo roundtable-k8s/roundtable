@@ -14,6 +14,8 @@ import (
 
 // runSkillFilter executes the generated skill-filter script once against a
 // temp dir standing in for /arsenal and /skills.
+//
+//nolint:unparam // the script output is only asserted by some callers
 func runSkillFilter(t *testing.T, k *aiv1alpha1.Knight, root string) string {
 	t.Helper()
 	sh, err := exec.LookPath("sh")

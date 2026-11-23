@@ -398,7 +398,7 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 
 	// Publish to planner knight's task subject.
 	prefix := natsPrefix(mission)
-	if plannerKnight.Spec.NATS.Subjects != nil && len(plannerKnight.Spec.NATS.Subjects) > 0 {
+	if len(plannerKnight.Spec.NATS.Subjects) > 0 {
 		parts := strings.SplitN(plannerKnight.Spec.NATS.Subjects[0], ".tasks.", 2)
 		if len(parts) == 2 {
 			prefix = parts[0]
@@ -681,8 +681,8 @@ func extractJSON(s string) string {
 	}
 	if idx := strings.Index(s, "```"); idx >= 0 {
 		s = s[idx+3:]
-		if idx := strings.Index(s, "```"); idx >= 0 {
-			return strings.TrimSpace(s[:idx])
+		if before, _, ok := strings.Cut(s, "```"); ok {
+			return strings.TrimSpace(before)
 		}
 	}
 	return strings.TrimSpace(s)

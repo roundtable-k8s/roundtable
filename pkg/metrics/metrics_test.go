@@ -29,7 +29,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestMetricsRegistered(t *testing.T) {
-	collectors := map[string]interface{}{
+	collectors := map[string]any{
 		"KnightsTotal":         KnightsTotal,
 		"TasksCompletedTotal":  TasksCompletedTotal,
 		"TaskDurationSeconds":  TaskDurationSeconds,

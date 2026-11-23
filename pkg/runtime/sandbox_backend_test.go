@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -77,7 +76,7 @@ func TestSandboxBackend_Reconcile_CreatesSandbox(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 
 	err := b.Reconcile(ctx, knight)
 	require.NoError(t, err)
@@ -112,7 +111,7 @@ func TestSandboxBackend_Cleanup_DeletesSandbox(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Cleanup(ctx, knight)
 	require.NoError(t, err)
 
@@ -126,7 +125,7 @@ func TestSandboxBackend_Cleanup_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Cleanup(ctx, knight)
 	assert.NoError(t, err)
 }
@@ -155,7 +154,7 @@ func TestSandboxBackend_IsReady_TrueWithReadyCondition(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).WithStatusSubresource(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.True(t, ready)
@@ -167,7 +166,7 @@ func TestSandboxBackend_IsReady_FalseWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.False(t, ready)
@@ -193,7 +192,7 @@ func TestSandboxBackend_IsReady_FallbackToReplicas(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).WithStatusSubresource(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.True(t, ready)
@@ -206,7 +205,7 @@ func TestSandboxBackend_Suspend_ScalesToZero(t *testing.T) {
 	sandbox := &sandboxv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{Name: "gawain", Namespace: "ai"},
 		Spec: sandboxv1alpha1.SandboxSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: new(int32(1)),
 			PodTemplate: sandboxv1alpha1.PodTemplate{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 			},
@@ -216,7 +215,7 @@ func TestSandboxBackend_Suspend_ScalesToZero(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Suspend(ctx, knight)
 	require.NoError(t, err)
 
@@ -231,7 +230,7 @@ func TestSandboxBackend_Suspend_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Suspend(ctx, knight)
 	assert.NoError(t, err)
 }
@@ -243,7 +242,7 @@ func TestSandboxBackend_Resume_ScalesToOne(t *testing.T) {
 	sandbox := &sandboxv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{Name: "gawain", Namespace: "ai"},
 		Spec: sandboxv1alpha1.SandboxSpec{
-			Replicas: ptr.To(int32(0)),
+			Replicas: new(int32(0)),
 			PodTemplate: sandboxv1alpha1.PodTemplate{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 			},
@@ -253,7 +252,7 @@ func TestSandboxBackend_Resume_ScalesToOne(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Resume(ctx, knight)
 	require.NoError(t, err)
 
@@ -268,7 +267,7 @@ func TestSandboxBackend_Resume_ErrorsWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Resume(ctx, knight)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
@@ -279,7 +278,7 @@ func TestSandboxBackend_BuildVolumeClaimTemplates_NilWhenExistingClaim(t *testin
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	knight.Spec.Workspace = &aiv1alpha1.KnightWorkspace{
 		ExistingClaim: "my-pvc",
 	}
@@ -293,7 +292,7 @@ func TestSandboxBackend_BuildVolumeClaimTemplates_NilWhenNoWorkspace(t *testing.
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	knight.Spec.Workspace = nil
 
 	templates := b.buildVolumeClaimTemplates(knight)

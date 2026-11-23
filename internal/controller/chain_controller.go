@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"text/template"
@@ -356,7 +357,7 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 				"Error":  "",
 			}
 		}
-		mockData := map[string]interface{}{
+		mockData := map[string]any{
 			"Steps": mockSteps,
 			"Input": "",
 		}
@@ -485,7 +486,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			// The step timeout runs from knight pickup, not from publish, so
 			// time spent queued behind a busy knight doesn't eat the budget.
 			spec := specMap[ss.Name]
-			r.detectPickup(ctx, nc, chain, ss, specMap[ss.Name])
+			r.detectPickup(ctx, nc, ss, specMap[ss.Name])
 			if ss.StartedAt != nil && spec != nil {
 				now := metav1.Now()
 				if ss.PickedUpAt != nil {
@@ -657,7 +658,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Task:      taskStr,
 		}
 
-		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, step.KnightRef, payload)
+		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -723,9 +724,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		totalSteps := len(chain.Status.StepStatuses)
 
 		for _, ss := range chain.Status.StepStatuses {
-			if ss.Phase == aiv1alpha1.ChainStepPhaseSucceeded {
+			switch ss.Phase {
+			case aiv1alpha1.ChainStepPhaseSucceeded:
 				succeededSteps++
-			} else if ss.Phase == aiv1alpha1.ChainStepPhaseFailed {
+			case aiv1alpha1.ChainStepPhaseFailed:
 				spec := specMap[ss.Name]
 				if spec != nil && spec.ContinueOnFailure {
 					softFailures++
@@ -814,7 +816,7 @@ func (r *ChainReconciler) renderTemplate(chain *aiv1alpha1.Chain, taskStr string
 		}
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"Steps": steps,
 		"Input": chain.Spec.Input,
 	}
@@ -853,14 +855,14 @@ func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alph
 
 // publishTask publishes a task to NATS JetStream.
 // It returns the tasks-stream sequence of the published message.
-func (r *ChainReconciler) publishTask(ctx context.Context, nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
-	client, err := r.natsClient()
+func (r *ChainReconciler) publishTask(nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return 0, err
 	}
 
 	subject := natspkg.TaskSubject(nc.SubjectPrefix, domain, knightName)
-	return client.PublishJSONSeq(subject, payload)
+	return natsCli.PublishJSONSeq(subject, payload)
 }
 
 // defaultMaxQueueWait bounds how long a task may sit unclaimed by its knight.
@@ -882,7 +884,7 @@ func maxQueueWait(chain *aiv1alpha1.Chain) time.Duration {
 // runtime change is needed. A step without a recorded sequence (published by
 // an older operator) falls back to the legacy behaviour: the clock starts at
 // publish time.
-func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
+func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
 	if ss.PickedUpAt != nil || ss.StartedAt == nil {
 		return
 	}
@@ -890,11 +892,11 @@ func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, chain
 		ss.PickedUpAt = ss.StartedAt
 		return
 	}
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return
 	}
-	floor, err := client.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(spec.KnightRef))
+	floor, err := natsCli.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(spec.KnightRef))
 	if err != nil {
 		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "step", ss.Name, "error", err.Error())
 		return
@@ -983,7 +985,7 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainName, stepName, taskID string) (*natspkg.TaskResult, error) {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return nil, err
 	}
@@ -1000,7 +1002,7 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 	// Use ephemeral consumer with explicit ack (compatible with both Limits and WorkQueue retention)
 	consumerName := natspkg.ChainConsumerName(chainName, stepName)
 
-	msg, err := client.PollMessage(subject, 2*time.Second,
+	msg, err := natsCli.PollMessage(subject, 2*time.Second,
 		natspkg.WithDurable(consumerName),
 		natspkg.WithAckExplicit(),
 		natspkg.WithBindStream(nc.ResultsStream),
@@ -1010,7 +1012,7 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 
 	// Clean up ephemeral consumer
 	defer func() {
-		_ = client.DeleteConsumer(nc.ResultsStream, consumerName)
+		_ = natsCli.DeleteConsumer(nc.ResultsStream, consumerName)
 	}()
 
 	if err != nil {
@@ -1189,14 +1191,14 @@ func (r *ChainReconciler) renderOutputPath(chain *aiv1alpha1.Chain, step *aiv1al
 
 // writeArtifact dispatches a write task to the outputKnight.
 func (r *ChainReconciler) writeArtifact(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, stepName, outputPath, content string) error {
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return err
 	}
 
 	knightName := chain.Spec.OutputKnight
 	if knightName == "" {
-		knightName = "gawain"
+		knightName = defaultOutputKnight
 	}
 
 	// Get knight to find its domain
@@ -1219,7 +1221,7 @@ func (r *ChainReconciler) writeArtifact(ctx context.Context, nc natsConfig, chai
 	}
 
 	subject := natspkg.TaskSubject(nc.SubjectPrefix, knight.Spec.Domain, knightName)
-	return client.PublishJSON(subject, payload)
+	return natsCli.PublishJSON(subject, payload)
 }
 
 // emptyOutputSentinels are placeholder strings produced by knights when an
@@ -1235,12 +1237,7 @@ func isEmptyStepOutput(output string) bool {
 	if trimmed == "" {
 		return true
 	}
-	for _, sentinel := range emptyOutputSentinels {
-		if trimmed == sentinel {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(emptyOutputSentinels, trimmed)
 }
 
 // storeStepOutputToKV stores the full step output to the NATS KV "chain-outputs" bucket.
@@ -1255,7 +1252,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 		return
 	}
 
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		log.Error(err, "Failed to connect NATS for KV store", "step", stepName)
 		return
@@ -1266,7 +1263,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 		durationStr = completedAt.Time.Sub(startedAt.Time).String()
 	}
 
-	kvValue := map[string]interface{}{
+	kvValue := map[string]any{
 		"output":   output,
 		"error":    errStr,
 		"knight":   knight,
@@ -1282,7 +1279,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 	}
 
 	key := chainName + "." + stepName
-	if err := client.KVPut("chain-outputs", key, data); err != nil {
+	if err := natsCli.KVPut("chain-outputs", key, data); err != nil {
 		log.Error(err, "Failed to store step output to KV", "key", key)
 	} else {
 		log.Info("Stored step output to NATS KV", "bucket", "chain-outputs", "key", key, "size", len(data))
@@ -1294,7 +1291,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *aiv1alpha1.Chain) int {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		log.Error(err, "Failed to connect NATS for KV restore")
 		return 0
@@ -1308,13 +1305,13 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		}
 
 		key := chain.Name + "." + ss.Name
-		data, err := client.KVGet("chain-outputs", key)
+		data, err := natsCli.KVGet("chain-outputs", key)
 		if err != nil {
 			log.V(1).Info("No stored output found for step", "step", ss.Name, "key", key)
 			continue
 		}
 
-		var kvValue map[string]interface{}
+		var kvValue map[string]any
 		if err := json.Unmarshal(data, &kvValue); err != nil {
 			log.Error(err, "Failed to unmarshal KV value", "step", ss.Name)
 			continue
@@ -1328,7 +1325,7 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		// delete the entry so it cannot mask future runs.
 		if errStr == "" && isEmptyStepOutput(output) {
 			log.Info("Skipping restore of empty stored output, deleting poisoned KV entry", "step", ss.Name, "key", key)
-			if err := client.KVDelete("chain-outputs", key); err != nil {
+			if err := natsCli.KVDelete("chain-outputs", key); err != nil {
 				log.Error(err, "Failed to delete poisoned KV entry", "key", key)
 			}
 			continue
@@ -1388,3 +1385,6 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("chain").
 		Complete(r)
 }
+
+// defaultOutputKnight is the knight that receives chain output when spec.outputKnight is unset.
+const defaultOutputKnight = "gawain"

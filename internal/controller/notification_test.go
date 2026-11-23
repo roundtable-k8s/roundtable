@@ -182,7 +182,7 @@ var _ = Describe("Completion notifications", func() {
 			r := newChainReconciler(sink.server.URL)
 			nn := createTerminalChain("notify-once", aiv1alpha1.ChainPhaseSucceeded, webhookTo(sink.server.URL))
 
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
 				Expect(err).NotTo(HaveOccurred())
 			}
@@ -345,7 +345,7 @@ var _ = Describe("Completion notifications", func() {
 			Expect(k8sClient.Status().Update(ctx, mission)).To(Succeed())
 
 			r := newMissionReconciler(sink.server.URL)
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
 				Expect(err).NotTo(HaveOccurred())
 			}

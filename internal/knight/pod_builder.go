@@ -35,7 +35,7 @@ import (
 // var so EVERY process — kubectl exec shells, the agent, and any subprocess —
 // resolves the knight's tools, not just the entrypoint's exec'd process tree.
 // Missing dirs are ignored, so the list covers every tool source at once.
-func knightToolPATH(name string) string {
+func knightToolPATH() string {
 	return strings.Join([]string{
 		"/home/node/.nix-profile/bin",
 		"/data/nix-env/bin",
@@ -481,8 +481,9 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 	skillCategories := strings.Join(b.knight.Spec.Skills, " ")
 
-	paths := []string{}
-	for _, a := range b.arsenals() {
+	arsenals := b.arsenals()
+	paths := make([]string, 0, len(arsenals))
+	for _, a := range arsenals {
 		paths = append(paths, a.path)
 	}
 	if len(paths) == 0 {
@@ -640,8 +641,8 @@ func (b *PodBuilder) WithBrowser() *PodBuilder {
 			PeriodSeconds:       10,
 		},
 		SecurityContext: &corev1.SecurityContext{
-			ReadOnlyRootFilesystem:   util.BoolPtr(false),
-			AllowPrivilegeEscalation: util.BoolPtr(false),
+			ReadOnlyRootFilesystem:   new(false),
+			AllowPrivilegeEscalation: new(false),
 		},
 	}
 
@@ -677,7 +678,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		{Name: "TZ", Value: "America/Chicago"},
 		// PATH at the container level so exec shells and all subprocesses see
 		// the knight's nix/mise tools (not just the entrypoint's process tree).
-		{Name: "PATH", Value: knightToolPATH(b.knight.Name)},
+		{Name: "PATH", Value: knightToolPATH()},
 	}
 
 	// Browser capability
@@ -736,16 +737,17 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	}
 
 	// Combine main container with sidecars
-	containers := []corev1.Container{knightContainer}
+	containers := make([]corev1.Container, 0, 1+len(b.sidecars))
+	containers = append(containers, knightContainer)
 	containers = append(containers, b.sidecars...)
 
 	return corev1.PodSpec{
 		Containers:                   containers,
 		Volumes:                      b.volumes,
-		EnableServiceLinks:           util.BoolPtr(false),
+		EnableServiceLinks:           new(false),
 		SecurityContext:              b.security.PodSecurityContext(),
 		ServiceAccountName:           b.knight.Spec.ServiceAccountName,
-		AutomountServiceAccountToken: util.BoolPtr(true),
+		AutomountServiceAccountToken: new(true),
 	}
 }
 
