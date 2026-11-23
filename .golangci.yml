@@ -3,13 +3,15 @@ run:
   allow-parallel-runners: true
 linters:
   default: none
+  # Intentionally not enabled:
+  #  - gocyclo: the large Reconcile state machines exceed any sensible threshold; splitting them is a
+  #    refactor, not a lint fix.
+  #  - dupl: flags table-style test cases and CRD plumbing that read better unfactored.
   enable:
     - copyloopvar
-    - dupl
     - errcheck
     - ginkgolinter
     - goconst
-    - gocyclo
     - govet
     - ineffassign
     - lll
@@ -42,9 +44,12 @@ linters:
           - lll
         path: api/*
       - linters:
-          - dupl
           - lll
         path: internal/*
+      # Repeated literals in tests (names, namespaces, label values) are clearer inline than as constants.
+      - linters:
+          - goconst
+        path: _test\.go
     paths:
       - third_party$
       - builtin$

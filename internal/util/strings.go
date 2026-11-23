@@ -1,8 +1,9 @@
 package util
 
-import "slices"
-
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // ContainsString checks if a string slice contains a specific string.
 func ContainsString(slice []string, s string) bool {

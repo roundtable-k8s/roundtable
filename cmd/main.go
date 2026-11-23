@@ -254,10 +254,12 @@ func main() {
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
 	knightSecurity := knightpkg.PodSecurityFromEnv()
+	// Note: GetEventRecorderFor is deprecated (SA1019); GetEventRecorder returns a different
+	// events API type and needs controller changes, so the migration is deferred.
 	knightReconciler := &controller.KnightReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
+		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: see note above
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
 		SandboxEnabled: sandboxEnabled,
@@ -292,7 +294,7 @@ func main() {
 	if err := (&controller.ChainReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("chain-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
+		Recorder: mgr.GetEventRecorderFor("chain-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
 		Notify:   notifier,
 	}).SetupWithManager(mgr); err != nil {
@@ -302,7 +304,7 @@ func main() {
 	if err := (&controller.RoundTableReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
+		Recorder: mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
@@ -316,7 +318,7 @@ func main() {
 	if err := (&controller.MissionReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("mission-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
+		Recorder: mgr.GetEventRecorderFor("mission-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
 		Notify:   notifier,
 		Planner:  missionPlanner,

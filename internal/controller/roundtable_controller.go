@@ -40,6 +40,9 @@ import (
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
+// labelValueTrue is the label value used for boolean-style labels.
+const labelValueTrue = "true"
+
 // RoundTableReconciler reconciles a RoundTable object.
 type RoundTableReconciler struct {
 	client.Client
@@ -264,7 +267,7 @@ func (r *RoundTableReconciler) discoverKnights(ctx context.Context, rt *aiv1alph
 	if !rt.Spec.Ephemeral {
 		filtered := make([]aiv1alpha1.Knight, 0, len(knightList.Items))
 		for _, knight := range knightList.Items {
-			if knight.Labels[aiv1alpha1.LabelEphemeral] != "true" {
+			if knight.Labels[aiv1alpha1.LabelEphemeral] != labelValueTrue {
 				filtered = append(filtered, knight)
 			}
 		}
@@ -505,12 +508,12 @@ func (r *RoundTableReconciler) listWarmPoolKnights(ctx context.Context, rt *aiv1
 	knightList := &aiv1alpha1.KnightList{}
 	claimedVal := "false"
 	if claimed {
-		claimedVal = "true"
+		claimedVal = labelValueTrue
 	}
 	if err := r.List(ctx, knightList,
 		client.InNamespace(rt.Namespace),
 		client.MatchingLabels{
-			aiv1alpha1.LabelWarmPool:        "true",
+			aiv1alpha1.LabelWarmPool:        labelValueTrue,
 			aiv1alpha1.LabelWarmPoolClaimed: claimedVal,
 			aiv1alpha1.LabelRoundTable:      rt.Name,
 		},
@@ -573,7 +576,7 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 			Name:      name,
 			Namespace: rt.Namespace,
 			Labels: map[string]string{
-				aiv1alpha1.LabelWarmPool:        "true",
+				aiv1alpha1.LabelWarmPool:        labelValueTrue,
 				aiv1alpha1.LabelWarmPoolClaimed: "false",
 				aiv1alpha1.LabelRoundTable:      rt.Name,
 			},

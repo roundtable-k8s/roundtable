@@ -44,6 +44,10 @@ import (
 
 const (
 	missionFinalizer = "ai.roundtable.io/mission-finalizer"
+	// defaultRoundTableRef is the RoundTable used when a mission does not name one.
+	defaultRoundTableRef = "default"
+	// cleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes the mission after its TTL.
+	cleanupPolicyDelete = "Delete"
 )
 
 // MissionReconciler reconciles a Mission object.
@@ -900,7 +904,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// Self-delete if cleanupPolicy=Delete and TTL expired
-	if mission.Spec.CleanupPolicy == "Delete" &&
+	if mission.Spec.CleanupPolicy == cleanupPolicyDelete &&
 		mission.Status.ExpiresAt != nil &&
 		time.Now().After(mission.Status.ExpiresAt.Time) {
 		log.Info("Deleting expired mission", "mission", mission.Name)
@@ -911,7 +915,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// If cleanupPolicy=Delete but TTL hasn't expired yet, requeue
-	if mission.Spec.CleanupPolicy == "Delete" && mission.Status.ExpiresAt != nil {
+	if mission.Spec.CleanupPolicy == cleanupPolicyDelete && mission.Status.ExpiresAt != nil {
 		remaining := time.Until(mission.Status.ExpiresAt.Time)
 		if remaining > 0 {
 			return ctrl.Result{RequeueAfter: remaining}, nil
@@ -1265,7 +1269,7 @@ func (r *MissionReconciler) ensureMissionChain(ctx context.Context, mission *aiv
 	// Get RoundTable reference for this mission
 	rtRef := mission.Spec.RoundTableRef
 	if rtRef == "" {
-		rtRef = "default" // fallback to default if not specified
+		rtRef = defaultRoundTableRef // fallback to default if not specified
 	}
 
 	// Create the mission-scoped chain
@@ -1401,7 +1405,7 @@ func terminalOutcome(mission *aiv1alpha1.Mission) aiv1alpha1.MissionPhase {
 // shouldDeleteResources determines if resources should be deleted based on cleanup policy and mission outcome.
 func (r *MissionReconciler) shouldDeleteResources(mission *aiv1alpha1.Mission) bool {
 	switch mission.Spec.CleanupPolicy {
-	case "Delete":
+	case cleanupPolicyDelete:
 		return true
 	case "Retain":
 		return false

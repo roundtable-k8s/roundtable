@@ -1198,7 +1198,7 @@ func (r *ChainReconciler) writeArtifact(ctx context.Context, nc natsConfig, chai
 
 	knightName := chain.Spec.OutputKnight
 	if knightName == "" {
-		knightName = "gawain"
+		knightName = defaultOutputKnight
 	}
 
 	// Get knight to find its domain
@@ -1385,3 +1385,6 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("chain").
 		Complete(r)
 }
+
+// defaultOutputKnight is the knight that receives chain output when spec.outputKnight is unset.
+const defaultOutputKnight = "gawain"
