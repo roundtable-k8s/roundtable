@@ -76,6 +76,16 @@ type RoundTableSpec struct {
 	// +optional
 	WarmPool *WarmPoolConfig `json:"warmPool,omitempty"`
 
+	// modelAliases maps intent names to model IDs so chain steps can say
+	// "model: deep" instead of a concrete model, e.g.
+	// {deep: opus, fast: haiku, review: openrouter/z-ai/glm-5.3}.
+	// A step's model is looked up here first (one level, no chaining); the
+	// resolved value is then validated against the target knight's runtime, so
+	// an alias only works on knights whose runtime supports its model.
+	// +kubebuilder:validation:MaxProperties=64
+	// +optional
+	ModelAliases map[string]string `json:"modelAliases,omitempty"`
+
 	// suspended, if true, suspends all knights in this table.
 	// +kubebuilder:default=false
 	// +optional

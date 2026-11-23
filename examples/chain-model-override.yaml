@@ -1,0 +1,54 @@
+# Per-step model override (#217). Steps say intent ("deep", "review") and the
+# RoundTable maps it to a model. The operator checks each resolved model against
+# the target knight's runtime (claude-knight: Claude models; pi-knight:
+# provider/model) and fails the step instead of silently using the default.
+# See docs/knight-task-contract.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: fleet-a
+  namespace: roundtable
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: fleet-a
+    tasksStream: fleet_a_tasks
+    resultsStream: fleet_a_results
+  modelAliases:
+    deep: opus
+    fast: haiku
+    review: openrouter/z-ai/glm-5.3
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: operator-change
+  namespace: roundtable
+spec:
+  roundTableRef: fleet-a
+  timeout: 7200
+  input: "Add a status condition for stale tools images"
+  steps:
+    - name: design
+      knightRef: rt-operator # claude-knight image
+      model: deep # → opus
+      timeout: 3600
+      task: |
+        Implement: {{ .Input }}
+
+    - name: changelog
+      knightRef: rt-operator
+      model: fast # → haiku
+      dependsOn: [design]
+      task: |
+        Write a one-paragraph changelog entry for:
+        {{ .Steps.design.Output }}
+
+    - name: review
+      knightRef: reviewer # pi-knight image
+      model: review # → openrouter/z-ai/glm-5.3
+      dependsOn: [design]
+      timeout: 1800
+      task: |
+        Review this change for correctness bugs:
+        {{ .Steps.design.Output }}

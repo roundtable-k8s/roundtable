@@ -279,6 +279,11 @@ spec:
       timeout: 120
 ```
 
+A step can override the knight's model for that task only with `model:` — a model
+ID or an alias from the RoundTable's `spec.modelAliases`, validated against the
+knight's runtime. See [knight-task-contract.md](knight-task-contract.md#model) and
+[examples/chain-model-override.yaml](../examples/chain-model-override.yaml).
+
 ### Chain with Schedule
 
 ```yaml

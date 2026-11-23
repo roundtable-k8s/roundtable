@@ -34,6 +34,11 @@ type TaskPayload struct {
 
 	// Task is the task description or instruction to execute.
 	Task string `json:"task"`
+
+	// Model overrides the knight's configured model for this task only
+	// (optional). The operator has already resolved RoundTable aliases and
+	// checked it suits the knight's runtime. Empty means the knight default.
+	Model string `json:"model,omitempty"`
 }
 
 // TaskResult is the JSON payload received from NATS for a completed task.
@@ -56,6 +61,9 @@ type TaskResult struct {
 
 	// Success indicates task success (pi-knight format).
 	Success *bool `json:"success,omitempty"`
+
+	// Model is the model the knight actually used for the task (optional).
+	Model string `json:"model,omitempty"`
 }
 
 // GetTaskID returns the task ID from whichever field was populated.
