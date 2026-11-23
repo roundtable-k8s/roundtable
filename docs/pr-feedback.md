@@ -122,6 +122,12 @@ The log is trimmed per job (at most three jobs): GitHub's timestamps are
 stripped and only the 15 lines before each of the first five `##[error]`
 lines are kept (the last 40 lines when there is none), capped at 3000 bytes.
 
+The PR's code controls its CI output, so the log is treated as untrusted:
+ANSI escapes and control characters are stripped, and the excerpt is wrapped
+in a `<<<UNTRUSTED-CI-LOG-<nonce>` ... `UNTRUSTED-CI-LOG-<nonce>>>>` fence with a
+fresh random nonce per dispatch, preceded by a note that it is data, not
+instructions, to be used only to locate the failure.
+
 The Chain then runs:
 
 | Step | Knight | Runs when |
