@@ -56,10 +56,15 @@ const (
 // whether the registry positively says it is gone (404). Anything else — the
 // registry being down, a timeout, an unexpected status — counts as "not known
 // to be missing", so an outage never triggers a rebuild of every image.
+//
+// It is a GET, not a HEAD, on purpose: a registry that expires tags nobody
+// pulls (zot's pulledWithin retention) counts a GET as a pull but not a HEAD.
+// A knight's pod can run for months without its node pulling the image again,
+// so this periodic check is what keeps an image in use from expiring.
 func probeToolsImageMissing(ctx context.Context, manifestURL string) bool {
 	ctx, cancel := context.WithTimeout(ctx, toolsImageProbeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, manifestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return false
 	}
