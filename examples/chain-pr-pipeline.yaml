@@ -9,8 +9,10 @@
 # Input: {"repo": "<owner>/<repo>", "issue": <n>}. The planner picks the coder
 # and the model alias; knightRef and model are static per step, so there is
 # one `when`-gated step per choice and exactly one of them runs.
-# Needs the RoundTable's spec.modelAliases to define deep, fast and review, and
-# every knight named here to exist (the Chain is invalid otherwise).
+# Needs the RoundTable's spec.modelAliases to define deep and fast (they only
+# need to resolve on the coders' runtime: lead steps set no model, so a lead on
+# another runtime, e.g. pi-knight, uses its default), and every knight named
+# here to exist (the Chain is invalid otherwise).
 #
 # Rendered from the Helm chart (templates/pr-pipeline.yaml with
 # prPipeline.coders=[rt-operator, rt-ui]). Change the template and re-render
@@ -31,7 +33,6 @@ spec:
     - name: plan
       knightRef:
         name: rt-lead
-      model: deep
       timeoutSeconds: 1800
       task: |
         Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ .Input }}
@@ -159,7 +160,6 @@ spec:
     - name: review
       knightRef:
         name: rt-lead
-      model: review
       dependsOn: [implement_rt_operator_deep, implement_rt_operator_fast, split_rt_operator, implement_rt_ui_deep, implement_rt_ui_fast, split_rt_ui]
       when: '["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded")'
       timeoutSeconds: 1800
@@ -207,7 +207,6 @@ spec:
           - name: review
             knightRef:
               name: rt-lead
-            model: review
             timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ .Input }}:
@@ -250,7 +249,6 @@ spec:
           - name: review
             knightRef:
               name: rt-lead
-            model: review
             timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ .Input }}:
@@ -267,7 +265,6 @@ spec:
     - name: merge
       knightRef:
         name: rt-lead
-      model: fast
       dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
       when: '["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Converged")'
       timeoutSeconds: 3600
@@ -289,7 +286,6 @@ spec:
     - name: escalate
       knightRef:
         name: rt-lead
-      model: fast
       dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
       when: '["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Exhausted") || !["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded")'
       timeoutSeconds: 600

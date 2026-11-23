@@ -34,15 +34,22 @@ It is built only from existing Chain features: `when` and `loop`
 
 ## Steps
 
-| Step | Knight | Model alias | Runs when |
+| Step | Knight | Model | Runs when |
 |---|---|---|---|
-| `plan` | lead | `deep` | always |
+| `plan` | lead | lead default (or `leadModel`) | always |
 | `implement_<coder>_<alias>` | coder | the planner's alias | the plan picked this coder and alias, no split |
 | `split_<coder>` (forEach over `.issues`) | coder | `deep` | the plan picked this coder and split |
-| `review` | lead | `review` | an implement or split step succeeded |
-| `fixloop_<coder>` (loop: `fix` → `review`) | coder, lead | `deep`, `review` | the review ran and the plan picked this coder |
-| `merge` | lead | `fast` | a fix loop `Converged` |
-| `escalate` | lead | `fast` | a fix loop is `Exhausted`, or no implementation ran |
+| `review` | lead | lead default (or `leadModel`) | an implement or split step succeeded |
+| `fixloop_<coder>` (loop: `fix` → `review`) | coder, lead | `deep`, lead default | the review ran and the plan picked this coder |
+| `merge` | lead | lead default (or `leadModel`) | a fix loop `Converged` |
+| `escalate` | lead | lead default (or `leadModel`) | a fix loop is `Exhausted`, or no implementation ran |
+
+Lead steps set no `model`, so the lead runs its own default model whatever its
+runtime. Model aliases are single-valued per RoundTable and validated against
+the runtime of the knight running the step, so one alias cannot suit both a
+claude-knight coder (`opus`) and a pi-knight lead (`provider/model`). Set
+`prPipeline.leadModel` to pin the lead's model (an alias or a model ID valid on
+the lead's runtime).
 
 `<coder>` is the knight name with `-` replaced by `_` (`rt-operator` →
 `implement_rt_operator_deep`), so templates can use `.Steps.<name>`.
@@ -110,7 +117,8 @@ track cost); it is a follow-up.
 
 ## Install
 
-The RoundTable must define the three aliases:
+The RoundTable must define the aliases the coders use (`deep`, plus every
+entry of `implementModels`); they only need to resolve on the coders' runtime:
 
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
@@ -121,7 +129,6 @@ spec:
   modelAliases:
     deep: opus
     fast: haiku
-    review: sonnet
 ```
 
 Every knight in the chain (`prPipeline.lead` and all `prPipeline.coders`) must
@@ -137,6 +144,19 @@ prPipeline:
   coders: [rt-operator, rt-ui]
   implementModels: [deep, fast]
   maxIterations: 3
+```
+
+Example with a pi-knight lead (rt-lead on GLM via OpenRouter) and claude-knight
+coders: the aliases map to Claude models for the coders, and the lead steps
+need no alias. Optionally pin the lead's model in its own form:
+
+```yaml
+prPipeline:
+  enabled: true
+  lead: rt-lead                 # image pi-knight; uses its default model
+  # leadModel: openrouter/z-ai/glm-5.3
+  coders: [rt-operator, rt-ui]  # image claude-knight
+  implementModels: [deep, fast]
 ```
 
 Re-render the example after changing the template:

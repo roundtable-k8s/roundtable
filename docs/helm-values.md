@@ -126,8 +126,9 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 |-----|------|---------|-------------|
 | `prPipeline.enabled` | bool | `false` | Create the Chain |
 | `prPipeline.name` | string | `pr-pipeline` | Chain name |
-| `prPipeline.roundTableRef.name` | string | `roundtable-dev` | RoundTable; must define the `deep`, `fast` and `review` model aliases |
+| `prPipeline.roundTableRef.name` | string | `roundtable-dev` | RoundTable; must define the `deep` and `fast` model aliases (for the coders) |
 | `prPipeline.lead` | string | `rt-lead` | Knight that plans, reviews, merges and escalates |
+| `prPipeline.leadModel` | string | `""` | Model (alias or runtime model ID) for the lead's steps; empty = the lead's default model |
 | `prPipeline.coders` | list | `[rt-operator]` | Coder knights the planner may pick; one implement/split step and fix loop each |
 | `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation |
 | `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
