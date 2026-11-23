@@ -181,6 +181,9 @@ the template, the `prPipeline` values or the Chain API.
 
 ## Run it for an issue
 
+[Issue pickup](issue-pickup.md) does this automatically for issues labelled
+`rt:ready` (RoundTable `spec.issuePickup`). By hand:
+
 A spec change resets the Chain to `Idle`; the run annotation starts a run:
 
 ```bash

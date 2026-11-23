@@ -147,6 +147,18 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
 - JetStream streams (if `createStreams=true`)
 - No direct Knight ownership (uses selector, like a Service)
 
+### Issue pickup (#224)
+
+A second controller on RoundTables (`issuepickup`) acts only when
+`spec.issuePickup` is set. Every `intervalSeconds` it lists open issues
+labelled `rt:ready` in `spec.issuePickup.repos` with the table's
+`spec.github` token, hands issues that need a human back (`needs-human`),
+and, within `maxActive`/`maxActivePerRepo`, copies the `chainRef` Chain to
+`<chainRef>-<repo>-<issue>` with the issue as input, starts it and claims the
+issue (`rt:in-progress` + comment). The copies are owned by the RoundTable;
+finished ones are deleted after `ttlSecondsAfterFinished`. Progress is in
+`status.issuePickup`. See [issue-pickup.md](issue-pickup.md).
+
 ### Knight scaling (#215)
 
 A Knight runs `spec.replicas` pods (default 1) bound to the same durable

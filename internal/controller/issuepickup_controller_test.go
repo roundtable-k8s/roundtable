@@ -1,0 +1,483 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/github"
+)
+
+// fakeGitHub serves the issue endpoints the pickup controller uses from
+// memory.
+type fakeGitHub struct {
+	mu       sync.Mutex
+	issues   map[string][]*github.Issue // repo -> issues
+	comments map[string][]string        // "repo#n" -> bodies
+	assigned map[string][]string
+	requests int
+	token    string
+	// failComments makes the next n comment calls fail with 500.
+	failComments int
+}
+
+func newFakeGitHub() *fakeGitHub {
+	return &fakeGitHub{issues: map[string][]*github.Issue{}, comments: map[string][]string{}, assigned: map[string][]string{}}
+}
+
+func (f *fakeGitHub) add(repo string, n int, title, body string, labels ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	is := &github.Issue{Number: n, Title: title, Body: body}
+	for _, l := range labels {
+		is.Labels = append(is.Labels, github.Label{Name: l})
+	}
+	f.issues[repo] = append(f.issues[repo], is)
+}
+
+func (f *fakeGitHub) labels(repo string, n int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	is := f.find(repo, n)
+	out := make([]string, 0, len(is.Labels))
+	for _, l := range is.Labels {
+		out = append(out, l.Name)
+	}
+	return out
+}
+
+func (f *fakeGitHub) commentsOn(repo string, n int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.comments[repo+"#"+strconv.Itoa(n)])
+}
+
+func (f *fakeGitHub) setLabels(repo string, n int, labels ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	is := f.find(repo, n)
+	is.Labels = nil
+	for _, l := range labels {
+		is.Labels = append(is.Labels, github.Label{Name: l})
+	}
+}
+
+func (f *fakeGitHub) find(repo string, n int) *github.Issue {
+	for _, is := range f.issues[repo] {
+		if is.Number == n {
+			return is
+		}
+	}
+	return nil
+}
+
+var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(/labels|/comments|/assignees)(?:/(.+))?)?$`)
+
+func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests++
+	if req.Header.Get("Authorization") != "Bearer "+f.token {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		return
+	}
+	m := issueRoute.FindStringSubmatch(req.URL.EscapedPath())
+	if m == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	repo, _ := url.PathUnescape(m[1])
+	if m[2] == "" { // list
+		label := req.URL.Query().Get("labels")
+		out := []*github.Issue{}
+		for _, is := range f.issues[repo] {
+			if is.HasLabel(label) {
+				out = append(out, is)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
+	n, _ := strconv.Atoi(m[2])
+	is := f.find(repo, n)
+	if is == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var body map[string]any
+	if req.Body != nil {
+		_ = json.NewDecoder(req.Body).Decode(&body)
+	}
+	switch {
+	case m[3] == "/labels" && req.Method == http.MethodPost:
+		for _, l := range body["labels"].([]any) {
+			if !is.HasLabel(l.(string)) {
+				is.Labels = append(is.Labels, github.Label{Name: l.(string)})
+			}
+		}
+	case m[3] == "/labels" && req.Method == http.MethodDelete:
+		name, _ := url.PathUnescape(m[4])
+		if !is.HasLabel(name) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		is.Labels = slices.DeleteFunc(is.Labels, func(l github.Label) bool { return l.Name == name })
+	case m[3] == "/comments":
+		if f.failComments > 0 {
+			f.failComments--
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		key := repo + "#" + m[2]
+		f.comments[key] = append(f.comments[key], body["body"].(string))
+		w.WriteHeader(http.StatusCreated)
+	case m[3] == "/assignees":
+		for _, a := range body["assignees"].([]any) {
+			f.assigned[repo+"#"+m[2]] = append(f.assigned[repo+"#"+m[2]], a.(string))
+		}
+		w.WriteHeader(http.StatusCreated)
+	}
+	_, _ = w.Write([]byte(`{}`))
+}
+
+var _ = Describe("IssuePickup controller", func() {
+	const (
+		ns       = "default"
+		rtName   = "pickup-table"
+		tmplName = "pickup-pipeline"
+		repo     = "acme/widgets"
+		token    = "ghs_test"
+	)
+	ctx := context.Background()
+	rtKey := types.NamespacedName{Name: rtName, Namespace: ns}
+
+	var (
+		gh    *fakeGitHub
+		srv   *httptest.Server
+		r     *IssuePickupReconciler
+		clock time.Time
+	)
+
+	reconcileOnce := func() reconcile.Result {
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: rtKey})
+		Expect(err).NotTo(HaveOccurred())
+		return res
+	}
+	tick := func() reconcile.Result {
+		clock = clock.Add(10 * time.Minute)
+		return reconcileOnce()
+	}
+	getRT := func() *aiv1alpha1.RoundTable {
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, rtKey, rt)).To(Succeed())
+		return rt
+	}
+	pickupChains := func() []aiv1alpha1.Chain {
+		l := &aiv1alpha1.ChainList{}
+		Expect(k8sClient.List(ctx, l, client.InNamespace(ns), client.MatchingLabels{aiv1alpha1.LabelPickupRoundTable: rtName})).To(Succeed())
+		return l.Items
+	}
+	finish := func(name string) {
+		c := &aiv1alpha1.Chain{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+		c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+		c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+		c.Status.CompletedAt = &metav1.Time{Time: clock}
+		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+	}
+
+	BeforeEach(func() {
+		gh = newFakeGitHub()
+		gh.token = token
+		srv = httptest.NewServer(gh)
+		clock = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+		r = &IssuePickupReconciler{
+			Client:       k8sClient,
+			Scheme:       k8sClient.Scheme(),
+			Recorder:     record.NewFakeRecorder(100),
+			GitHubAPIURL: srv.URL,
+			Now:          func() time.Time { return clock },
+		}
+
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "pickup-gh", Namespace: ns},
+			Data:       map[string][]byte{"token": []byte(token + "\n")},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
+			ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: ns},
+			Spec: aiv1alpha1.ChainSpec{
+				RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+				Input:         `{"repo": "x/y", "issue": 1}`,
+				Schedule:      "0 * * * *",
+				Steps:         []aiv1alpha1.ChainStep{{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: "lead"}, Task: "plan {{ .Input }}", TimeoutSeconds: 120}},
+			},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: rtName, Namespace: ns},
+			Spec: aiv1alpha1.RoundTableSpec{
+				NATS: aiv1alpha1.RoundTableNATS{
+					URL: "nats://localhost:4222", SubjectPrefix: "pick", TasksStream: "pick_tasks", ResultsStream: "pick_results",
+				},
+				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pickup-gh"}, Key: "token"}},
+				IssuePickup: &aiv1alpha1.IssuePickupSpec{
+					Repos:     []string{repo},
+					ChainRef:  corev1.LocalObjectReference{Name: tmplName},
+					Assignees: []string{"octo"},
+				},
+			},
+		})).To(Succeed())
+	})
+
+	AfterEach(func() {
+		srv.Close()
+		for _, c := range pickupChains() {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &c))).To(Succeed())
+		}
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: ns}}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: rtName, Namespace: ns}}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "pickup-gh", Namespace: ns}}))).To(Succeed())
+	})
+
+	It("applies CRD defaults to spec.issuePickup", func() {
+		p := getRT().Spec.IssuePickup
+		Expect(p.ReadyLabel).To(Equal("rt:ready"))
+		Expect(p.InProgressLabel).To(Equal("rt:in-progress"))
+		Expect(p.NeedsHumanLabel).To(Equal("needs-human"))
+		Expect(p.IntervalSeconds).To(Equal(int32(300)))
+		Expect(p.MaxActivePerRepo).To(Equal(int32(1)))
+		Expect(p.MaxActive).To(Equal(int32(2)))
+		Expect(p.TTLSecondsAfterFinished).To(Equal(new(int32(604800))))
+		Expect(p.HumanPatterns).To(HaveLen(3))
+	})
+
+	It("claims a ready issue once, starts a Chain copy and respects the per-repo cap", func() {
+		gh.add(repo, 7, "Add a widget", "please", "rt:ready")
+		gh.add(repo, 8, "Another widget", "later", "rt:ready")
+
+		res := reconcileOnce()
+		Expect(res.RequeueAfter).To(Equal(300 * time.Second))
+
+		chains := pickupChains()
+		Expect(chains).To(HaveLen(1))
+		c := chains[0]
+		Expect(c.Name).To(Equal(tmplName + "-widgets-7"))
+		Expect(c.Spec.Input).To(MatchJSON(`{"repo": "acme/widgets", "issue": 7}`))
+		Expect(c.Spec.Schedule).To(BeEmpty())
+		Expect(c.Spec.Steps).To(HaveLen(1))
+		Expect(c.Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationPickupRepo, repo))
+		Expect(c.Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationPickupIssue, "7"))
+		trigger := c.Annotations[aiv1alpha1.AnnotationChainRun]
+		Expect(trigger).NotTo(BeEmpty())
+		Expect(c.Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationPickupClaimed, trigger))
+		Expect(metav1.GetControllerOf(&c).Name).To(Equal(rtName))
+
+		Expect(gh.labels(repo, 7)).To(ConsistOf("rt:in-progress"))
+		Expect(gh.commentsOn(repo, 7)).To(HaveLen(1))
+		Expect(gh.commentsOn(repo, 7)[0]).To(ContainSubstring("started Chain `" + c.Name + "`"))
+		Expect(gh.assigned[repo+"#7"]).To(Equal([]string{"octo"}))
+		Expect(gh.labels(repo, 8)).To(ConsistOf("rt:ready"), "per-repo cap of 1 leaves #8 ready")
+
+		st := getRT().Status.IssuePickup
+		Expect(st).NotTo(BeNil())
+		Expect(st.PickedTotal).To(Equal(int64(1)))
+		Expect(st.Active).To(Equal(int32(1)))
+		Expect(st.LastError).To(BeEmpty())
+
+		By("not polling again before the interval")
+		before := gh.requests
+		res = reconcileOnce()
+		Expect(gh.requests).To(Equal(before))
+		Expect(res.RequeueAfter).To(BeNumerically("~", 300*time.Second, time.Second))
+
+		By("a ready label re-added mid-run is dropped without a second chain or comment")
+		gh.setLabels(repo, 7, "rt:in-progress", "rt:ready")
+		tick()
+		Expect(pickupChains()).To(HaveLen(1))
+		Expect(gh.labels(repo, 7)).To(ConsistOf("rt:in-progress"))
+		Expect(gh.commentsOn(repo, 7)).To(HaveLen(1))
+		Expect(gh.labels(repo, 8)).To(ConsistOf("rt:ready"))
+
+		By("taking the next issue once the first Chain finished")
+		finish(c.Name)
+		tick()
+		Expect(pickupChains()).To(HaveLen(2))
+		Expect(gh.labels(repo, 8)).To(ConsistOf("rt:in-progress"))
+		Expect(getRT().Status.IssuePickup.PickedTotal).To(Equal(int64(2)))
+
+		By("re-running a finished Chain when the ready label comes back")
+		gh.setLabels(repo, 7, "rt:ready")
+		finish(tmplName + "-widgets-8")
+		tick()
+		again := &aiv1alpha1.Chain{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: c.Name, Namespace: ns}, again)).To(Succeed())
+		Expect(again.Annotations[aiv1alpha1.AnnotationChainRun]).NotTo(Equal(trigger))
+		Expect(pickupChainActive(again)).To(BeTrue())
+		Expect(gh.commentsOn(repo, 7)).To(HaveLen(2))
+
+		By("deleting finished Chains after ttlSecondsAfterFinished")
+		clock = clock.Add(8 * 24 * time.Hour)
+		reconcileOnce()
+		left := pickupChains()
+		names := make([]string, 0, len(left))
+		for _, ch := range left {
+			names = append(names, ch.Name)
+		}
+		Expect(names).To(ConsistOf(c.Name), "#8 finished 8 days ago; #7 is running again")
+	})
+
+	It("hands issues that need a human back instead of starting a Chain", func() {
+		gh.add(repo, 3, "Bump CI", "edit .github/workflows/ci.yml", "rt:ready")
+		gh.add(repo, 4, "Tricky", "", "rt:ready", "needs-human")
+
+		reconcileOnce()
+		Expect(pickupChains()).To(BeEmpty())
+		Expect(gh.labels(repo, 3)).To(ConsistOf("needs-human"))
+		Expect(gh.commentsOn(repo, 3)).To(ConsistOf(ContainSubstring(".github/workflows")))
+		Expect(gh.labels(repo, 4)).To(ConsistOf("needs-human"))
+		Expect(getRT().Status.IssuePickup.SkippedTotal).To(Equal(int64(2)))
+
+		tick()
+		Expect(gh.commentsOn(repo, 3)).To(HaveLen(1), "handed back once")
+	})
+
+	It("finishes a half-done claim on the next poll without a second Chain", func() {
+		gh.add(repo, 5, "Feature", "", "rt:ready")
+		gh.failComments = 1
+
+		reconcileOnce()
+		Expect(pickupChains()).To(HaveLen(1))
+		st := getRT().Status.IssuePickup
+		Expect(st.LastError).To(ContainSubstring("claim"))
+		Expect(st.PickedTotal).To(BeZero())
+		Expect(gh.commentsOn(repo, 5)).To(BeEmpty())
+
+		// The ready label was already removed; put it back as if the
+		// removal had failed too, so the poll sees the issue again.
+		gh.setLabels(repo, 5, "rt:ready", "rt:in-progress")
+		tick()
+		chains := pickupChains()
+		Expect(chains).To(HaveLen(1))
+		Expect(chains[0].Annotations[aiv1alpha1.AnnotationPickupClaimed]).To(Equal(chains[0].Annotations[aiv1alpha1.AnnotationChainRun]))
+		Expect(gh.commentsOn(repo, 5)).To(HaveLen(1))
+		Expect(gh.labels(repo, 5)).To(ConsistOf("rt:in-progress"))
+		Expect(getRT().Status.IssuePickup.LastError).To(BeEmpty())
+	})
+
+	It("caps unfinished Chains per table across repos", func() {
+		const other = "acme/gears"
+		rt := getRT()
+		rt.Spec.IssuePickup.Repos = []string{repo, other}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		gh.add(repo, 1, "a", "", "rt:ready")
+		gh.add(other, 1, "b", "", "rt:ready")
+		gh.add(other, 2, "c", "", "rt:ready")
+
+		reconcileOnce()
+		Expect(pickupChains()).To(HaveLen(2))
+		Expect(gh.labels(repo, 1)).To(ConsistOf("rt:in-progress"))
+		Expect(gh.labels(other, 1)).To(ConsistOf("rt:in-progress"))
+		Expect(gh.labels(other, 2)).To(ConsistOf("rt:ready"))
+		Expect(gh.commentsOn(other, 2)).To(BeEmpty())
+
+		By("lowering maxActive below the running count starts nothing new")
+		finish(tmplName + "-gears-1")
+		rt = getRT()
+		rt.Spec.IssuePickup.MaxActive = 1
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		tick()
+		Expect(gh.labels(other, 2)).To(ConsistOf("rt:ready"))
+		Expect(getRT().Status.IssuePickup.Active).To(Equal(int32(1)))
+	})
+
+	It("does nothing when suspended and reports a bad token", func() {
+		gh.add(repo, 9, "Feature", "", "rt:ready")
+		rt := getRT()
+		rt.Spec.IssuePickup.Suspend = true
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		Expect(reconcileOnce().RequeueAfter).To(BeZero())
+		Expect(gh.requests).To(BeZero())
+
+		rt = getRT()
+		rt.Spec.IssuePickup.Suspend = false
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		gh.token = "rotated"
+		reconcileOnce()
+		Expect(pickupChains()).To(BeEmpty())
+		Expect(getRT().Status.IssuePickup.LastError).To(ContainSubstring("401"))
+	})
+
+	It("rejects a readyLabel equal to inProgressLabel", func() {
+		rt := getRT()
+		rt.Spec.IssuePickup.InProgressLabel = "rt:ready"
+		err := k8sClient.Update(ctx, rt)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("readyLabel must differ"))
+	})
+})
+
+var _ = Describe("IssuePickup helpers", func() {
+	It("derives DNS-safe chain names", func() {
+		Expect(pickupChainName("pr-pipeline", "roundtable-k8s/roundtable", 224)).To(Equal("pr-pipeline-roundtable-224"))
+		Expect(pickupChainName("pr-pipeline", "Acme/My_Repo.go", 1)).To(Equal("pr-pipeline-my-repo-go-1"))
+		long := pickupChainName(strings.Repeat("a", 250), "o/r", 12345)
+		Expect(len(long)).To(BeNumerically("<=", 253))
+		Expect(long).To(HaveSuffix("-12345"))
+	})
+
+	It("flags issues that need a human", func() {
+		pats, err := compileHumanPatterns([]string{`\.github/workflows`, `(?i)\bsecrets?\b`, `(?i)\b(auth|oauth|authn|authz|authentication|authori[sz]ation|credentials?)\b`})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(needsHuman(&github.Issue{Title: "Rotate the Secret"}, "needs-human", pats)).To(ContainSubstring("Secret"))
+		Expect(needsHuman(&github.Issue{Body: "fix OAuth login"}, "needs-human", pats)).To(ContainSubstring("OAuth"))
+		Expect(needsHuman(&github.Issue{Title: "author field in docs"}, "needs-human", pats)).To(BeEmpty())
+		Expect(needsHuman(&github.Issue{Labels: []github.Label{{Name: "Needs-Human"}}}, "needs-human", pats)).To(ContainSubstring("labelled"))
+		_, err = compileHumanPatterns([]string{"("})
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("treats a pending run trigger as active", func() {
+		c := &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{aiv1alpha1.AnnotationChainRun: "2"}}}
+		c.Status.LastRunTrigger = "1"
+		c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+		Expect(pickupChainActive(c)).To(BeTrue())
+		c.Status.LastRunTrigger = "2"
+		Expect(pickupChainActive(c)).To(BeFalse())
+		c.Status.Phase = aiv1alpha1.ChainPhaseRunning
+		Expect(pickupChainActive(c)).To(BeTrue())
+	})
+})

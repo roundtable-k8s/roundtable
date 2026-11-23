@@ -76,6 +76,7 @@ func main() {
 	var sandboxBackendMode string
 	var kedaMode string
 	var natsMonitoringEndpoint string
+	var githubAPIURL string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -103,6 +104,8 @@ func main() {
 	flag.StringVar(&natsMonitoringEndpoint, "nats-monitoring-endpoint", os.Getenv("NATS_MONITORING_ENDPOINT"),
 		"NATS HTTP monitoring endpoint (host:port) for KEDA's JetStream scaler. "+
 			"Empty derives it from each knight's spec.nats.url host on port 8222.")
+	flag.StringVar(&githubAPIURL, "github-api-url", "https://api.github.com",
+		"GitHub REST API URL used by RoundTable spec.issuePickup.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -336,6 +339,16 @@ func main() {
 		NATS:     natsProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
+		os.Exit(1)
+	}
+	// Issue pickup (#224) only acts on RoundTables that set spec.issuePickup.
+	if err := (&controller.IssuePickupReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Recorder:     mgr.GetEventRecorderFor("issuepickup-controller"), //nolint:staticcheck // SA1019: see note above
+		GitHubAPIURL: githubAPIURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "IssuePickup")
 		os.Exit(1)
 	}
 	missionPlanner := &mission.Planner{
