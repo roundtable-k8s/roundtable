@@ -163,6 +163,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
+	// Inherit the table's default resources and workspace (in memory only).
+	knightpkg.ApplyTableDefaults(ctx, r.Client, knight)
+
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
 	// with a clear condition and leave any existing runtime resources alone.
 	if knight.Spec.Runtime == runtimeSandbox && !r.SandboxEnabled {

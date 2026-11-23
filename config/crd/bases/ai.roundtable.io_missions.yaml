@@ -4032,8 +4032,10 @@ spec:
                         type: string
                       resources:
                         description: |-
-                          resources are the default compute resource requests and limits for
-                          the knights' app container.
+                          resources are the default compute resource requests and limits (cpu,
+                          memory, ephemeral-storage, ...) for the app container of the table's
+                          standing knights (those labelled ai.roundtable.io/round-table). A knight
+                          that sets its own spec.resources keeps it; resources are not merged.
                         properties:
                           claims:
                             description: |-
@@ -4099,6 +4101,41 @@ spec:
                         maximum: 3600
                         minimum: 30
                         type: integer
+                      workspace:
+                        description: |-
+                          workspace is the default workspace storage (mode and size) for the
+                          table's standing knights. A knight that sets its own spec.workspace
+                          keeps it. existingClaim is never inherited: a claim is per knight.
+                        properties:
+                          existingClaim:
+                            description: |-
+                              existingClaim references an existing PVC to use instead of creating a new one.
+                              Useful for migrating existing knights to operator management.
+                            type: string
+                          mode:
+                            default: pvc
+                            description: |-
+                              mode selects the workspace storage.
+                              "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+                              runs a single pod.
+                              "ephemeral" gives every pod its own emptyDir (size limit: size), which
+                              lets the knight run several replicas. Anything the runtime keeps under
+                              /data, including its memory files, is lost when the pod is replaced.
+                            enum:
+                            - pvc
+                            - ephemeral
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            default: 1Gi
+                            description: |-
+                              size is the storage request for auto-created PVCs, or the emptyDir
+                              size limit in ephemeral mode.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
                     type: object
                   natsURL:
                     description: natsURL overrides the NATS server URL for the mission
