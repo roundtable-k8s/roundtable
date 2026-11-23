@@ -2,6 +2,8 @@ module github.com/roundtable-k8s/roundtable
 
 go 1.26.1
 
+toolchain go1.26.3
+
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/nats-io/nats.go v1.49.0

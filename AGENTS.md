@@ -56,6 +56,31 @@ Always use `kubebuilder create api` and `kubebuilder create webhook` to scaffold
 The e2e tests are designed to validate the solution in an isolated environment (similar to GitHub Actions CI).
 Ensure you run them against a dedicated [Kind](https://kind.sigs.k8s.io/) cluster (not your “real” dev/prod cluster).
 
+## Local build, test, lint
+
+The Go toolchain is pinned by the `toolchain go1.26.3` directive in `go.mod` (CI's
+`setup-go` reads the same file). Do NOT set `GOTOOLCHAIN` by hand; a local Go
+older than the pin is upgraded automatically, a newer one is kept. The
+Makefile builds the custom golangci-lint with the same pinned version.
+
+```bash
+make build   # compile the manager
+make test    # manifests + generate + fmt + vet + envtest unit tests
+make lint    # builds custom golangci-lint into ./bin on first run, then runs it
+```
+
+**CGO:** knight pods have no `gcc`. Anything that compiles cgo (including
+`go install` of controller-gen / golangci-lint, run by the Makefile) fails with
+`C compiler "gcc" not found`. Prefix with `CGO_ENABLED=0` there:
+
+```bash
+CGO_ENABLED=0 make test
+CGO_ENABLED=0 make lint
+```
+
+`make lint` may report existing findings (tracked separately); it should still
+run to completion. The race detector (`-race`) needs CGO, so don't use it in pods.
+
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**
