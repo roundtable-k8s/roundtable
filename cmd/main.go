@@ -257,7 +257,7 @@ func main() {
 	knightReconciler := &controller.KnightReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("knight-controller"),
+		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
 		SandboxEnabled: sandboxEnabled,
@@ -292,7 +292,7 @@ func main() {
 	if err := (&controller.ChainReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("chain-controller"),
+		Recorder: mgr.GetEventRecorderFor("chain-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
 		NATS:     natsProvider,
 		Notify:   notifier,
 	}).SetupWithManager(mgr); err != nil {
@@ -302,7 +302,7 @@ func main() {
 	if err := (&controller.RoundTableReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("roundtable-controller"),
+		Recorder: mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
 		NATS:     natsProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
@@ -316,7 +316,7 @@ func main() {
 	if err := (&controller.MissionReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("mission-controller"),
+		Recorder: mgr.GetEventRecorderFor("mission-controller"), //nolint:staticcheck // SA1019: migrating to the new events API changes the recorder interface; tracked separately
 		NATS:     natsProvider,
 		Notify:   notifier,
 		Planner:  missionPlanner,

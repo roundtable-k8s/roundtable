@@ -96,7 +96,7 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
 		"roundtable.io/domain": knight.Spec.Domain,
 	}
-	desired.Spec.Template.ObjectMeta.Annotations = podAnnotations
+	desired.Spec.Template.Annotations = podAnnotations
 
 	desiredHash := knightpkg.DeploymentSpecHash(desired)
 
@@ -133,10 +133,10 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		deploy.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: labels,
 		}
-		deploy.Spec.Template.ObjectMeta.Labels = labels
+		deploy.Spec.Template.Labels = labels
 
 		podAnnotations[specHashAnnotation] = desiredHash
-		deploy.Spec.Template.ObjectMeta.Annotations = podAnnotations
+		deploy.Spec.Template.Annotations = podAnnotations
 
 		deploy.Spec.Template.Spec = desiredSpec.Template.Spec
 

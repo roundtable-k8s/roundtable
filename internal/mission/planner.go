@@ -398,7 +398,7 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 
 	// Publish to planner knight's task subject.
 	prefix := natsPrefix(mission)
-	if plannerKnight.Spec.NATS.Subjects != nil && len(plannerKnight.Spec.NATS.Subjects) > 0 {
+	if len(plannerKnight.Spec.NATS.Subjects) > 0 {
 		parts := strings.SplitN(plannerKnight.Spec.NATS.Subjects[0], ".tasks.", 2)
 		if len(parts) == 2 {
 			prefix = parts[0]

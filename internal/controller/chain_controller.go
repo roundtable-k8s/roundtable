@@ -724,9 +724,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		totalSteps := len(chain.Status.StepStatuses)
 
 		for _, ss := range chain.Status.StepStatuses {
-			if ss.Phase == aiv1alpha1.ChainStepPhaseSucceeded {
+			switch ss.Phase {
+			case aiv1alpha1.ChainStepPhaseSucceeded:
 				succeededSteps++
-			} else if ss.Phase == aiv1alpha1.ChainStepPhaseFailed {
+			case aiv1alpha1.ChainStepPhaseFailed:
 				spec := specMap[ss.Name]
 				if spec != nil && spec.ContinueOnFailure {
 					softFailures++

@@ -538,13 +538,13 @@ func (r *KnightReconciler) reconcileDeployment(ctx context.Context, knight *aiv1
 	desired.Spec.Strategy = appsv1.DeploymentStrategy{
 		Type: appsv1.RecreateDeploymentStrategyType,
 	}
-	desired.Spec.Template.ObjectMeta.Labels = labels
+	desired.Spec.Template.Labels = labels
 	podAnnotations := map[string]string{
 		"roundtable.io/model":  knight.Spec.Model,
 		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
 		"roundtable.io/domain": knight.Spec.Domain,
 	}
-	desired.Spec.Template.ObjectMeta.Annotations = podAnnotations
+	desired.Spec.Template.Annotations = podAnnotations
 	desired.Spec.Template.Spec = r.BuildPodSpec(ctx, knight)
 
 	// Compute hash of desired state
@@ -583,11 +583,11 @@ func (r *KnightReconciler) reconcileDeployment(ctx context.Context, knight *aiv1
 		deploy.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: labels,
 		}
-		deploy.Spec.Template.ObjectMeta.Labels = labels
+		deploy.Spec.Template.Labels = labels
 
 		// Add spec hash to pod annotations
 		podAnnotations[specHashAnnotation] = desiredHash
-		deploy.Spec.Template.ObjectMeta.Annotations = podAnnotations
+		deploy.Spec.Template.Annotations = podAnnotations
 
 		deploy.Spec.Template.Spec = r.BuildPodSpec(ctx, knight)
 

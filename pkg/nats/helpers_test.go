@@ -310,8 +310,8 @@ func TestSubjectFormatConsistency(t *testing.T) {
 		for _, subject := range subjects {
 			// NATS subjects should only contain alphanumeric, dots, hyphens, underscores
 			for _, ch := range subject {
-				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-					(ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '_' || ch == '*' || ch == '>') {
+				if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') &&
+					(ch < '0' || ch > '9') && ch != '.' && ch != '-' && ch != '_' && ch != '*' && ch != '>' {
 					t.Errorf("subject contains invalid character %c: %s", ch, subject)
 				}
 			}
