@@ -57,7 +57,9 @@ type DeploymentBackend struct {
 }
 
 // NewDeploymentBackend creates a new DeploymentBackend.
-func NewDeploymentBackend(c client.Client, scheme *runtime.Scheme, defaultImage string, builder PodSpecBuilder) *DeploymentBackend {
+func NewDeploymentBackend(
+	c client.Client, scheme *runtime.Scheme, defaultImage string, builder PodSpecBuilder,
+) *DeploymentBackend {
 	return &DeploymentBackend{
 		Client:              c,
 		Scheme:              scheme,

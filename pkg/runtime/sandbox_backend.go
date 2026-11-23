@@ -48,7 +48,10 @@ type SandboxBackend struct {
 }
 
 // NewSandboxBackend creates a new SandboxBackend.
-func NewSandboxBackend(c client.Client, scheme *k8sruntime.Scheme, defaultImage string, builder func(ctx context.Context, knight *aiv1alpha1.Knight) corev1.PodSpec) *SandboxBackend {
+func NewSandboxBackend(
+	c client.Client, scheme *k8sruntime.Scheme, defaultImage string,
+	builder func(ctx context.Context, knight *aiv1alpha1.Knight) corev1.PodSpec,
+) *SandboxBackend {
 	return &SandboxBackend{
 		Client:       c,
 		Scheme:       scheme,
@@ -199,7 +202,9 @@ func (b *SandboxBackend) Resume(ctx context.Context, knight *aiv1alpha1.Knight) 
 }
 
 // buildVolumeClaimTemplates constructs PVC templates for the Sandbox from Knight workspace config.
-func (b *SandboxBackend) buildVolumeClaimTemplates(knight *aiv1alpha1.Knight) []sandboxv1alpha1.PersistentVolumeClaimTemplate {
+func (b *SandboxBackend) buildVolumeClaimTemplates(
+	knight *aiv1alpha1.Knight,
+) []sandboxv1alpha1.PersistentVolumeClaimTemplate {
 	// If the knight uses an existing claim, no templates needed
 	if knight.Spec.Workspace != nil && knight.Spec.Workspace.ExistingClaim != "" {
 		return nil

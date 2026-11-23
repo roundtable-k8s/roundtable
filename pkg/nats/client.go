@@ -407,7 +407,9 @@ func (c *JetStreamClient) DeleteConsumer(stream, consumer string) error {
 }
 
 // PollMessage polls for a single message with a timeout.
-func (c *JetStreamClient) PollMessage(subject string, timeout time.Duration, opts ...SubscribeOption) (*nats.Msg, error) {
+func (c *JetStreamClient) PollMessage(
+	subject string, timeout time.Duration, opts ...SubscribeOption,
+) (*nats.Msg, error) {
 	sub, err := c.Subscribe(subject, opts...)
 	if err != nil {
 		return nil, err
