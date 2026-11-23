@@ -40,9 +40,14 @@ const (
 	// generated flake does not float. Overridable via KNIGHT_NIX2CONTAINER_REV.
 	defaultNix2ContainerRev = "42d1df94f001a9416ef08be7b305144074aca9d2"
 
-	// defaultToolsBuilderImage is the image the build Job runs: stock Nix,
-	// pinned by digest (nix 2.36.0). Overridable via KNIGHT_TOOLS_BUILDER_IMAGE.
-	defaultToolsBuilderImage = "nixos/nix@sha256:746280551ddc1c72177d1a597c05eacac86dfaa18d5d649bf86411278bcd5470"
+	// stockNixImage is plain Nix pinned by digest (nix 2.36.0). It is the base
+	// of the prebuilt tools builder (Dockerfile.tools-builder) and the fallback
+	// builder when no prebuilt image matches the configured pins. On it a build
+	// Job compiles the nix2container tooling from source every time.
+	stockNixImage = "nixos/nix@sha256:746280551ddc1c72177d1a597c05eacac86dfaa18d5d649bf86411278bcd5470"
+
+	// prebuiltToolsBuilderRepo is where CI publishes the prebuilt tools builder.
+	prebuiltToolsBuilderRepo = "ghcr.io/roundtable-k8s/tools-builder"
 )
 
 // ToolsImageRepo returns the repository knights pull tools images from, e.g.
@@ -75,12 +80,32 @@ func ToolsImagePushInsecure() bool {
 	return os.Getenv("KNIGHT_TOOLS_IMAGE_PUSH_INSECURE") == "true"
 }
 
-// ToolsBuilderImage returns the image the tools build Job runs.
+// ToolsBuilderImage returns the image the tools build Job runs:
+//
+//   - KNIGHT_TOOLS_BUILDER_IMAGE (chart value toolsImage.builderImage) if set;
+//   - otherwise the prebuilt builder CI publishes for the operator's built-in
+//     pins, which has the nix2container tooling already in its Nix store;
+//   - or plain Nix when the nixpkgs or nix2container pin has been overridden,
+//     because no prebuilt image exists for other pins. That still works, it
+//     is just slow.
 func ToolsBuilderImage() string {
 	if v := os.Getenv("KNIGHT_TOOLS_BUILDER_IMAGE"); v != "" {
 		return v
 	}
-	return defaultToolsBuilderImage
+	if NixpkgsRef() == defaultNixpkgsRef && Nix2ContainerRev() == defaultNix2ContainerRev {
+		return prebuiltToolsBuilderRepo + ":" + ToolsBuilderTag()
+	}
+	return stockNixImage
+}
+
+// ToolsBuilderTag returns the tag of the prebuilt tools builder for the
+// current pins: a hash of everything that determines the image content (the
+// base Nix image and the warm-up flake, which carries the nixpkgs and
+// nix2container pins). CI computes the same tag when it builds the image
+// (cmd/toolsflake -tag), so an operator and its builder always line up.
+func ToolsBuilderTag() string {
+	h := sha256.Sum256([]byte("tools-builder/v1\n" + stockNixImage + "\n" + ToolsBuilderWarmupFlake()))
+	return hex.EncodeToString(h[:8])
 }
 
 // Nix2ContainerRev returns the pinned nix2container commit.
@@ -224,4 +249,15 @@ func GenerateToolsImageFlake(knight *aiv1alpha1.Knight) string {
 	sb.WriteString("    };\n")
 	sb.WriteString("}\n")
 	return sb.String()
+}
+
+// ToolsBuilderWarmupFlake returns the flake the prebuilt tools builder image
+// is warmed up with: the same flake a build Job gets, for a single small
+// package. Building it bakes the nix2container tooling (its patched skopeo is
+// compiled from source and otherwise dominates every build) and the pinned
+// flake inputs into the image's Nix store.
+func ToolsBuilderWarmupFlake() string {
+	return GenerateToolsImageFlake(&aiv1alpha1.Knight{
+		Spec: aiv1alpha1.KnightSpec{Tools: &aiv1alpha1.KnightTools{Nix: []string{"hello"}}},
+	})
 }

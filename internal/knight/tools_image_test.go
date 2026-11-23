@@ -17,6 +17,7 @@ limitations under the License.
 package knight
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -168,5 +169,53 @@ func TestMountedToolsImageRefTrailsUntilPublished(t *testing.T) {
 	t.Setenv("KNIGHT_TOOLS_IMAGE_REPO", "")
 	if got := MountedToolsImageRef(k); got != "" {
 		t.Errorf("with tools images disabled the knight mounts %q, want nothing", got)
+	}
+}
+
+func TestToolsBuilderImageSelection(t *testing.T) {
+	// Built-in pins: the prebuilt builder published for exactly those pins.
+	prebuilt := prebuiltToolsBuilderRepo + ":" + ToolsBuilderTag()
+	if got := ToolsBuilderImage(); got != prebuilt {
+		t.Errorf("default builder = %q, want prebuilt %q", got, prebuilt)
+	}
+
+	// An overridden pin has no prebuilt image: fall back to plain Nix.
+	t.Setenv("KNIGHT_NIXPKGS_REF", "some-other-ref")
+	if got := ToolsBuilderImage(); got != stockNixImage {
+		t.Errorf("builder with a custom nixpkgs pin = %q, want stock %q", got, stockNixImage)
+	}
+	t.Setenv("KNIGHT_NIXPKGS_REF", "")
+	t.Setenv("KNIGHT_NIX2CONTAINER_REV", "some-other-rev")
+	if got := ToolsBuilderImage(); got != stockNixImage {
+		t.Errorf("builder with a custom nix2container pin = %q, want stock %q", got, stockNixImage)
+	}
+
+	// An explicit image always wins.
+	t.Setenv("KNIGHT_TOOLS_BUILDER_IMAGE", "example.com/builder:1")
+	if got := ToolsBuilderImage(); got != "example.com/builder:1" {
+		t.Errorf("explicit builder = %q, want example.com/builder:1", got)
+	}
+}
+
+func TestToolsBuilderTagFollowsThePins(t *testing.T) {
+	base := ToolsBuilderTag()
+	if len(base) != 16 {
+		t.Fatalf("tag %q should be a 16-char hash", base)
+	}
+	t.Setenv("KNIGHT_NIXPKGS_REF", "different-ref")
+	if ToolsBuilderTag() == base {
+		t.Error("builder tag must change with the nixpkgs pin")
+	}
+}
+
+// The builder image is built FROM the same stock Nix image the operator falls
+// back to; the digest lives in both places, so keep them identical.
+func TestToolsBuilderDockerfileUsesStockNixImage(t *testing.T) {
+	dockerfile, err := os.ReadFile("../../Dockerfile.tools-builder")
+	if err != nil {
+		t.Fatalf("read Dockerfile.tools-builder: %v", err)
+	}
+	if !strings.Contains(string(dockerfile), "FROM "+stockNixImage+"\n") {
+		t.Errorf("Dockerfile.tools-builder must build FROM %s", stockNixImage)
 	}
 }
