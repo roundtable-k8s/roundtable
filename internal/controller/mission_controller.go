@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -57,7 +56,6 @@ type MissionReconciler struct {
 	Notify    *notify.Notifier
 	Planner   *mission.Planner
 	Assembler *mission.KnightAssembler
-	mu        sync.Mutex
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
