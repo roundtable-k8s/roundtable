@@ -56,6 +56,11 @@ type RoundTableSpec struct {
 	// +optional
 	GitHub *GitHubConfig `json:"github,omitempty"`
 
+	// issuePickup polls GitHub for issues labelled ready and starts one copy
+	// of a Chain (the PR pipeline) per issue. Unset means off.
+	// +optional
+	IssuePickup *IssuePickupSpec `json:"issuePickup,omitempty"`
+
 	// vault configures the shared Obsidian vault for all knights in this table.
 	// +optional
 	Vault *KnightVault `json:"vault,omitempty"`
@@ -285,6 +290,10 @@ type RoundTableStatus struct {
 	// warmPool reports the current state of the warm pool.
 	// +optional
 	WarmPool *WarmPoolStatus `json:"warmPool,omitempty"`
+
+	// issuePickup is the observed state of spec.issuePickup.
+	// +optional
+	IssuePickup *IssuePickupStatus `json:"issuePickup,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional

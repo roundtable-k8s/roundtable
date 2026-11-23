@@ -235,6 +235,130 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              issuePickup:
+                description: |-
+                  issuePickup polls GitHub for issues labelled ready and starts one copy
+                  of a Chain (the PR pipeline) per issue. Unset means off.
+                properties:
+                  assignees:
+                    description: |-
+                      assignees are GitHub logins assigned to a claimed issue. GitHub
+                      ignores logins that cannot be assigned (GitHub App bots cannot be).
+                    items:
+                      type: string
+                    maxItems: 10
+                    type: array
+                    x-kubernetes-list-type: set
+                  chainRef:
+                    description: |-
+                      chainRef names the Chain in the RoundTable's namespace that is copied
+                      for every picked-up issue (normally the PR pipeline, pr-pipeline). The
+                      copy gets spec.input {"repo": "<owner/name>", "issue": <n>} and is
+                      started with the ai.roundtable.io/run annotation. The template itself
+                      is never run by pickup.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                    x-kubernetes-validations:
+                    - message: chainRef.name is required
+                      rule: size(self.name) > 0
+                  humanPatterns:
+                    default:
+                    - \.github/workflows
+                    - (?i)\bsecrets?\b
+                    - (?i)\b(auth|oauth|authn|authz|authentication|authori[sz]ation|credentials?)\b
+                    description: |-
+                      humanPatterns are RE2 regular expressions matched against an issue's
+                      title and body. A match means the work needs a human (the bot token
+                      cannot push workflow changes, and secrets/auth changes need review).
+                    items:
+                      type: string
+                    maxItems: 20
+                    type: array
+                  inProgressLabel:
+                    default: rt:in-progress
+                    description: inProgressLabel replaces readyLabel when an issue
+                      is claimed.
+                    maxLength: 50
+                    minLength: 1
+                    type: string
+                  intervalSeconds:
+                    default: 300
+                    description: intervalSeconds is the time between polls.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  maxActive:
+                    default: 2
+                    description: maxActive caps unfinished pickup Chains for the whole
+                      RoundTable.
+                    format: int32
+                    maximum: 50
+                    minimum: 1
+                    type: integer
+                  maxActivePerRepo:
+                    default: 1
+                    description: maxActivePerRepo caps unfinished pickup Chains per
+                      repository.
+                    format: int32
+                    maximum: 20
+                    minimum: 1
+                    type: integer
+                  needsHumanLabel:
+                    default: needs-human
+                    description: |-
+                      needsHumanLabel marks issues a knight must not take. A ready issue with
+                      this label, or whose title or body matches humanPatterns, is skipped:
+                      readyLabel is removed, needsHumanLabel added and a comment says why.
+                    maxLength: 50
+                    minLength: 1
+                    type: string
+                  readyLabel:
+                    default: rt:ready
+                    description: readyLabel marks issues to pick up.
+                    maxLength: 50
+                    minLength: 1
+                    type: string
+                  repos:
+                    description: repos are the GitHub repositories to poll, as owner/name.
+                    items:
+                      pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                      type: string
+                    maxItems: 50
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  suspend:
+                    default: false
+                    description: suspend stops polling. Chains already started keep
+                      running.
+                    type: boolean
+                  ttlSecondsAfterFinished:
+                    default: 604800
+                    description: |-
+                      ttlSecondsAfterFinished deletes a finished pickup Chain this long after
+                      it completed. 0 keeps finished Chains.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - chainRef
+                - repos
+                type: object
+                x-kubernetes-validations:
+                - message: readyLabel must differ from inProgressLabel and needsHumanLabel
+                  rule: self.readyLabel != self.inProgressLabel && self.readyLabel
+                    != self.needsHumanLabel
               knightSelector:
                 description: |-
                   knightSelector is a label selector for Knights that belong to this table.
@@ -1963,6 +2087,31 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              issuePickup:
+                description: issuePickup is the observed state of spec.issuePickup.
+                properties:
+                  active:
+                    description: active is the number of unfinished pickup Chains.
+                    format: int32
+                    type: integer
+                  lastError:
+                    description: lastError is the last poll's error ("" when it succeeded).
+                    type: string
+                  lastPollTime:
+                    description: lastPollTime is when GitHub was last polled.
+                    format: date-time
+                    type: string
+                  pickedTotal:
+                    description: pickedTotal counts issues claimed (and Chain runs
+                      started).
+                    format: int64
+                    type: integer
+                  skippedTotal:
+                    description: skippedTotal counts ready issues handed back to a
+                      human.
+                    format: int64
+                    type: integer
+                type: object
               knights:
                 description: knights provides a summary of each knight's status.
                 items:

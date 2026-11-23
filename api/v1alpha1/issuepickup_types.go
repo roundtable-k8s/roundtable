@@ -1,0 +1,157 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	// LabelPickupRoundTable marks a Chain created by a RoundTable's issue
+	// pickup; the value is the RoundTable name.
+	LabelPickupRoundTable = "ai.roundtable.io/pickup-roundtable"
+
+	// AnnotationPickupRepo is the owner/name of the picked-up issue's repo.
+	AnnotationPickupRepo = "ai.roundtable.io/pickup-repo"
+
+	// AnnotationPickupIssue is the picked-up issue number.
+	AnnotationPickupIssue = "ai.roundtable.io/pickup-issue"
+
+	// AnnotationPickupClaimed is set to the run trigger once the issue has
+	// been claimed on GitHub for that run (labels swapped and commented), so
+	// a retried poll never comments twice.
+	AnnotationPickupClaimed = "ai.roundtable.io/pickup-claimed"
+)
+
+// IssuePickupSpec configures polling GitHub for issues labelled ready and
+// starting one copy of a Chain (the PR pipeline) per issue. The operator uses
+// the RoundTable's spec.github.tokenSecretRef token; it needs read/write on
+// issues in every listed repo.
+// +kubebuilder:validation:XValidation:rule="self.readyLabel != self.inProgressLabel && self.readyLabel != self.needsHumanLabel",message="readyLabel must differ from inProgressLabel and needsHumanLabel"
+type IssuePickupSpec struct {
+	// suspend stops polling. Chains already started keep running.
+	// +kubebuilder:default=false
+	// +optional
+	Suspend bool `json:"suspend,omitempty"`
+
+	// repos are the GitHub repositories to poll, as owner/name.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
+	// +listType=set
+	// +required
+	Repos []string `json:"repos"`
+
+	// chainRef names the Chain in the RoundTable's namespace that is copied
+	// for every picked-up issue (normally the PR pipeline, pr-pipeline). The
+	// copy gets spec.input {"repo": "<owner/name>", "issue": <n>} and is
+	// started with the ai.roundtable.io/run annotation. The template itself
+	// is never run by pickup.
+	// +kubebuilder:validation:XValidation:rule="size(self.name) > 0",message="chainRef.name is required"
+	// +required
+	ChainRef corev1.LocalObjectReference `json:"chainRef"`
+
+	// readyLabel marks issues to pick up.
+	// +kubebuilder:default="rt:ready"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	ReadyLabel string `json:"readyLabel,omitempty"`
+
+	// inProgressLabel replaces readyLabel when an issue is claimed.
+	// +kubebuilder:default="rt:in-progress"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	InProgressLabel string `json:"inProgressLabel,omitempty"`
+
+	// needsHumanLabel marks issues a knight must not take. A ready issue with
+	// this label, or whose title or body matches humanPatterns, is skipped:
+	// readyLabel is removed, needsHumanLabel added and a comment says why.
+	// +kubebuilder:default="needs-human"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	NeedsHumanLabel string `json:"needsHumanLabel,omitempty"`
+
+	// humanPatterns are RE2 regular expressions matched against an issue's
+	// title and body. A match means the work needs a human (the bot token
+	// cannot push workflow changes, and secrets/auth changes need review).
+	// +kubebuilder:default={"\\.github/workflows","(?i)\\bsecrets?\\b","(?i)\\b(auth|oauth|authn|authz|authentication|authori[sz]ation|credentials?)\\b"}
+	// +kubebuilder:validation:MaxItems=20
+	// +optional
+	HumanPatterns []string `json:"humanPatterns,omitempty"`
+
+	// assignees are GitHub logins assigned to a claimed issue. GitHub
+	// ignores logins that cannot be assigned (GitHub App bots cannot be).
+	// +kubebuilder:validation:MaxItems=10
+	// +listType=set
+	// +optional
+	Assignees []string `json:"assignees,omitempty"`
+
+	// intervalSeconds is the time between polls.
+	// +kubebuilder:default=300
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+
+	// maxActivePerRepo caps unfinished pickup Chains per repository.
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	MaxActivePerRepo int32 `json:"maxActivePerRepo,omitempty"`
+
+	// maxActive caps unfinished pickup Chains for the whole RoundTable.
+	// +kubebuilder:default=2
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxActive int32 `json:"maxActive,omitempty"`
+
+	// ttlSecondsAfterFinished deletes a finished pickup Chain this long after
+	// it completed. 0 keeps finished Chains.
+	// +kubebuilder:default=604800
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+}
+
+// IssuePickupStatus is the observed state of a RoundTable's issue pickup.
+type IssuePickupStatus struct {
+	// lastPollTime is when GitHub was last polled.
+	// +optional
+	LastPollTime *metav1.Time `json:"lastPollTime,omitempty"`
+
+	// active is the number of unfinished pickup Chains.
+	// +optional
+	Active int32 `json:"active,omitempty"`
+
+	// pickedTotal counts issues claimed (and Chain runs started).
+	// +optional
+	PickedTotal int64 `json:"pickedTotal,omitempty"`
+
+	// skippedTotal counts ready issues handed back to a human.
+	// +optional
+	SkippedTotal int64 `json:"skippedTotal,omitempty"`
+
+	// lastError is the last poll's error ("" when it succeeded).
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+}
