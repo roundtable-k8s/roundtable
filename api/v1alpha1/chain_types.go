@@ -155,6 +155,18 @@ type ChainStep struct {
 	// retry configures per-step retry behavior, overriding the chain-level retryPolicy.
 	// +optional
 	Retry *StepRetry `json:"retry,omitempty"`
+
+	// model overrides the knight's spec.model for this step only. It is either
+	// a model ID or the name of an alias from the chain's RoundTable
+	// spec.modelAliases (an alias name wins over a literal model ID). The
+	// resolved model must suit the knight's runtime: a Claude model ("opus",
+	// "sonnet", "haiku", "claude-...") on a claude-knight, a "provider/model"
+	// on a pi-knight. A mismatch fails the step without dispatching it.
+	// Empty means the knight's default model.
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$`
+	// +optional
+	Model string `json:"model,omitempty"`
 }
 
 // StepRetry configures retry behavior for an individual step.
@@ -256,6 +268,12 @@ type ChainStepStatus struct {
 	// retries is the number of retry attempts made.
 	// +optional
 	Retries int32 `json:"retries,omitempty"`
+
+	// model is the model requested for the step's current task after alias
+	// resolution (empty when the step has no override). It is replaced by the
+	// model the knight reports having used, when the knight reports one.
+	// +optional
+	Model string `json:"model,omitempty"`
 }
 
 // ChainStatus defines the observed state of Chain.

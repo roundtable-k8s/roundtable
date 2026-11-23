@@ -210,6 +210,18 @@ spec:
                       description: knightRef is the name of the Knight to execute
                         this step.
                       type: string
+                    model:
+                      description: |-
+                        model overrides the knight's spec.model for this step only. It is either
+                        a model ID or the name of an alias from the chain's RoundTable
+                        spec.modelAliases (an alias name wins over a literal model ID). The
+                        resolved model must suit the knight's runtime: a Claude model ("opus",
+                        "sonnet", "haiku", "claude-...") on a claude-knight, a "provider/model"
+                        on a pi-knight. A mismatch fails the step without dispatching it.
+                        Empty means the knight's default model.
+                      maxLength: 256
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$
+                      type: string
                     name:
                       description: name is a unique identifier for this step within
                         the chain.
@@ -410,6 +422,12 @@ spec:
                       type: string
                     error:
                       description: error contains the error message if the step failed.
+                      type: string
+                    model:
+                      description: |-
+                        model is the model requested for the step's current task after alias
+                        resolution (empty when the step has no override). It is replaced by the
+                        model the knight reports having used, when the knight reports one.
                       type: string
                     name:
                       description: name matches the step name from the spec.

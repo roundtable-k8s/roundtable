@@ -175,6 +175,18 @@ spec:
                             description: knightRef is the name of the Knight to execute
                               this step.
                             type: string
+                          model:
+                            description: |-
+                              model overrides the knight's spec.model for this step only. It is either
+                              a model ID or the name of an alias from the chain's RoundTable
+                              spec.modelAliases (an alias name wins over a literal model ID). The
+                              resolved model must suit the knight's runtime: a Claude model ("opus",
+                              "sonnet", "haiku", "claude-...") on a claude-knight, a "provider/model"
+                              on a pi-knight. A mismatch fails the step without dispatching it.
+                              Empty means the knight's default model.
+                            maxLength: 256
+                            pattern: ^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$
+                            type: string
                           name:
                             description: name is a unique identifier for this step
                               within the chain.
@@ -684,8 +696,8 @@ spec:
                           type: object
                         nixPackages:
                           description: |-
-                            nixPackages lists nix packages to install during knight bootstrap.
-                            Packages are installed via: nix profile install nixpkgs#<pkg>
+                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                            builds into a tools image the knight mounts read-only.
                           items:
                             type: string
                           type: array
@@ -794,8 +806,10 @@ spec:
                               type: array
                             nix:
                               description: |-
-                                nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                                These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                                nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                                The operator builds each unique list once into an OCI tools image and
+                                the knight mounts it read-only at /nix. Requires the operator to be
+                                configured with a tools image repository.
                               items:
                                 type: string
                               type: array
@@ -1075,8 +1089,10 @@ spec:
                               type: array
                             nix:
                               description: |-
-                                nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                                These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                                nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                                The operator builds each unique list once into an OCI tools image and
+                                the knight mounts it read-only at /nix. Requires the operator to be
+                                configured with a tools image repository.
                               items:
                                 type: string
                               type: array
@@ -1533,8 +1549,8 @@ spec:
                           type: object
                         nixPackages:
                           description: |-
-                            nixPackages lists nix packages to install during knight bootstrap.
-                            Packages are installed via: nix profile install nixpkgs#<pkg>
+                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                            builds into a tools image the knight mounts read-only.
                           items:
                             type: string
                           type: array
@@ -1643,8 +1659,10 @@ spec:
                               type: array
                             nix:
                               description: |-
-                                nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                                These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                                nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                                The operator builds each unique list once into an OCI tools image and
+                                the knight mounts it read-only at /nix. Requires the operator to be
+                                configured with a tools image repository.
                               items:
                                 type: string
                               type: array
@@ -2141,8 +2159,8 @@ spec:
                           type: object
                         nixPackages:
                           description: |-
-                            nixPackages lists nix packages to install during knight bootstrap.
-                            Packages are installed via: nix profile install nixpkgs#<pkg>
+                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                            builds into a tools image the knight mounts read-only.
                           items:
                             type: string
                           type: array
@@ -2251,8 +2269,10 @@ spec:
                               type: array
                             nix:
                               description: |-
-                                nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                                These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                                nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                                The operator builds each unique list once into an OCI tools image and
+                                the knight mounts it read-only at /nix. Requires the operator to be
+                                configured with a tools image repository.
                               items:
                                 type: string
                               type: array
@@ -2532,8 +2552,10 @@ spec:
                               type: array
                             nix:
                               description: |-
-                                nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                                These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                                nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                                The operator builds each unique list once into an OCI tools image and
+                                the knight mounts it read-only at /nix. Requires the operator to be
+                                configured with a tools image repository.
                               items:
                                 type: string
                               type: array
@@ -3066,8 +3088,8 @@ spec:
                         type: object
                       nixPackages:
                         description: |-
-                          nixPackages lists nix packages to install during knight bootstrap.
-                          Packages are installed via: nix profile install nixpkgs#<pkg>
+                          nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                          builds into a tools image the knight mounts read-only.
                         items:
                           type: string
                         type: array
@@ -3175,8 +3197,10 @@ spec:
                             type: array
                           nix:
                             description: |-
-                              nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                              These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                              nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                              The operator builds each unique list once into an OCI tools image and
+                              the knight mounts it read-only at /nix. Requires the operator to be
+                              configured with a tools image repository.
                             items:
                               type: string
                             type: array

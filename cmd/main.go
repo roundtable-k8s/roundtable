@@ -297,6 +297,8 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("chain-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
 		Notify:   notifier,
+
+		DefaultKnightImage: defaultImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Chain")
 		os.Exit(1)

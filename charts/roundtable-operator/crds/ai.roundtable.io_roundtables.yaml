@@ -649,8 +649,8 @@ spec:
                       type: object
                     nixPackages:
                       description: |-
-                        nixPackages lists nix packages to install during knight bootstrap.
-                        Packages are installed via: nix profile install nixpkgs#<pkg>
+                        nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                        builds into a tools image the knight mounts read-only.
                       items:
                         type: string
                       type: array
@@ -757,8 +757,10 @@ spec:
                           type: array
                         nix:
                           description: |-
-                            nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                            These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                            nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                            The operator builds each unique list once into an OCI tools image and
+                            the knight mounts it read-only at /nix. Requires the operator to be
+                            configured with a tools image repository.
                           items:
                             type: string
                           type: array
@@ -812,6 +814,18 @@ spec:
                 description: missionRef is set by the mission controller when creating
                   ephemeral tables.
                 type: string
+              modelAliases:
+                additionalProperties:
+                  type: string
+                description: |-
+                  modelAliases maps intent names to model IDs so chain steps can say
+                  "model: deep" instead of a concrete model, e.g.
+                  {deep: opus, fast: haiku, review: openrouter/z-ai/glm-5.3}.
+                  A step's model is looked up here first (one level, no chaining); the
+                  resolved value is then validated against the target knight's runtime, so
+                  an alias only works on knights whose runtime supports its model.
+                maxProperties: 64
+                type: object
               nats:
                 description: nats configures the shared NATS infrastructure for all
                   knights in this table.
@@ -1413,8 +1427,8 @@ spec:
                         type: object
                       nixPackages:
                         description: |-
-                          nixPackages lists nix packages to install during knight bootstrap.
-                          Packages are installed via: nix profile install nixpkgs#<pkg>
+                          nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                          builds into a tools image the knight mounts read-only.
                         items:
                           type: string
                         type: array
@@ -1522,8 +1536,10 @@ spec:
                             type: array
                           nix:
                             description: |-
-                              nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                              These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                              nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                              The operator builds each unique list once into an OCI tools image and
+                              the knight mounts it read-only at /nix. Requires the operator to be
+                              configured with a tools image repository.
                             items:
                               type: string
                             type: array

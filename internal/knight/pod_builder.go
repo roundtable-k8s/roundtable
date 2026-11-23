@@ -252,6 +252,22 @@ func (b *PodBuilder) WithSharedWorkspace(ctx context.Context) *PodBuilder {
 	return b
 }
 
+// FallbackImage is the knight image used when neither spec.image nor the
+// operator's DEFAULT_KNIGHT_IMAGE is set.
+const FallbackImage = "ghcr.io/roundtable-k8s/pi-knight:latest"
+
+// EffectiveImage returns the image a knight pod runs: spec.image, else
+// defaultImage, else FallbackImage.
+func EffectiveImage(k *aiv1alpha1.Knight, defaultImage string) string {
+	if k.Spec.Image != "" {
+		return k.Spec.Image
+	}
+	if defaultImage != "" {
+		return defaultImage
+	}
+	return FallbackImage
+}
+
 const (
 	// GitHubTokenDir is where the GitHub token Secret is mounted in the knight.
 	GitHubTokenDir = "/var/run/secrets/roundtable/github"
@@ -652,14 +668,7 @@ func (b *PodBuilder) WithBrowser() *PodBuilder {
 
 // Build assembles the complete PodSpec with all configured components.
 func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
-	// Determine image
-	image := b.knight.Spec.Image
-	if image == "" {
-		image = b.defaultImg
-	}
-	if image == "" {
-		image = "ghcr.io/roundtable-k8s/pi-knight:latest"
-	}
+	image := EffectiveImage(b.knight, b.defaultImg)
 
 	// Build environment variables
 	taskTimeoutMs := int64(b.knight.Spec.TaskTimeout) * 1000

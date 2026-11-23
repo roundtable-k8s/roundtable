@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -58,6 +59,10 @@ type natsConfig struct {
 	SubjectPrefix string // e.g. "table-prefix" or "chelonian"
 	TasksStream   string // e.g. "fleet_a_tasks" or "chelonian_tasks"
 	ResultsStream string // e.g. "fleet_a_results" or "chelonian_results"
+	// ModelAliases is the RoundTable's spec.modelAliases, used to resolve
+	// per-step model overrides. Not NATS config, but resolved from the same
+	// RoundTable lookup.
+	ModelAliases map[string]string
 }
 
 // ChainReconciler reconciles a Chain object.
@@ -68,8 +73,12 @@ type ChainReconciler struct {
 
 	NATS   *natspkg.Provider
 	Notify *notify.Notifier
-	cron   *cron.Cron
-	mu     sync.Mutex
+	// DefaultKnightImage is the operator's DEFAULT_KNIGHT_IMAGE. It is used to
+	// infer a knight's agent runtime (claude-knight/pi-knight) when the Knight
+	// has no spec.image, for per-step model validation.
+	DefaultKnightImage string
+	cron               *cron.Cron
+	mu                 sync.Mutex
 	// cronEntries maps chain namespace/name to cron entry ID
 	cronEntries map[string]cron.EntryID
 }
@@ -515,6 +524,9 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			if result != nil {
 				now := metav1.Now()
 				ss.CompletedAt = &now
+				if result.Model != "" {
+					ss.Model = result.Model
+				}
 				resultErr := result.GetError()
 				resultOutput := result.GetOutput()
 				if resultErr == "" && isEmptyStepOutput(resultOutput) {
@@ -645,6 +657,21 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			continue
 		}
 
+		// Resolve the per-step model override. A model the knight's runtime
+		// can't run is a spec error: fail the step (no retry) rather than let
+		// the knight silently fall back to its default model.
+		model, err := resolveStepModel(step.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+		if err != nil {
+			log.Info("Rejected step model", "step", step.Name, "knight", step.KnightRef, "reason", err.Error())
+			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", step.Name, err)
+			ss.Phase = aiv1alpha1.ChainStepPhaseFailed
+			ss.Error = fmt.Sprintf("invalid model for knight %q: %v", step.KnightRef, err)
+			ss.Model = ""
+			now := metav1.Now()
+			ss.CompletedAt = &now
+			continue
+		}
+
 		// The run ID shares the final subject token with the timestamp (joined
 		// by "-") so the result subject keeps the same token count and the
 		// wildcard fallback in pollResult still matches.
@@ -656,6 +683,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			StepName:  step.Name,
 			RunID:     chain.Status.RunID,
 			Task:      taskStr,
+			Model:     model,
 		}
 
 		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef, payload)
@@ -670,7 +698,8 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		ss.PickedUpAt = nil
 		ss.TaskSeq = seq
 		ss.TaskID = taskID
-		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef)
+		ss.Model = model
+		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef, "model", model)
 	}
 
 	// Check if all steps are terminal
@@ -850,6 +879,7 @@ func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alph
 		SubjectPrefix: rt.Spec.NATS.SubjectPrefix,
 		TasksStream:   rt.Spec.NATS.TasksStream,
 		ResultsStream: rt.Spec.NATS.ResultsStream,
+		ModelAliases:  rt.Spec.ModelAliases,
 	}, nil
 }
 
