@@ -9,7 +9,7 @@
 # Input: {"repo": "<owner>/<repo>", "issue": <n>}. The planner picks the coder
 # and the model alias; knightRef and model are static per step, so there is
 # one `when`-gated step per choice and exactly one of them runs.
-# Needs the RoundTable's spec.modelAliases to define deep and fast (they only
+# Needs the RoundTable's spec.modelAliases to define the aliases used: deep and fast (and cheap when implementModels lists it; they only
 # need to resolve on the coders' runtime: lead steps set no model, so a lead on
 # another runtime, e.g. pi-knight, uses its default), and every knight named
 # here to exist (the Chain is invalid otherwise).
@@ -39,9 +39,15 @@ spec:
 
         1. Read the issue (gh issue view <issue> --repo <repo>) and the repo's AGENTS.md / README.
         2. Pick the coder knight that owns this repo or area. It must be one of: rt-operator, rt-ui.
-        3. Pick the model alias for the implementation: "deep" for design-heavy,
-           cross-cutting or risky changes, "fast" for small mechanical ones.
+        3. Pick the model alias for the implementation (cheapest tier that fits;
+           a weaker draft is fixed by the stronger "deep" model in the fix loop).
            Allowed: deep, fast.
+           - "cheap" (Haiku drafts): only for small, well-specified issues: a single
+             file or area, clear acceptance criteria, no API/CRD/contract change and
+             no `breaking` label.
+           - "fast": the default.
+           - "deep": design-heavy, cross-cutting or risky work.
+           Record why in "reason", naming the tier and the criteria that decided it.
         4. If the issue is too large for one reviewable PR, split it: create
            sub-issues in the same repo (gh issue create, body starting
            "Part of #<issue>"), comment the list on the issue and set split to
@@ -308,7 +314,9 @@ spec:
         Then wait until each one is merged, closed, or blocked by a failing required
         check (check every few minutes, give up after 50 minutes).
         Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
-        then a last line "Fix rounds: <n>".
+        then a line "Fix rounds: <n>" and a last line
+        "Tiering: implement=<alias the plan chose> fix=deep review rounds=<n>"
+        (the alias is in the plan: {{ .Steps.plan.Output }}).
 
     - name: escalate
       knightRef:

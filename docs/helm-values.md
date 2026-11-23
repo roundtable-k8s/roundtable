@@ -132,11 +132,12 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 |-----|------|---------|-------------|
 | `prPipeline.enabled` | bool | `false` | Create the Chain |
 | `prPipeline.name` | string | `pr-pipeline` | Chain name |
-| `prPipeline.roundTableRef.name` | string | `roundtable-dev` | RoundTable; must define the `deep` and `fast` model aliases (for the coders) |
+| `prPipeline.roundTableRef.name` | string | `roundtable-dev` | RoundTable; must define the model aliases used (`deep`, `fast`, and `cheap` if listed; for the coders) |
 | `prPipeline.lead` | string | `rt-lead` | Knight that plans, reviews, merges and escalates |
 | `prPipeline.leadModel` | string | `""` | Model (alias or runtime model ID) for the lead's steps; empty = the lead's default model |
 | `prPipeline.coders` | list | `[rt-operator]` | Coder knights the planner may pick; one implement/split step and fix loop each |
-| `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation |
+| `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation (`cheap` = Haiku drafts, `fast`, `deep`) |
+| `prPipeline.fixModel` | string | `deep` | Model alias for every fix round, so a cheap draft is fixed by a stronger model |
 | `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
 | `prPipeline.timeoutSeconds` | int | `86400` | Chain timeout (seconds) |
 | `prPipeline.maxQueueWaitSeconds` | int | `3600` | Max seconds a task may wait for its knight |

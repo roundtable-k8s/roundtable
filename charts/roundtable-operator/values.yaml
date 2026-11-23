@@ -265,8 +265,9 @@ planner:
 # issue by setting spec.input to {"repo": "<owner>/<repo>", "issue": <n>} and
 # annotating ai.roundtable.io/run. See docs/pr-pipeline.md.
 # Every knight below must exist in the release namespace, and the RoundTable
-# must define the model aliases deep and fast (spec.modelAliases), resolvable on
-# the coders' runtime. Lead steps use no alias (see leadModel).
+# must define the model aliases it uses (deep, fast, and cheap when listed in
+# implementModels; spec.modelAliases, e.g. cheap: haiku), resolvable on the
+# coders' runtime. Lead steps use no alias (see leadModel).
 prPipeline:
   enabled: false
   name: pr-pipeline
@@ -283,10 +284,15 @@ prPipeline:
   # are rendered; `when` runs only the planner's pick.
   coders:
     - rt-operator
-  # Model aliases the planner may pick for the implementation.
+  # Model aliases the planner may pick for the implementation. Add `cheap` (a
+  # RoundTable alias for Haiku) to let the planner draft small, well-specified
+  # issues on the cheapest tier: [cheap, fast, deep].
   implementModels:
     - deep
     - fast
+  # Model alias for every fix round. Keep it stronger than the cheap tier so a
+  # Haiku draft is fixed by fast (Sonnet) or deep (Opus).
+  fixModel: deep
   # Fix → re-review rounds before escalating.
   maxIterations: 3
   timeoutSeconds: 86400
