@@ -82,3 +82,24 @@ func TestAPIError(t *testing.T) {
 		t.Fatal("want error for bad repo")
 	}
 }
+
+func TestListOpenPullRequestsFiltersByLabel(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		_, _ = io.WriteString(w, `[{"number":1,"labels":[{"name":"Breaking"}],"head":{"ref":"rt/1-x"}},
+			{"number":2,"labels":[{"name":"docs"}],"head":{"ref":"rt/2-y"}}]`)
+	}))
+	defer srv.Close()
+
+	prs, err := NewClient(srv.URL, "tok").ListOpenPullRequests(context.Background(), "acme/widgets", "breaking")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[0].Number != 1 || prs[0].Head.Ref != "rt/1-x" {
+		t.Fatalf("prs = %+v", prs)
+	}
+	if gotPath != "/repos/acme/widgets/pulls" || gotQuery != "per_page=100&state=open" {
+		t.Fatalf("path %q query %q", gotPath, gotQuery)
+	}
+}

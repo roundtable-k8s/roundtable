@@ -71,10 +71,21 @@ spec:
            sub-issues in the same repo (gh issue create, body starting
            "Part of #<issue>"), comment the list on the issue and set split to
            true. Otherwise set split to false and list just the input issue.
+        5. Breaking changes: if the work changes an API type, a CRD, the task
+           contract or another interface other repos or live resources depend
+           on, set "breaking" to true. The implementing PR gets the `breaking`
+           label and a migration note.
+        6. Check for open breaking PRs (gh pr list --repo <repo> --label breaking
+           --state open --json number,headRefName,files). If one touches the
+           packages this issue touches, do not start parallel work: reply with
+           coder "none" and a reason "blocked by #<pr>" (the chain then
+           escalates and the issue waits for a human). Only if the issue
+           depends on that PR's change, name its branch in "base" so the coder
+           branches from it instead of origin/main.
 
         Reply with ONLY a fenced ```json block of exactly this shape:
-        {"coder": "<knight>", "model": "<alias>", "split": false,
-         "issues": [{"number": <n>, "title": "<title>"}], "reason": "<one sentence>"}
+        {"coder": "<knight>", "model": "<alias>", "split": false, "breaking": false,
+         "base": "", "issues": [{"number": <n>, "title": "<title>"}], "reason": "<one sentence>"}
 {{- range $coders }}
 {{- $coder := . }}
 {{- $k := . | replace "-" "_" }}
@@ -94,6 +105,10 @@ spec:
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
         rt/<issue>-<short-slug>, keep the change focused, add tests and run the
         repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        If the plan's "base" is set, branch from that branch instead of origin/main
+        and open the PR against it. If the plan's "breaking" is true, label the PR
+        `breaking` (create the label if missing) and add a "Migration" section to
+        the body: who must change what, and in which order to roll it out.
         Never merge. Reply with the PR URL on the first line.
 {{- end }}
 

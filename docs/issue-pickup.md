@@ -26,6 +26,8 @@ Every `intervalSeconds` (default 300) the controller, for each RoundTable with
    - **Needs a human** (label `needsHumanLabel`, or the title/body matches one
      of `humanPatterns`): adds `needsHumanLabel`, comments why, removes
      `readyLabel`. No Chain is started.
+   - **Held behind a breaking PR** (the repo has an open PR labelled
+     `breakingLabel`): left alone, see [Breaking changes](#breaking-changes).
    - **Over capacity** (`maxActive` unfinished Chains for the table, or
      `maxActivePerRepo` for the repo): left alone; it is picked up by a later
      poll.
@@ -62,6 +64,19 @@ Claiming is idempotent:
   twice.
 - Only the operator's leader runs the controller.
 
+### Breaking changes
+
+Breaking-change protocol (#260, see
+[pr-pipeline.md](pr-pipeline.md#breaking-changes)). Before starting a Chain,
+pickup lists the repo's open PRs; if any carries `breakingLabel` (default
+`breaking`), it starts nothing new for that repo. Ready issues keep their
+label and are picked up on the first poll after the breaking PR is merged or
+closed. Each poll that holds issues records an `IssuePickupHeld` event naming
+the PRs. Chains already running are not stopped. If the PR list cannot be read
+(the token needs **Pull requests: read**), the repo is held and the error is in
+`status.issuePickup.lastError`. The hold is per repo, not per package: there is
+no diff before the plan, so pickup cannot tell which packages an issue touches.
+
 ### Running an issue again
 
 When the Chain has finished (merged, escalated or failed), add `rt:ready` to
@@ -78,7 +93,8 @@ Prerequisites:
   [pr-pipeline.md](pr-pipeline.md#install)).
 - The RoundTable has `spec.github.tokenSecretRef`. The token needs **Issues:
   read & write** on every listed repo (the knights' narrowed bot token,
-  contents/pull_requests/issues, is enough). It does not need workflows,
+  contents/pull_requests/issues, is enough); it also reads open PRs, so
+  **Pull requests: read**. It does not need workflows,
   projects or administration permissions.
 
 ## Who may trigger pickup
@@ -127,6 +143,7 @@ poll either.
 | `readyLabel` | `rt:ready` | Label that marks issues to pick up |
 | `inProgressLabel` | `rt:in-progress` | Label set when claimed |
 | `needsHumanLabel` | `needs-human` | Label that blocks pickup; set when handing an issue back |
+| `breakingLabel` | `breaking` | PR label that holds new pickup in the repo while the PR is open |
 | `humanPatterns` | `\.github/workflows`, `(?i)\bsecrets?\b`, `(?i)\b(auth\|oauth\|authn\|authz\|authentication\|authori[sz]ation\|credentials?)\b` | RE2 patterns on title + body that hand the issue back to a human |
 | `assignees` | `[]` | Logins assigned on claim (GitHub ignores logins it cannot assign, including App bots) |
 | `intervalSeconds` | `300` | Seconds between polls (60–86400) |

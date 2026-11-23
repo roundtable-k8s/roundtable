@@ -48,6 +48,7 @@ const (
 	defaultReadyLabel      = "rt:ready"
 	defaultInProgressLabel = "rt:in-progress"
 	defaultNeedsHumanLabel = "needs-human"
+	defaultBreakingLabel   = "breaking"
 	pickupLastErrorMax     = 1024
 )
 
@@ -190,6 +191,17 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 			res.fail("%s: list issues: %v", repo, err)
 			continue
 		}
+		// Breaking-change protocol (#260): no new work in a repo while a
+		// breaking PR is open. If the lookup fails, hold too: the safe side.
+		var held string
+		if len(issues) > 0 {
+			var err error
+			if held, err = breakingHold(ctx, gh, repo, breakingLabel(spec)); err != nil {
+				res.fail("%s: list %s PRs: %v", repo, breakingLabel(spec), err)
+				held = "could not list breaking PRs"
+			}
+		}
+		heldCount := 0
 		for i := range issues {
 			issue := &issues[i]
 			name := pickupChainName(tmpl.Name, repo, issue.Number)
@@ -227,6 +239,10 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 			if res.active >= maxActive || activeByRepo[repo] >= maxPerRepo {
 				continue // capacity; it stays ready for a later poll
 			}
+			if held != "" {
+				heldCount++
+				continue // it stays ready until the breaking PR is merged or closed
+			}
 
 			trigger := strconv.FormatInt(now.Unix(), 10)
 			chain, err := r.startChain(ctx, rt, tmpl, existing, name, repo, issue.Number, trigger)
@@ -244,6 +260,11 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 			res.picked++
 			log.Info("Picked up issue", "repo", repo, "issue", issue.Number, "chain", name)
 			r.Recorder.Eventf(rt, corev1.EventTypeNormal, "IssuePickedUp", "%s#%d started chain %s", repo, issue.Number, name)
+		}
+		if heldCount > 0 {
+			log.Info("Held ready issues behind a breaking PR", "repo", repo, "issues", heldCount, "breaking", held)
+			r.Recorder.Eventf(rt, corev1.EventTypeNormal, "IssuePickupHeld", "%s: %d ready issue(s) held, open %s PR(s): %s",
+				repo, heldCount, breakingLabel(spec), held)
 		}
 	}
 	return res
@@ -394,6 +415,27 @@ func pickupLabels(spec *aiv1alpha1.IssuePickupSpec) pickupLabelSet {
 		l.needsHuman = defaultNeedsHumanLabel
 	}
 	return l
+}
+
+func breakingLabel(spec *aiv1alpha1.IssuePickupSpec) string {
+	if spec.BreakingLabel == "" {
+		return defaultBreakingLabel
+	}
+	return spec.BreakingLabel
+}
+
+// breakingHold returns a description of the open breaking PRs in repo
+// ("#241 (rt/241-x)"), or "" when there are none.
+func breakingHold(ctx context.Context, gh *github.Client, repo, label string) (string, error) {
+	prs, err := gh.ListOpenPullRequests(ctx, repo, label)
+	if err != nil {
+		return "", err
+	}
+	parts := make([]string, 0, len(prs))
+	for _, p := range prs {
+		parts = append(parts, fmt.Sprintf("#%d (%s)", p.Number, p.Head.Ref))
+	}
+	return strings.Join(parts, ", "), nil
 }
 
 func pickupInterval(spec *aiv1alpha1.IssuePickupSpec) time.Duration {

@@ -57,12 +57,13 @@ the lead's runtime).
 **Plan.** The lead reads the issue and replies with a fenced JSON block:
 
 ```json
-{"coder": "rt-operator", "model": "deep", "split": false,
- "issues": [{"number": 225, "title": "PR pipeline chain"}], "reason": "..."}
+{"coder": "rt-operator", "model": "deep", "split": false, "breaking": false,
+ "base": "", "issues": [{"number": 225, "title": "PR pipeline chain"}], "reason": "..."}
 ```
 
 `coder` must be one of `prPipeline.coders` and `model` one of
-`prPipeline.implementModels`. If the issue is too large for one PR, the lead
+`prPipeline.implementModels` (`none` blocks the issue, see
+[Breaking changes](#breaking-changes)). If the issue is too large for one PR, the lead
 creates sub-issues (`Part of #n`), lists them in `issues` and sets `split` to
 true.
 
@@ -102,6 +103,37 @@ outcome `Exhausted`, `escalate` labels the issue and PRs `needs-human` and
 comments the last review, and the chain ends `PartiallySucceeded`. It also
 runs (labelling the issue) when the plan names a coder or alias the chain
 does not have.
+
+## Breaking changes
+
+A PR that changes an API type, a CRD, the task contract or another interface
+other repos and live resources depend on is *breaking* (#260; #241 ran
+alongside three other PRs and cost three rebase-and-re-review rounds and an
+abandoned PR). Breaking PRs are serialised:
+
+1. **Label.** The `breaking` label marks the PR. The planner sets `"breaking":
+   true` in its plan, the implementing coder labels the PR and adds a
+   "Migration" section to its body, and rt-lead or a human can add the label
+   later. The `protected-paths` label from the merge guard
+   (`.github/merge-guard-paths`) is separate and only shows that a PR touches
+   sensitive paths; use it as a hint when deciding to add `breaking`.
+2. **Migration note.** rt-lead requires the migration note on `breaking` PRs
+   and holds them for a human-sequenced rollout instead of queueing the merge.
+3. **Pickup holds new work.** While a repo has an open PR labelled `breaking`
+   (`spec.issuePickup.breakingLabel`, default `breaking`), [issue
+   pickup](issue-pickup.md#breaking-changes) starts no new Chain for that repo.
+   Ready issues stay ready and are picked up on the first poll after the
+   breaking PR is merged or closed. This is per repo, not per package: before
+   the plan there is no diff to compare with, so pickup errs on the safe side.
+4. **The plan checks packages.** For work started by hand (or a Chain already
+   running), the planner lists open `breaking` PRs with their files. If one
+   touches the packages the issue touches, the plan names coder `none` with the
+   reason `blocked by #<pr>`, so the chain escalates and the issue waits for a
+   human. If the issue builds on that PR's change, the plan sets `"base"` to the
+   PR's branch and the coder branches from it and opens its PR against it
+   instead of `origin/main`.
+
+Non-breaking work that does not touch the same packages is not affected.
 
 ## Output
 
