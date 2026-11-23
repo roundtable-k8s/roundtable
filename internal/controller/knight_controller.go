@@ -577,15 +577,14 @@ func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
 // Exported so it can be passed as a PodSpecBuilder to RuntimeBackend.
 //
 // Replicas is the fixed replica count, or the initial count when KEDA owns
-// it. A PVC workspace (ReadWriteOnce) needs the Recreate strategy; an
-// ephemeral one rolls pods without downtime.
+// it. A workspace that more than one pod can mount (ephemeral, or an
+// existingClaim) rolls with maxSurge 1 / maxUnavailable 0 so the old pod
+// drains in-flight tasks while the new one starts; a single ReadWriteOnce
+// PVC keeps Recreate. terminationGracePeriodSeconds is taskTimeoutSeconds+60.
 func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.DeploymentSpec {
 	labels := knightLabels(knight)
 	replicas := r.scalingOrFallback(ctx, knight).InitialReplicas()
-	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
-	if knightpkg.EphemeralWorkspace(knight) {
-		strategy = appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType}
-	}
+	strategy := knightpkg.RolloutStrategy(knight)
 	return appsv1.DeploymentSpec{
 		Replicas: &replicas,
 		Strategy: strategy,
@@ -596,9 +595,16 @@ func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: labels,
 			},
-			Spec: r.BuildPodSpec(ctx, knight),
+			Spec: r.buildDrainablePodSpec(ctx, knight),
 		},
 	}
+}
+
+// buildDrainablePodSpec is BuildPodSpec plus the drain grace period.
+func (r *KnightReconciler) buildDrainablePodSpec(ctx context.Context, knight *aiv1alpha1.Knight) corev1.PodSpec {
+	spec := r.BuildPodSpec(ctx, knight)
+	spec.TerminationGracePeriodSeconds = new(knightpkg.TerminationGracePeriod(knight))
+	return spec
 }
 
 // BuildPodSpec constructs the complete pod spec for a knight using the composable builder.
