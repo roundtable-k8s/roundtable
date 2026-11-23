@@ -1,0 +1,214 @@
+{{- /*
+PR pipeline Chain (#225): plan → implement → review → fix loop → merge | escalate.
+Docs: docs/pr-pipeline.md. Rendered example: examples/chain-pr-pipeline.yaml.
+
+knightRef and model are static per step, so the planner's choice of coder and
+model alias is applied through `when`: one implement step per coder × alias
+(single PR, same runId as the fix loop), one forEach step per coder (split into
+sub-issues) and one fix loop per coder. Exactly one of each set runs.
+
+$o / $c emit the Chain's own Go-template delimiters, which the operator renders
+at dispatch time (Helm must not).
+*/ -}}
+{{- with .Values.prPipeline }}
+{{- if .enabled }}
+{{- $o := "{{" }}
+{{- $c := "}}" }}
+{{- $lead := .lead }}
+{{- $coders := .coders }}
+{{- $models := .implementModels }}
+{{- $impl := list }}
+{{- $loops := list }}
+{{- range $coders }}
+{{- $k := . | replace "-" "_" }}
+{{- range $models }}
+{{- $impl = append $impl (printf "implement_%s_%s" $k .) }}
+{{- end }}
+{{- $impl = append $impl (printf "split_%s" $k) }}
+{{- $loops = append $loops (printf "fixloop_%s" $k) }}
+{{- end }}
+{{- $implList := printf "[\"%s\"]" (join "\", \"" $impl) }}
+{{- $loopList := printf "[\"%s\"]" (join "\", \"" $loops) }}
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+spec:
+  description: "PR pipeline: plan → implement → review → fix loop → merge, or escalate to a human"
+  roundTableRef: {{ .roundTableRef }}
+  timeout: {{ .timeout }}
+  maxQueueWait: {{ .maxQueueWait }}
+  {{- if .input }}
+  input: {{ .input | squote }}
+  {{- end }}
+  steps:
+    - name: plan
+      knightRef: {{ $lead }}
+      model: deep
+      timeout: 1800
+      task: |
+        Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
+
+        1. Read the issue (gh issue view <issue> --repo <repo>) and the repo's AGENTS.md / README.
+        2. Pick the coder knight that owns this repo or area. It must be one of: {{ join ", " $coders }}.
+        3. Pick the model alias for the implementation: "deep" for design-heavy,
+           cross-cutting or risky changes, "fast" for small mechanical ones.
+           Allowed: {{ join ", " $models }}.
+        4. If the issue is too large for one reviewable PR, split it: create
+           sub-issues in the same repo (gh issue create, body starting
+           "Part of #<issue>"), comment the list on the issue and set split to
+           true. Otherwise set split to false and list just the input issue.
+
+        Reply with ONLY a fenced ```json block of exactly this shape:
+        {"coder": "<knight>", "model": "<alias>", "split": false,
+         "issues": [{"number": <n>, "title": "<title>"}], "reason": "<one sentence>"}
+{{- range $coders }}
+{{- $coder := . }}
+{{- $k := . | replace "-" "_" }}
+{{- range $models }}
+
+    - name: implement_{{ $k }}_{{ . }}
+      knightRef: {{ $coder }}
+      model: {{ . }}
+      dependsOn: [plan]
+      when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).model == "{{ . }}" && !json(steps.plan.output).split'
+      timeout: 3600
+      task: |
+        Implement this GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
+        Plan: {{ $o }} .Steps.plan.Output {{ $c }}
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        Never merge. Reply with the PR URL on the first line.
+{{- end }}
+
+    - name: split_{{ $k }}
+      knightRef: {{ $coder }}
+      model: deep
+      dependsOn: [plan]
+      when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).split'
+      timeout: 3600
+      forEach:
+        from: steps.plan
+        path: .issues
+        maxItems: 10
+      maxParallel: 2
+      failurePolicy: failFast
+      task: |
+        Implement sub-issue #{{ $o }} .Item.number {{ $c }} ({{ $o }} .Item.title {{ $c }}) of {{ $o }} .Input {{ $c }}.
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<sub-issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint. Open one PR whose body ends
+        "Closes #{{ $o }} .Item.number {{ $c }}". Never merge. Reply with the PR URL on the first line.
+{{- end }}
+
+    - name: review
+      knightRef: {{ $lead }}
+      model: review
+      dependsOn: [{{ join ", " $impl }}]
+      when: '{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
+      timeout: 1800
+      task: |
+        Review the pull request(s) for {{ $o }} .Input {{ $c }}.
+        Implementation report:
+        {{- range $impl }}
+        {{ $o }} .Steps.{{ . }}.Output {{ $c }}
+        {{- end }}
+
+        Check correctness, tests, scope and that each PR body ends "Closes #<n>".
+        Start your reply with one line "PRs: <url> [<url> ...]" listing every PR.
+        End it with exactly one line, either
+        "Verdict: ship it" or "Verdict: needs changes".
+{{- range $coders }}
+{{- $coder := . }}
+{{- $k := . | replace "-" "_" }}
+
+    - name: fixloop_{{ $k }}
+      dependsOn: [review]
+      when: 'steps.review.phase == "Succeeded" && json(steps.plan.output).coder == "{{ $coder }}"'
+      loop:
+        from: review
+        until: 'last.output.matches("(?mi)^\\W*verdict:\\s*ship it\\W*$")'
+        maxIterations: {{ $.Values.prPipeline.maxIterations }}
+        onExhausted: continue
+        steps:
+          - name: fix
+            knightRef: {{ $coder }}
+            model: deep
+            timeout: 3600
+            retry:
+              maxAttempts: 1
+              backoffSeconds: 60
+            task: |
+              Fix round {{ $o }} .Loop.Iteration {{ $c }}/{{ $o }} .Loop.MaxIterations {{ $c }} for {{ $o }} .Input {{ $c }}.
+              The reviewer asked for changes:
+
+              {{ $o }} .Loop.Last.Output {{ $c }}
+
+              Address every point on the same branch(es), run the repo's build, test
+              and lint, push, and reply with a short summary of what changed.
+              Do not open new PRs and never merge.
+          - name: review
+            knightRef: {{ $lead }}
+            model: review
+            timeout: 1800
+            task: |
+              The author pushed fixes for {{ $o }} .Input {{ $c }}:
+
+              {{ $o }} .Loop.Last.Output {{ $c }}
+
+              Re-review the PR(s) listed in the previous review:
+              {{ $o }} .Steps.review.Output {{ $c }}
+
+              Start your reply with one line "PRs: <url> [<url> ...]" listing every PR.
+              End it with exactly one line, either
+              "Verdict: ship it" or "Verdict: needs changes".
+{{- end }}
+
+    - name: merge
+      knightRef: {{ $lead }}
+      model: fast
+      dependsOn: [{{ join ", " $loops }}]
+      when: '{{ $loopList }}.exists(s, steps[s].outcome == "Converged")'
+      timeout: 3600
+      task: |
+        The review of {{ $o }} .Input {{ $c }} passed.
+        {{- range $loops }}
+        {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Outcome "Converged" {{ $c }}Fix rounds: {{ $o }} .Iterations {{ $c }}
+        Final review:
+        {{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+        {{- end }}
+
+        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`.
+        Then wait until each one is merged, closed, or blocked by a failing required
+        check (check every few minutes, give up after 50 minutes).
+        Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
+        then a last line "Fix rounds: <n>".
+
+    - name: escalate
+      knightRef: {{ $lead }}
+      model: fast
+      dependsOn: [{{ join ", " $loops }}]
+      when: '{{ $loopList }}.exists(s, steps[s].outcome == "Exhausted") || !{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
+      timeout: 600
+      task: |
+        Escalate {{ $o }} .Input {{ $c }} to a human.
+        {{- range $loops }}
+        {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Outcome "Exhausted" {{ $c }}The PR(s) still need changes after {{ $o }} .Iterations {{ $c }} fix rounds. Last review:
+        {{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+        {{- end }}
+        {{ $o }} if eq .Steps.review.Phase "Skipped" {{ $c }}No implementation ran: the plan named no known coder/model. Plan:
+        {{ $o }} .Steps.plan.Output {{ $c }}{{ $o }} end {{ $c }}
+
+        Add the label `needs-human` (create it if missing) to the issue and to
+        every PR on the last review's "PRs:" line, and comment on each with the
+        last review (or the plan) and why it was escalated. Do not merge.
+        Reply with the URLs you labelled.
+{{- end }}
+{{- end }}

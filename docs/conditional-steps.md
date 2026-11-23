@@ -13,7 +13,8 @@ validation, not Go templates. CEL has no side effects, always terminates and
 runs under a cost limit. A syntax or type error makes the Chain invalid
 (`ChainValid=False`, reason `InvalidCondition`) before anything runs.
 
-Full example: [`examples/chain-pr-pipeline.yaml`](../examples/chain-pr-pipeline.yaml).
+Full example: [`examples/chain-pr-pipeline.yaml`](../examples/chain-pr-pipeline.yaml),
+the PR pipeline described in [pr-pipeline.md](pr-pipeline.md).
 
 ## `when`
 
