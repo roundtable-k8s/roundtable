@@ -159,6 +159,9 @@ const (
 	// ReasonInvalidTemplate indicates a step's Go template failed to parse.
 	ReasonInvalidTemplate = "InvalidTemplate"
 
+	// ReasonInvalidForEach indicates a step has an invalid forEach / maxParallel / failurePolicy configuration.
+	ReasonInvalidForEach = "InvalidForEach"
+
 	// ReasonChainSucceeded indicates all chain steps completed successfully.
 	ReasonChainSucceeded = "Succeeded"
 

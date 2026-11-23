@@ -206,10 +206,68 @@ spec:
                       items:
                         type: string
                       type: array
+                    failurePolicy:
+                      description: |-
+                        failurePolicy decides what a failed item does to a forEach step.
+                        failFast (default): no further items are dispatched once an item fails
+                        (after its retries); in-flight items finish, the rest are Skipped and the
+                        step fails. continue: every item runs; the step succeeds unless every
+                        item failed, and a chain with failed items ends PartiallySucceeded.
+                        Only valid together with forEach.
+                      enum:
+                      - failFast
+                      - continue
+                      type: string
+                    forEach:
+                      description: |-
+                        forEach fans this step out: it runs once per element of a JSON list taken
+                        from the chain input or a prior step's output. The task template gets the
+                        element as {{ .Item }} (alias {{ .item }}), its compact JSON as
+                        {{ .ItemJSON }} and its zero-based position as {{ .ItemIndex }}. Every
+                        item is its own task with its own taskId and a per-item runId. When all
+                        items are done the step output is the joined JSON array of per-item
+                        results ({index, item, phase, output, error}), which downstream steps read
+                        through {{ .Steps.<name>.Output }}.
+                      properties:
+                        from:
+                          description: |-
+                            from names the JSON document holding the list: "input" (spec.input) or
+                            "steps.<stepName>" (that step's output; the step must be listed in
+                            dependsOn). Prose around the JSON is tolerated when the JSON sits in a
+                            fenced ```json code block.
+                          pattern: ^(input|steps\.[A-Za-z0-9_-]+)$
+                          type: string
+                        maxItems:
+                          default: 50
+                          description: |-
+                            maxItems is the largest list the step accepts. A longer list fails the
+                            step instead of being silently truncated.
+                          format: int32
+                          maximum: 200
+                          minimum: 1
+                          type: integer
+                        path:
+                          description: |-
+                            path is a JSONPath expression (kubectl syntax, e.g. "{.issues}" or
+                            ".issues[*].number") evaluated against the document. A single list
+                            result is the item list; otherwise the values found form the list. When
+                            empty the document itself must be a JSON array.
+                          type: string
+                      required:
+                      - from
+                      type: object
                     knightRef:
                       description: knightRef is the name of the Knight to execute
                         this step.
                       type: string
+                    maxParallel:
+                      description: |-
+                        maxParallel caps how many items of a forEach step are in flight at once.
+                        Defaults to the knight's concurrency. Only valid together with forEach.
+                      format: int32
+                      maximum: 100
+                      minimum: 1
+                      type: integer
                     model:
                       description: |-
                         model overrides the knight's spec.model for this step only. It is either
@@ -239,8 +297,9 @@ spec:
                         When set, the controller dispatches a write task to the outputKnight after the step succeeds.
                       type: string
                     retry:
-                      description: retry configures per-step retry behavior, overriding
-                        the chain-level retryPolicy.
+                      description: |-
+                        retry configures per-step retry behavior, overriding the chain-level retryPolicy.
+                        For a forEach step it applies to each item individually.
                       properties:
                         backoffSeconds:
                           default: 30
@@ -423,6 +482,112 @@ spec:
                     error:
                       description: error contains the error message if the step failed.
                       type: string
+                    fanOut:
+                      description: fanOut tracks the items of a forEach step. Unset
+                        for ordinary steps.
+                      properties:
+                        failed:
+                          format: int32
+                          type: integer
+                        itemPhases:
+                          description: |-
+                            itemPhases holds one character per item, in list order:
+                            P=Pending, R=Running, S=Succeeded, F=Failed, K=Skipped.
+                          type: string
+                        items:
+                          description: items are the detailed per-item entries (bounded;
+                            see omittedItems).
+                          items:
+                            description: ChainItemStatus is the execution state of
+                              one forEach item.
+                            properties:
+                              completedAt:
+                                description: completedAt is when the item finished.
+                                format: date-time
+                                type: string
+                              error:
+                                description: error is the item's error message (truncated).
+                                type: string
+                              index:
+                                description: index is the item's zero-based position
+                                  in the list.
+                                format: int32
+                                type: integer
+                              output:
+                                description: output is the item's result (truncated).
+                                type: string
+                              phase:
+                                description: phase is the item's execution phase.
+                                enum:
+                                - Pending
+                                - Running
+                                - Succeeded
+                                - Failed
+                                - Skipped
+                                type: string
+                              pickedUpAt:
+                                description: pickedUpAt is when the knight picked
+                                  the item task up.
+                                format: date-time
+                                type: string
+                              retries:
+                                description: retries is the number of retry attempts
+                                  made for this item.
+                                format: int32
+                                type: integer
+                              runId:
+                                description: runId is the per-item run identity sent
+                                  to the knight.
+                                type: string
+                              startedAt:
+                                description: startedAt is when the item task was published.
+                                format: date-time
+                                type: string
+                              taskId:
+                                description: taskID is the NATS task identifier of
+                                  the item's current execution.
+                                type: string
+                              taskSeq:
+                                description: taskSeq is the tasks-stream sequence
+                                  of the published item task.
+                                format: int64
+                                type: integer
+                            required:
+                            - index
+                            type: object
+                          type: array
+                        itemsHash:
+                          description: |-
+                            itemsHash fingerprints the resolved list; a different list on a later
+                            reconcile of the same run fails the step instead of mixing item sets.
+                          type: string
+                        omittedItems:
+                          description: |-
+                            omittedItems counts finished items whose detailed entry was dropped to
+                            keep the status bounded.
+                          format: int32
+                          type: integer
+                        pending:
+                          description: pending, running, succeeded, failed and skipped
+                            summarise itemPhases.
+                          format: int32
+                          type: integer
+                        running:
+                          format: int32
+                          type: integer
+                        skipped:
+                          format: int32
+                          type: integer
+                        succeeded:
+                          format: int32
+                          type: integer
+                        total:
+                          description: total is the number of items in the list.
+                          format: int32
+                          type: integer
+                      required:
+                      - total
+                      type: object
                     model:
                       description: |-
                         model is the model requested for the step's current task after alias
