@@ -41,6 +41,22 @@ jobs:
       - name: Test
         run: go test ./... -coverprofile cover.out
 
+  # Fails on any golangci-lint finding (main is clean as of #207). `make lint`
+  # builds the custom golangci-lint with the logcheck plugin (.custom-gcl.yml)
+  # at the version the Makefile pins, so CI and local runs use the same linter.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint
+        run: make lint
+
   docker:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
