@@ -9,7 +9,32 @@ on:
     types: [checks_requested]
 
 jobs:
+  # On main, the merge queue already ran build + lint on this exact commit (the
+  # queue fast-forwards main to the commit it tested). Skip re-testing it and go
+  # straight to the image and chart. A commit pushed around the queue (admin
+  # bypass) has no successful merge_group run and is tested in full.
+  queue-tested:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          n="$(gh run list -R "$REPO" --workflow CI --event merge_group --commit "$SHA" \
+            --status success --json databaseId --jq length)"
+          echo "Successful merge_group runs for $SHA: $n"
+          if [ "$n" -gt 0 ]; then echo "tested=true" >> "$GITHUB_OUTPUT"; else echo "tested=false" >> "$GITHUB_OUTPUT"; fi
+
   build:
+    needs: queue-tested
+    if: ${{ !cancelled() && needs.queue-tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,13 +65,31 @@ jobs:
           ENVTEST_ASSETS=$(setup-envtest use --print path)
           echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
 
+      # -race: flaky tests only surfaced in the merge queue before (#253).
       - name: Test
-        run: go test ./... -coverprofile cover.out
+        run: go test -race ./... -coverprofile cover.out
+
+  # Runs on PRs and in the merge queue: the chart's pipeline template drifted
+  # from the CRDs once because only the main-branch helm job touched the chart.
+  helm-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Helm lint + PR pipeline example check
+        run: make helm-check
 
   # Fails on any golangci-lint finding (main is clean as of #207). `make lint`
   # builds the custom golangci-lint with the logcheck plugin (.custom-gcl.yml)
   # at the version the Makefile pins, so CI and local runs use the same linter.
   lint:
+    needs: queue-tested
+    if: ${{ !cancelled() && needs.queue-tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,8 +103,12 @@ jobs:
         run: make lint
 
   docker:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [queue-tested, build, lint]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.queue-tested.result == 'success'
+      && contains(fromJSON('["success","skipped"]'), needs.build.result)
+      && contains(fromJSON('["success","skipped"]'), needs.lint.result)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,8 +146,12 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
   helm:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [queue-tested, build, lint]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.queue-tested.result == 'success'
+      && contains(fromJSON('["success","skipped"]'), needs.build.result)
+      && contains(fromJSON('["success","skipped"]'), needs.lint.result)
     runs-on: ubuntu-latest
     permissions:
       contents: read

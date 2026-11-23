@@ -557,9 +557,13 @@ func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 ARSENALS="%s"
 TARGET="/skills"
 SKILL_CATEGORIES="%s"`, strings.Join(paths, " "), skillCategories) + `
+# PID 1 ignores SIGTERM unless a handler is installed; without this the pod
+# stays Terminating for the full grace period. Sleeps run in the background
+# and are waited on so the trap fires immediately.
+trap 'exit 0' TERM INT
 # Wait until every arsenal has completed its first sync.
 until ready=1; for a in $ARSENALS; do [ -d "$a" ] || ready=0; done; [ "$ready" = 1 ]; do
-  sleep 2
+  sleep 2 & wait $!
 done
 echo "Arsenals synced: $ARSENALS"
 sync_skills() {
@@ -602,7 +606,7 @@ done
 echo "Skills linked"
 [ -n "$SKILL_FILTER_ONCE" ] && exit 0
 while true; do
-  sleep 60
+  sleep 60 & wait $!
   sync_skills
 done`
 
