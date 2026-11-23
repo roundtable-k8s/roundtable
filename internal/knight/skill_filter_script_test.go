@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -149,5 +150,51 @@ func TestSkillFilterReplacesLegacyCategoryLink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(skills, "shared", "web-search", "SKILL.md")); err != nil {
 		t.Errorf("web-search not reachable: %v", err)
+	}
+}
+
+// The sidecar runs the script as PID 1, which ignores SIGTERM unless trapped.
+func TestSkillFilterScriptTrapsTerm(t *testing.T) {
+	k := &aiv1alpha1.Knight{}
+	k.Spec.Skills = []string{"core"}
+	script := NewPodBuilder(k, "img").WithSkillFilter().sidecars[0].Args[0]
+	if !strings.Contains(script, "trap 'exit 0' TERM INT") {
+		t.Fatalf("script has no TERM/INT trap:\n%s", script)
+	}
+	for _, l := range strings.Split(script, "\n") {
+		if strings.Contains(l, "sleep ") && !strings.Contains(l, "sleep 2 & wait $!") && !strings.Contains(l, "sleep 60 & wait $!") {
+			t.Errorf("sleep is not interruptible: %q", l)
+		}
+	}
+}
+
+func TestSkillFilterExitsOnSIGTERM(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh available")
+	}
+	root := t.TempDir()
+	k := &aiv1alpha1.Knight{}
+	k.Spec.Skills = []string{"core"}
+	script := NewPodBuilder(k, "img").WithSkillFilter().sidecars[0].Args[0]
+	script = strings.ReplaceAll(script, `ARSENALS="/arsenal"`, `ARSENALS="`+root+`"`)
+	script = strings.ReplaceAll(script, `TARGET="/skills"`, `TARGET="`+filepath.Join(root, "skills")+`"`)
+
+	cmd := exec.Command(sh, "-c", "exec "+"sh -c \"$0\"", script) //nolint:gosec // test-only
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond) // let it reach the sleep loop
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected clean exit on SIGTERM, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("skill-filter did not exit on SIGTERM")
 	}
 }
