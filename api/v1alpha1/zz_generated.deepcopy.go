@@ -210,6 +210,10 @@ func (in *ChainStepStatus) DeepCopyInto(out *ChainStepStatus) {
 		in, out := &in.StartedAt, &out.StartedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.PickedUpAt != nil {
+		in, out := &in.PickedUpAt, &out.PickedUpAt
+		*out = (*in).DeepCopy()
+	}
 	if in.CompletedAt != nil {
 		in, out := &in.CompletedAt, &out.CompletedAt
 		*out = (*in).DeepCopy()

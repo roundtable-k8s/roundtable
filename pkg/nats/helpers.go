@@ -55,3 +55,12 @@ func ChainConsumerName(chainName, stepName string) string {
 func KnightConsumerName(knightName string) string {
 	return fmt.Sprintf("knight-%s", knightName)
 }
+
+// KnightTaskConsumerName is the durable JetStream consumer a knight runtime
+// creates on the tasks stream. Format: {knight}-consumer.
+// Knights acknowledge a task message as soon as they receive it, so this
+// consumer's ack floor passing a task's stream sequence is the "picked up"
+// signal for chain step timeouts.
+func KnightTaskConsumerName(knightName string) string {
+	return fmt.Sprintf("%s-consumer", knightName)
+}

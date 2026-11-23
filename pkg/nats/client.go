@@ -43,6 +43,14 @@ type Client interface {
 	// PublishJSON publishes a JSON-encoded value to a subject.
 	PublishJSON(subject string, v interface{}) error
 
+	// PublishJSONSeq publishes a JSON-encoded value and returns the stream
+	// sequence number JetStream assigned to it.
+	PublishJSONSeq(subject string, v interface{}) (uint64, error)
+
+	// ConsumerAckFloor returns the stream sequence at or below which every
+	// message has been acknowledged by the named consumer.
+	ConsumerAckFloor(stream, consumer string) (uint64, error)
+
 	// Subscribe creates a synchronous subscription to a subject.
 	Subscribe(subject string, opts ...SubscribeOption) (*nats.Subscription, error)
 
@@ -178,6 +186,40 @@ func (c *JetStreamClient) PublishJSON(subject string, v interface{}) error {
 		return fmt.Errorf("marshal JSON payload: %w", err)
 	}
 	return c.Publish(subject, data)
+}
+
+// PublishJSONSeq publishes a JSON-encoded value and returns its stream sequence.
+func (c *JetStreamClient) PublishJSONSeq(subject string, v interface{}) (uint64, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0, fmt.Errorf("marshal JSON payload: %w", err)
+	}
+	if err := c.Connect(); err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	js := c.js
+	c.mu.Unlock()
+	ack, err := js.Publish(subject, data)
+	if err != nil {
+		return 0, fmt.Errorf("NATS publish to %s failed: %w", subject, err)
+	}
+	return ack.Sequence, nil
+}
+
+// ConsumerAckFloor returns the consumer's acknowledged-floor stream sequence.
+func (c *JetStreamClient) ConsumerAckFloor(stream, consumer string) (uint64, error) {
+	if err := c.Connect(); err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	js := c.js
+	c.mu.Unlock()
+	info, err := js.ConsumerInfo(stream, consumer)
+	if err != nil {
+		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+	}
+	return info.AckFloor.Stream, nil
 }
 
 // Subscribe creates a synchronous subscription to a subject.

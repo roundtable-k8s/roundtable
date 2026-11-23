@@ -20,6 +20,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	// AnnotationChainRun starts a brand-new chain run (new runId, steps reset)
+	// whenever its value differs from status.lastRunTrigger.
+	AnnotationChainRun = "ai.roundtable.io/run"
+
+	// AnnotationChainRetryFailed resumes the current run from its failed
+	// step(s) only, whenever its value differs from status.lastRetryTrigger.
+	AnnotationChainRetryFailed = "ai.roundtable.io/retry-failed"
+)
+
 // ChainSpec defines the desired state of a Chain — a declarative multi-knight task pipeline.
 type ChainSpec struct {
 	// description is a human-readable summary of what this chain accomplishes.
@@ -38,6 +48,15 @@ type ChainSpec struct {
 	// +kubebuilder:validation:Maximum=86400
 	// +optional
 	Timeout int32 `json:"timeout,omitempty"`
+
+	// maxQueueWait is how long (seconds) a published step task may wait for its
+	// knight to pick it up before the step fails. The per-step timeout only
+	// starts counting once the knight has picked the task up, so a busy (or
+	// dead) knight is bounded by this guard instead. Defaults to 1800 when unset.
+	// +kubebuilder:validation:Minimum=30
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
+	MaxQueueWait int32 `json:"maxQueueWait,omitempty"`
 
 	// schedule is an optional cron expression to trigger this chain on a recurring basis.
 	// Uses standard cron syntax (e.g., "0 */6 * * *").
@@ -208,9 +227,19 @@ type ChainStepStatus struct {
 	// +optional
 	TaskID string `json:"taskId,omitempty"`
 
-	// startedAt is when the step began execution.
+	// startedAt is when the step's task was published (queued) to the knight.
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// taskSeq is the tasks-stream sequence number of the published task. It is
+	// used to detect knight pickup (the knight's consumer acknowledging it).
+	// +optional
+	TaskSeq uint64 `json:"taskSeq,omitempty"`
+
+	// pickedUpAt is when the knight picked the task up. The step timeout is
+	// measured from here, not from startedAt.
+	// +optional
+	PickedUpAt *metav1.Time `json:"pickedUpAt,omitempty"`
 
 	// completedAt is when the step finished execution.
 	// +optional
@@ -264,6 +293,16 @@ type ChainStatus struct {
 	// a previous run can never be attributed to the current one.
 	// +optional
 	RunID string `json:"runId,omitempty"`
+
+	// lastRunTrigger is the last value of the ai.roundtable.io/run annotation
+	// that was handled. A run is only started when the annotation differs.
+	// +optional
+	LastRunTrigger string `json:"lastRunTrigger,omitempty"`
+
+	// lastRetryTrigger is the last value of the ai.roundtable.io/retry-failed
+	// annotation that was handled.
+	// +optional
+	LastRetryTrigger string `json:"lastRetryTrigger,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
