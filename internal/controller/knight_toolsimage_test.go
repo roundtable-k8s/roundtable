@@ -17,6 +17,10 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -105,6 +109,8 @@ var _ = Describe("Knight tools image", func() {
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(10),
+				// Registry reports every image present unless a test says otherwise.
+				ToolsImageMissing: func(context.Context, string) bool { return false },
 			}
 		})
 
@@ -197,6 +203,84 @@ var _ = Describe("Knight tools image", func() {
 			Expect(nixVolumeRef(k)).To(Equal(newRef))
 		})
 
+		It("rebuilds when the registry has lost the published image", func() {
+			k := newKnight("bedivere", []string{"curl"})
+			ref := knightpkg.ToolsImageRef(k)
+			k.Status.ToolsImage = ref
+
+			var probed []string
+			r.ToolsImageMissing = func(_ context.Context, url string) bool {
+				probed = append(probed, url)
+				return true
+			}
+
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(probed).To(Equal([]string{knightpkg.ToolsImageManifestURL(k)}))
+			Expect(k.Status.ToolsImage).To(BeEmpty(), "a lost image is no longer published")
+			job, err := getJob(k)
+			Expect(err).NotTo(HaveOccurred(), "a new build Job is created")
+			defer func() { _ = k8sClient.Delete(ctx, job) }()
+
+			// The pod keeps referencing the same tag, so a running knight is not rolled.
+			Expect(knightpkg.MountedToolsImageRef(k)).To(Equal(ref))
+		})
+
+		It("removes the finished Job of a lost image so the rebuild is not skipped", func() {
+			k := newKnight("lucan", []string{"curl", "jq"})
+			ref := knightpkg.ToolsImageRef(k)
+
+			// First build: Job created and completed, image recorded.
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			job, err := getJob(k)
+			Expect(err).NotTo(HaveOccurred())
+			oldUID := job.UID
+			now := metav1.Now()
+			job.Status.Succeeded = 1
+			job.Status.StartTime = &now
+			job.Status.CompletionTime = &now
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(k.Status.ToolsImage).To(Equal(ref))
+
+			// Registry loses it. A fresh reconciler has no memory of the earlier check.
+			r2 := &KnightReconciler{
+				Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10),
+				ToolsImageMissing: func(context.Context, string) bool { return true },
+			}
+			Expect(r2.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(k.Status.ToolsImage).To(BeEmpty())
+
+			// The stale Job goes away, and the next pass creates a new one
+			// instead of reading the old success as "published".
+			Eventually(func() bool {
+				j, err := getJob(k)
+				return apierrors.IsNotFound(err) || (err == nil && j.UID != oldUID)
+			}).Should(BeTrue())
+			r2.ToolsImageMissing = func(context.Context, string) bool { return false }
+			Expect(r2.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(k.Status.ToolsImage).To(BeEmpty(), "not published again until the new Job succeeds")
+			newJob, err := getJob(k)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = k8sClient.Delete(ctx, newJob) }()
+			Expect(newJob.UID).NotTo(Equal(oldUID))
+		})
+
+		It("checks the registry at most once per interval for an image", func() {
+			k := newKnight("pellinore", []string{"curl", "whois"})
+			k.Status.ToolsImage = knightpkg.ToolsImageRef(k)
+			calls := 0
+			r.ToolsImageMissing = func(context.Context, string) bool { calls++; return false }
+
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(calls).To(Equal(1))
+			Expect(k.Status.ToolsImage).NotTo(BeEmpty())
+		})
+
 		It("builds again when the tool list changes", func() {
 			k := newKnight("ector", []string{"curl"})
 			k.Status.ToolsImage = knightpkg.ToolsImageRef(k)
@@ -210,7 +294,46 @@ var _ = Describe("Knight tools image", func() {
 		})
 	})
 
+	// ── registry probe ────────────────────────────────────────────────────
+	Describe("probeToolsImageMissing", func() {
+		It("reports missing only on a 404 from the registry", func() {
+			status := http.StatusOK
+			var gotMethod, gotAccept string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				gotMethod, gotAccept = req.Method, req.Header.Get("Accept")
+				w.WriteHeader(status)
+			}))
+			url := srv.URL + "/v2/knight-tools/manifests/abc"
+
+			Expect(probeToolsImageMissing(ctx, url)).To(BeFalse())
+			Expect(gotMethod).To(Equal(http.MethodHead))
+			Expect(gotAccept).To(ContainSubstring("application/vnd.oci.image.manifest.v1+json"))
+
+			status = http.StatusNotFound
+			Expect(probeToolsImageMissing(ctx, url)).To(BeTrue())
+
+			// A broken or unreachable registry is not evidence the image is gone.
+			status = http.StatusInternalServerError
+			Expect(probeToolsImageMissing(ctx, url)).To(BeFalse())
+			srv.Close()
+			Expect(probeToolsImageMissing(ctx, url)).To(BeFalse())
+		})
+	})
+
 	// ── reconcileNixBuild dispatch ────────────────────────────────────────
+	It("asks to be requeued to re-verify a published image", func() {
+		r := &KnightReconciler{
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10),
+			ToolsImageMissing: func(context.Context, string) bool { return false },
+		}
+		k := newKnight("sagramore", []string{"jq", "tree"})
+		k.Status.ToolsImage = knightpkg.ToolsImageRef(k)
+
+		requeue, err := r.reconcileNixBuild(ctx, k)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(requeue).To(Equal(toolsImageVerifyInterval))
+	})
+
 	It("takes the tools image path instead of the shared store when a repository is set", func() {
 		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
 		k := newKnight("dinadan", []string{"jq"})

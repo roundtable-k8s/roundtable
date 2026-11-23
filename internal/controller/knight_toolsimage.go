@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -41,7 +44,54 @@ const (
 	// toolsImageJobTTL keeps finished build Jobs around briefly for log
 	// inspection. A failed Job is retried once this expires and it is removed.
 	toolsImageJobTTL int32 = 3600
+
+	// toolsImageVerifyInterval is how often the operator re-checks that a
+	// published tools image is still in the registry.
+	toolsImageVerifyInterval = 10 * time.Minute
+
+	// toolsImageProbeTimeout bounds one registry check.
+	toolsImageProbeTimeout = 5 * time.Second
 )
+
+// probeToolsImageMissing asks the registry for the image manifest and reports
+// whether the registry positively says it is gone (404). Anything else — the
+// registry being down, a timeout, an unexpected status — counts as "not known
+// to be missing", so an outage never triggers a rebuild of every image.
+func probeToolsImageMissing(ctx context.Context, manifestURL string) bool {
+	ctx, cancel := context.WithTimeout(ctx, toolsImageProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, manifestURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.oci.image.manifest.v1+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusNotFound
+}
+
+// toolsImageLost reports whether the knight's published tools image has
+// disappeared from the registry. Checks are throttled per image reference to
+// one every toolsImageVerifyInterval (knights sharing an image share the
+// check).
+func (r *KnightReconciler) toolsImageLost(ctx context.Context, knight *aiv1alpha1.Knight, ref string) bool {
+	if at, ok := r.toolsImageVerifiedAt.Load(ref); ok && time.Since(at.(time.Time)) < toolsImageVerifyInterval {
+		return false
+	}
+	probe := r.ToolsImageMissing
+	if probe == nil {
+		probe = probeToolsImageMissing
+	}
+	if probe(ctx, knightpkg.ToolsImageManifestURL(knight)) {
+		r.toolsImageVerifiedAt.Delete(ref)
+		return true
+	}
+	r.toolsImageVerifiedAt.Store(ref, time.Now())
+	return false
+}
 
 // toolsImageBuildScript is what the build Job runs. It skips the build when
 // the tag is already in the registry (another knight with the same tool list
@@ -83,12 +133,34 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 		knight.Status.ToolsImage = "" // no Nix tools; persisted by updateStatus
 		return nil
 	}
-	if knight.Status.ToolsImage == ref {
-		return nil // already published
-	}
-
 	jobName := toolsImageJobName(knight)
 	job := &batchv1.Job{}
+
+	if knight.Status.ToolsImage == ref {
+		if !r.toolsImageLost(ctx, knight, ref) {
+			return nil // already published
+		}
+		// The registry no longer has the image (wiped volume, garbage
+		// collection, manual delete). Forget that it was published and build
+		// it again. The pod spec does not change, so a running knight keeps
+		// going on the copy its node has cached.
+		log.Info("Published tools image is missing from the registry", "image", ref)
+		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ToolsImageMissing",
+			"Tools image %s is no longer in the registry; rebuilding", ref)
+		knight.Status.ToolsImage = "" // persisted by updateStatus
+		// A finished Job from the original build would read as "published";
+		// remove it so a fresh one is created on the requeue its deletion causes.
+		err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: knight.Namespace}, job)
+		if err == nil {
+			if err := r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("stale tools image Job delete failed: %w", err)
+			}
+			return nil
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("tools image Job get failed: %w", err)
+		}
+	}
+
 	err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: knight.Namespace}, job)
 	if apierrors.IsNotFound(err) {
 		newJob := r.buildToolsImageJob(knight)
@@ -107,8 +179,11 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 
 	// Job exists — react to its terminal state (the owner watch requeues us).
 	switch {
+	case job.DeletionTimestamp != nil:
+		// Being removed (see the missing-image path above); wait for it to go.
 	case job.Status.Succeeded > 0:
 		knight.Status.ToolsImage = ref // persisted by updateStatus
+		r.toolsImageVerifiedAt.Store(ref, time.Now())
 		log.Info("Published tools image", "job", jobName, "image", ref)
 		r.Recorder.Eventf(knight, corev1.EventTypeNormal, "ToolsImagePublished", "Tools image %s published", ref)
 	case job.Spec.BackoffLimit != nil && job.Status.Failed > *job.Spec.BackoffLimit:
