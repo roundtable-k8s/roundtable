@@ -286,6 +286,17 @@ spec:
                     maxItems: 10
                     type: array
                     x-kubernetes-list-type: set
+                  breakingLabel:
+                    default: breaking
+                    description: |-
+                      breakingLabel marks open pull requests that change an API, CRD or
+                      contract (the breaking-change protocol, #260). While a repo has an open
+                      pull request with this label, pickup starts no new Chain for it: ready
+                      issues stay ready and are picked up after the breaking PR is merged or
+                      closed.
+                    maxLength: 50
+                    minLength: 1
+                    type: string
                   chainRef:
                     description: |-
                       chainRef names the Chain in the RoundTable's namespace that is copied

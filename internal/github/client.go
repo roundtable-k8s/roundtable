@@ -179,6 +179,50 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo, label string) ([]Issu
 	return issues, nil
 }
 
+// PullRequest is the subset of a GitHub pull request the pickup controller
+// reads.
+type PullRequest struct {
+	Number  int     `json:"number"`
+	Title   string  `json:"title"`
+	HTMLURL string  `json:"html_url"`
+	Labels  []Label `json:"labels"`
+	Head    struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
+// HasLabel reports whether the pull request carries the named label
+// (case-insensitive, like GitHub).
+func (p *PullRequest) HasLabel(name string) bool {
+	for _, l := range p.Labels {
+		if strings.EqualFold(l.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// ListOpenPullRequests returns the open pull requests carrying label (the
+// first 100 open PRs, newest first; needs the pull requests read permission).
+func (c *Client) ListOpenPullRequests(ctx context.Context, repo, label string) ([]PullRequest, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	q := url.Values{"state": {"open"}, "per_page": {"100"}}
+	var all []PullRequest
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls", owner, name), q, nil, &all); err != nil {
+		return nil, err
+	}
+	prs := all[:0]
+	for _, p := range all {
+		if p.HasLabel(label) {
+			prs = append(prs, p)
+		}
+	}
+	return prs, nil
+}
+
 // AddLabels adds labels to an issue (labels that do not exist are created).
 func (c *Client) AddLabels(ctx context.Context, repo string, number int, labels ...string) error {
 	p, err := issuePath(repo, number, "/labels")

@@ -47,7 +47,9 @@ import (
 type fakeGitHub struct {
 	mu       sync.Mutex
 	issues   map[string][]*github.Issue // repo -> issues
-	comments map[string][]string        // "repo#n" -> bodies
+	pulls    map[string][]github.PullRequest
+	failPRs  bool
+	comments map[string][]string // "repo#n" -> bodies
 	assigned map[string][]string
 	requests int
 	token    string
@@ -56,7 +58,7 @@ type fakeGitHub struct {
 }
 
 func newFakeGitHub() *fakeGitHub {
-	return &fakeGitHub{issues: map[string][]*github.Issue{}, comments: map[string][]string{}, assigned: map[string][]string{}}
+	return &fakeGitHub{issues: map[string][]*github.Issue{}, pulls: map[string][]github.PullRequest{}, comments: map[string][]string{}, assigned: map[string][]string{}}
 }
 
 func (f *fakeGitHub) add(repo string, n int, title, body string, labels ...string) {
@@ -67,6 +69,23 @@ func (f *fakeGitHub) add(repo string, n int, title, body string, labels ...strin
 		is.Labels = append(is.Labels, github.Label{Name: l})
 	}
 	f.issues[repo] = append(f.issues[repo], is)
+}
+
+func (f *fakeGitHub) addPR(repo string, n int, branch string, labels ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pr := github.PullRequest{Number: n}
+	pr.Head.Ref = branch
+	for _, l := range labels {
+		pr.Labels = append(pr.Labels, github.Label{Name: l})
+	}
+	f.pulls[repo] = append(f.pulls[repo], pr)
+}
+
+func (f *fakeGitHub) closePRs(repo string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[repo] = nil
 }
 
 func (f *fakeGitHub) labels(repo string, n int) []string {
@@ -105,6 +124,8 @@ func (f *fakeGitHub) find(repo string, n int) *github.Issue {
 	return nil
 }
 
+var pullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
+
 var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(/labels|/comments|/assignees)(?:/(.+))?)?$`)
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -114,6 +135,19 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Header.Get("Authorization") != "Bearer "+f.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		return
+	}
+	if pm := pullsRoute.FindStringSubmatch(req.URL.EscapedPath()); pm != nil {
+		if f.failPRs {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		repo, _ := url.PathUnescape(pm[1])
+		out := f.pulls[repo]
+		if out == nil {
+			out = []github.PullRequest{}
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	m := issueRoute.FindStringSubmatch(req.URL.EscapedPath())
@@ -283,6 +317,41 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(p.MaxActive).To(Equal(int32(2)))
 		Expect(p.TTLSecondsAfterFinished).To(Equal(new(int32(604800))))
 		Expect(p.HumanPatterns).To(HaveLen(3))
+		Expect(p.BreakingLabel).To(Equal("breaking"))
+	})
+
+	It("holds new work in a repo while a breaking PR is open (#260)", func() {
+		gh.add(repo, 7, "Add a widget", "please", "rt:ready")
+		gh.addPR(repo, 241, "rt/241-crd-change", "Breaking") // label match is case-insensitive
+		gh.addPR(repo, 242, "rt/242-other", "docs")
+
+		reconcileOnce()
+		Expect(pickupChains()).To(BeEmpty())
+		Expect(gh.labels(repo, 7)).To(ConsistOf("rt:ready"))
+		Expect(gh.commentsOn(repo, 7)).To(BeEmpty())
+		Expect(getRT().Status.IssuePickup.PickedTotal).To(Equal(int64(0)))
+		Expect(getRT().Status.IssuePickup.LastError).To(BeEmpty())
+
+		By("picking the issue up once the breaking PR is merged or closed")
+		gh.closePRs(repo)
+		tick()
+		Expect(pickupChains()).To(HaveLen(1))
+		Expect(gh.labels(repo, 7)).To(ConsistOf("rt:in-progress"))
+	})
+
+	It("does not hold for PRs without the breaking label", func() {
+		gh.add(repo, 7, "Add a widget", "please", "rt:ready")
+		gh.addPR(repo, 242, "rt/242-other", "docs")
+		reconcileOnce()
+		Expect(pickupChains()).To(HaveLen(1))
+	})
+
+	It("holds when the breaking PR lookup fails", func() {
+		gh.add(repo, 7, "Add a widget", "please", "rt:ready")
+		gh.failPRs = true
+		reconcileOnce()
+		Expect(pickupChains()).To(BeEmpty())
+		Expect(getRT().Status.IssuePickup.LastError).To(ContainSubstring("list breaking PRs"))
 	})
 
 	It("claims a ready issue once, starts a Chain copy and respects the per-repo cap", func() {

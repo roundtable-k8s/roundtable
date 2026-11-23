@@ -89,6 +89,17 @@ type IssuePickupSpec struct {
 	// +optional
 	NeedsHumanLabel string `json:"needsHumanLabel,omitempty"`
 
+	// breakingLabel marks open pull requests that change an API, CRD or
+	// contract (the breaking-change protocol, #260). While a repo has an open
+	// pull request with this label, pickup starts no new Chain for it: ready
+	// issues stay ready and are picked up after the breaking PR is merged or
+	// closed.
+	// +kubebuilder:default="breaking"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	BreakingLabel string `json:"breakingLabel,omitempty"`
+
 	// humanPatterns are RE2 regular expressions matched against an issue's
 	// title and body. A match means the work needs a human (the bot token
 	// cannot push workflow changes, and secrets/auth changes need review).
