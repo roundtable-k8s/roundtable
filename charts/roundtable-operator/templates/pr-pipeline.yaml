@@ -7,6 +7,10 @@ model alias is applied through `when`: one implement step per coder × alias
 (single PR, same runId as the fix loop), one forEach step per coder (split into
 sub-issues) and one fix loop per coder. Exactly one of each set runs.
 
+Model tiers: the planner picks the implement alias (cheap/fast/deep, see
+prPipeline.implementModels); every fix round runs prPipeline.fixModel, so a
+weak first draft is fixed by a stronger model.
+
 Lead steps (plan, review, merge, escalate) set no model unless prPipeline.leadModel
 is set: the aliases are single-valued per RoundTable and only valid for the coders'
 runtime, so a lead on another runtime (e.g. pi-knight) uses its own default (#244).
@@ -22,6 +26,7 @@ at dispatch time (Helm must not).
 {{- $leadModel := .leadModel | default "" }}
 {{- $coders := .coders }}
 {{- $models := .implementModels }}
+{{- $fixModel := .fixModel | default "deep" }}
 {{- $impl := list }}
 {{- $loops := list }}
 {{- range $coders }}
@@ -64,9 +69,15 @@ spec:
 
         1. Read the issue (gh issue view <issue> --repo <repo>) and the repo's AGENTS.md / README.
         2. Pick the coder knight that owns this repo or area. It must be one of: {{ join ", " $coders }}.
-        3. Pick the model alias for the implementation: "deep" for design-heavy,
-           cross-cutting or risky changes, "fast" for small mechanical ones.
+        3. Pick the model alias for the implementation (cheapest tier that fits;
+           a weaker draft is fixed by the stronger "{{ $fixModel }}" model in the fix loop).
            Allowed: {{ join ", " $models }}.
+           - "cheap" (Haiku drafts): only for small, well-specified issues: a single
+             file or area, clear acceptance criteria, no API/CRD/contract change and
+             no `breaking` label.
+           - "fast": the default.
+           - "deep": design-heavy, cross-cutting or risky work.
+           Record why in "reason", naming the tier and the criteria that decided it.
         4. If the issue is too large for one reviewable PR, split it: create
            sub-issues in the same repo (gh issue create, body starting
            "Part of #<issue>"), comment the list on the issue and set split to
@@ -155,7 +166,7 @@ spec:
           - name: fix
             knightRef:
               name: {{ $coder }}
-            model: deep
+            model: {{ $fixModel }}
             timeoutSeconds: 3600
             retry:
               maxAttempts: 1
@@ -210,7 +221,9 @@ spec:
         Then wait until each one is merged, closed, or blocked by a failing required
         check (check every few minutes, give up after 50 minutes).
         Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
-        then a last line "Fix rounds: <n>".
+        then a line "Fix rounds: <n>" and a last line
+        "Tiering: implement=<alias the plan chose> fix={{ $fixModel }} review rounds=<n>"
+        (the alias is in the plan: {{ $o }} .Steps.plan.Output {{ $c }}).
 
     - name: escalate
       knightRef:

@@ -40,7 +40,7 @@ It is built only from existing Chain features: `when` and `loop`
 | `implement_<coder>_<alias>` | coder | the planner's alias | the plan picked this coder and alias, no split |
 | `split_<coder>` (forEach over `.issues`) | coder | `deep` | the plan picked this coder and split |
 | `review` | lead | lead default (or `leadModel`) | an implement or split step succeeded |
-| `fixloop_<coder>` (loop: `fix` → `review`) | coder, lead | `deep`, lead default | the review ran and the plan picked this coder |
+| `fixloop_<coder>` (loop: `fix` → `review`) | coder, lead | `fixModel` (default `deep`), lead default | the review ran and the plan picked this coder |
 | `merge` | lead | lead default (or `leadModel`) | a fix loop `Converged` |
 | `escalate` | lead | lead default (or `leadModel`) | a fix loop is `Exhausted`, or no implementation ran |
 
@@ -60,6 +60,15 @@ the lead's runtime).
 {"coder": "rt-operator", "model": "deep", "split": false,
  "issues": [{"number": 225, "title": "PR pipeline chain"}], "reason": "..."}
 ```
+
+**Model tiers.** `implementModels` may include `cheap` (a RoundTable alias,
+e.g. `cheap: haiku`) next to `fast` and `deep`. The planner picks `cheap` only
+for small, well-specified issues (single file or area, clear acceptance
+criteria, no API/CRD/contract change, no `breaking` label), `fast` by default
+and `deep` for design-heavy or cross-cutting work, and records the reason in
+the plan JSON. Every fix round runs `fixModel` (default `deep`), so a Haiku
+draft is fixed by Sonnet (`fast`) or Opus. The chart default stays
+`[deep, fast]`; enable the cheap tier with `implementModels: [cheap, fast, deep]`.
 
 `coder` must be one of `prPipeline.coders` and `model` one of
 `prPipeline.implementModels`. If the issue is too large for one PR, the lead
@@ -112,8 +121,10 @@ does not have.
 | Merge state | `merge` output |
 | Resolved model per step | `status.stepStatuses[].model` (loop body steps: `.loop.steps[].model`) |
 
-Cost per step is not recorded on Chains yet (only Missions and RoundTables
-track cost); it is a follow-up.
+The `merge` output ends with a `Tiering:` line (implement alias, fix model,
+review rounds), so the tiering can be compared across runs. Cost per step is
+not recorded on Chains yet (only Missions and RoundTables track cost); it is a
+follow-up.
 
 ## Install
 
@@ -128,7 +139,8 @@ metadata:
 spec:
   modelAliases:
     deep: opus
-    fast: haiku
+    fast: sonnet
+    cheap: haiku
 ```
 
 Every knight in the chain (`prPipeline.lead` and all `prPipeline.coders`) must
@@ -142,7 +154,8 @@ prPipeline:
     name: roundtable-dev
   lead: rt-lead
   coders: [rt-operator, rt-ui]
-  implementModels: [deep, fast]
+  implementModels: [cheap, fast, deep]   # chart default: [deep, fast]
+  fixModel: deep
   maxIterations: 3
 ```
 
