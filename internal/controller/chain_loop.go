@@ -64,6 +64,14 @@ func validateConditionsAndLoops(chain *aiv1alpha1.Chain) (string, error) {
 				return aiv1alpha1.ReasonInvalidCondition, fmt.Errorf("step %q when: %w", step.Name, err)
 			}
 		}
+		if step.ResumeRunID != "" {
+			if step.Loop != nil || step.ForEach != nil {
+				return aiv1alpha1.ReasonInvalidCondition, fmt.Errorf("step %q: resumeRunId is not valid on loop or forEach steps", step.Name)
+			}
+			if _, err := compileStringExpr(step.ResumeRunID); err != nil {
+				return aiv1alpha1.ReasonInvalidCondition, fmt.Errorf("step %q resumeRunId: %w", step.Name, err)
+			}
+		}
 		lp := step.Loop
 		if lp == nil {
 			if step.KnightRef.Name == "" || step.Task == "" {

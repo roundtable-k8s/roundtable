@@ -220,6 +220,17 @@ type ChainStep struct {
 	// +optional
 	When string `json:"when,omitempty"`
 
+	// resumeRunId is a CEL expression, with the same variables as when, that
+	// yields the runId the step's task carries instead of the chain run's
+	// runId. Knights key their agent session by runId, so this lets a step
+	// resume the session of an earlier run, e.g. json(input).runId for a
+	// follow-up chain fed the original run's ID. An empty result keeps the
+	// chain run's runId; an evaluation error fails the step. Not valid on
+	// forEach or loop steps.
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	ResumeRunID string `json:"resumeRunId,omitempty"`
+
 	// loop makes this step a bounded loop: its body steps run in order, round
 	// after round, until the until expression holds or maxIterations rounds
 	// have run. A loop step has no knightRef, task, forEach, model, retry or

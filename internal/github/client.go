@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -98,11 +99,14 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	var rd io.Reader
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
+		// No HTML escaping: bodies carry log text with <, > and &.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(body); err != nil {
 			return err
 		}
-		rd = bytes.NewReader(b)
+		rd = &buf
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
@@ -122,7 +126,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		return fmt.Errorf("github %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxLogBytes))
 	if err != nil {
 		return err
 	}
@@ -134,6 +138,10 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		return &APIError{Method: method, Path: path, Status: resp.StatusCode, Message: msg.Message}
 	}
 	if out != nil && len(data) > 0 {
+		if s, ok := out.(*string); ok { // raw text, e.g. a job log
+			*s = string(data)
+			return nil
+		}
 		return json.Unmarshal(data, out)
 	}
 	return nil
@@ -179,28 +187,6 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo, label string) ([]Issu
 	return issues, nil
 }
 
-// PullRequest is the subset of a GitHub pull request the pickup controller
-// reads.
-type PullRequest struct {
-	Number  int     `json:"number"`
-	Title   string  `json:"title"`
-	HTMLURL string  `json:"html_url"`
-	Labels  []Label `json:"labels"`
-	Head    struct {
-		Ref string `json:"ref"`
-	} `json:"head"`
-}
-
-// HasLabel reports whether the pull request carries the named label
-// (case-insensitive, like GitHub).
-func (p *PullRequest) HasLabel(name string) bool {
-	for _, l := range p.Labels {
-		if strings.EqualFold(l.Name, name) {
-			return true
-		}
-	}
-	return false
-}
 
 // ListOpenPullRequests returns the open pull requests carrying label (the
 // first 100 open PRs, newest first; needs the pull requests read permission).
@@ -264,4 +250,229 @@ func (c *Client) Comment(ctx context.Context, repo string, number int, body stri
 		return err
 	}
 	return c.do(ctx, http.MethodPost, p, nil, map[string]string{"body": body}, nil)
+}
+
+// maxLogBytes caps how much of a job log is read.
+const maxLogBytes = 8 << 20
+
+// maxPages bounds how many pages a paginated list call follows.
+const maxPages = 5
+
+// IsNotFound reports whether err is a 404 or 410 from GitHub.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusGone
+	}
+	return false
+}
+
+// User is a GitHub account.
+type User struct {
+	Login string `json:"login"`
+}
+
+// PullRequest is the subset of a pull request the PR feedback watcher reads.
+type PullRequest struct {
+	Number  int     `json:"number"`
+	HTMLURL string  `json:"html_url"`
+	State   string  `json:"state"`
+	Title   string  `json:"title"`
+	Draft   bool    `json:"draft"`
+	Merged  bool    `json:"merged"`
+	User    User    `json:"user"`
+	Labels  []Label `json:"labels"`
+	Head    struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+}
+
+// HasLabel reports whether the pull request carries label name
+// (case-insensitive).
+func (p *PullRequest) HasLabel(name string) bool {
+	for _, l := range p.Labels {
+		if strings.EqualFold(l.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// pages follows a paginated list endpoint (at most maxPages pages of 100),
+// calling add with each decoded page. It stops at the first short page.
+func pages[T any](ctx context.Context, c *Client, path string, q url.Values, pick func(page []T) int) error {
+	for p := 1; p <= maxPages; p++ {
+		qq := maps.Clone(q)
+		qq.Set("per_page", "100")
+		qq.Set("page", fmt.Sprint(p))
+		var page []T
+		if err := c.do(ctx, http.MethodGet, path, qq, nil, &page); err != nil {
+			return err
+		}
+		if pick(page) < 100 {
+			return nil
+		}
+	}
+	return nil
+}
+
+// ListOpenPulls returns the open pull requests of repo (owner/name), newest
+// first, following up to maxPages pages.
+func (c *Client) ListOpenPulls(ctx context.Context, repo string) ([]PullRequest, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var out []PullRequest
+	err = pages(ctx, c, fmt.Sprintf("/repos/%s/%s/pulls", owner, name), url.Values{"state": {"open"}},
+		func(page []PullRequest) int { out = append(out, page...); return len(page) })
+	return out, err
+}
+
+// GetPull returns one pull request.
+func (c *Client) GetPull(ctx context.Context, repo string, number int) (*PullRequest, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	out := &PullRequest{}
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, name, number), nil, nil, out)
+	return out, err
+}
+
+// CheckRun is one check run on a commit. For GitHub Actions the check run ID
+// is also the job ID.
+type CheckRun struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion"`
+	HTMLURL     string     `json:"html_url"`
+	DetailsURL  string     `json:"details_url"`
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	App         *struct {
+		Slug string `json:"slug"`
+	} `json:"app"`
+	Output struct {
+		Title   string `json:"title"`
+		Summary string `json:"summary"`
+	} `json:"output"`
+}
+
+// IsActions reports whether the check run is a GitHub Actions job.
+func (r *CheckRun) IsActions() bool {
+	return r.App != nil && r.App.Slug == "github-actions"
+}
+
+// ListCheckRuns returns every check run (all attempts, not only the latest)
+// on commit sha.
+func (c *Client) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRun, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var all []CheckRun
+	for p := 1; p <= maxPages; p++ {
+		var out struct {
+			CheckRuns []CheckRun `json:"check_runs"`
+		}
+		q := url.Values{"filter": {"all"}, "per_page": {"100"}, "page": {fmt.Sprint(p)}}
+		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, name, url.PathEscape(sha)), q, nil, &out); err != nil {
+			return all, err
+		}
+		all = append(all, out.CheckRuns...)
+		if len(out.CheckRuns) < 100 {
+			break
+		}
+	}
+	return all, nil
+}
+
+// WorkflowRun is one GitHub Actions workflow run.
+type WorkflowRun struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	HeadBranch string    `json:"head_branch"`
+	HeadSHA    string    `json:"head_sha"`
+	Event      string    `json:"event"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	HTMLURL    string    `json:"html_url"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ListMergeGroupRuns returns the newest merge_group workflow runs of repo
+// (at most 100), newest first.
+func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]WorkflowRun, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+	}
+	q := url.Values{"event": {"merge_group"}, "per_page": {"100"}}
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/runs", owner, name), q, nil, &out)
+	return out.WorkflowRuns, err
+}
+
+// Job is one job of a workflow run.
+type Job struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+}
+
+// ListRunJobs returns the jobs of the latest attempt of a workflow run.
+func (c *Client) ListRunJobs(ctx context.Context, repo string, runID int64) ([]Job, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Jobs []Job `json:"jobs"`
+	}
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs", owner, name, runID), url.Values{"per_page": {"100"}}, nil, &out)
+	return out.Jobs, err
+}
+
+// JobLog returns the plain-text log of an Actions job (at most 8 MiB).
+func (c *Client) JobLog(ctx context.Context, repo string, jobID int64) (string, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return "", err
+	}
+	var out string
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/jobs/%d/logs", owner, name, jobID), nil, nil, &out)
+	return out, err
+}
+
+// ListOpenIssuesWithLabel returns open issues (and pull requests) carrying
+// label, at most 100.
+func (c *Client) ListOpenIssuesWithLabel(ctx context.Context, repo, label string) ([]Issue, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var out []Issue
+	q := url.Values{"state": {"open"}, "labels": {label}, "per_page": {"100"}}
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/issues", owner, name), q, nil, &out)
+	return out, err
+}
+
+// CreateIssue opens an issue.
+func (c *Client) CreateIssue(ctx context.Context, repo, title, body string, labels ...string) (*Issue, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	out := &Issue{}
+	err = c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues", owner, name), nil, map[string]any{"title": title, "body": body, "labels": labels}, out)
+	return out, err
 }

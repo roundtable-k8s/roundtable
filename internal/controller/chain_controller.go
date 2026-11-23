@@ -414,8 +414,9 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 			return fmt.Errorf("step %q has invalid template: %w", name, err)
 		}
 		mockData := map[string]any{
-			"Steps": mockSteps,
-			"Input": "",
+			"Steps":  mockSteps,
+			"Input":  "",
+			"Fields": map[string]any{},
 		}
 		maps.Copy(mockData, extra)
 		var buf bytes.Buffer
@@ -799,11 +800,31 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// wildcard fallback in pollResult still matches.
 		taskID := fmt.Sprintf("chain-%s-%s.%s-%d", chain.Name, step.Name, chain.Status.RunID, time.Now().UnixMilli())
 
+		// resumeRunId: carry an earlier run's ID so the knight resumes that
+		// session. It does not change the chain's own run identity (KV keys,
+		// taskId).
+		runID := chain.Status.RunID
+		if step.ResumeRunID != "" {
+			resumed, err := evalString(step.ResumeRunID, r.conditionVars(ctx, chain, step.ResumeRunID))
+			if err != nil {
+				log.Info("Step resumeRunId expression failed", "step", step.Name, "error", err.Error())
+				ss.Phase = aiv1alpha1.ChainStepPhaseFailed
+				ss.Error = fmt.Sprintf("resumeRunId: %v", err)
+				now := metav1.Now()
+				ss.CompletedAt = &now
+				r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepResumeRunIDError", "Step %s: resumeRunId: %v", step.Name, err)
+				continue
+			}
+			if resumed != "" {
+				runID = resumed
+			}
+		}
+
 		payload := natspkg.TaskPayload{
 			TaskID:    taskID,
 			ChainName: chain.Name,
 			StepName:  step.Name,
-			RunID:     chain.Status.RunID,
+			RunID:     runID,
 			Task:      taskStr,
 			Model:     model,
 		}
@@ -990,8 +1011,9 @@ func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr st
 	}
 
 	data := map[string]any{
-		"Steps": steps,
-		"Input": chain.Spec.Input,
+		"Steps":  steps,
+		"Input":  chain.Spec.Input,
+		"Fields": inputFields(chain.Spec.Input),
 	}
 	maps.Copy(data, extra)
 
@@ -1604,4 +1626,17 @@ func hasHardFailure(chain *aiv1alpha1.Chain, specMap map[string]*aiv1alpha1.Chai
 		}
 	}
 	return false
+}
+
+// inputFields returns the top-level fields of spec.input when it is a JSON
+// object (else an empty map), for templates that must pick single fields
+// instead of rendering all of .Input, e.g. {{ .Fields.url }}.
+func inputFields(input string) map[string]any {
+	fields := map[string]any{}
+	if strings.HasPrefix(strings.TrimSpace(input), "{") {
+		if err := json.Unmarshal([]byte(input), &fields); err != nil {
+			return map[string]any{}
+		}
+	}
+	return fields
 }

@@ -105,7 +105,9 @@ review lists the PRs to work on).
 **Merge.** The lead queues every PR from the final review with
 `gh pr merge --auto --squash` and waits up to 50 minutes for each to be merged,
 closed or blocked by a failing required check. Its output has one line per PR
-and the number of fix rounds. Handling a rejected merge is #226.
+and the number of fix rounds. A merge-queue rejection or a red CI run after
+the pipeline ended goes back to the PR's author through the feedback Chain
+([pr-feedback.md](pr-feedback.md)).
 
 **Escalate.** With `onExhausted: continue` an exhausted loop succeeds with
 outcome `Exhausted`, `escalate` labels the issue and PRs `needs-human` and
