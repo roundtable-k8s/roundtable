@@ -161,7 +161,7 @@ func TestSkillFilterScriptTrapsTerm(t *testing.T) {
 	if !strings.Contains(script, "trap 'exit 0' TERM INT") {
 		t.Fatalf("script has no TERM/INT trap:\n%s", script)
 	}
-	for _, l := range strings.Split(script, "\n") {
+	for l := range strings.SplitSeq(script, "\n") {
 		if strings.Contains(l, "sleep ") && !strings.Contains(l, "sleep 2 & wait $!") && !strings.Contains(l, "sleep 60 & wait $!") {
 			t.Errorf("sleep is not interruptible: %q", l)
 		}
