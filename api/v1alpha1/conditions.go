@@ -45,6 +45,20 @@ const (
 	// available (e.g. runtime: sandbox without the agent-sandbox v1alpha1 API).
 	ConditionKnightRuntimeAvailable = "RuntimeAvailable"
 
+	// ConditionKnightAutoscaled reports whether a KEDA ScaledObject scales
+	// the knight. It is only set when autoscaling is requested
+	// (spec.maxReplicas > 1 or lifecycle.suspendPolicy: auto).
+	// Status=False means it was requested but can't be honoured (KEDA's
+	// keda.sh/v1alpha1 ScaledObject isn't served, or the runtime doesn't
+	// support it); the knight then runs spec.replicas pods.
+	ConditionKnightAutoscaled = "Autoscaled"
+
+	// ConditionKnightPlanCapLimited is True when the RoundTable's
+	// policies.maxConcurrentPlanTasks lowered this plan-backed knight's
+	// replicas or maxReplicas. Only set on plan-backed knights in a table
+	// with a cap.
+	ConditionKnightPlanCapLimited = "PlanCapLimited"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
@@ -118,6 +132,27 @@ const (
 	// ReasonSandboxUnavailable indicates the knight requests runtime: sandbox but
 	// the operator started without the sandbox backend.
 	ReasonSandboxUnavailable = "SandboxUnavailable"
+
+	// ReasonKnightScaledToZero indicates KEDA scaled an autoscaled knight to
+	// zero pods because it had no pending tasks. It wakes on the next task.
+	ReasonKnightScaledToZero = "ScaledToZero"
+
+	// ReasonScaledObjectReady indicates the KEDA ScaledObject is rendered.
+	ReasonScaledObjectReady = "ScaledObjectReady"
+
+	// ReasonKEDAUnavailable indicates autoscaling was requested but the
+	// operator found no keda.sh/v1alpha1 ScaledObject API at startup.
+	ReasonKEDAUnavailable = "KEDAUnavailable"
+
+	// ReasonAutoscalingUnsupported indicates autoscaling was requested on a
+	// runtime the operator can't autoscale (runtime: sandbox).
+	ReasonAutoscalingUnsupported = "UnsupportedRuntime"
+
+	// ReasonPlanCapApplied indicates the plan-task cap lowered the knight's scale.
+	ReasonPlanCapApplied = "PlanCapApplied"
+
+	// ReasonWithinPlanCap indicates the knight got all the replicas it asked for.
+	ReasonWithinPlanCap = "WithinPlanCap"
 
 	// ===== RoundTable Condition Reasons =====
 

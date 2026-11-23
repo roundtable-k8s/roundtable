@@ -145,6 +145,40 @@ A step with `forEach` fans out over a JSON list taken from `spec.input` or a pri
 - JetStream streams (if `createStreams=true`)
 - No direct Knight ownership (uses selector, like a Service)
 
+### Knight scaling (#215)
+
+A Knight runs `spec.replicas` pods (default 1) bound to the same durable
+consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
+`concurrency` stays the number of tasks per pod.
+
+- **Workspace.** `workspace.mode: pvc` (default) is one ReadWriteOnce PVC and
+  allows a single pod (Recreate strategy). `workspace.mode: ephemeral` gives
+  each pod an `emptyDir` limited to `workspace.size` (RollingUpdate strategy)
+  and sets `KNIGHT_WORKSPACE_MODE=ephemeral`. CEL on `Knight.spec` rejects
+  `replicas`/`maxReplicas` above 1 on the default PVC (a ReadWriteMany
+  `existingClaim` is allowed) and on `runtime: sandbox`.
+- **Autoscaling.** With `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`
+  the operator renders a KEDA `ScaledObject` (same name as the Knight):
+  `nats-jetstream` trigger on `spec.nats.stream` / `<Knight>-consumer`,
+  `lagThreshold: "1"`, min `0` for `auto` (else `replicas`), max `maxReplicas`,
+  `cooldownPeriod` from `lifecycle.idleTimeout` (default 5m). The NATS
+  monitoring endpoint is `--nats-monitoring-endpoint` or `<nats host>:8222`.
+  The Deployment is created with one pod (the runtime creates its consumer on
+  start), after which KEDA owns `replicas`. A knight KEDA scaled to zero
+  reports phase `Suspended`, `Available=False` reason `ScaledToZero`.
+  `spec.suspended: true` deletes the ScaledObject before scaling to 0.
+- **KEDA is optional.** `--enable-keda=auto` probes discovery for
+  `keda.sh/v1alpha1 ScaledObject` once at startup (like the sandbox backend).
+  Without it the knight runs `spec.replicas` pods and reports
+  `Autoscaled=False` reason `KEDAUnavailable`.
+- **PodDisruptionBudget.** Knights that can run more than one pod get a PDB
+  with `maxUnavailable: 1`.
+- **Plan-task cap.** `RoundTable.spec.policies.maxConcurrentPlanTasks` caps the
+  combined capacity (`pods × concurrency`) of the table's plan-backed knights
+  (`spec.planBacked`, default: knights on a claude-knight image). Each knight
+  keeps one pod; spare capacity is handed out one pod at a time in name order.
+  A capped knight reports `PlanCapLimited=True`.
+
 ## 4. NATS Subject Mapping
 
 ### Current State (Implicit fleet-a)

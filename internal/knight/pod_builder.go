@@ -88,7 +88,27 @@ func (b *PodBuilder) WithReader(r client.Reader) *PodBuilder {
 }
 
 // WithWorkspace adds the workspace PVC mount at /data.
+//
+// In ephemeral mode (workspace.mode: ephemeral) /data is a per-pod emptyDir
+// limited to workspace.size, so several replicas can run side by side, and
+// KNIGHT_WORKSPACE_MODE=ephemeral tells the runtime its /data doesn't persist.
 func (b *PodBuilder) WithWorkspace() *PodBuilder {
+	if EphemeralWorkspace(b.knight) {
+		emptyDir := &corev1.EmptyDirVolumeSource{}
+		if size := b.knight.Spec.Workspace.Size; size != "" {
+			if q, err := resource.ParseQuantity(size); err == nil {
+				emptyDir.SizeLimit = &q
+			}
+		}
+		b.volumes = append(b.volumes, corev1.Volume{
+			Name:         "data",
+			VolumeSource: corev1.VolumeSource{EmptyDir: emptyDir},
+		})
+		b.mounts = append(b.mounts, corev1.VolumeMount{Name: "data", MountPath: "/data"})
+		b.env = append(b.env, corev1.EnvVar{Name: "KNIGHT_WORKSPACE_MODE", Value: aiv1alpha1.WorkspaceModeEphemeral})
+		return b
+	}
+
 	pvcName := b.knight.Name
 	if b.knight.Spec.Workspace != nil && b.knight.Spec.Workspace.ExistingClaim != "" {
 		pvcName = b.knight.Spec.Workspace.ExistingClaim

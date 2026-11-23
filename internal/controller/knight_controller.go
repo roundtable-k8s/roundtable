@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,9 +35,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -81,6 +85,16 @@ type KnightReconciler struct {
 	// RuntimeAvailable=False instead of being reconciled.
 	SandboxEnabled bool
 
+	// KEDAEnabled reports whether keda.sh/v1alpha1 ScaledObject is served.
+	// When false the operator never touches ScaledObjects, and knights that
+	// ask for autoscaling run spec.replicas pods with Autoscaled=False.
+	KEDAEnabled bool
+
+	// NATSMonitoringEndpoint overrides the NATS HTTP monitoring endpoint
+	// (host:port) written into ScaledObject triggers. Empty derives it from
+	// each knight's spec.nats.url host on port 8222.
+	NATSMonitoringEndpoint string
+
 	// ToolsImageMissing reports whether the registry positively says the
 	// tools image manifest at the given URL does not exist. Nil uses an HTTP
 	// HEAD probe; tests replace it.
@@ -93,6 +107,9 @@ type KnightReconciler struct {
 
 // runtimeSandbox is the spec.runtime value for the agent-sandbox backend.
 const runtimeSandbox = "sandbox"
+
+// runtimeDeployment is the default spec.runtime value (a Deployment).
+const runtimeDeployment = "deployment"
 
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights/status,verbs=get;update;patch
@@ -161,8 +178,12 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// Don't block reconciliation — the cleanup will retry on next reconcile
 	}
 
-	// Handle suspended state
+	// Handle suspended state. The ScaledObject goes first, or KEDA would
+	// scale the Deployment straight back up.
 	if knight.Spec.Suspended {
+		if err := r.deleteScaledObject(ctx, knight); err != nil {
+			return ctrl.Result{}, err
+		}
 		if backend != nil {
 			if err := backend.Suspend(ctx, knight); err != nil {
 				return ctrl.Result{}, err
@@ -174,6 +195,15 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Reconcile each owned resource
 	var reconcileErr error
+
+	// 0. Replica plan: spec.replicas/maxReplicas, KEDA availability and the
+	//    table's plan-task cap.
+	plan, err := r.resolveScaling(ctx, knight)
+	if err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to resolve knight scaling")
+		plan.Scaling = plan.CapReplicas(1)
+	}
 
 	// 1. ConfigMap (tools + prompt config)
 	if err := r.reconcileConfigMap(ctx, knight); err != nil {
@@ -211,8 +241,19 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
+	// 4. Scaling: KEDA ScaledObject and PodDisruptionBudget
+	if err := r.reconcileScaledObject(ctx, knight, plan.Scaling); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to reconcile ScaledObject")
+	}
+	if err := r.reconcilePDB(ctx, knight, plan.Scaling); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to reconcile PodDisruptionBudget")
+	}
+	r.setScalingConditions(knight, plan)
+
 	// Update status based on reconciliation results
-	if err := r.updateStatus(ctx, knight, reconcileErr); err != nil {
+	if err := r.updateStatus(ctx, knight, plan.Scaling, reconcileErr); err != nil {
 		log.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -454,11 +495,16 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 }
 
 // reconcilePVC creates the knight's persistent workspace volume.
-// Skips creation when spec.workspace.existingClaim is set (migration mode).
+// Skips creation when spec.workspace.existingClaim is set (migration mode) or
+// the workspace is ephemeral. Switching to ephemeral leaves an existing PVC in
+// place (it holds the knight's memory); it goes when the Knight is deleted.
 //
 // Nix tooling has no PVC: knights mount their tools image read-only (see
 // PodBuilder.WithNixStore).
 func (r *KnightReconciler) reconcilePVC(ctx context.Context, knight *aiv1alpha1.Knight) error {
+	if knightpkg.EphemeralWorkspace(knight) {
+		return nil
+	}
 	// Workspace PVC — skip if using an existing claim (migration mode)
 	if knight.Spec.Workspace != nil && knight.Spec.Workspace.ExistingClaim != "" {
 		logf.FromContext(ctx).Info("Using existing PVC", "claim", knight.Spec.Workspace.ExistingClaim)
@@ -512,114 +558,37 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 	return nil
 }
 
-// reconcileDeployment creates/updates the knight's Deployment.
-// Uses a spec hash annotation to avoid unnecessary updates that would trigger
-// a reconciliation hot loop.
+// reconcileDeployment creates/updates the knight's Deployment when no
+// RuntimeBackend is configured. It runs the same logic as the Deployment
+// backend (spec-hash guarded updates, KEDA-owned replicas left alone).
 func (r *KnightReconciler) reconcileDeployment(ctx context.Context, knight *aiv1alpha1.Knight) error {
-	log := logf.FromContext(ctx)
+	return r.NewDeploymentBackend().Reconcile(ctx, knight)
+}
 
-	// Build the desired state in a temporary deployment to compute the hash
-	desired := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      knight.Name,
-			Namespace: knight.Namespace,
-		},
-	}
-
-	labels := map[string]string{
-		"app.kubernetes.io/name":       "knight",
-		"app.kubernetes.io/instance":   knight.Name,
-		"app.kubernetes.io/managed-by": "roundtable-operator",
-		"roundtable.io/domain":         knight.Spec.Domain,
-	}
-
-	replicas := int32(1)
-	desired.Spec.Replicas = &replicas
-	desired.Spec.Strategy = appsv1.DeploymentStrategy{
-		Type: appsv1.RecreateDeploymentStrategyType,
-	}
-	desired.Spec.Template.Labels = labels
-	podAnnotations := map[string]string{
-		"roundtable.io/model":  knight.Spec.Model,
-		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
-		"roundtable.io/domain": knight.Spec.Domain,
-	}
-	desired.Spec.Template.Annotations = podAnnotations
-	desired.Spec.Template.Spec = r.BuildPodSpec(ctx, knight)
-
-	// Compute hash of desired state
-	desiredHash := knightpkg.DeploymentSpecHash(desired)
-
-	// Fetch or create the deployment
-	deploy := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      knight.Name,
-			Namespace: knight.Namespace,
-		},
-	}
-
-	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, deploy, func() error {
-		if err := controllerutil.SetControllerReference(knight, deploy, r.Scheme); err != nil {
-			return err
-		}
-
-		// Check if the spec hash matches — if so, skip mutation
-		existingHash := ""
-		if deploy.Spec.Template.Annotations != nil {
-			existingHash = deploy.Spec.Template.Annotations[specHashAnnotation]
-		}
-		if existingHash == desiredHash {
-			// No changes needed — return without modifying the object
-			// so CreateOrUpdate sees no diff and reports "unchanged"
-			return nil
-		}
-
-		// Apply desired state
-		deploy.Labels = labels
-		deploy.Spec.Replicas = &replicas
-		deploy.Spec.Strategy = appsv1.DeploymentStrategy{
-			Type: appsv1.RecreateDeploymentStrategyType,
-		}
-		deploy.Spec.Selector = &metav1.LabelSelector{
-			MatchLabels: labels,
-		}
-		deploy.Spec.Template.Labels = labels
-
-		// Add spec hash to pod annotations
-		podAnnotations[specHashAnnotation] = desiredHash
-		deploy.Spec.Template.Annotations = podAnnotations
-
-		deploy.Spec.Template.Spec = r.BuildPodSpec(ctx, knight)
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("deployment reconcile failed: %w", err)
-	}
-
-	log.Info("Deployment reconciled", "operation", op,
-		"specImage", knight.Spec.Image,
-		"defaultImage", r.DefaultImage,
-		"resolvedImage", deploy.Spec.Template.Spec.Containers[0].Image)
-	return nil
+// NewDeploymentBackend returns a Deployment runtime backend wired to this
+// reconciler's spec builder and autoscaling check.
+func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
+	b := rtruntime.NewDeploymentBackend(r.Client, r.Scheme, r.DefaultImage, r.BuildDeploymentSpec)
+	b.Autoscaled = r.isAutoscaled
+	return b
 }
 
 // BuildDeploymentSpec constructs the full DeploymentSpec for a Knight.
 // Exported so it can be passed as a PodSpecBuilder to RuntimeBackend.
+//
+// Replicas is the fixed replica count, or the initial count when KEDA owns
+// it. A PVC workspace (ReadWriteOnce) needs the Recreate strategy; an
+// ephemeral one rolls pods without downtime.
 func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.DeploymentSpec {
-	labels := map[string]string{
-		"app.kubernetes.io/name":       "knight",
-		"app.kubernetes.io/instance":   knight.Name,
-		"app.kubernetes.io/managed-by": "roundtable-operator",
-		"roundtable.io/domain":         knight.Spec.Domain,
+	labels := knightLabels(knight)
+	replicas := r.scalingOrFallback(ctx, knight).InitialReplicas()
+	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	if knightpkg.EphemeralWorkspace(knight) {
+		strategy = appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType}
 	}
-	replicas := int32(1)
 	return appsv1.DeploymentSpec{
 		Replicas: &replicas,
-		Strategy: appsv1.DeploymentStrategy{
-			Type: appsv1.RecreateDeploymentStrategyType,
-		},
+		Strategy: strategy,
 		Selector: &metav1.LabelSelector{
 			MatchLabels: labels,
 		},
@@ -659,21 +628,34 @@ func (r *KnightReconciler) BuildPodSpec(ctx context.Context, k *aiv1alpha1.Knigh
 	return builder.Build(ctx)
 }
 
-func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.Knight, reconcileErr error) error {
+func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.Knight, scaling knightpkg.Scaling, reconcileErr error) error {
 	// Check deployment readiness — prefer RuntimeBackend if available
 	backend := r.runtimeBackendFor(knight)
 	var isReady bool
+	deploy := &appsv1.Deployment{}
+	deployFound := false
+	if runtimeName(knight) == runtimeDeployment {
+		if err := r.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, deploy); err == nil {
+			deployFound = true
+		}
+	}
 	if backend != nil {
 		ready, err := backend.IsReady(ctx, knight)
 		if err == nil {
 			isReady = ready
 		}
-	} else {
-		deploy := &appsv1.Deployment{}
-		if err := r.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, deploy); err == nil {
-			isReady = deploy.Status.ReadyReplicas > 0
-		}
+	} else if deployFound {
+		isReady = deploy.Status.ReadyReplicas > 0
 	}
+	knight.Status.Replicas, knight.Status.ReadyReplicas = 0, 0
+	if deployFound {
+		knight.Status.Replicas = deploy.Status.Replicas
+		knight.Status.ReadyReplicas = deploy.Status.ReadyReplicas
+	}
+	// KEDA scaled an idle knight to zero: report it as suspended, not as
+	// stuck provisioning. It wakes when a task is pending on its consumer.
+	scaledToZero := scaling.Autoscaled && deployFound && !isReady &&
+		deploy.Spec.Replicas != nil && *deploy.Spec.Replicas == 0
 
 	if reconcileErr != nil {
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ReconcileFailed", "Reconciliation failed: %v", reconcileErr)
@@ -684,6 +666,17 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			Status:             metav1.ConditionFalse,
 			Reason:             aiv1alpha1.ReasonKnightReconcileError,
 			Message:            reconcileErr.Error(),
+			ObservedGeneration: knight.Generation,
+		})
+	} else if scaledToZero {
+		knight.Status.Phase = aiv1alpha1.KnightPhaseSuspended
+		knight.Status.Ready = false
+		meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+			Type:   aiv1alpha1.ConditionKnightAvailable,
+			Status: metav1.ConditionFalse,
+			Reason: aiv1alpha1.ReasonKnightScaledToZero,
+			Message: fmt.Sprintf("KEDA scaled the knight to zero; it wakes when tasks are pending on consumer %s",
+				knightpkg.TaskConsumerName(knight)),
 			ObservedGeneration: knight.Generation,
 		})
 	} else if isReady {
@@ -756,7 +749,7 @@ func (r *KnightReconciler) runtimeBackendFor(knight *aiv1alpha1.Knight) rtruntim
 // runtimeName returns the effective spec.runtime (empty means deployment).
 func runtimeName(knight *aiv1alpha1.Knight) string {
 	if knight.Spec.Runtime == "" {
-		return "deployment"
+		return runtimeDeployment
 	}
 	return knight.Spec.Runtime
 }
@@ -770,7 +763,15 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&batchv1.Job{}).
-		Owns(&corev1.ConfigMap{})
+		Owns(&corev1.ConfigMap{}).
+		Owns(&policyv1.PodDisruptionBudget{}).
+		// Plan-task cap: a knight's share depends on its table and siblings.
+		Watches(&aiv1alpha1.RoundTable{},
+			handler.EnqueueRequestsFromMapFunc(r.roundTableKnightRequests),
+			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&aiv1alpha1.Knight{},
+			handler.EnqueueRequestsFromMapFunc(r.planSiblingRequests),
+			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	if r.SandboxEnabled {
 		b = b.Owns(&sandboxv1alpha1.Sandbox{})
 	}

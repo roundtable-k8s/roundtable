@@ -366,3 +366,77 @@ func TestDeploymentBackend_Resume_ErrorsWhenNotFound(t *testing.T) {
 	assert.Error(t, err, "resume should error when deployment not found")
 	assert.Contains(t, err.Error(), "not found")
 }
+
+// scaledSpecBuilder wraps stubPodSpecBuilder with fixed replicas and strategy.
+func scaledSpecBuilder(replicas int32, strategy appsv1.DeploymentStrategyType) PodSpecBuilder {
+	return func(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.DeploymentSpec {
+		spec := stubPodSpecBuilder(ctx, knight)
+		spec.Replicas = &replicas
+		spec.Strategy = appsv1.DeploymentStrategy{Type: strategy}
+		return spec
+	}
+}
+
+func getDeploy(t *testing.T, b *DeploymentBackend, name string) *appsv1.Deployment {
+	t.Helper()
+	deploy := &appsv1.Deployment{}
+	require.NoError(t, b.Client.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "ai"}, deploy))
+	return deploy
+}
+
+func TestDeploymentBackend_Reconcile_UsesSpecReplicasAndStrategy(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(3, appsv1.RollingUpdateDeploymentStrategyType))
+
+	require.NoError(t, b.Reconcile(ctx, newTestKnight("tristan")))
+	deploy := getDeploy(t, b, "tristan")
+	assert.Equal(t, int32(3), *deploy.Spec.Replicas)
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, deploy.Spec.Strategy.Type)
+}
+
+func TestDeploymentBackend_Reconcile_RestoresReplicasAfterSuspend(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(2, appsv1.RollingUpdateDeploymentStrategyType))
+	knight := newTestKnight("bedivere")
+
+	require.NoError(t, b.Reconcile(ctx, knight))
+	require.NoError(t, b.Suspend(ctx, knight))
+	assert.Equal(t, int32(0), *getDeploy(t, b, "bedivere").Spec.Replicas)
+
+	// The template is unchanged (same spec hash), but replicas still come back.
+	require.NoError(t, b.Reconcile(ctx, knight))
+	assert.Equal(t, int32(2), *getDeploy(t, b, "bedivere").Spec.Replicas)
+}
+
+func TestDeploymentBackend_Reconcile_LeavesKEDAReplicasAlone(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(1, appsv1.RollingUpdateDeploymentStrategyType))
+	b.Autoscaled = func(context.Context, *aiv1alpha1.Knight) bool { return true }
+	knight := newTestKnight("gareth")
+
+	// Created with the initial count.
+	require.NoError(t, b.Reconcile(ctx, knight))
+	deploy := getDeploy(t, b, "gareth")
+	assert.Equal(t, int32(1), *deploy.Spec.Replicas)
+
+	// KEDA scales out; a reconcile (even with a template change) keeps it.
+	five := int32(5)
+	deploy.Spec.Replicas = &five
+	require.NoError(t, c.Update(ctx, deploy))
+	knight.Spec.Image = "ghcr.io/dapperdivers/openclaw-knight:v2"
+	require.NoError(t, b.Reconcile(ctx, knight))
+	deploy = getDeploy(t, b, "gareth")
+	assert.Equal(t, int32(5), *deploy.Spec.Replicas)
+	assert.Equal(t, "ghcr.io/dapperdivers/openclaw-knight:v2", deploy.Spec.Template.Spec.Containers[0].Image)
+
+	// Autoscaling off again: the operator takes replicas back.
+	b.Autoscaled = nil
+	require.NoError(t, b.Reconcile(ctx, knight))
+	assert.Equal(t, int32(1), *getDeploy(t, b, "gareth").Spec.Replicas)
+}

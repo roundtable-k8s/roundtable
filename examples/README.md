@@ -5,6 +5,7 @@ Real-world examples of Round Table resources.
 | File | Description |
 |------|-------------|
 | [`knight-basic.yaml`](knight-basic.yaml) | A single knight — security domain with NATS config |
+| [`knight-scaled.yaml`](knight-scaled.yaml) | A horizontally scaled knight — ephemeral workspace, KEDA 0..N on pending tasks |
 | [`roundtable-fleet.yaml`](roundtable-fleet.yaml) | Full fleet config with warm pool, policies, and NATS streams |
 | [`chain-sequential.yaml`](chain-sequential.yaml) | Multi-step chain with output templating between steps |
 | [`chain-model-override.yaml`](chain-model-override.yaml) | Per-step model override with RoundTable `modelAliases` |

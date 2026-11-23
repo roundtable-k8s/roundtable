@@ -694,19 +694,34 @@ spec:
                             idleTimeout:
                               description: |-
                                 idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
+                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
+                                the ScaledObject cooldownPeriod (default 5m).
                               type: string
                             suspendPolicy:
                               default: never
                               description: |-
                                 suspendPolicy controls when the knight is suspended.
-                                Values: auto, manual, never (default: never)
+                                Values: auto, manual, never (default: never).
+                                auto makes the operator render a KEDA ScaledObject that scales the
+                                knight to 0 when its consumer has no pending tasks and back up when
+                                tasks arrive (requires KEDA).
                               enum:
                               - auto
                               - manual
                               - never
                               type: string
                           type: object
+                        maxReplicas:
+                          description: |-
+                            maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
+                            A value above 1 makes the operator render a KEDA ScaledObject that
+                            scales the knight on its consumer's pending tasks. concurrency stays
+                            the number of tasks per pod. Requires KEDA; without it the knight runs
+                            spec.replicas pods and reports Autoscaled=False.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         model:
                           default: openrouter/deepseek/deepseek-v3.2
                           description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
@@ -760,6 +775,14 @@ spec:
                           items:
                             type: string
                           type: array
+                        planBacked:
+                          description: |-
+                            planBacked marks a knight whose tasks spend the shared Claude plan
+                            quota (a setup token shared by several knights). The RoundTable's
+                            policies.maxConcurrentPlanTasks caps the combined capacity
+                            (replicas x concurrency) of its plan-backed knights. When unset, knights
+                            running a claude-knight image count as plan-backed.
+                          type: boolean
                         prompt:
                           description: prompt allows overriding the knight's system
                             prompt components.
@@ -789,6 +812,19 @@ spec:
                                 appended to the system prompt.
                               type: string
                           type: object
+                        replicas:
+                          description: |-
+                            replicas is the number of worker pods for this knight. All replicas bind
+                            to the same durable consumer, so JetStream hands each one different
+                            tasks. When the knight is autoscaled (see maxReplicas and
+                            lifecycle.suspendPolicy) this is KEDA's minReplicaCount instead, except
+                            with suspendPolicy auto, which always scales down to 0.
+                            More than one replica needs workspace.mode: ephemeral (or a
+                            ReadWriteMany workspace.existingClaim). Defaults to 1.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         resources:
                           description: resources defines compute resource requirements
                             for the knight container.
@@ -905,10 +941,24 @@ spec:
                                 existingClaim references an existing PVC to use instead of creating a new one.
                                 Useful for migrating existing knights to operator management.
                               type: string
+                            mode:
+                              default: pvc
+                              description: |-
+                                mode selects the workspace storage.
+                                "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+                                runs a single pod.
+                                "ephemeral" gives every pod its own emptyDir (size limit: size), which
+                                lets the knight run several replicas. Anything the runtime keeps under
+                                /data, including its memory files, is lost when the pod is replaced.
+                              enum:
+                              - pvc
+                              - ephemeral
+                              type: string
                             size:
                               default: 1Gi
-                              description: size is the storage request for auto-created
-                                PVCs.
+                              description: |-
+                                size is the storage request for auto-created PVCs, or the emptyDir
+                                size limit in ephemeral mode.
                               type: string
                           type: object
                       required:
@@ -1547,19 +1597,34 @@ spec:
                             idleTimeout:
                               description: |-
                                 idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
+                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
+                                the ScaledObject cooldownPeriod (default 5m).
                               type: string
                             suspendPolicy:
                               default: never
                               description: |-
                                 suspendPolicy controls when the knight is suspended.
-                                Values: auto, manual, never (default: never)
+                                Values: auto, manual, never (default: never).
+                                auto makes the operator render a KEDA ScaledObject that scales the
+                                knight to 0 when its consumer has no pending tasks and back up when
+                                tasks arrive (requires KEDA).
                               enum:
                               - auto
                               - manual
                               - never
                               type: string
                           type: object
+                        maxReplicas:
+                          description: |-
+                            maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
+                            A value above 1 makes the operator render a KEDA ScaledObject that
+                            scales the knight on its consumer's pending tasks. concurrency stays
+                            the number of tasks per pod. Requires KEDA; without it the knight runs
+                            spec.replicas pods and reports Autoscaled=False.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         model:
                           default: openrouter/deepseek/deepseek-v3.2
                           description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
@@ -1613,6 +1678,14 @@ spec:
                           items:
                             type: string
                           type: array
+                        planBacked:
+                          description: |-
+                            planBacked marks a knight whose tasks spend the shared Claude plan
+                            quota (a setup token shared by several knights). The RoundTable's
+                            policies.maxConcurrentPlanTasks caps the combined capacity
+                            (replicas x concurrency) of its plan-backed knights. When unset, knights
+                            running a claude-knight image count as plan-backed.
+                          type: boolean
                         prompt:
                           description: prompt allows overriding the knight's system
                             prompt components.
@@ -1642,6 +1715,19 @@ spec:
                                 appended to the system prompt.
                               type: string
                           type: object
+                        replicas:
+                          description: |-
+                            replicas is the number of worker pods for this knight. All replicas bind
+                            to the same durable consumer, so JetStream hands each one different
+                            tasks. When the knight is autoscaled (see maxReplicas and
+                            lifecycle.suspendPolicy) this is KEDA's minReplicaCount instead, except
+                            with suspendPolicy auto, which always scales down to 0.
+                            More than one replica needs workspace.mode: ephemeral (or a
+                            ReadWriteMany workspace.existingClaim). Defaults to 1.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         resources:
                           description: resources defines compute resource requirements
                             for the knight container.
@@ -1758,10 +1844,24 @@ spec:
                                 existingClaim references an existing PVC to use instead of creating a new one.
                                 Useful for migrating existing knights to operator management.
                               type: string
+                            mode:
+                              default: pvc
+                              description: |-
+                                mode selects the workspace storage.
+                                "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+                                runs a single pod.
+                                "ephemeral" gives every pod its own emptyDir (size limit: size), which
+                                lets the knight run several replicas. Anything the runtime keeps under
+                                /data, including its memory files, is lost when the pod is replaced.
+                              enum:
+                              - pvc
+                              - ephemeral
+                              type: string
                             size:
                               default: 1Gi
-                              description: size is the storage request for auto-created
-                                PVCs.
+                              description: |-
+                                size is the storage request for auto-created PVCs, or the emptyDir
+                                size limit in ephemeral mode.
                               type: string
                           type: object
                       required:
@@ -2157,19 +2257,34 @@ spec:
                             idleTimeout:
                               description: |-
                                 idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
+                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
+                                the ScaledObject cooldownPeriod (default 5m).
                               type: string
                             suspendPolicy:
                               default: never
                               description: |-
                                 suspendPolicy controls when the knight is suspended.
-                                Values: auto, manual, never (default: never)
+                                Values: auto, manual, never (default: never).
+                                auto makes the operator render a KEDA ScaledObject that scales the
+                                knight to 0 when its consumer has no pending tasks and back up when
+                                tasks arrive (requires KEDA).
                               enum:
                               - auto
                               - manual
                               - never
                               type: string
                           type: object
+                        maxReplicas:
+                          description: |-
+                            maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
+                            A value above 1 makes the operator render a KEDA ScaledObject that
+                            scales the knight on its consumer's pending tasks. concurrency stays
+                            the number of tasks per pod. Requires KEDA; without it the knight runs
+                            spec.replicas pods and reports Autoscaled=False.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         model:
                           default: openrouter/deepseek/deepseek-v3.2
                           description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
@@ -2223,6 +2338,14 @@ spec:
                           items:
                             type: string
                           type: array
+                        planBacked:
+                          description: |-
+                            planBacked marks a knight whose tasks spend the shared Claude plan
+                            quota (a setup token shared by several knights). The RoundTable's
+                            policies.maxConcurrentPlanTasks caps the combined capacity
+                            (replicas x concurrency) of its plan-backed knights. When unset, knights
+                            running a claude-knight image count as plan-backed.
+                          type: boolean
                         prompt:
                           description: prompt allows overriding the knight's system
                             prompt components.
@@ -2252,6 +2375,19 @@ spec:
                                 appended to the system prompt.
                               type: string
                           type: object
+                        replicas:
+                          description: |-
+                            replicas is the number of worker pods for this knight. All replicas bind
+                            to the same durable consumer, so JetStream hands each one different
+                            tasks. When the knight is autoscaled (see maxReplicas and
+                            lifecycle.suspendPolicy) this is KEDA's minReplicaCount instead, except
+                            with suspendPolicy auto, which always scales down to 0.
+                            More than one replica needs workspace.mode: ephemeral (or a
+                            ReadWriteMany workspace.existingClaim). Defaults to 1.
+                          format: int32
+                          maximum: 50
+                          minimum: 1
+                          type: integer
                         resources:
                           description: resources defines compute resource requirements
                             for the knight container.
@@ -2368,10 +2504,24 @@ spec:
                                 existingClaim references an existing PVC to use instead of creating a new one.
                                 Useful for migrating existing knights to operator management.
                               type: string
+                            mode:
+                              default: pvc
+                              description: |-
+                                mode selects the workspace storage.
+                                "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+                                runs a single pod.
+                                "ephemeral" gives every pod its own emptyDir (size limit: size), which
+                                lets the knight run several replicas. Anything the runtime keeps under
+                                /data, including its memory files, is lost when the pod is replaced.
+                              enum:
+                              - pvc
+                              - ephemeral
+                              type: string
                             size:
                               default: 1Gi
-                              description: size is the storage request for auto-created
-                                PVCs.
+                              description: |-
+                                size is the storage request for auto-created PVCs, or the emptyDir
+                                size limit in ephemeral mode.
                               type: string
                           type: object
                       required:
@@ -3086,19 +3236,34 @@ spec:
                           idleTimeout:
                             description: |-
                               idleTimeout is how long after the last task before auto-suspending.
-                              Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
+                              Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
+                              the ScaledObject cooldownPeriod (default 5m).
                             type: string
                           suspendPolicy:
                             default: never
                             description: |-
                               suspendPolicy controls when the knight is suspended.
-                              Values: auto, manual, never (default: never)
+                              Values: auto, manual, never (default: never).
+                              auto makes the operator render a KEDA ScaledObject that scales the
+                              knight to 0 when its consumer has no pending tasks and back up when
+                              tasks arrive (requires KEDA).
                             enum:
                             - auto
                             - manual
                             - never
                             type: string
                         type: object
+                      maxReplicas:
+                        description: |-
+                          maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
+                          A value above 1 makes the operator render a KEDA ScaledObject that
+                          scales the knight on its consumer's pending tasks. concurrency stays
+                          the number of tasks per pod. Requires KEDA; without it the knight runs
+                          spec.replicas pods and reports Autoscaled=False.
+                        format: int32
+                        maximum: 50
+                        minimum: 1
+                        type: integer
                       model:
                         default: openrouter/deepseek/deepseek-v3.2
                         description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
@@ -3152,6 +3317,14 @@ spec:
                         items:
                           type: string
                         type: array
+                      planBacked:
+                        description: |-
+                          planBacked marks a knight whose tasks spend the shared Claude plan
+                          quota (a setup token shared by several knights). The RoundTable's
+                          policies.maxConcurrentPlanTasks caps the combined capacity
+                          (replicas x concurrency) of its plan-backed knights. When unset, knights
+                          running a claude-knight image count as plan-backed.
+                        type: boolean
                       prompt:
                         description: prompt allows overriding the knight's system
                           prompt components.
@@ -3181,6 +3354,19 @@ spec:
                               appended to the system prompt.
                             type: string
                         type: object
+                      replicas:
+                        description: |-
+                          replicas is the number of worker pods for this knight. All replicas bind
+                          to the same durable consumer, so JetStream hands each one different
+                          tasks. When the knight is autoscaled (see maxReplicas and
+                          lifecycle.suspendPolicy) this is KEDA's minReplicaCount instead, except
+                          with suspendPolicy auto, which always scales down to 0.
+                          More than one replica needs workspace.mode: ephemeral (or a
+                          ReadWriteMany workspace.existingClaim). Defaults to 1.
+                        format: int32
+                        maximum: 50
+                        minimum: 1
+                        type: integer
                       resources:
                         description: resources defines compute resource requirements
                           for the knight container.
@@ -3295,10 +3481,24 @@ spec:
                               existingClaim references an existing PVC to use instead of creating a new one.
                               Useful for migrating existing knights to operator management.
                             type: string
+                          mode:
+                            default: pvc
+                            description: |-
+                              mode selects the workspace storage.
+                              "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+                              runs a single pod.
+                              "ephemeral" gives every pod its own emptyDir (size limit: size), which
+                              lets the knight run several replicas. Anything the runtime keeps under
+                              /data, including its memory files, is lost when the pod is replaced.
+                            enum:
+                            - pvc
+                            - ephemeral
+                            type: string
                           size:
                             default: 1Gi
-                            description: size is the storage request for auto-created
-                              PVCs.
+                            description: |-
+                              size is the storage request for auto-created PVCs, or the emptyDir
+                              size limit in ephemeral mode.
                             type: string
                         type: object
                     required:
@@ -3456,6 +3656,20 @@ spec:
                         description: costResetSchedule is a cron expression for resetting
                           the cost counter (e.g., "0 0 1 * *" for monthly).
                         type: string
+                      maxConcurrentPlanTasks:
+                        default: 0
+                        description: |-
+                          maxConcurrentPlanTasks caps how many tasks the table's plan-backed
+                          knights (see Knight spec.planBacked) can run at once, so parallel
+                          sessions sharing one Claude plan token don't exhaust its rate limit.
+                          The operator enforces it on capacity: the sum of replicas x concurrency
+                          over plan-backed knights stays within the cap, by lowering each
+                          knight's replicas/maxReplicas. Every running plan-backed knight keeps
+                          at least one pod, so the cap can be exceeded only by those first pods.
+                          0 means unlimited.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       maxConcurrentTasks:
                         default: 0
                         description: |-
