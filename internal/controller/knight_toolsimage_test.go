@@ -320,7 +320,7 @@ var _ = Describe("Knight tools image", func() {
 		})
 	})
 
-	// ── reconcileNixBuild dispatch ────────────────────────────────────────
+	// ── reconcileNixTools ────────────────────────────────────────
 	It("asks to be requeued to re-verify a published image", func() {
 		r := &KnightReconciler{
 			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10),
@@ -329,16 +329,32 @@ var _ = Describe("Knight tools image", func() {
 		k := newKnight("sagramore", []string{"jq", "tree"})
 		k.Status.ToolsImage = knightpkg.ToolsImageRef(k)
 
-		requeue, err := r.reconcileNixBuild(ctx, k)
+		requeue, err := r.reconcileNixTools(ctx, k)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(Equal(toolsImageVerifyInterval))
 	})
 
-	It("takes the tools image path instead of the shared store when a repository is set", func() {
+	It("warns and builds nothing when no tools image repository is configured", func() {
+		GinkgoT().Setenv("KNIGHT_TOOLS_IMAGE_REPO", "")
+		rec := record.NewFakeRecorder(10)
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		k := newKnight("agravain", []string{"jq"})
+
+		requeue, err := r.reconcileNixTools(ctx, k)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(requeue).To(BeZero())
+		Expect(rec.Events).To(Receive(ContainSubstring("ToolsImageNotConfigured")))
+
+		job := &batchv1.Job{}
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: "agravain-toolsimg-" + knightpkg.ToolsImageTag(k), Namespace: "default"}, job)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("builds a tools image for a knight with Nix tools", func() {
 		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
 		k := newKnight("dinadan", []string{"jq"})
 
-		requeue, err := r.reconcileNixBuild(ctx, k)
+		requeue, err := r.reconcileNixTools(ctx, k)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeZero())
 

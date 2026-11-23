@@ -46,8 +46,7 @@ spec:
           env:
             - name: DEFAULT_KNIGHT_IMAGE
               value: "{{ .Values.images.piKnight.repository }}:{{ .Values.images.piKnight.tag }}"
-            # Pod security context applied to knight Deployments and Nix build
-            # Jobs alike (set once here, reused by the operator).
+            # Pod security context applied to knight pods.
             - name: KNIGHT_RUN_AS_USER
               value: "{{ .Values.knightSecurity.runAsUser }}"
             - name: KNIGHT_RUN_AS_GROUP
@@ -62,7 +61,7 @@ spec:
             {{- with .Values.toolsImage }}
             {{- if .repository }}
             # Per-knight tools images: build Nix tools into an OCI image per
-            # tool list and mount it as an image volume (no shared store).
+            # tool list and mount it as an image volume.
             - name: KNIGHT_TOOLS_IMAGE_REPO
               value: "{{ .repository }}"
             {{- if .pushRepository }}
@@ -89,17 +88,6 @@ spec:
             - name: NOTIFY_ALLOWED_URL_PREFIXES
               value: "{{ join "," .Values.notify.allowedURLPrefixes }}"
             {{- end }}
-            # Shared Nix store PVC — knights mount it read-only and the legacy
-            # build Job mounts it read-write. Single source of truth for the
-            # store name (the builder Deployment mounts the same value).
-            - name: KNIGHT_NIX_STORE_PVC
-              value: "{{ .Values.nixBuilder.storeClaimName }}"
-            {{- if and .Values.nixBuilder.enabled .Values.nixBuilder.mountQueue }}
-            # Presence of /queue switches the operator to queue-backed dispatch
-            # (the nix-daemon builder) instead of per-knight build Jobs.
-            - name: BUILD_QUEUE_DIR
-              value: /queue
-            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -109,14 +97,3 @@ spec:
             capabilities:
               drop:
                 - ALL
-          {{- if and .Values.nixBuilder.enabled .Values.nixBuilder.mountQueue }}
-          volumeMounts:
-            - name: build-queue
-              mountPath: /queue
-          {{- end }}
-      {{- if and .Values.nixBuilder.enabled .Values.nixBuilder.mountQueue }}
-      volumes:
-        - name: build-queue
-          persistentVolumeClaim:
-            claimName: {{ .Values.nixBuilder.queueClaimName }}
-      {{- end }}

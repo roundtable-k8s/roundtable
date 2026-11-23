@@ -481,8 +481,8 @@ spec:
                 type: object
               nixPackages:
                 description: |-
-                  nixPackages lists nix packages to install during knight bootstrap.
-                  Packages are installed via: nix profile install nixpkgs#<pkg>
+                  nixPackages is deprecated and ignored. Use tools.nix, which the operator
+                  builds into a tools image the knight mounts read-only.
                 items:
                   type: string
                 type: array
@@ -588,8 +588,10 @@ spec:
                     type: array
                   nix:
                     description: |-
-                      nix is a list of nixpkgs packages to install via Nix flakes (e.g., "nmap", "whois", "dnsutils").
-                      These get compiled into a flake.nix and built on first boot, cached on the Nix PVC.
+                      nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
+                      The operator builds each unique list once into an OCI tools image and
+                      the knight mounts it read-only at /nix. Requires the operator to be
+                      configured with a tools image repository.
                     items:
                       type: string
                     type: array
@@ -705,12 +707,6 @@ spec:
                 description: natsConsumer is the name of the reconciled NATS durable
                   consumer.
                 type: string
-              nixToolsHash:
-                description: |-
-                  nixToolsHash is the tools hash whose flake has been successfully built
-                  and published to the shared Nix store. Empty until the first build
-                  completes; used to avoid rebuilding unchanged tool sets.
-                type: string
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
@@ -742,8 +738,8 @@ spec:
                 description: |-
                   toolsImage is the tools image reference that has been built and pushed
                   for this knight's current Nix tool list. Empty until the build Job
-                  succeeds; used to avoid rebuilding unchanged tool lists. Only set when
-                  the operator is configured with a tools image repository.
+                  succeeds; used to avoid rebuilding unchanged tool lists and as the
+                  image the knight's pod mounts.
                 type: string
               totalCost:
                 description: totalCost is the cumulative cost in USD of all tasks

@@ -57,29 +57,28 @@ images:
     repository: ghcr.io/roundtable-k8s/roundtable-ui
     tag: 24615ccda6af6136eb81ee07e535c00bd73095a5
 
-# Pod-level security context for all knight-owned pods — knight Deployments
-# AND the shared Nix store build Jobs. Set once here; the operator applies it
-# everywhere. OnRootMismatch is important: it stops kubelet from recursively
-# chowning the (large) shared Nix store on every pod mount.
+# Pod-level security context for knight pods. Set once here; the operator
+# applies it to every knight. OnRootMismatch stops kubelet from recursively
+# chowning a knight's volumes on every pod mount.
 knightSecurity:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
   fsGroupChangePolicy: OnRootMismatch
 
-# Pinned nixpkgs ref for knight tool flakes — an immutable commit for
+# Pinned nixpkgs ref for knight tools images — an immutable commit for
 # reproducible builds. Bump to roll the whole fleet's tooling forward (changing
-# this triggers a one-time rebuild of every knight's Nix tools).
+# this changes every tools image tag, so every knight's tools are rebuilt).
 nixpkgs:
   ref: "9ae611a455b90cf061d8f332b977e387bda8e1ca" # nixos-unstable @ 2026-06-10
 
-# Per-knight tools images. When repository is set, the operator stops using the
-# shared Nix store: for each unique spec.tools.nix list it runs a one-off Job
-# that builds an OCI image with nix2container and pushes it (tag = hash of the
-# tool list), and the knight mounts that image read-only at /nix as an image
-# volume. Identical lists share one image and are built once. Needs Kubernetes
-# image volumes (on by default from 1.35) and containerd 2.1+. With this set,
-# nixBuilder below is unused and can stay disabled.
+# Per-knight tools images: how knights get their spec.tools.nix packages. For
+# each unique list the operator runs a one-off Job that builds an OCI image
+# with nix2container and pushes it (tag = hash of the tool list), and the
+# knight mounts that image read-only at /nix as an image volume. Identical
+# lists share one image and are built once. Needs Kubernetes image volumes (on
+# by default from 1.35) and containerd 2.1+. Without a repository, knights run
+# without their Nix tools and get a ToolsImageNotConfigured warning event.
 toolsImage:
   # Repository knights (i.e. the nodes) pull from, e.g.
   # registry.example.com/knight-tools. Empty disables tools images.
@@ -95,33 +94,6 @@ toolsImage:
   # nix2container commit the generated flake pins; defaults to the operator's
   # built-in pin. Changing it changes every tools image tag.
   nix2containerRev: ""
-
-# Persistent shared-store builder (the nix-daemon builder). When enabled, a
-# single-replica root Deployment owns the shared Nix store read-write, runs a
-# nix-daemon, and builds knight tools that the operator dispatches through an
-# RWX work-queue PVC — replacing the per-knight build Jobs + global store lock.
-# The operator auto-switches to queue dispatch whenever the queue PVC is mounted
-# into it (mountQueue, below); otherwise it falls back to the legacy build Jobs.
-nixBuilder:
-  enabled: false
-  # Mount the work-queue PVC into the operator so it dispatches via the queue.
-  # Keep in lockstep with enabled; split out only to stage a rollout if needed.
-  mountQueue: true
-  image:
-    # Defaults to images.piKnight when repository/tag are empty.
-    repository: ""
-    tag: ""
-    pullPolicy: Always
-  storeClaimName: roundtable-nix-store        # RWX; mounted read-write (sole writer)
-  queueClaimName: roundtable-nix-buildqueue   # RWX; operator<->builder coordination
-  concurrency: 6                              # concurrent `nix build` clients
-  scratchSizeLimit: 10Gi                      # emptyDir for build scratch (off the store)
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      memory: 4Gi
 
 # Dashboard (Round Table UI) — observability platform
 dashboard:

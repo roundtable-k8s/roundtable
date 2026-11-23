@@ -26,10 +26,9 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
-// Tools images: instead of building a knight's Nix tools into a shared store
-// PVC, the operator builds them once per unique tool list into an OCI image
-// (nix2container), pushes it to a registry, and the knight mounts that image
-// read-only at /nix as an image volume. The image tag is a hash of the tool
+// Tools images: the operator builds a knight's Nix tools once per unique tool
+// list into an OCI image (nix2container), pushes it to a registry, and the
+// knight mounts that image read-only at /nix as an image volume. The image tag is a hash of the tool
 // list, so identical lists resolve to the same image and are built only once.
 
 const (
@@ -48,14 +47,13 @@ const (
 
 // ToolsImageRepo returns the repository knights pull tools images from, e.g.
 // "registry.example.com/knight-tools" (KNIGHT_TOOLS_IMAGE_REPO, chart value
-// toolsImage.repository). Empty disables tools images: the operator then uses
-// the shared Nix store instead.
+// toolsImage.repository). Empty disables tools images: knights then run
+// without their Nix tools.
 func ToolsImageRepo() string {
 	return strings.TrimSuffix(os.Getenv("KNIGHT_TOOLS_IMAGE_REPO"), "/")
 }
 
-// ToolsImageEnabled reports whether knights get their Nix tools as an image
-// volume rather than from the shared store.
+// ToolsImageEnabled reports whether a tools image repository is configured.
 func ToolsImageEnabled() bool {
 	return ToolsImageRepo() != ""
 }

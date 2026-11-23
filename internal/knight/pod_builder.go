@@ -19,7 +19,6 @@ package knight
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -35,13 +34,11 @@ import (
 // knightToolPATH returns the container PATH for a knight, set as a pod-spec env
 // var so EVERY process — kubectl exec shells, the agent, and any subprocess —
 // resolves the knight's tools, not just the entrypoint's exec'd process tree.
-// Includes both the legacy per-pod nix dir and the shared-store profile so it
-// works before and after the read-only cutover (missing dirs are ignored).
+// Missing dirs are ignored, so the list covers every tool source at once.
 func knightToolPATH(name string) string {
 	return strings.Join([]string{
 		"/home/node/.nix-profile/bin",
 		"/data/nix-env/bin",
-		"/nix/var/nix/profiles/knights/" + name + "/bin",
 		ToolsImageProfilePath + "/bin",
 		"/data/bin",
 		"/data/.mise/shims",
@@ -77,8 +74,8 @@ func NewPodBuilder(k *aiv1alpha1.Knight, defaultImage string) *PodBuilder {
 	}
 }
 
-// WithSecurity sets the pod-level security context (shared with the Nix build
-// Jobs). Defaults to DefaultPodSecurity when not called.
+// WithSecurity sets the pod-level security context. Defaults to
+// DefaultPodSecurity when not called.
 func (b *PodBuilder) WithSecurity(s PodSecurity) *PodBuilder {
 	b.security = s.OrDefault()
 	return b
@@ -130,34 +127,13 @@ func (b *PodBuilder) WithConfig(configMapName string) *PodBuilder {
 	return b
 }
 
-// defaultSharedNixStorePVC is the fallback name of the cluster-wide RWX Nix
-// store when KNIGHT_NIX_STORE_PVC is unset.
-const defaultSharedNixStorePVC = "roundtable-nix-store"
-
-// SharedNixStorePVC returns the name of the shared Nix store PVC. It is
-// configurable via the KNIGHT_NIX_STORE_PVC env, which the chart sets from
-// nixBuilder.storeClaimName — the same value the builder Deployment mounts — so
-// the writer (builder) and readers (knights, legacy build Job) never drift.
-func SharedNixStorePVC() string {
-	if v := os.Getenv("KNIGHT_NIX_STORE_PVC"); v != "" {
-		return v
-	}
-	return defaultSharedNixStorePVC
-}
-
-// WithNixStore mounts the shared Nix store read-only at /nix when the knight has
-// nix tools, and points the entrypoint at its published profile. The store is
-// built by the operator's nix-builder; the knight never writes to it — a
-// read-only mount also makes kubelet skip the fsGroup chown of the large store.
-// Tools resolve via the profile's bin dir, already on the container PATH
-// (knightToolPATH). The entrypoint detects the read-only /nix and sources the
-// profile instead of bootstrapping a per-pod store.
-//
-// When a tools image repository is configured the knight instead mounts its
-// own tools image (see tools_image.go) as an image volume. It mounts the image
-// last published for the knight, so a changed tool list only rolls the pod
-// once the new image exists; a knight with nothing published yet waits in
-// image pull for its first image.
+// WithNixStore mounts the knight's tools image (see tools_image.go) read-only
+// at /nix as an image volume, when the knight has Nix tools and a tools image
+// repository is configured. It mounts the image last published for the knight,
+// so a changed tool list only rolls the pod once the new image exists; a
+// knight with nothing published yet waits in image pull for its first image.
+// Tools resolve via the image's profile bin dir, already on the container PATH
+// (knightToolPATH).
 func (b *PodBuilder) WithNixStore() *PodBuilder {
 	if ref := MountedToolsImageRef(b.knight); ref != "" {
 		b.volumes = append(b.volumes, corev1.Volume{
@@ -180,29 +156,6 @@ func (b *PodBuilder) WithNixStore() *PodBuilder {
 		b.env = append(b.env, corev1.EnvVar{
 			Name:  "KNIGHT_NIX_PROFILE",
 			Value: ToolsImageProfilePath,
-		})
-		return b
-	}
-	if b.knight.Spec.Tools != nil && len(b.knight.Spec.Tools.Nix) > 0 {
-		b.volumes = append(b.volumes, corev1.Volume{
-			Name: "nix",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: SharedNixStorePVC(),
-					ReadOnly:  true,
-				},
-			},
-		})
-		b.mounts = append(b.mounts, corev1.VolumeMount{
-			Name:      "nix",
-			MountPath: "/nix",
-			ReadOnly:  true,
-		})
-		// CR names are RFC1123 lowercase — matches the profile key the builder
-		// publishes (and the entrypoint's KNIGHT_NAME-derived default).
-		b.env = append(b.env, corev1.EnvVar{
-			Name:  "KNIGHT_NIX_PROFILE",
-			Value: "/nix/var/nix/profiles/knights/" + b.knight.Name,
 		})
 	}
 	return b

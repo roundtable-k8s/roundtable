@@ -46,10 +46,9 @@ import (
 )
 
 const (
-	knightFinalizer        = "ai.roundtable.io/knight-finalizer"
-	fieldOwner             = "roundtable-operator"
-	nixToolsHashAnnotation = "roundtable.io/nix-tools-hash"
-	specHashAnnotation     = "roundtable.io/spec-hash"
+	knightFinalizer    = "ai.roundtable.io/knight-finalizer"
+	fieldOwner         = "roundtable-operator"
+	specHashAnnotation = "roundtable.io/spec-hash"
 )
 
 // KnightReconciler reconciles a Knight object
@@ -188,14 +187,13 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		log.Error(err, "Failed to reconcile PVC")
 	}
 
-	// 2b. Nix build (shared store) — queue-backed nix-daemon builder, or the
-	//     legacy per-knight Job when the queue PVC is not mounted. No-op unless
-	//     a shared store / queue is available. Returns a poll interval while a
-	//     build is pending (queue results are files, not watched objects).
+	// 2b. Nix tools — built into a per-tool-list OCI image the knight mounts.
+	//     Returns an interval to come back on while an image is published, to
+	//     re-verify it is still in the registry.
 	var nixRequeue time.Duration
-	if d, err := r.reconcileNixBuild(ctx, knight); err != nil {
+	if d, err := r.reconcileNixTools(ctx, knight); err != nil {
 		reconcileErr = err
-		log.Error(err, "Failed to reconcile Nix build")
+		log.Error(err, "Failed to reconcile Nix tools")
 	} else {
 		nixRequeue = d
 	}
@@ -400,12 +398,10 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 		// Skill categories for the skill-filter sidecar
 		cm.Data["KNIGHT_SKILLS"] = strings.Join(knight.Spec.Skills, ",")
 
-		// Generate flake.nix for Nix-managed tools
-		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0 {
-			cm.Data["flake.nix"] = knightpkg.GenerateFlakeNix(knight)
-		}
+		// flake.nix was the shared-store flake; nothing reads it any more.
+		delete(cm.Data, "flake.nix")
 
-		// Flake for the tools image build Job (tools image mode only).
+		// Flake for the tools image build Job.
 		if knightpkg.ToolsImageEnabled() && knightpkg.HasToolsImage(knight) {
 			cm.Data[toolsImageFlakeKey] = knightpkg.GenerateToolsImageFlake(knight)
 		} else {
@@ -416,11 +412,7 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0 {
 			var toolsDoc strings.Builder
 			toolsDoc.WriteString("# Available Tools\n\n")
-			if knightpkg.ToolsImageEnabled() {
-				toolsDoc.WriteString("Tools are installed at `" + knightpkg.ToolsImageProfilePath + "/bin/` (a read-only tools image) and are in your PATH.\n\n")
-			} else {
-				toolsDoc.WriteString("Tools are installed at `/data/nix-env/bin/` and are in your PATH.\n\n")
-			}
+			toolsDoc.WriteString("Tools are installed at `" + knightpkg.ToolsImageProfilePath + "/bin/` (a read-only tools image) and are in your PATH.\n\n")
 			toolsDoc.WriteString("## Nix Packages\n")
 			for _, pkg := range knight.Spec.Tools.Nix {
 				toolsDoc.WriteString(fmt.Sprintf("- %s\n", pkg))
@@ -433,23 +425,10 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 			toolsDoc.WriteString("- `GH_TOKEN` / `GITHUB_TOKEN` env vars are set for GitHub API access\n")
 			toolsDoc.WriteString("- Use `gh` CLI for PR creation: `gh pr create --title ... --body ...`\n")
 			toolsDoc.WriteString("- Use authenticated clone: `git clone https://${GH_TOKEN}@github.com/...`\n")
-			if knightpkg.ToolsImageEnabled() {
-				toolsDoc.WriteString("\n## Adding Tools\n")
-				toolsDoc.WriteString("The tool set is fixed by `spec.tools.nix` on your Knight resource and is\n")
-				toolsDoc.WriteString("read-only at runtime. To add a tool, request it via the\n")
-				toolsDoc.WriteString("fleet-self-improvement chain.\n")
-			} else {
-				toolsDoc.WriteString("\n## Self-Installing Tools\n")
-				toolsDoc.WriteString("You can install additional tools at runtime using Nix:\n")
-				toolsDoc.WriteString("```bash\n")
-				toolsDoc.WriteString("# Install a package (persists on your PVC across restarts)\n")
-				toolsDoc.WriteString("nix profile install nixpkgs#<package>\n")
-				toolsDoc.WriteString("# Search for packages\n")
-				toolsDoc.WriteString("nix search nixpkgs <query>\n")
-				toolsDoc.WriteString("```\n")
-				toolsDoc.WriteString("Installed tools persist in /nix on your PVC. For permanent additions,\n")
-				toolsDoc.WriteString("request them via the fleet-self-improvement chain.\n")
-			}
+			toolsDoc.WriteString("\n## Adding Tools\n")
+			toolsDoc.WriteString("The tool set is fixed by `spec.tools.nix` on your Knight resource and is\n")
+			toolsDoc.WriteString("read-only at runtime. To add a tool, request it via the\n")
+			toolsDoc.WriteString("fleet-self-improvement chain.\n")
 			cm.Data["TOOLS.md"] = toolsDoc.String()
 		}
 
@@ -477,11 +456,8 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 // reconcilePVC creates the knight's persistent workspace volume.
 // Skips creation when spec.workspace.existingClaim is set (migration mode).
 //
-// Nix tooling no longer gets a per-knight PVC: knights mount the shared Nix
-// store read-only (see PodBuilder.WithNixStore) and source the profile the
-// nix-builder Deployment publishes. The legacy per-knight knight-<name>-nix
-// PVCs are left in place for rollback and removed by the separate decommission
-// step.
+// Nix tooling has no PVC: knights mount their tools image read-only (see
+// PodBuilder.WithNixStore).
 func (r *KnightReconciler) reconcilePVC(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	// Workspace PVC — skip if using an existing claim (migration mode)
 	if knight.Spec.Workspace != nil && knight.Spec.Workspace.ExistingClaim != "" {
@@ -567,10 +543,6 @@ func (r *KnightReconciler) reconcileDeployment(ctx context.Context, knight *aiv1
 		"roundtable.io/model":  knight.Spec.Model,
 		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
 		"roundtable.io/domain": knight.Spec.Domain,
-	}
-	hasNixTools := (knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0) || len(knight.Spec.NixPackages) > 0
-	if hasNixTools {
-		podAnnotations[nixToolsHashAnnotation] = knightpkg.NixToolsHash(knight)
 	}
 	desired.Spec.Template.ObjectMeta.Annotations = podAnnotations
 	desired.Spec.Template.Spec = r.BuildPodSpec(ctx, knight)

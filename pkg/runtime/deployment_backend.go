@@ -35,8 +35,7 @@ import (
 )
 
 const (
-	specHashAnnotation     = "roundtable.io/spec-hash"
-	nixToolsHashAnnotation = "roundtable.io/nix-tools-hash"
+	specHashAnnotation = "roundtable.io/spec-hash"
 )
 
 // PodSpecBuilder is a function that constructs a PodSpec for a Knight.
@@ -94,10 +93,6 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		"roundtable.io/model":  knight.Spec.Model,
 		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
 		"roundtable.io/domain": knight.Spec.Domain,
-	}
-	hasNixTools := (knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0) || len(knight.Spec.NixPackages) > 0
-	if hasNixTools {
-		podAnnotations[nixToolsHashAnnotation] = knightpkg.NixToolsHash(knight)
 	}
 	desired.Spec.Template.ObjectMeta.Annotations = podAnnotations
 
