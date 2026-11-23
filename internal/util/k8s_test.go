@@ -147,7 +147,7 @@ func TestBoolPtr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BoolPtr(tt.b)
+			got := new(tt.b)
 			if got == nil {
 				t.Error("BoolPtr() returned nil")
 				return
@@ -170,7 +170,7 @@ func TestFSGroupChangePolicyPtr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FSGroupChangePolicyPtr(tt.policy)
+			got := new(tt.policy)
 			if got == nil {
 				t.Error("FSGroupChangePolicyPtr() returned nil")
 				return

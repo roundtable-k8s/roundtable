@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"text/template"
@@ -356,7 +357,7 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 				"Error":  "",
 			}
 		}
-		mockData := map[string]interface{}{
+		mockData := map[string]any{
 			"Steps": mockSteps,
 			"Input": "",
 		}
@@ -814,7 +815,7 @@ func (r *ChainReconciler) renderTemplate(chain *aiv1alpha1.Chain, taskStr string
 		}
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"Steps": steps,
 		"Input": chain.Spec.Input,
 	}
@@ -1235,12 +1236,7 @@ func isEmptyStepOutput(output string) bool {
 	if trimmed == "" {
 		return true
 	}
-	for _, sentinel := range emptyOutputSentinels {
-		if trimmed == sentinel {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(emptyOutputSentinels, trimmed)
 }
 
 // storeStepOutputToKV stores the full step output to the NATS KV "chain-outputs" bucket.
@@ -1266,7 +1262,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 		durationStr = completedAt.Time.Sub(startedAt.Time).String()
 	}
 
-	kvValue := map[string]interface{}{
+	kvValue := map[string]any{
 		"output":   output,
 		"error":    errStr,
 		"knight":   knight,
@@ -1314,7 +1310,7 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 			continue
 		}
 
-		var kvValue map[string]interface{}
+		var kvValue map[string]any
 		if err := json.Unmarshal(data, &kvValue); err != nil {
 			log.Error(err, "Failed to unmarshal KV value", "step", ss.Name)
 			continue

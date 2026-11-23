@@ -309,7 +309,7 @@ var _ = Describe("Chain Controller", func() {
 
 			r := newReconciler()
 			// Reconcile through finalizer + validation + init
-			for i := 0; i < 4; i++ {
+			for range 4 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: chainNN})
 			}
 

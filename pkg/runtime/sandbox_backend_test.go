@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -206,7 +205,7 @@ func TestSandboxBackend_Suspend_ScalesToZero(t *testing.T) {
 	sandbox := &sandboxv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{Name: "gawain", Namespace: "ai"},
 		Spec: sandboxv1alpha1.SandboxSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: new(int32(1)),
 			PodTemplate: sandboxv1alpha1.PodTemplate{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 			},
@@ -243,7 +242,7 @@ func TestSandboxBackend_Resume_ScalesToOne(t *testing.T) {
 	sandbox := &sandboxv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{Name: "gawain", Namespace: "ai"},
 		Spec: sandboxv1alpha1.SandboxSpec{
-			Replicas: ptr.To(int32(0)),
+			Replicas: new(int32(0)),
 			PodTemplate: sandboxv1alpha1.PodTemplate{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 			},

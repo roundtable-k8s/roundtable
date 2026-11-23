@@ -212,10 +212,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 	// Note: Caller should update status
 
 	// Check assembly timeout (Timeout/3, floored at minAssemblyTimeout)
-	assemblyTimeout := time.Duration(mission.Spec.Timeout/3) * time.Second
-	if assemblyTimeout < minAssemblyTimeout {
-		assemblyTimeout = minAssemblyTimeout
-	}
+	assemblyTimeout := max(time.Duration(mission.Spec.Timeout/3)*time.Second, minAssemblyTimeout)
 	if mission.Status.StartedAt != nil && time.Since(mission.Status.StartedAt.Time) > assemblyTimeout {
 		log.Info("Assembly timeout exceeded",
 			"timeout", assemblyTimeout,
@@ -643,7 +640,7 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(4222)),
+							Port:     new(intstr.FromInt(4222)),
 						},
 					},
 				},
@@ -666,11 +663,11 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolUDP),
-							Port:     ptr.To(intstr.FromInt(53)),
+							Port:     new(intstr.FromInt(53)),
 						},
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(53)),
+							Port:     new(intstr.FromInt(53)),
 						},
 					},
 				},
@@ -681,7 +678,7 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 					Ports: []networkingv1.NetworkPolicyPort{
 						{
 							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     ptr.To(intstr.FromInt(443)),
+							Port:     new(intstr.FromInt(443)),
 						},
 					},
 				},

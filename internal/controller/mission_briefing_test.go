@@ -71,7 +71,7 @@ func (f *fakeNATSClient) Publish(subject string, data []byte) error {
 	return nil
 }
 
-func (f *fakeNATSClient) PublishJSON(subject string, v interface{}) error {
+func (f *fakeNATSClient) PublishJSON(subject string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -252,7 +252,7 @@ var _ = Describe("MissionReconciler.publishBriefing", func() {
 	})
 })
 
-func (f *fakeNATSClient) PublishJSONSeq(subject string, v interface{}) (uint64, error) {
+func (f *fakeNATSClient) PublishJSONSeq(subject string, v any) (uint64, error) {
 	if err := f.PublishJSON(subject, v); err != nil {
 		return 0, err
 	}

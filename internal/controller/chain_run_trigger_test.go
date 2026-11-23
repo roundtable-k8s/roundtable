@@ -42,7 +42,7 @@ type pickupFakeNATS struct {
 	seq   uint64
 }
 
-func (f *pickupFakeNATS) PublishJSONSeq(subject string, v interface{}) (uint64, error) {
+func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	if err := f.PublishJSON(subject, v); err != nil {
 		return 0, err
 	}
@@ -70,7 +70,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 	)
 
 	reconcileN := func(n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
 			Expect(err).NotTo(HaveOccurred())
 		}

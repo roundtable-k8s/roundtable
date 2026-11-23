@@ -179,7 +179,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			}, timeout, interval).Should(Equal(aiv1alpha1.MissionPhasePending))
 
 			// Phase 2: Progress to Active through multiple reconciles
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				time.Sleep(200 * time.Millisecond)
 			}
@@ -319,7 +319,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			}
 
 			// Progress through phases until Active
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				m := &aiv1alpha1.Mission{}
 				if err := k8sClient.Get(ctx, missionNN, m); err == nil && m.Status.Phase == aiv1alpha1.MissionPhaseActive {
@@ -474,7 +474,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			}
 
 			// Progress through phases
-			for i := 0; i < 15; i++ {
+			for range 15 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -512,7 +512,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			// but ResultsConfigMap is still set to prevent infinite retry
 			m := &aiv1alpha1.Mission{}
 			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				_ = k8sClient.Get(ctx, missionNN, m)
 				if m.Status.ResultsConfigMap != "" {
@@ -637,7 +637,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			}
 
 			// Progress to Active phase
-			for i := 0; i < 15; i++ {
+			for range 15 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -777,7 +777,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			}
 
 			// Progress to Active phase
-			for i := 0; i < 15; i++ {
+			for range 15 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				time.Sleep(100 * time.Millisecond)
 			}

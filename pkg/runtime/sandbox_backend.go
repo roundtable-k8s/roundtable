@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -92,7 +91,7 @@ func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knigh
 		}
 
 		// Sandbox is a singleton — always 1 replica (or 0 when suspended)
-		sandbox.Spec.Replicas = ptr.To(int32(1))
+		sandbox.Spec.Replicas = new(int32(1))
 
 		// Map VolumeClaimTemplates from Knight workspace config
 		sandbox.Spec.VolumeClaimTemplates = b.buildVolumeClaimTemplates(knight)
@@ -165,7 +164,7 @@ func (b *SandboxBackend) Suspend(ctx context.Context, knight *aiv1alpha1.Knight)
 	}
 
 	if sandbox.Spec.Replicas == nil || *sandbox.Spec.Replicas != 0 {
-		sandbox.Spec.Replicas = ptr.To(int32(0))
+		sandbox.Spec.Replicas = new(int32(0))
 		if err := b.Client.Update(ctx, sandbox); err != nil {
 			return fmt.Errorf("failed to scale sandbox to 0: %w", err)
 		}
@@ -189,7 +188,7 @@ func (b *SandboxBackend) Resume(ctx context.Context, knight *aiv1alpha1.Knight) 
 	}
 
 	if sandbox.Spec.Replicas == nil || *sandbox.Spec.Replicas != 1 {
-		sandbox.Spec.Replicas = ptr.To(int32(1))
+		sandbox.Spec.Replicas = new(int32(1))
 		if err := b.Client.Update(ctx, sandbox); err != nil {
 			return fmt.Errorf("failed to scale sandbox to 1: %w", err)
 		}

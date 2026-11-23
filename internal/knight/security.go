@@ -21,8 +21,6 @@ import (
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
-
-	"github.com/roundtable-k8s/roundtable/internal/util"
 )
 
 // PodSecurity is the single source of truth for the pod-level security context
@@ -86,8 +84,8 @@ func (s PodSecurity) PodSecurityContext() *corev1.PodSecurityContext {
 	return &corev1.PodSecurityContext{
 		RunAsUser:           &runAsUser,
 		RunAsGroup:          &runAsGroup,
-		RunAsNonRoot:        util.BoolPtr(runAsUser != 0),
+		RunAsNonRoot:        new(runAsUser != 0),
 		FSGroup:             &fsGroup,
-		FSGroupChangePolicy: util.FSGroupChangePolicyPtr(s.FSGroupChangePolicy),
+		FSGroupChangePolicy: new(s.FSGroupChangePolicy),
 	}
 }

@@ -465,11 +465,8 @@ func (r *RoundTableReconciler) reconcileWarmPool(ctx context.Context, rt *aiv1al
 
 	// Create new warm knights if pool is under capacity (burst-limited)
 	const maxWarmCreationsPerReconcile int32 = 5
-	deficit := wp.Size - (available + provisioning)
-	if deficit > maxWarmCreationsPerReconcile {
-		deficit = maxWarmCreationsPerReconcile
-	}
-	for i := int32(0); i < deficit; i++ {
+	deficit := min(wp.Size-(available+provisioning), maxWarmCreationsPerReconcile)
+	for range deficit {
 		if err := r.createWarmKnight(ctx, rt); err != nil {
 			log.Error(err, "Failed to create warm pool knight")
 			return err

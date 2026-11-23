@@ -27,7 +27,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -238,20 +237,20 @@ func (r *KnightReconciler) buildToolsImageJob(knight *aiv1alpha1.Knight) *batchv
 			Labels:    labels,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(2)),
-			TTLSecondsAfterFinished: ptr.To(toolsImageJobTTL),
-			ActiveDeadlineSeconds:   ptr.To(int64(1800)),
+			BackoffLimit:            new(int32(2)),
+			TTLSecondsAfterFinished: new(toolsImageJobTTL),
+			ActiveDeadlineSeconds:   new(int64(1800)),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					RestartPolicy:                corev1.RestartPolicyNever,
-					AutomountServiceAccountToken: ptr.To(false),
+					AutomountServiceAccountToken: new(false),
 					// Root, like the shared-store builder: the stock Nix image
 					// owns /nix as root, and source builds expect to chown and
 					// chmod. The pod is short-lived and mounts nothing shared.
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsUser:  ptr.To(int64(0)),
-						RunAsGroup: ptr.To(int64(0)),
+						RunAsUser:  new(int64(0)),
+						RunAsGroup: new(int64(0)),
 					},
 					Containers: []corev1.Container{
 						{
@@ -265,8 +264,8 @@ func (r *KnightReconciler) buildToolsImageJob(knight *aiv1alpha1.Knight) *batchv
 								{Name: "TMPDIR", Value: "/work"},
 							},
 							SecurityContext: &corev1.SecurityContext{
-								AllowPrivilegeEscalation: ptr.To(true),
-								RunAsNonRoot:             ptr.To(false),
+								AllowPrivilegeEscalation: new(true),
+								RunAsNonRoot:             new(false),
 								SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 							},
 							VolumeMounts: []corev1.VolumeMount{

@@ -681,8 +681,8 @@ func extractJSON(s string) string {
 	}
 	if idx := strings.Index(s, "```"); idx >= 0 {
 		s = s[idx+3:]
-		if idx := strings.Index(s, "```"); idx >= 0 {
-			return strings.TrimSpace(s[:idx])
+		if before, _, ok := strings.Cut(s, "```"); ok {
+			return strings.TrimSpace(before)
 		}
 	}
 	return strings.TrimSpace(s)

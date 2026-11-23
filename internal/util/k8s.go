@@ -71,13 +71,17 @@ func IsValidSkillName(name string) bool {
 }
 
 // BoolPtr returns a pointer to the given bool value.
+//
+//go:fix inline
 func BoolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }
 
 // FSGroupChangePolicyPtr returns a pointer to the given PodFSGroupChangePolicy value.
+//
+//go:fix inline
 func FSGroupChangePolicyPtr(p corev1.PodFSGroupChangePolicy) *corev1.PodFSGroupChangePolicy {
-	return &p
+	return new(p)
 }
 
 // IntstrPort converts an int port to IntOrString type.

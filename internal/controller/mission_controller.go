@@ -1045,8 +1045,8 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 	}
 
 	// Build complete results document
-	results := map[string]interface{}{
-		"summary": map[string]interface{}{
+	results := map[string]any{
+		"summary": map[string]any{
 			"mission":   mission.Name,
 			"objective": mission.Spec.Objective,
 			"phase":     string(mission.Status.Phase),
@@ -1054,17 +1054,17 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 			"duration":  duration,
 			"totalCost": mission.Status.TotalCost,
 		},
-		"timeline": map[string]interface{}{
+		"timeline": map[string]any{
 			"started":   "",
 			"completed": "",
 			"phases":    []map[string]string{},
 		},
-		"chains":  map[string]interface{}{},
-		"knights": []map[string]interface{}{},
+		"chains":  map[string]any{},
+		"knights": []map[string]any{},
 	}
 
 	// Timeline
-	timeline := results["timeline"].(map[string]interface{})
+	timeline := results["timeline"].(map[string]any)
 	if mission.Status.StartedAt != nil {
 		timeline["started"] = mission.Status.StartedAt.Format(time.RFC3339)
 	}
@@ -1081,7 +1081,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 	}
 
 	// Chain results
-	chains := results["chains"].(map[string]interface{})
+	chains := results["chains"].(map[string]any)
 	for _, cs := range mission.Status.ChainStatuses {
 		chain := &aiv1alpha1.Chain{}
 		if err := r.Get(ctx, types.NamespacedName{
@@ -1092,14 +1092,14 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 			continue
 		}
 
-		chainResult := map[string]interface{}{
+		chainResult := map[string]any{
 			"name":   cs.Name,
 			"phase":  string(cs.Phase),
-			"steps":  []map[string]interface{}{},
+			"steps":  []map[string]any{},
 			"output": "",
 		}
 		for _, stepStatus := range chain.Status.StepStatuses {
-			chainResult["steps"] = append(chainResult["steps"].([]map[string]interface{}), map[string]interface{}{
+			chainResult["steps"] = append(chainResult["steps"].([]map[string]any), map[string]any{
 				"name":   stepStatus.Name,
 				"output": stepStatus.Output,
 				"error":  stepStatus.Error,
@@ -1113,7 +1113,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 
 	// Knight statuses
 	for _, ks := range mission.Status.KnightStatuses {
-		results["knights"] = append(results["knights"].([]map[string]interface{}), map[string]interface{}{
+		results["knights"] = append(results["knights"].([]map[string]any), map[string]any{
 			"name":      ks.Name,
 			"ready":     ks.Ready,
 			"ephemeral": ks.Ephemeral,
@@ -1122,7 +1122,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 
 	// Cost breakdown
 	if len(mission.Status.CostBreakdown) > 0 {
-		results["costs"] = map[string]interface{}{
+		results["costs"] = map[string]any{
 			"breakdown": mission.Status.CostBreakdown,
 			"total":     mission.Status.TotalCost,
 		}

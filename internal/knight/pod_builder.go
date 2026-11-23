@@ -640,8 +640,8 @@ func (b *PodBuilder) WithBrowser() *PodBuilder {
 			PeriodSeconds:       10,
 		},
 		SecurityContext: &corev1.SecurityContext{
-			ReadOnlyRootFilesystem:   util.BoolPtr(false),
-			AllowPrivilegeEscalation: util.BoolPtr(false),
+			ReadOnlyRootFilesystem:   new(false),
+			AllowPrivilegeEscalation: new(false),
 		},
 	}
 
@@ -742,10 +742,10 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	return corev1.PodSpec{
 		Containers:                   containers,
 		Volumes:                      b.volumes,
-		EnableServiceLinks:           util.BoolPtr(false),
+		EnableServiceLinks:           new(false),
 		SecurityContext:              b.security.PodSecurityContext(),
 		ServiceAccountName:           b.knight.Spec.ServiceAccountName,
-		AutomountServiceAccountToken: util.BoolPtr(true),
+		AutomountServiceAccountToken: new(true),
 	}
 }
 
