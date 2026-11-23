@@ -116,7 +116,7 @@ nix run .#tools.copyTo -- $TOOLS_IMAGE_COPY_ARGS "docker://$TOOLS_IMAGE_PUSH_REF
 echo "Published $TOOLS_IMAGE_PUSH_REF"
 `
 
-// reconcileNixTools provisions the knight's Nix tools (spec.tools.nix) as a
+// reconcileNixTools provisions the knight's Nix tools (spec.tools.nix and spec.tools.flakes) as a
 // tools image. It returns an interval to come back on while an image is
 // published, so the operator notices if the registry loses it. Without a
 // tools image repository configured there is nowhere to build to: the knight
@@ -125,7 +125,7 @@ func (r *KnightReconciler) reconcileNixTools(ctx context.Context, knight *aiv1al
 	if !knightpkg.ToolsImageEnabled() {
 		if knightpkg.HasToolsImage(knight) {
 			r.Recorder.Event(knight, corev1.EventTypeWarning, "ToolsImageNotConfigured",
-				"spec.tools.nix is set but the operator has no tools image repository (chart value toolsImage.repository); Nix tools are not installed")
+				"spec.tools.nix or spec.tools.flakes is set but the operator has no tools image repository (chart value toolsImage.repository); Nix tools are not installed")
 		}
 		return 0, nil
 	}

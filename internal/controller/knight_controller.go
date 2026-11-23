@@ -453,13 +453,18 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 		}
 
 		// Generate TOOLS.md listing available tools and paths
-		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0 {
+		if knightpkg.HasToolsImage(knight) {
 			var toolsDoc strings.Builder
 			toolsDoc.WriteString("# Available Tools\n\n")
 			toolsDoc.WriteString("Tools are installed at `" + knightpkg.ToolsImageProfilePath + "/bin/` (a read-only tools image) and are in your PATH.\n\n")
 			toolsDoc.WriteString("## Nix Packages\n")
 			for _, pkg := range knight.Spec.Tools.Nix {
 				toolsDoc.WriteString(fmt.Sprintf("- %s\n", pkg))
+			}
+			for _, f := range knight.Spec.Tools.Flakes {
+				for _, pkg := range f.Packages {
+					toolsDoc.WriteString(fmt.Sprintf("- %s (flake %s)\n", pkg, f.Ref))
+				}
 			}
 			toolsDoc.WriteString("\n## Shared Workspace\n")
 			toolsDoc.WriteString("- `/shared/` — RWX volume shared with all knights\n")
@@ -470,7 +475,7 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 			toolsDoc.WriteString("- Use `gh` CLI for PR creation: `gh pr create --title ... --body ...`\n")
 			toolsDoc.WriteString("- Use authenticated clone: `git clone https://${GH_TOKEN}@github.com/...`\n")
 			toolsDoc.WriteString("\n## Adding Tools\n")
-			toolsDoc.WriteString("The tool set is fixed by `spec.tools.nix` on your Knight resource and is\n")
+			toolsDoc.WriteString("The tool set is fixed by `spec.tools.nix` and `spec.tools.flakes` on your Knight resource and is\n")
 			toolsDoc.WriteString("read-only at runtime. To add a tool, request it via the\n")
 			toolsDoc.WriteString("fleet-self-improvement chain.\n")
 			cm.Data["TOOLS.md"] = toolsDoc.String()

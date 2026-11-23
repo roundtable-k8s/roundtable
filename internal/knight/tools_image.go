@@ -19,6 +19,7 @@ package knight
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -117,10 +118,39 @@ func Nix2ContainerRev() string {
 }
 
 // HasToolsImage reports whether the knight declares Nix tools that a tools
-// image can carry. Only spec.tools.nix is supported; the legacy
-// spec.nixPackages field is not.
+// image can carry: spec.tools.nix and spec.tools.flakes. The legacy
+// spec.nixPackages field is not supported.
 func HasToolsImage(knight *aiv1alpha1.Knight) bool {
-	return knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0
+	return knight.Spec.Tools != nil && (len(knight.Spec.Tools.Nix) > 0 || len(knight.Spec.Tools.Flakes) > 0)
+}
+
+// sortedFlakes returns the knight's flake tools with duplicate refs merged and
+// packages de-duplicated, sorted by ref, so the same set always yields the same
+// tag and the same flake.
+func sortedFlakes(knight *aiv1alpha1.Knight) []aiv1alpha1.KnightToolsFlake {
+	if knight.Spec.Tools == nil || len(knight.Spec.Tools.Flakes) == 0 {
+		return nil
+	}
+	byRef := map[string]map[string]struct{}{}
+	for _, f := range knight.Spec.Tools.Flakes {
+		if byRef[f.Ref] == nil {
+			byRef[f.Ref] = map[string]struct{}{}
+		}
+		for _, p := range f.Packages {
+			byRef[f.Ref][p] = struct{}{}
+		}
+	}
+	out := make([]aiv1alpha1.KnightToolsFlake, 0, len(byRef))
+	for ref, set := range byRef {
+		pkgs := make([]string, 0, len(set))
+		for p := range set {
+			pkgs = append(pkgs, p)
+		}
+		sort.Strings(pkgs)
+		out = append(out, aiv1alpha1.KnightToolsFlake{Ref: ref, Packages: pkgs})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out
 }
 
 // sortedNixTools returns the knight's Nix tools de-duplicated and sorted, so
@@ -148,11 +178,19 @@ func sortedNixTools(knight *aiv1alpha1.Knight) []string {
 // knights with identical lists share one image. Empty when there are no tools.
 func ToolsImageTag(knight *aiv1alpha1.Knight) string {
 	tools := sortedNixTools(knight)
-	if len(tools) == 0 {
+	flakes := sortedFlakes(knight)
+	if len(tools) == 0 && len(flakes) == 0 {
 		return ""
+	}
+	// Flakes extend the hash input only when present, so tags of knights
+	// without flakes are unchanged.
+	var flakePart strings.Builder
+	for _, f := range flakes {
+		flakePart.WriteString("\nflake " + f.Ref + " " + strings.Join(f.Packages, ","))
 	}
 	h := sha256.Sum256([]byte(
 		"tools-image/v1\n" + strings.Join(tools, ",") +
+			flakePart.String() +
 			"\nnixpkgs@" + NixpkgsRef() +
 			"\nnix2container@" + Nix2ContainerRev()))
 	return hex.EncodeToString(h[:8]) // 16-char hex prefix
@@ -209,6 +247,9 @@ func ToolsImageManifestURL(knight *aiv1alpha1.Knight) string {
 	return scheme + "://" + host + "/v2/" + path + "/manifests/" + tag
 }
 
+// flakeInputName names the i-th flake input of the generated flake.
+func flakeInputName(i int) string { return fmt.Sprintf("tools-%d", i) }
+
 // GenerateToolsImageFlake produces the flake the build Job turns into the
 // knight's tools image. The image holds the tools' closure under /nix/store
 // plus a /nix/profile symlink to their buildEnv; mounted at /nix in the knight
@@ -221,7 +262,15 @@ func GenerateToolsImageFlake(knight *aiv1alpha1.Knight) string {
 	sb.WriteString("  inputs.nixpkgs.url = \"github:NixOS/nixpkgs/" + NixpkgsRef() + "\";\n")
 	sb.WriteString("  inputs.nix2container.url = \"github:nlewo/nix2container/" + Nix2ContainerRev() + "\";\n")
 	sb.WriteString("  inputs.nix2container.inputs.nixpkgs.follows = \"nixpkgs\";\n")
-	sb.WriteString("  outputs = { self, nixpkgs, nix2container }:\n")
+	flakes := sortedFlakes(knight)
+	for i, f := range flakes {
+		sb.WriteString(fmt.Sprintf("  inputs.%s.url = %q;\n", flakeInputName(i), f.Ref))
+	}
+	if len(flakes) > 0 {
+		sb.WriteString("  outputs = { self, nixpkgs, nix2container, ... }@inputs:\n")
+	} else {
+		sb.WriteString("  outputs = { self, nixpkgs, nix2container }:\n")
+	}
 	sb.WriteString("    let\n")
 	sb.WriteString("      system = \"x86_64-linux\";\n")
 	// allowUnfree: many security/pentest tools (wpscan, burpsuite, …) are
@@ -233,6 +282,11 @@ func GenerateToolsImageFlake(knight *aiv1alpha1.Knight) string {
 	sb.WriteString("        paths = with pkgs; [\n")
 	for _, pkg := range sortedNixTools(knight) {
 		sb.WriteString("          " + pkg + "\n")
+	}
+	for i, f := range flakes {
+		for _, pkg := range f.Packages {
+			sb.WriteString(fmt.Sprintf("          inputs.%s.packages.${system}.%q\n", flakeInputName(i), pkg))
+		}
 	}
 	sb.WriteString("        ];\n")
 	sb.WriteString("      };\n")

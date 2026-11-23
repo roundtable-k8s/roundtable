@@ -329,6 +329,14 @@ type KnightTools struct {
 	// +optional
 	Nix []string `json:"nix,omitempty"`
 
+	// flakes adds packages from Nix flakes outside nixpkgs to the same tools
+	// image as nix. Each ref must be pinned to a commit, because the image is
+	// rebuilt only when the spec changes; a branch name would never refresh.
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=atomic
+	// +optional
+	Flakes []KnightToolsFlake `json:"flakes,omitempty"`
+
 	// apt is a list of apt packages to install (fallback, requires root — prefer nix).
 	// +optional
 	Apt []string `json:"apt,omitempty"`
@@ -336,6 +344,25 @@ type KnightTools struct {
 	// mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
 	// +optional
 	Mise []string `json:"mise,omitempty"`
+}
+
+// KnightToolsFlake selects packages from one Nix flake for the tools image.
+type KnightToolsFlake struct {
+	// ref is a flake reference pinned to a commit, e.g.
+	// github:roundtable-k8s/roundtable/<40-hex-rev> or
+	// git+https://host/repo.git?rev=<40-hex-rev>. Branch names and tags are
+	// rejected.
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^((github|gitlab|sourcehut):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}(\?dir=[A-Za-z0-9_./-]+)?|git\+(https|ssh)://[A-Za-z0-9_.@:/-]+\?([A-Za-z0-9_.=/-]+&)*rev=[0-9a-f]{40}(&[A-Za-z0-9_.=/-]+)*)$`
+	Ref string `json:"ref"`
+
+	// packages are output names under the flake's packages.<system> (x86_64-linux).
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_][A-Za-z0-9_.+-]*$`
+	// +kubebuilder:validation:items:MaxLength=128
+	// +listType=atomic
+	Packages []string `json:"packages"`
 }
 
 // KnightNATS configures the knight's NATS JetStream connection and consumers.
