@@ -221,22 +221,33 @@ func (r *ChainReconciler) forEachSource(ctx context.Context, chain *aiv1alpha1.C
 	return "", fmt.Errorf("forEach source step %q not found", src)
 }
 
-// kvOutput reads a stored output of the current run from the chain-outputs bucket.
-func (r *ChainReconciler) kvOutput(ctx context.Context, chain *aiv1alpha1.Chain, key string) (string, bool) {
+// kvRecord is the part of a chain-outputs entry the controller reads back.
+type kvRecord struct {
+	Output  string          `json:"output"`
+	Error   string          `json:"error"`
+	RunID   string          `json:"runId"`
+	PRs     []natspkg.PRRef `json:"prs"`
+	Verdict string          `json:"verdict"`
+}
+
+// kvEntry reads a stored entry of the current run from the chain-outputs bucket.
+func (r *ChainReconciler) kvEntry(key string) (kvRecord, bool) {
+	var v kvRecord
 	natsCli, err := r.natsClient()
 	if err != nil {
-		return "", false
+		return v, false
 	}
 	data, err := natsCli.KVGet("chain-outputs", key)
 	if err != nil {
-		return "", false
+		return v, false
 	}
-	var v struct {
-		Output string `json:"output"`
-		Error  string `json:"error"`
-		RunID  string `json:"runId"`
-	}
-	if err := json.Unmarshal(data, &v); err != nil || v.RunID == "" || v.RunID != chain.Status.RunID {
+	return v, json.Unmarshal(data, &v) == nil && v.RunID != "" // caller checks the run
+}
+
+// kvOutput reads a stored output of the current run from the chain-outputs bucket.
+func (r *ChainReconciler) kvOutput(ctx context.Context, chain *aiv1alpha1.Chain, key string) (string, bool) {
+	v, ok := r.kvEntry(key)
+	if !ok || v.RunID != chain.Status.RunID {
 		return "", false
 	}
 	if v.Error != "" {

@@ -64,6 +64,13 @@ type TaskResult struct {
 
 	// Model is the model the knight actually used for the task (optional).
 	Model string `json:"model,omitempty"`
+
+	// PRs lists pull requests the task opened or updated (optional).
+	PRs []PRRef `json:"prs,omitempty"`
+
+	// Verdict is a review verdict: "ship_it", "needs_changes" or null/absent
+	// (optional). Use Structured() to read it with a prose fallback.
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // GetTaskID returns the task ID from whichever field was populated.

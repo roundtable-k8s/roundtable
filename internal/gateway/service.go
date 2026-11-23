@@ -304,6 +304,8 @@ func (s *Service) complete(rec *TaskRecord, data []byte) {
 	} else {
 		rec.Output = res.GetOutput()
 		rec.Model = res.Model
+		st := res.Structured()
+		rec.PRs, rec.Verdict = st.PRs, st.Verdict
 		switch e := res.GetError(); {
 		case e != "":
 			rec.Status = TaskFailed

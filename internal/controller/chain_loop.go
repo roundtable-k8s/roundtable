@@ -158,21 +158,49 @@ func (r *ChainReconciler) fullOutput(ctx context.Context, chain *aiv1alpha1.Chai
 	return fallback
 }
 
+// structuredVars returns the "prs" and "verdict" values for a step: the
+// structured fields the knight reported (kept in the KV entry) or, failing
+// that, the prose fallback over out. Steps that did not succeed, or that the
+// expressions do not mention, get empty values without touching KV.
+func (r *ChainReconciler) structuredVars(chain *aiv1alpha1.Chain, key, out string, load bool) (prs []any, verdict string) {
+	prs = []any{}
+	if !load {
+		return prs, ""
+	}
+	st := natspkg.ParseStructured(out)
+	if v, ok := r.kvEntry(key); ok && v.RunID == chain.Status.RunID {
+		if v.Verdict != "" {
+			st.Verdict = v.Verdict
+		}
+		if len(v.PRs) > 0 {
+			st.PRs = v.PRs
+		}
+	}
+	for _, p := range st.PRs {
+		prs = append(prs, map[string]any{"repo": p.Repo, "number": int64(p.Number), "url": p.URL, "action": p.Action})
+	}
+	return prs, st.Verdict
+}
+
 // conditionVars builds the CEL variables shared by when and until: input and
 // steps. Outputs of steps the expressions mention are read in full from KV.
 func (r *ChainReconciler) conditionVars(ctx context.Context, chain *aiv1alpha1.Chain, exprs ...string) map[string]any {
 	steps := make(map[string]any, len(chain.Status.StepStatuses))
 	for _, ss := range chain.Status.StepStatuses {
 		out := ss.Output
-		if ss.Phase == aiv1alpha1.ChainStepPhaseSucceeded && mentions(exprs, ss.Name) {
+		load := ss.Phase == aiv1alpha1.ChainStepPhaseSucceeded && mentions(exprs, ss.Name)
+		if load {
 			out = r.fullOutput(ctx, chain, chain.Name+"."+ss.Name, out)
 		}
+		prs, verdict := r.structuredVars(chain, chain.Name+"."+ss.Name, out, load)
 		entry := map[string]any{
 			"name":       ss.Name,
 			"phase":      string(ss.Phase),
 			"output":     clipForCEL(out),
 			"error":      ss.Error,
 			"reason":     ss.Reason,
+			"prs":        prs,
+			"verdict":    verdict,
 			"outcome":    "",
 			"iterations": int64(0),
 		}
@@ -312,22 +340,42 @@ func (r *ChainReconciler) loopLast(ctx context.Context, chain *aiv1alpha1.Chain,
 	return empty
 }
 
+// loopLastKey is the KV key of the step loopLast returns ("" when none).
+func (r *ChainReconciler) loopLastKey(chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, ls *aiv1alpha1.ChainLoopStatus, idx int) string {
+	prev := idx - 1
+	if prev < 0 && ls.Iteration > 1 {
+		prev = len(ls.Steps) - 1
+	}
+	if prev >= 0 && prev < len(ls.Steps) {
+		return loopBodyKey(chain, spec.Name, ls.Steps[prev].Name)
+	}
+	if spec.Loop.From != "" {
+		return chain.Name + "." + spec.Loop.From
+	}
+	return ""
+}
+
 // evalUntil evaluates the loop's until expression with last = loopLast(idx).
 func (r *ChainReconciler) evalUntil(ctx context.Context, chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, ls *aiv1alpha1.ChainLoopStatus, idx int) (bool, error) {
 	expr := spec.Loop.Until
 	vars := r.conditionVars(ctx, chain, expr)
 	last := r.loopLast(ctx, chain, spec, ls, idx)
+	lastPRs, lastVerdict := r.structuredVars(chain, r.loopLastKey(chain, spec, ls, idx), last["output"], last["phase"] == string(aiv1alpha1.ChainStepPhaseSucceeded))
 	vars["last"] = map[string]any{
 		"step": last["step"], "phase": last["phase"], "output": clipForCEL(last["output"]), "error": last["error"],
+		"prs": lastPRs, "verdict": lastVerdict,
 	}
 	body := make(map[string]any, len(ls.Steps))
 	for _, bs := range ls.Steps {
 		out := bs.Output
-		if bs.Phase == aiv1alpha1.ChainStepPhaseSucceeded && mentions([]string{expr}, bs.Name) {
+		load := bs.Phase == aiv1alpha1.ChainStepPhaseSucceeded && mentions([]string{expr}, bs.Name)
+		if load {
 			out = r.fullOutput(ctx, chain, loopBodyKey(chain, spec.Name, bs.Name), out)
 		}
+		prs, verdict := r.structuredVars(chain, loopBodyKey(chain, spec.Name, bs.Name), out, load)
 		body[bs.Name] = map[string]any{
 			"phase": string(bs.Phase), "output": clipForCEL(out), "error": bs.Error, "iteration": int64(bs.Iteration),
+			"prs": prs, "verdict": verdict,
 		}
 	}
 	vars["iteration"] = int64(ls.Iteration)
@@ -491,6 +539,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 		timing.TimeoutSeconds = 120
 	}
 	var errMsg, output string
+	var structured natspkg.Structured
 	if msg := taskDeadlineError(chain, timing, bs.StartedAt, bs.PickedUpAt); msg != "" {
 		errMsg = msg
 	} else {
@@ -506,6 +555,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 			bs.Model = result.Model
 		}
 		errMsg, output = result.GetError(), result.GetOutput()
+		structured = result.Structured()
 		if errMsg == "" && isEmptyStepOutput(output) {
 			errMsg = errEmptyOutput
 		}
@@ -527,7 +577,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	bs.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 	bs.Error = ""
 	bs.Output = truncateStatusOutput(output, key)
-	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef.Name, bs.StartedAt, &now)
+	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef.Name, bs.StartedAt, &now, structured)
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "LoopStepCompleted", "Loop step %s: %s completed round %d", spec.Name, bs.Name, bs.Iteration)
 }
 

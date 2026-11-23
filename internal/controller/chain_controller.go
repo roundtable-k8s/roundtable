@@ -645,7 +645,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 
 					// Store full output to NATS KV (best-effort)
 					if spec := specMap[ss.Name]; spec != nil {
-						r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, resultErr, spec.KnightRef.Name, ss.StartedAt, &now)
+						r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, resultErr, spec.KnightRef.Name, ss.StartedAt, &now, result.Structured())
 					}
 
 					// Truncate CRD status output to avoid etcd bloat (4000 chars allows
@@ -1436,7 +1436,7 @@ func isEmptyStepOutput(output string) bool {
 
 // storeStepOutputToKV stores the full step output to the NATS KV "chain-outputs" bucket.
 // This is best-effort — failures are logged but do not block chain execution.
-func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, runID, stepName, output, errStr, knight string, startedAt, completedAt *metav1.Time) {
+func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, runID, stepName, output, errStr, knight string, startedAt, completedAt *metav1.Time, structured ...natspkg.Structured) {
 	log := logf.FromContext(ctx)
 
 	// Never persist empty outputs — a poisoned KV entry would be restored as a
@@ -1464,6 +1464,15 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 		"runId":    runID,
 		"duration": durationStr,
 		"storedAt": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if len(structured) > 0 {
+		if len(structured[0].PRs) > 0 {
+			kvValue["prs"] = structured[0].PRs
+		}
+		if structured[0].Verdict != "" {
+			kvValue["verdict"] = structured[0].Verdict
+		}
 	}
 
 	data, err := json.Marshal(kvValue)

@@ -22,6 +22,8 @@ package gateway
 import (
 	"errors"
 	"time"
+
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // TaskStatus is the lifecycle state of an invoked task.
@@ -71,9 +73,13 @@ type TaskRecord struct {
 	// RequestedModel is the resolved per-task model override sent with the task.
 	RequestedModel string `json:"requestedModel,omitempty"`
 	// Model is the model the knight reports having used.
-	Model       string     `json:"model,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	Model string `json:"model,omitempty"`
+	// PRs and Verdict are the structured result fields (reported by the knight,
+	// else recovered from the prose output).
+	PRs         []natspkg.PRRef `json:"prs,omitempty"`
+	Verdict     string          `json:"verdict,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	CompletedAt *time.Time      `json:"completedAt,omitempty"`
 
 	// ResultSubject and ResultsStream locate the result on NATS.
 	ResultSubject string `json:"resultSubject"`

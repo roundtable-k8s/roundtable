@@ -131,6 +131,11 @@ func (k *fakeKnight) answer(js nats.JetStreamContext, p natspkg.TaskPayload) {
 	switch {
 	case strings.Contains(p.Task, "fail"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Error: "boom", Model: model}
+	case strings.Contains(p.Task, "structured"):
+		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "reviewed", Model: model, Verdict: "needs_changes",
+			PRs: []natspkg.PRRef{{Repo: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Action: "updated"}}}
+	case strings.Contains(p.Task, "prose-result"):
+		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "Opened #245.\nVerdict: SHIP IT", Model: model}
 	case strings.Contains(p.Task, "pi-format"):
 		ok := true
 		res = natspkg.TaskResult{TaskID2: p.TaskID, Result: "pi says hi", Success: &ok, Model: model}
@@ -305,6 +310,25 @@ func TestInvokeReturnsResult(t *testing.T) {
 		if resp.StatusCode != http.StatusOK || got["output"] != body["output"] || got["status"] != string(TaskSucceeded) {
 			t.Fatalf("GET = %d %v", resp.StatusCode, got)
 		}
+	}
+}
+
+func TestInvokeStructuredResult(t *testing.T) {
+	e := newEnv(t, Options{})
+	_, body := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "structured"})
+	if body["verdict"] != "needs_changes" {
+		t.Fatalf("verdict = %v", body["verdict"])
+	}
+	prs, _ := body["prs"].([]any)
+	if len(prs) != 1 || prs[0].(map[string]any)["number"] != float64(3) || prs[0].(map[string]any)["action"] != "updated" {
+		t.Fatalf("prs = %v", body["prs"])
+	}
+
+	// Prose fallback for knights that do not report the fields.
+	_, body = e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "prose-result"})
+	prs, _ = body["prs"].([]any)
+	if body["verdict"] != "ship_it" || len(prs) != 1 || prs[0].(map[string]any)["number"] != float64(245) {
+		t.Fatalf("fallback: verdict=%v prs=%v", body["verdict"], body["prs"])
 	}
 }
 
