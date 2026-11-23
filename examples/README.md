@@ -10,7 +10,7 @@ Real-world examples of Round Table resources.
 | [`chain-sequential.yaml`](chain-sequential.yaml) | Multi-step chain with output templating between steps |
 | [`chain-model-override.yaml`](chain-model-override.yaml) | Per-step model override with RoundTable `modelAliases` |
 | [`chain-fan-out.yaml`](chain-fan-out.yaml) | `forEach` fan-out/fan-in over a planner's JSON list |
-| [`chain-pr-pipeline.yaml`](chain-pr-pipeline.yaml) | implement → review → bounded fix `loop` → merge, or escalate via `when` |
+| [`chain-pr-pipeline.yaml`](chain-pr-pipeline.yaml) | PR pipeline: plan → implement (or `forEach` over sub-issues) → review → bounded fix `loop` → merge, or escalate via `when`. Rendered from the chart's `prPipeline` values ([docs](../docs/pr-pipeline.md)) |
 | [`mission-ephemeral.yaml`](mission-ephemeral.yaml) | Mission using existing fleet knights |
 | [`mission-meta.yaml`](mission-meta.yaml) | Meta-mission — planner auto-generates chains and knights |
 

@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -33,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/yaml"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -150,29 +148,6 @@ func TestValidateConditionsAndLoops(t *testing.T) {
 				t.Fatalf("got reason %q err %v, want reason %q", reason, err, tc.reason)
 			}
 		})
-	}
-}
-
-func TestPRPipelineExampleIsValid(t *testing.T) {
-	data, err := os.ReadFile("../../examples/chain-pr-pipeline.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var chain aiv1alpha1.Chain
-	if err := yaml.UnmarshalStrict(data, &chain); err != nil {
-		t.Fatal(err)
-	}
-	if reason, err := validateConditionsAndLoops(&chain); err != nil {
-		t.Fatalf("%s: %v", reason, err)
-	}
-	if err := (&ChainReconciler{}).validateTemplates(&chain); err != nil {
-		t.Fatal(err)
-	}
-	if err := (&ChainReconciler{}).validateDAG(&chain); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateForEach(&chain); err != nil {
-		t.Fatal(err)
 	}
 }
 

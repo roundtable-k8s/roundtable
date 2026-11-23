@@ -116,6 +116,24 @@ knights:
         name: roundtable-github-token  # key defaults to "token"
 ```
 
+### PR pipeline
+
+The PR pipeline Chain (plan → implement → review → fix loop → merge or
+escalate). See [pr-pipeline.md](pr-pipeline.md).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `prPipeline.enabled` | bool | `false` | Create the Chain |
+| `prPipeline.name` | string | `pr-pipeline` | Chain name |
+| `prPipeline.roundTableRef` | string | `roundtable-dev` | RoundTable; must define the `deep`, `fast` and `review` model aliases |
+| `prPipeline.lead` | string | `rt-lead` | Knight that plans, reviews, merges and escalates |
+| `prPipeline.coders` | list | `[rt-operator]` | Coder knights the planner may pick; one implement/split step and fix loop each |
+| `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation |
+| `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
+| `prPipeline.timeout` | int | `86400` | Chain timeout (seconds) |
+| `prPipeline.maxQueueWait` | int | `3600` | Max seconds a task may wait for its knight |
+| `prPipeline.input` | string | `""` | Initial input, `{"repo": "<owner>/<repo>", "issue": <n>}` |
+
 ### Planner
 
 | Key | Type | Default | Description |
