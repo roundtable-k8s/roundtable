@@ -303,7 +303,7 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			Expect(nestedInt64(so, "spec", "maxReplicaCount")).To(Equal(int64(3)))
 			Expect(nestedInt64(so, "spec", "cooldownPeriod")).To(Equal(int64(600)))
 			triggers, _, _ := unstructured.NestedSlice(so.Object, "spec", "triggers")
-			Expect(triggers).To(HaveLen(1))
+			Expect(triggers).To(HaveLen(2))
 			trigger := triggers[0].(map[string]any)
 			Expect(trigger["type"]).To(Equal("nats-jetstream"))
 			Expect(trigger["metadata"]).To(Equal(map[string]any{
@@ -314,6 +314,18 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 				"lagThreshold":                 "1",
 				"activationLagThreshold":       "0",
 			}))
+			// In-flight tasks: ack_pending / concurrency (2).
+			ackTrigger := triggers[1].(map[string]any)
+			Expect(ackTrigger["type"]).To(Equal("metrics-api"))
+			Expect(ackTrigger["metricType"]).To(Equal("AverageValue"))
+			Expect(ackTrigger["metadata"]).To(Equal(map[string]any{
+				"url":                   "http://nats.test:8222/jsz?acc=%24G&streams=true&consumers=true",
+				"valueLocation":         `account_details.0.stream_detail.#(name=="rt_test_tasks").consumer_detail.#(name=="Scale-keda-consumer").num_ack_pending`,
+				"targetValue":           "2",
+				"activationTargetValue": "0",
+			}))
+			// Default scale-down stabilization window.
+			Expect(nestedInt64(so, "spec", "advanced", "horizontalPodAutoscalerConfig", "behavior", "scaleDown", "stabilizationWindowSeconds")).To(Equal(int64(600)))
 
 			// Starts with one pod so the runtime creates its consumer.
 			d := getKnightDeployment(k)

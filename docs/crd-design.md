@@ -175,7 +175,15 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   the operator renders a KEDA `ScaledObject` (same name as the Knight):
   `nats-jetstream` trigger on `spec.nats.stream` / `<Knight>-consumer`,
   `lagThreshold: "1"`, min `0` for `auto` (else `replicas`), max `maxReplicas`,
-  `cooldownPeriod` from `lifecycle.idleTimeoutSeconds` (default 300). The NATS
+  `cooldownPeriod` from `lifecycle.idleTimeoutSeconds` (default 300). The
+  `nats-jetstream` trigger only counts *pending* messages, so a second
+  `metrics-api` trigger reads the consumer's `num_ack_pending` (in-flight
+  tasks) from the monitoring endpoint's `/jsz` and targets `concurrency` per
+  pod; the HPA uses the larger of the two, so a pod running a task is not
+  scaled away when the queue empties. The ScaledObject also sets
+  `advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.stabilizationWindowSeconds`
+  from `lifecycle.scaleDownStabilizationSeconds` (default 600, `0` disables).
+  The NATS
   monitoring endpoint is `--nats-monitoring-endpoint` or `<nats host>:8222`.
   The Deployment is created with one pod (the runtime creates its consumer on
   start), after which KEDA owns `replicas`. A knight KEDA scaled to zero

@@ -26,3 +26,4 @@ spec:
   lifecycle:
     suspendPolicy: auto # scale to zero when idle
     idleTimeoutSeconds: 900    # ScaledObject cooldownPeriod
+    scaleDownStabilizationSeconds: 600  # HPA scale-down window (default 600)

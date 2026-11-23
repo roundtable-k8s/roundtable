@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -239,6 +240,15 @@ func (r *KnightReconciler) desiredScaledObjectSpec(k *aiv1alpha1.Knight, s knigh
 		"minReplicaCount": int64(s.MinReplicas),
 		"maxReplicaCount": int64(s.MaxReplicas),
 		"cooldownPeriod":  knightpkg.CooldownSeconds(k),
+		"advanced": map[string]any{
+			"horizontalPodAutoscalerConfig": map[string]any{
+				"behavior": map[string]any{
+					"scaleDown": map[string]any{
+						"stabilizationWindowSeconds": knightpkg.ScaleDownStabilizationSeconds(k),
+					},
+				},
+			},
+		},
 		"triggers": []any{
 			map[string]any{
 				"type": natsJetStreamTrigger,
@@ -249,6 +259,22 @@ func (r *KnightReconciler) desiredScaledObjectSpec(k *aiv1alpha1.Knight, s knigh
 					"consumer":                     knightpkg.TaskConsumerName(k),
 					"lagThreshold":                 "1",
 					"activationLagThreshold":       "0",
+				},
+			},
+			// The nats-jetstream scaler only sees pending messages. Tasks a
+			// pod is already running are ack-pending, so a second trigger
+			// reads them from the monitoring endpoint: ack_pending /
+			// concurrency pods. The HPA takes the larger of the two triggers.
+			map[string]any{
+				"type":       "metrics-api",
+				"metricType": "AverageValue",
+				"metadata": map[string]any{
+					"url": fmt.Sprintf("http://%s/jsz?acc=%%24G&streams=true&consumers=true", endpoint),
+					"valueLocation": fmt.Sprintf(
+						"account_details.0.stream_detail.#(name==%s).consumer_detail.#(name==%s).num_ack_pending",
+						strconv.Quote(k.Spec.NATS.Stream), strconv.Quote(knightpkg.TaskConsumerName(k))),
+					"targetValue":           strconv.Itoa(int(knightpkg.Concurrency(k))),
+					"activationTargetValue": "0",
 				},
 			},
 		},

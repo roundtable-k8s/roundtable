@@ -130,6 +130,19 @@ func CooldownSeconds(k *aiv1alpha1.Knight) int64 {
 	return int64(DefaultCooldown / time.Second)
 }
 
+// DefaultScaleDownStabilizationSeconds is the HPA scale-down stabilization
+// window when lifecycle.scaleDownStabilizationSeconds is unset.
+const DefaultScaleDownStabilizationSeconds int64 = 600
+
+// ScaleDownStabilizationSeconds returns the HPA scale-down stabilization
+// window: lifecycle.scaleDownStabilizationSeconds when set, else the default.
+func ScaleDownStabilizationSeconds(k *aiv1alpha1.Knight) int64 {
+	if k.Spec.Lifecycle != nil && k.Spec.Lifecycle.ScaleDownStabilizationSeconds != nil {
+		return int64(*k.Spec.Lifecycle.ScaleDownStabilizationSeconds)
+	}
+	return DefaultScaleDownStabilizationSeconds
+}
+
 // Concurrency returns spec.concurrency, defaulting to 1 when unset.
 func Concurrency(k *aiv1alpha1.Knight) int32 {
 	if k.Spec.Concurrency > 0 {
