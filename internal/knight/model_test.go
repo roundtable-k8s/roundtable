@@ -14,28 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package knight
 
 import "testing"
 
 func TestAgentRuntimeForImage(t *testing.T) {
 	tests := []struct {
 		image string
-		want  agentRuntime
+		want  AgentRuntime
 	}{
-		{"ghcr.io/roundtable-k8s/claude-knight:latest", agentRuntimeClaude},
-		{"ghcr.io/roundtable-k8s/claude-knight", agentRuntimeClaude},
-		{"registry.local:5000/mirror/claude-knight-dev:v1@sha256:abc", agentRuntimeClaude},
-		{"ghcr.io/roundtable-k8s/pi-knight:latest", agentRuntimePi},
-		{"pi-knight@sha256:abc", agentRuntimePi},
-		{"registry.local:5000/pi-knight", agentRuntimePi},
-		{"ghcr.io/acme/my-agent:1.0", agentRuntimeUnknown},
-		{"ghcr.io/claude-knight/agent:1.0", agentRuntimeUnknown}, // only the repo name counts
-		{"", agentRuntimeUnknown},
+		{"ghcr.io/roundtable-k8s/claude-knight:latest", AgentRuntimeClaude},
+		{"ghcr.io/roundtable-k8s/claude-knight", AgentRuntimeClaude},
+		{"registry.local:5000/mirror/claude-knight-dev:v1@sha256:abc", AgentRuntimeClaude},
+		{"ghcr.io/roundtable-k8s/pi-knight:latest", AgentRuntimePi},
+		{"pi-knight@sha256:abc", AgentRuntimePi},
+		{"registry.local:5000/pi-knight", AgentRuntimePi},
+		{"ghcr.io/acme/my-agent:1.0", AgentRuntimeUnknown},
+		{"ghcr.io/claude-knight/agent:1.0", AgentRuntimeUnknown}, // only the repo name counts
+		{"", AgentRuntimeUnknown},
 	}
 	for _, tt := range tests {
-		if got := agentRuntimeForImage(tt.image); got != tt.want {
-			t.Errorf("agentRuntimeForImage(%q) = %q, want %q", tt.image, got, tt.want)
+		if got := AgentRuntimeForImage(tt.image); got != tt.want {
+			t.Errorf("AgentRuntimeForImage(%q) = %q, want %q", tt.image, got, tt.want)
 		}
 	}
 }
@@ -83,12 +83,12 @@ func TestResolveStepModel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveStepModel(tt.requested, aliases, tt.image)
+			got, err := ResolveModel(tt.requested, aliases, tt.image)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("resolveStepModel(%q, %q) error = %v, wantErr %v", tt.requested, tt.image, err, tt.wantErr)
+				t.Fatalf("ResolveModel(%q, %q) error = %v, wantErr %v", tt.requested, tt.image, err, tt.wantErr)
 			}
 			if got != tt.want {
-				t.Errorf("resolveStepModel(%q, %q) = %q, want %q", tt.requested, tt.image, got, tt.want)
+				t.Errorf("ResolveModel(%q, %q) = %q, want %q", tt.requested, tt.image, got, tt.want)
 			}
 		})
 	}

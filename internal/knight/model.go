@@ -14,27 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package knight
 
 import (
 	"fmt"
 	"strings"
 )
 
-// agentRuntime is the agent harness a knight image runs. It is unrelated to
+// AgentRuntime is the agent harness a knight image runs. It is unrelated to
 // Knight.spec.runtime, which selects the pod backend (deployment/sandbox).
-type agentRuntime string
+type AgentRuntime string
 
 const (
-	agentRuntimeClaude  agentRuntime = "claude-knight"
-	agentRuntimePi      agentRuntime = "pi-knight"
-	agentRuntimeUnknown agentRuntime = ""
+	AgentRuntimeClaude  AgentRuntime = "claude-knight"
+	AgentRuntimePi      AgentRuntime = "pi-knight"
+	AgentRuntimeUnknown AgentRuntime = ""
 )
 
-// agentRuntimeForImage infers the agent runtime from a container image
+// AgentRuntimeForImage infers the agent runtime from a container image
 // reference by its repository name: ".../claude-knight[-*][:tag][@digest]"
 // is claude-knight, ".../pi-knight..." is pi-knight, anything else is unknown.
-func agentRuntimeForImage(image string) agentRuntime {
+func AgentRuntimeForImage(image string) AgentRuntime {
 	ref := image
 	if i := strings.Index(ref, "@"); i >= 0 {
 		ref = ref[:i]
@@ -46,12 +46,12 @@ func agentRuntimeForImage(image string) agentRuntime {
 		ref = ref[:i]
 	}
 	switch {
-	case strings.HasPrefix(ref, string(agentRuntimeClaude)):
-		return agentRuntimeClaude
-	case strings.HasPrefix(ref, string(agentRuntimePi)):
-		return agentRuntimePi
+	case strings.HasPrefix(ref, string(AgentRuntimeClaude)):
+		return AgentRuntimeClaude
+	case strings.HasPrefix(ref, string(AgentRuntimePi)):
+		return AgentRuntimePi
 	default:
-		return agentRuntimeUnknown
+		return AgentRuntimeUnknown
 	}
 }
 
@@ -90,11 +90,11 @@ func isProviderModel(model string) bool {
 	return ok && provider != "" && rest != "" && !strings.HasSuffix(rest, "/")
 }
 
-// resolveStepModel resolves a step's requested model through the RoundTable's
+// ResolveModel resolves a step's requested model through the RoundTable's
 // aliases and checks it against the knight's agent runtime. An empty request
 // resolves to "" (use the knight's default). Knights whose runtime can't be
 // inferred from the image get the resolved model unvalidated.
-func resolveStepModel(requested string, aliases map[string]string, image string) (string, error) {
+func ResolveModel(requested string, aliases map[string]string, image string) (string, error) {
 	if requested == "" {
 		return "", nil
 	}
@@ -110,13 +110,13 @@ func resolveStepModel(requested string, aliases map[string]string, image string)
 		describe = fmt.Sprintf("model %q (alias %q)", model, requested)
 	}
 
-	switch rt := agentRuntimeForImage(image); rt {
-	case agentRuntimeClaude:
+	switch rt := AgentRuntimeForImage(image); rt {
+	case AgentRuntimeClaude:
 		if !isClaudeModel(model) {
 			return "", fmt.Errorf("%s is not a Claude model; knight image %q runs %s, which accepts opus, sonnet, haiku or claude-* model IDs",
 				describe, image, rt)
 		}
-	case agentRuntimePi:
+	case AgentRuntimePi:
 		if !isProviderModel(model) {
 			return "", fmt.Errorf("%s is not in provider/model form; knight image %q runs %s, which needs e.g. anthropic/claude-sonnet-4-5 or openrouter/z-ai/glm-5.3",
 				describe, image, rt)

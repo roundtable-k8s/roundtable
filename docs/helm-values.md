@@ -61,6 +61,32 @@ helm install roundtable charts/roundtable-operator \
 | `dashboard.vault.enabled` | bool | `true` | Mount shared Obsidian vault |
 | `dashboard.vault.claimName` | string | `roundtable-vault` | Vault PVC name |
 
+### Invoke gateway
+
+Synchronous HTTP API + MCP endpoint for knights (see [gateway.md](gateway.md)).
+Off by default; enabling it requires a bearer-token Secret.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `gateway.enabled` | bool | `false` | Deploy the invoke gateway |
+| `gateway.replicas` | int | `1` | Gateway replicas (stateless; task records live in NATS KV) |
+| `gateway.image.repository` / `.tag` | string | `""` | Image; defaults to the operator image (`/gateway` binary) |
+| `gateway.natsURL` | string | `nats://nats.database.svc:4222` | NATS server URL |
+| `gateway.namespace` | string | `""` | Default namespace for knights (empty = release namespace) |
+| `gateway.allowedNamespaces` | list | `[]` | Extra namespaces callers may target (`"*"` = any) |
+| `gateway.defaultTimeout` | duration | `60s` | Wait when the caller passes no `timeoutSeconds` |
+| `gateway.maxTimeout` | duration | `10m` | Upper bound on a caller's wait |
+| `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
+| `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records |
+| `gateway.taskTTL` | duration | `168h` | How long task records are kept |
+| `gateway.auth.existingSecret` | string | `""` | **Required.** Secret holding the bearer token(s) |
+| `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation) |
+| `gateway.service.type` / `.port` | string / int | `ClusterIP` / `80` | Service |
+| `gateway.networkPolicy.enabled` | bool | `true` | Restrict ingress to the gateway |
+| `gateway.networkPolicy.from` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed in (default: release namespace). An empty list allows any source. |
+| `gateway.resources` | object | 20m/32Mi req, 128Mi limit | Resources |
+| `gateway.extraArgs` | list | `[]` | Extra gateway flags |
+
 ### Knights
 
 Define knights inline in values to deploy them with the operator:

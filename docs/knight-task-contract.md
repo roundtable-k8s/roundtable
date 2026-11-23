@@ -5,7 +5,8 @@ NATS, and what it expects back. Go types: `pkg/nats/payload.go`.
 
 ## Task payload
 
-Published by the chain controller to `<prefix>.tasks.<domain>.<knight>`:
+Published by the chain controller and the [invoke gateway](gateway.md) to
+`<prefix>.tasks.<domain>.<knight>`:
 
 ```json
 {
@@ -23,7 +24,7 @@ Published by the chain controller to `<prefix>.tasks.<domain>.<knight>`:
 | `taskId` | yes | Unique task ID. The result is published to `<prefix>.results.<taskId>`. |
 | `task` | yes | The rendered prompt. |
 | `chainName`, `stepName` | no | Set for chain steps and mission briefings. |
-| `runId` | no | Chain run ID. Key fresh agent sessions on it so context never bleeds between runs. |
+| `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. |
 | `model` | no | Per-task model override (see below). Absent means "use your configured model" (`KNIGHT_MODEL`, from `Knight.spec.model`). |
 
 ### `model`
