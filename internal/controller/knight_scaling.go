@@ -95,7 +95,7 @@ func (r *KnightReconciler) isPlanBacked(k *aiv1alpha1.Knight) bool {
 	if k.Spec.PlanBacked != nil {
 		return *k.Spec.PlanBacked
 	}
-	return agentRuntimeForImage(knightpkg.EffectiveImage(k, r.DefaultImage)) == agentRuntimeClaude
+	return knightpkg.AgentRuntimeForImage(knightpkg.EffectiveImage(k, r.DefaultImage)) == knightpkg.AgentRuntimeClaude
 }
 
 // roundTableIncludes reports whether a RoundTable manages the knight. It
