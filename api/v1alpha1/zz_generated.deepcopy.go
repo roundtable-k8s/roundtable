@@ -581,6 +581,21 @@ func (in *KnightSpec) DeepCopyInto(out *KnightSpec) {
 		*out = new(KnightResources)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Replicas != nil {
+		in, out := &in.Replicas, &out.Replicas
+		*out = new(int32)
+		**out = **in
+	}
+	if in.MaxReplicas != nil {
+		in, out := &in.MaxReplicas, &out.MaxReplicas
+		*out = new(int32)
+		**out = **in
+	}
+	if in.PlanBacked != nil {
+		in, out := &in.PlanBacked, &out.PlanBacked
+		*out = new(bool)
+		**out = **in
+	}
 	if in.NixPackages != nil {
 		in, out := &in.NixPackages, &out.NixPackages
 		*out = make([]string, len(*in))

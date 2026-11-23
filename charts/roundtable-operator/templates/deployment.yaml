@@ -40,6 +40,10 @@ spec:
             {{- end }}
             {{- /* YAML may parse true/false as bools; keep them, default only when unset */}}
             - --enable-sandbox-backend={{ if kindIs "bool" .Values.sandboxBackend }}{{ .Values.sandboxBackend }}{{ else }}{{ .Values.sandboxBackend | default "auto" }}{{ end }}
+            - --enable-keda={{ if kindIs "bool" .Values.keda }}{{ .Values.keda }}{{ else }}{{ .Values.keda | default "auto" }}{{ end }}
+            {{- with .Values.natsMonitoringEndpoint }}
+            - --nats-monitoring-endpoint={{ . }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}

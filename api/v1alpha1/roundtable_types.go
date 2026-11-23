@@ -185,6 +185,19 @@ type RoundTablePolicies struct {
 	// +optional
 	MaxConcurrentTasks int32 `json:"maxConcurrentTasks,omitempty"`
 
+	// maxConcurrentPlanTasks caps how many tasks the table's plan-backed
+	// knights (see Knight spec.planBacked) can run at once, so parallel
+	// sessions sharing one Claude plan token don't exhaust its rate limit.
+	// The operator enforces it on capacity: the sum of replicas x concurrency
+	// over plan-backed knights stays within the cap, by lowering each
+	// knight's replicas/maxReplicas. Every running plan-backed knight keeps
+	// at least one pod, so the cap can be exceeded only by those first pods.
+	// 0 means unlimited.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxConcurrentPlanTasks int32 `json:"maxConcurrentPlanTasks,omitempty"`
+
 	// costBudgetUSD is the maximum cumulative cost in USD across all knights.
 	// When reached, all knights are suspended. "0" means unlimited.
 	// +kubebuilder:default="0"

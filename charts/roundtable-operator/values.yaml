@@ -33,6 +33,18 @@ affinity: {}
 #   false - never enable; sandbox knights report RuntimeAvailable=False
 sandboxBackend: auto
 
+# KEDA autoscaling for knights (Knight spec.maxReplicas > 1 or
+# lifecycle.suspendPolicy: auto). The operator renders a ScaledObject with the
+# NATS JetStream scaler on the knight's task consumer.
+#   auto  - enable only if the cluster serves keda.sh/v1alpha1 ScaledObject
+#   true  - always enable (ScaledObject writes fail if KEDA isn't installed)
+#   false - never enable; such knights run spec.replicas pods, Autoscaled=False
+keda: auto
+
+# NATS HTTP monitoring endpoint (host:port) for KEDA's JetStream scaler.
+# Empty derives it from each knight's spec.nats.url host on port 8222.
+natsMonitoringEndpoint: ""
+
 # Additional args to pass to the manager
 extraArgs: []
 

@@ -74,6 +74,8 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	var sandboxBackendMode string
+	var kedaMode string
+	var natsMonitoringEndpoint string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,6 +96,13 @@ func main() {
 	flag.StringVar(&sandboxBackendMode, "enable-sandbox-backend", string(rtruntime.SandboxModeAuto),
 		"Enable the agent-sandbox runtime backend: auto (only if agents.x-k8s.io/v1alpha1 Sandbox is served), "+
 			"true or false. When disabled, knights with runtime: sandbox report RuntimeAvailable=False.")
+	flag.StringVar(&kedaMode, "enable-keda", string(rtruntime.KEDAModeAuto),
+		"Render KEDA ScaledObjects for autoscaled knights (maxReplicas > 1 or suspendPolicy: auto): "+
+			"auto (only if keda.sh/v1alpha1 ScaledObject is served), true or false. "+
+			"When disabled, such knights run spec.replicas pods and report Autoscaled=False.")
+	flag.StringVar(&natsMonitoringEndpoint, "nats-monitoring-endpoint", os.Getenv("NATS_MONITORING_ENDPOINT"),
+		"NATS HTTP monitoring endpoint (host:port) for KEDA's JetStream scaler. "+
+			"Empty derives it from each knight's spec.nats.url host on port 8222.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -174,6 +183,11 @@ func main() {
 		setupLog.Error(err, "Invalid --enable-sandbox-backend")
 		os.Exit(1)
 	}
+	parsedKEDAMode, err := rtruntime.ParseKEDAMode(kedaMode)
+	if err != nil {
+		setupLog.Error(err, "Invalid --enable-keda")
+		os.Exit(1)
+	}
 
 	restConfig := ctrl.GetConfigOrDie()
 
@@ -197,6 +211,20 @@ func main() {
 	} else {
 		setupLog.Info("Runtime backends enabled", "backends", []string{"deployment"},
 			"reason", sandboxReason+"; knights with runtime: sandbox will report RuntimeAvailable=False")
+	}
+
+	// KEDA is optional too: probe once, the same way as the sandbox backend.
+	// The operator only touches ScaledObjects when the kind is served.
+	kedaEnabled, kedaReason, err := rtruntime.ResolveKEDA(parsedKEDAMode, discoveryClient)
+	if err != nil {
+		setupLog.Error(err, "Failed to detect the KEDA API")
+		os.Exit(1)
+	}
+	if kedaEnabled {
+		setupLog.Info("Knight autoscaling enabled", "reason", kedaReason)
+	} else {
+		setupLog.Info("Knight autoscaling disabled",
+			"reason", kedaReason+"; knights asking for autoscaling run spec.replicas pods and report Autoscaled=False")
 	}
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -263,15 +291,13 @@ func main() {
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
 		SandboxEnabled: sandboxEnabled,
+
+		KEDAEnabled:            kedaEnabled,
+		NATSMonitoringEndpoint: natsMonitoringEndpoint,
 	}
 
 	// Create runtime backends
-	deploymentBackend := rtruntime.NewDeploymentBackend(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		defaultImage,
-		knightReconciler.BuildDeploymentSpec,
-	)
+	deploymentBackend := knightReconciler.NewDeploymentBackend()
 
 	// Register backends by runtime type name
 	knightReconciler.RuntimeBackend = deploymentBackend // default

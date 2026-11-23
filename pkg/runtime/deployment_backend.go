@@ -54,6 +54,11 @@ type DeploymentBackend struct {
 	// DeploymentSpec for a Knight. The controller injects this to keep
 	// PodBuilder usage in the controller layer.
 	BuildDeploymentSpec PodSpecBuilder
+
+	// Autoscaled reports whether a KEDA ScaledObject owns the knight's
+	// replica count. When it returns true, Reconcile sets replicas only on
+	// create and otherwise leaves them to KEDA. Nil means never autoscaled.
+	Autoscaled func(ctx context.Context, knight *aiv1alpha1.Knight) bool
 }
 
 // NewDeploymentBackend creates a new DeploymentBackend.
@@ -109,10 +114,26 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 	}
 
 	replicas := int32(1)
+	if desiredSpec.Replicas != nil {
+		replicas = *desiredSpec.Replicas
+	}
+	strategy := desiredSpec.Strategy
+	if strategy.Type == "" {
+		strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	}
+	autoscaled := b.Autoscaled != nil && b.Autoscaled(ctx, knight)
 
 	op, err := controllerutil.CreateOrUpdate(ctx, b.Client, deploy, func() error {
 		if err := controllerutil.SetControllerReference(knight, deploy, b.Scheme); err != nil {
 			return err
+		}
+
+		// Replicas are reconciled even when the template is unchanged, so
+		// that un-suspending (which only touched replicas) or editing
+		// spec.replicas takes effect. A KEDA-owned Deployment keeps whatever
+		// replica count KEDA set; it only gets the initial count on create.
+		if !autoscaled || deploy.Spec.Replicas == nil {
+			deploy.Spec.Replicas = &replicas
 		}
 
 		// Check if the spec hash matches — if so, skip mutation
@@ -126,10 +147,7 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 
 		// Apply desired state
 		deploy.Labels = labels
-		deploy.Spec.Replicas = &replicas
-		deploy.Spec.Strategy = appsv1.DeploymentStrategy{
-			Type: appsv1.RecreateDeploymentStrategyType,
-		}
+		deploy.Spec.Strategy = strategy
 		deploy.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: labels,
 		}

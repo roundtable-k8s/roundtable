@@ -113,6 +113,36 @@ type KnightSpec struct {
 	// +optional
 	Concurrency int32 `json:"concurrency,omitempty"`
 
+	// replicas is the number of worker pods for this knight. All replicas bind
+	// to the same durable consumer, so JetStream hands each one different
+	// tasks. When the knight is autoscaled (see maxReplicas and
+	// lifecycle.suspendPolicy) this is KEDA's minReplicaCount instead, except
+	// with suspendPolicy auto, which always scales down to 0.
+	// More than one replica needs workspace.mode: ephemeral (or a
+	// ReadWriteMany workspace.existingClaim). Defaults to 1.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
+	// A value above 1 makes the operator render a KEDA ScaledObject that
+	// scales the knight on its consumer's pending tasks. concurrency stays
+	// the number of tasks per pod. Requires KEDA; without it the knight runs
+	// spec.replicas pods and reports Autoscaled=False.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// planBacked marks a knight whose tasks spend the shared Claude plan
+	// quota (a setup token shared by several knights). The RoundTable's
+	// policies.maxConcurrentPlanTasks caps the combined capacity
+	// (replicas x concurrency) of its plan-backed knights. When unset, knights
+	// running a claude-knight image count as plan-backed.
+	// +optional
+	PlanBacked *bool `json:"planBacked,omitempty"`
+
 	// taskTimeout is the default task timeout in seconds.
 	// +kubebuilder:default=120
 	// +kubebuilder:validation:Minimum=30
@@ -203,14 +233,35 @@ type KnightArsenal struct {
 	Image string `json:"image,omitempty"`
 }
 
-// KnightWorkspace configures the knight's persistent workspace storage.
+// Workspace modes for KnightWorkspace.Mode.
+const (
+	// WorkspaceModePVC mounts one ReadWriteOnce PVC at /data (default).
+	WorkspaceModePVC = "pvc"
+	// WorkspaceModeEphemeral mounts a per-pod emptyDir at /data, sized by
+	// workspace.size. Its contents are lost when the pod goes away.
+	WorkspaceModeEphemeral = "ephemeral"
+)
+
+// KnightWorkspace configures the knight's workspace storage at /data.
 type KnightWorkspace struct {
+	// mode selects the workspace storage.
+	// "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
+	// runs a single pod.
+	// "ephemeral" gives every pod its own emptyDir (size limit: size), which
+	// lets the knight run several replicas. Anything the runtime keeps under
+	// /data, including its memory files, is lost when the pod is replaced.
+	// +kubebuilder:validation:Enum=pvc;ephemeral
+	// +kubebuilder:default="pvc"
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
 	// existingClaim references an existing PVC to use instead of creating a new one.
 	// Useful for migrating existing knights to operator management.
 	// +optional
 	ExistingClaim string `json:"existingClaim,omitempty"`
 
-	// size is the storage request for auto-created PVCs.
+	// size is the storage request for auto-created PVCs, or the emptyDir
+	// size limit in ephemeral mode.
 	// +kubebuilder:default="1Gi"
 	// +optional
 	Size string `json:"size,omitempty"`
@@ -219,14 +270,18 @@ type KnightWorkspace struct {
 // KnightLifecycle controls suspend/resume behavior for the knight.
 type KnightLifecycle struct {
 	// suspendPolicy controls when the knight is suspended.
-	// Values: auto, manual, never (default: never)
+	// Values: auto, manual, never (default: never).
+	// auto makes the operator render a KEDA ScaledObject that scales the
+	// knight to 0 when its consumer has no pending tasks and back up when
+	// tasks arrive (requires KEDA).
 	// +kubebuilder:validation:Enum=auto;manual;never
 	// +kubebuilder:default="never"
 	// +optional
 	SuspendPolicy string `json:"suspendPolicy,omitempty"`
 
 	// idleTimeout is how long after the last task before auto-suspending.
-	// Only used when SuspendPolicy is "auto" (e.g., "30m", "1h").
+	// Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
+	// the ScaledObject cooldownPeriod (default 5m).
 	// +optional
 	IdleTimeout string `json:"idleTimeout,omitempty"`
 }
@@ -412,6 +467,14 @@ type KnightStatus struct {
 	// +optional
 	ToolsImage string `json:"toolsImage,omitempty"`
 
+	// replicas is the number of knight pods the Deployment currently has.
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// readyReplicas is the number of knight pods that are ready.
+	// +optional
+	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -430,6 +493,7 @@ type KnightStatus struct {
 // +kubebuilder:printcolumn:name="Model",type=string,JSONPath=`.spec.model`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
+// +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.readyReplicas`,priority=1
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.tasksCompleted`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
@@ -446,6 +510,10 @@ type Knight struct {
 
 	// spec defines the desired state of Knight
 	// +required
+	// +kubebuilder:validation:XValidation:rule="!has(self.maxReplicas) || !has(self.replicas) || self.maxReplicas >= self.replicas",message="maxReplicas must be greater than or equal to replicas"
+	// +kubebuilder:validation:XValidation:rule="((has(self.replicas) ? self.replicas : 1) <= 1 && (has(self.maxReplicas) ? self.maxReplicas : 1) <= 1) || (has(self.workspace) && ((has(self.workspace.mode) && self.workspace.mode == 'ephemeral') || (has(self.workspace.existingClaim) && size(self.workspace.existingClaim) > 0)))",message="replicas or maxReplicas above 1 need workspace.mode: ephemeral (or a ReadWriteMany workspace.existingClaim); the default workspace PVC is ReadWriteOnce"
+	// +kubebuilder:validation:XValidation:rule="!has(self.workspace) || !has(self.workspace.mode) || self.workspace.mode != 'ephemeral' || !has(self.workspace.existingClaim) || size(self.workspace.existingClaim) == 0",message="workspace.existingClaim cannot be combined with workspace.mode: ephemeral"
+	// +kubebuilder:validation:XValidation:rule="!has(self.runtime) || self.runtime != 'sandbox' || ((has(self.replicas) ? self.replicas : 1) <= 1 && (has(self.maxReplicas) ? self.maxReplicas : 1) <= 1)",message="runtime: sandbox runs a single pod; replicas and maxReplicas must be 1"
 	Spec KnightSpec `json:"spec"`
 
 	// status defines the observed state of Knight
