@@ -153,11 +153,12 @@ func SharedNixStorePVC() string {
 // profile instead of bootstrapping a per-pod store.
 //
 // When a tools image repository is configured the knight instead mounts its
-// own tools image (see tools_image.go) as an image volume. The pod references
-// the image by its tools-hash tag, so it waits in image pull until the build
-// Job has pushed it.
+// own tools image (see tools_image.go) as an image volume. It mounts the image
+// last published for the knight, so a changed tool list only rolls the pod
+// once the new image exists; a knight with nothing published yet waits in
+// image pull for its first image.
 func (b *PodBuilder) WithNixStore() *PodBuilder {
-	if ref := ToolsImageRef(b.knight); ref != "" {
+	if ref := MountedToolsImageRef(b.knight); ref != "" {
 		b.volumes = append(b.volumes, corev1.Volume{
 			Name: "nix",
 			VolumeSource: corev1.VolumeSource{

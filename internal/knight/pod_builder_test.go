@@ -171,6 +171,18 @@ var _ = Describe("PodBuilder", func() {
 			}))
 		})
 
+		It("keeps mounting the published image while a changed tool list is building", func() {
+			knight.Spec.Tools = &aiv1alpha1.KnightTools{Nix: []string{"kubectl"}}
+			published := ToolsImageRef(knight)
+			knight.Status.ToolsImage = published
+			knight.Spec.Tools.Nix = []string{"kubectl", "helm"}
+			Expect(ToolsImageRef(knight)).NotTo(Equal(published))
+
+			builder.WithNixStore()
+			Expect(builder.volumes).To(HaveLen(1))
+			Expect(builder.volumes[0].Image.Reference).To(Equal(published))
+		})
+
 		It("has the tools image profile on the container PATH", func() {
 			Expect(strings.Split(knightToolPATH("test-knight"), ":")).To(ContainElement("/nix/profile/bin"))
 		})

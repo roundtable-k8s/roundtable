@@ -70,9 +70,11 @@ func toolsImageJobName(knight *aiv1alpha1.Knight) string {
 
 // reconcileToolsImage ensures the knight's tools image is in the registry. It
 // records the published reference in status.toolsImage, which is what stops it
-// from building again. The knight's pod references the image regardless, so it
-// simply waits in image pull until the build lands — a knight never starts
-// without its declared tools.
+// from building again and what the knight's pod mounts. While a changed tool
+// list builds, the status still names the previous image, so the pod keeps
+// running on it and rolls only when the new one is published. A new knight has
+// no previous image: its pod waits in image pull, never starting without its
+// declared tools.
 func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
 
