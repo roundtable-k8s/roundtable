@@ -71,6 +71,47 @@ Published to `<prefix>.results.<taskId>`. Both spellings are accepted:
 | `error` / `success: false` | Task failed. |
 | `model` | Optional: the model actually used. The chain controller records it in `status.stepStatuses[].model`. Report it whether or not the task carried an override. |
 
+### Structured results: `prs` and `verdict`
+
+Optional, additive fields so consumers never have to parse prose (a result that
+says `#245` instead of a URL used to stall the review loop):
+
+```json
+{
+  "taskId": "…", "output": "Reviewed.",
+  "prs": [{"repo": "roundtable-k8s/roundtable", "number": 245,
+           "url": "https://github.com/roundtable-k8s/roundtable/pull/245",
+           "action": "opened"}],
+  "verdict": "needs_changes"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `prs` | Pull requests the task opened or updated: `{repo, number, url, action}` with `action` one of `opened` or `updated`. |
+| `verdict` | A review outcome: `ship_it`, `needs_changes`, or `null`/absent when the task is not a review. |
+
+Readers use the fields when present and otherwise fall back to the prose
+`output` (`pkg/nats.ParseStructured`): a `Verdict: SHIP IT` / `Verdict: needs
+changes` line (the last one wins), and PR references as GitHub PR URLs,
+`owner/repo#N`, or, only when nothing better is found, a bare `#N` (number
+only, no repo or URL). Fallback `prs` entries have no `action`. An explicitly
+reported field always wins over prose. Knights that don't know the fields keep
+working unchanged; an unrecognised `verdict` value reads as no verdict.
+
+Consumers:
+
+- **Chains**: `when` and `loop.until` see `steps.<name>.prs` (list of
+  `{repo, number, url, action}`) and `steps.<name>.verdict` (string, `""` when
+  none); `until` also sees them on `last` and `body.<name>`. As with `output`,
+  they are populated for succeeded steps the expression mentions, e.g.
+  `until: 'last.verdict == "ship_it"'` or `when: 'steps.build.prs.size() > 0'`.
+  Fields are kept next to the full output in the `chain-outputs` KV entry
+  (the CRD status is unchanged); fan-out items and loop wrapper steps use the
+  prose fallback.
+- **Gateway**: task records (`GET /v1/tasks/<id>`, invoke responses) include
+  `prs` and `verdict`.
+
 ## Chain and RoundTable fields
 
 ```yaml
