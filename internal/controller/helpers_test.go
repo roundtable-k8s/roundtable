@@ -140,7 +140,7 @@ var _ = Describe("Helper Functions", func() {
 				Spec: aiv1alpha1.MissionSpec{Knights: []aiv1alpha1.MissionKnight{}},
 			}
 			reconciler.initKnightStatuses(mission)
-			Expect(mission.Status.KnightStatuses).To(HaveLen(0))
+			Expect(mission.Status.KnightStatuses).To(BeEmpty())
 		})
 
 		It("creates one status entry per knight", func() {
