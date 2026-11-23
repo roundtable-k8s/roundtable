@@ -506,7 +506,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 	}
 	// Every item runs on the step's model override (#217); a model the
 	// knight's runtime can't run fails the whole step before any dispatch.
-	model, err := resolveStepModel(spec.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+	model, err := knightpkg.ResolveModel(spec.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", spec.Name, err)
 		ss.Model = ""

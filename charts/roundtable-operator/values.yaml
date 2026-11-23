@@ -123,6 +123,60 @@ dashboard:
     enabled: true
     claimName: "roundtable-vault"
 
+# Invoke gateway: a synchronous HTTP API and MCP (streamable HTTP) endpoint in
+# front of the knights. Callers POST a task, the gateway publishes it on the
+# knight's NATS subject and waits for the result (or returns 202 {taskId} to
+# poll). See docs/gateway.md. Runs as its own Deployment from the operator
+# image (/gateway) with read-only RBAC on Knights and RoundTables.
+gateway:
+  enabled: false
+  replicas: 1
+  # Image; defaults to the operator image (image.repository:image.tag).
+  image:
+    repository: ""
+    tag: ""
+  # NATS server the knights' RoundTables use.
+  natsURL: nats://nats.database.svc:4222
+  # Default namespace for knights; empty means the release namespace.
+  namespace: ""
+  # Extra namespaces callers may target ("*" for any). Widen the RBAC to
+  # match: the gateway gets a ClusterRole, so it can read Knights anywhere.
+  allowedNamespaces: []
+  # How long invoke waits when the caller doesn't pass timeoutSeconds, and
+  # the most a caller may ask for. Longer waits return 202 {taskId}.
+  defaultTimeout: 60s
+  maxTimeout: 10m
+  # Concurrently waiting invocations per replica; beyond it callers get 429.
+  maxInFlight: 64
+  # NATS KV bucket holding task records (taskId -> status/result) and how
+  # long they are kept.
+  taskBucket: roundtable_gateway_tasks
+  taskTTL: 168h
+  # Bearer-token auth (required). The Secret key holds the token; put two
+  # tokens on separate lines to rotate without downtime. Create it with e.g.
+  #   kubectl create secret generic roundtable-gateway-token \
+  #     --from-literal=token="$(openssl rand -hex 32)"
+  auth:
+    existingSecret: ""
+    secretKey: token
+  service:
+    type: ClusterIP
+    port: 80
+  # NetworkPolicy limiting who can reach the gateway, on top of the token.
+  # `from` is a list of NetworkPolicyPeers; the default allows pods in the
+  # release namespace only. Add e.g. a namespaceSelector for OpenClaw.
+  networkPolicy:
+    enabled: true
+    from:
+      - podSelector: {}
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  extraArgs: []
+
 # Knights to create alongside the operator
 # Example:
 # knights:

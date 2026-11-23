@@ -1,0 +1,215 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package gateway
+
+import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// maxBodyBytes bounds request bodies (the task plus a little JSON).
+const maxBodyBytes = maxTaskBytes + 16<<10
+
+// minTokenLength rejects trivially guessable bearer tokens.
+const minTokenLength = 16
+
+// Handler returns the gateway's HTTP handler: the REST API under /v1, the MCP
+// endpoint at /mcp (both behind bearer-token auth) and an unauthenticated
+// /healthz.
+func Handler(svc *Service, auth *TokenAuth) http.Handler {
+	api := http.NewServeMux()
+	api.HandleFunc("GET /v1/knights", svc.handleListKnights)
+	api.HandleFunc("POST /v1/knights/{name}/invoke", svc.handleInvoke)
+	api.HandleFunc("GET /v1/tasks", svc.handleListTasks)
+	api.HandleFunc("GET /v1/tasks/{taskId}", svc.handleGetTask)
+	api.Handle("/mcp", MCPHandler(svc))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.Handle("/", auth.Wrap(api))
+	return mux
+}
+
+func (s *Service) handleListKnights(w http.ResponseWriter, r *http.Request) {
+	knights, err := s.ListKnights(r.Context(), r.URL.Query().Get("namespace"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"knights": knights})
+}
+
+func (s *Service) handleInvoke(w http.ResponseWriter, r *http.Request) {
+	var req InvokeRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+		return
+	}
+	rec, err := s.Invoke(r.Context(), r.PathValue("name"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	code := http.StatusOK
+	if !rec.Done() {
+		code = http.StatusAccepted
+		w.Header().Set("Location", "/v1/tasks/"+rec.TaskID)
+	}
+	writeJSON(w, code, rec)
+}
+
+func (s *Service) handleGetTask(w http.ResponseWriter, r *http.Request) {
+	rec, err := s.GetTask(r.Context(), r.PathValue("taskId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := TaskFilter{Knight: q.Get("knight"), RunID: q.Get("runId"), Status: TaskStatus(q.Get("status"))}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeError(w, fmt.Errorf("%w: limit: %v", ErrInvalid, err))
+			return
+		}
+		f.Limit = n
+	}
+	tasks, err := s.ListTasks(r.Context(), f)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, ErrInvalid):
+		code = http.StatusBadRequest
+	case errors.Is(err, ErrNotFound):
+		code = http.StatusNotFound
+	case errors.Is(err, ErrBusy):
+		code = http.StatusTooManyRequests
+	case errors.Is(err, ErrUnavailable):
+		code = http.StatusServiceUnavailable
+	}
+	writeJSON(w, code, map[string]string{"error": err.Error()})
+}
+
+// TokenAuth checks "Authorization: Bearer <token>" against the tokens in a
+// file (one per line, so a Secret can hold the old and new token during a
+// rotation). The file is re-read at most every refresh interval, so a
+// rotated Secret takes effect without a restart.
+type TokenAuth struct {
+	path    string
+	refresh time.Duration
+
+	mu       sync.Mutex
+	hashes   [][32]byte
+	loadedAt time.Time
+}
+
+// NewTokenAuth loads the token file and fails if it holds no usable token.
+func NewTokenAuth(path string, refresh time.Duration) (*TokenAuth, error) {
+	a := &TokenAuth{path: path, refresh: refresh}
+	if err := a.load(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func (a *TokenAuth) load() error {
+	data, err := os.ReadFile(a.path)
+	if err != nil {
+		return fmt.Errorf("read token file: %w", err)
+	}
+	var hashes [][32]byte
+	for line := range strings.SplitSeq(string(data), "\n") {
+		tok := strings.TrimSpace(line)
+		if tok == "" {
+			continue
+		}
+		if len(tok) < minTokenLength {
+			return fmt.Errorf("token file %s: tokens must be at least %d characters", a.path, minTokenLength)
+		}
+		hashes = append(hashes, sha256.Sum256([]byte(tok)))
+	}
+	if len(hashes) == 0 {
+		return fmt.Errorf("token file %s holds no token", a.path)
+	}
+	a.hashes = hashes
+	a.loadedAt = time.Now()
+	return nil
+}
+
+func (a *TokenAuth) valid(tok string) bool {
+	a.mu.Lock()
+	if time.Since(a.loadedAt) > a.refresh {
+		// Keep the last good tokens if the file is briefly unreadable or
+		// empty mid-rotation, and don't retry before the next interval.
+		if err := a.load(); err != nil {
+			a.loadedAt = time.Now()
+		}
+	}
+	hashes := a.hashes
+	a.mu.Unlock()
+
+	// Compare fixed-size hashes in constant time.
+	h := sha256.Sum256([]byte(tok))
+	ok := 0
+	for i := range hashes {
+		ok |= subtle.ConstantTimeCompare(h[:], hashes[i][:])
+	}
+	return ok == 1
+}
+
+// Wrap rejects requests without a valid bearer token.
+func (a *TokenAuth) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scheme, tok, found := strings.Cut(r.Header.Get("Authorization"), " ")
+		if !found || !strings.EqualFold(scheme, "Bearer") || !a.valid(strings.TrimSpace(tok)) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="roundtable-gateway"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
