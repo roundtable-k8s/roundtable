@@ -59,6 +59,30 @@ spec:
             # Pinned nixpkgs ref for reproducible knight tool builds.
             - name: KNIGHT_NIXPKGS_REF
               value: "{{ .Values.nixpkgs.ref }}"
+            {{- with .Values.toolsImage }}
+            {{- if .repository }}
+            # Per-knight tools images: build Nix tools into an OCI image per
+            # tool list and mount it as an image volume (no shared store).
+            - name: KNIGHT_TOOLS_IMAGE_REPO
+              value: "{{ .repository }}"
+            {{- if .pushRepository }}
+            - name: KNIGHT_TOOLS_IMAGE_PUSH_REPO
+              value: "{{ .pushRepository }}"
+            {{- end }}
+            {{- if .pushInsecure }}
+            - name: KNIGHT_TOOLS_IMAGE_PUSH_INSECURE
+              value: "true"
+            {{- end }}
+            {{- if .builderImage }}
+            - name: KNIGHT_TOOLS_BUILDER_IMAGE
+              value: "{{ .builderImage }}"
+            {{- end }}
+            {{- if .nix2containerRev }}
+            - name: KNIGHT_NIX2CONTAINER_REV
+              value: "{{ .nix2containerRev }}"
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.notify.allowedURLPrefixes }}
             # SSRF allowlist for spec.notify completion webhooks; unset means
             # the operator rejects all notification URLs.

@@ -42,6 +42,7 @@ func knightToolPATH(name string) string {
 		"/home/node/.nix-profile/bin",
 		"/data/nix-env/bin",
 		"/nix/var/nix/profiles/knights/" + name + "/bin",
+		ToolsImageProfilePath + "/bin",
 		"/data/bin",
 		"/data/.mise/shims",
 		"/app/.mise/shims",
@@ -150,7 +151,36 @@ func SharedNixStorePVC() string {
 // Tools resolve via the profile's bin dir, already on the container PATH
 // (knightToolPATH). The entrypoint detects the read-only /nix and sources the
 // profile instead of bootstrapping a per-pod store.
+//
+// When a tools image repository is configured the knight instead mounts its
+// own tools image (see tools_image.go) as an image volume. The pod references
+// the image by its tools-hash tag, so it waits in image pull until the build
+// Job has pushed it.
 func (b *PodBuilder) WithNixStore() *PodBuilder {
+	if ref := ToolsImageRef(b.knight); ref != "" {
+		b.volumes = append(b.volumes, corev1.Volume{
+			Name: "nix",
+			VolumeSource: corev1.VolumeSource{
+				Image: &corev1.ImageVolumeSource{
+					Reference:  ref,
+					PullPolicy: corev1.PullIfNotPresent,
+				},
+			},
+		})
+		// The image holds /nix/store and /nix/profile; subPath "nix" lands
+		// them at the paths the store's own symlinks expect.
+		b.mounts = append(b.mounts, corev1.VolumeMount{
+			Name:      "nix",
+			MountPath: "/nix",
+			SubPath:   "nix",
+			ReadOnly:  true,
+		})
+		b.env = append(b.env, corev1.EnvVar{
+			Name:  "KNIGHT_NIX_PROFILE",
+			Value: ToolsImageProfilePath,
+		})
+		return b
+	}
 	if b.knight.Spec.Tools != nil && len(b.knight.Spec.Tools.Nix) > 0 {
 		b.volumes = append(b.volumes, corev1.Volume{
 			Name: "nix",

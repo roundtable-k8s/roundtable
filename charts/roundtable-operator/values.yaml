@@ -73,6 +73,29 @@ knightSecurity:
 nixpkgs:
   ref: "9ae611a455b90cf061d8f332b977e387bda8e1ca" # nixos-unstable @ 2026-06-10
 
+# Per-knight tools images. When repository is set, the operator stops using the
+# shared Nix store: for each unique spec.tools.nix list it runs a one-off Job
+# that builds an OCI image with nix2container and pushes it (tag = hash of the
+# tool list), and the knight mounts that image read-only at /nix as an image
+# volume. Identical lists share one image and are built once. Needs Kubernetes
+# image volumes (on by default from 1.35) and containerd 2.1+. With this set,
+# nixBuilder below is unused and can stay disabled.
+toolsImage:
+  # Repository knights (i.e. the nodes) pull from, e.g.
+  # registry.example.com/knight-tools. Empty disables tools images.
+  repository: ""
+  # Repository the build Job pushes to, when it reaches the registry by a
+  # different address than the nodes (e.g. an in-cluster Service). Defaults to
+  # repository.
+  pushRepository: ""
+  # Push over plain HTTP (in-cluster Service without TLS).
+  pushInsecure: false
+  # Image the build Job runs; defaults to a digest-pinned nixos/nix.
+  builderImage: ""
+  # nix2container commit the generated flake pins; defaults to the operator's
+  # built-in pin. Changing it changes every tools image tag.
+  nix2containerRev: ""
+
 # Persistent shared-store builder (the nix-daemon builder). When enabled, a
 # single-replica root Deployment owns the shared Nix store read-write, runs a
 # nix-daemon, and builds knight tools that the operator dispatches through an
