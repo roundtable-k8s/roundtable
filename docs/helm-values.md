@@ -135,6 +135,9 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `prPipeline.timeoutSeconds` | int | `86400` | Chain timeout (seconds) |
 | `prPipeline.maxQueueWaitSeconds` | int | `3600` | Max seconds a task may wait for its knight |
 | `prPipeline.input` | string | `""` | Initial input, `{"repo": "<owner>/<repo>", "issue": <n>}` |
+| `prPipeline.feedback.enabled` | bool | `false` | Create the feedback Chain the operator's PR feedback watcher feeds ([pr-feedback.md](pr-feedback.md)); the watcher itself is switched on per RoundTable (`spec.prFeedback`) |
+| `prPipeline.feedback.name` | string | `pr-pipeline-feedback` | Feedback Chain name (the RoundTable's `spec.prFeedback.chainRef`) |
+| `prPipeline.feedback.timeoutSeconds` | int | `7200` | Feedback Chain timeout (seconds) |
 
 ### Planner
 

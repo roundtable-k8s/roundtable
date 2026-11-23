@@ -338,6 +338,14 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
 	}
+	if err := (&controller.PRFeedbackReconciler{
+		Client:        mgr.GetClient(),
+		Recorder:      mgr.GetEventRecorderFor("prfeedback-controller"), //nolint:staticcheck // SA1019: see note above
+		GitHubBaseURL: os.Getenv("GITHUB_API_URL"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "PRFeedback")
+		os.Exit(1)
+	}
 	missionPlanner := &mission.Planner{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

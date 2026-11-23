@@ -145,6 +145,50 @@ func evalCondition(expr string, vars map[string]any) (bool, error) {
 	return b, nil
 }
 
+// compileStringExpr parses and type-checks an expression that must yield a
+// string (step resumeRunId).
+func compileStringExpr(expr string) (cel.Program, error) {
+	env, err := chainCELEnv()
+	if err != nil {
+		return nil, err
+	}
+	ast, iss := env.Compile(expr)
+	if iss != nil && iss.Err() != nil {
+		return nil, iss.Err()
+	}
+	// json() yields dyn, so dyn is accepted and checked at evaluation.
+	if t := ast.OutputType(); !t.IsAssignableType(cel.StringType) && t != cel.DynType {
+		return nil, fmt.Errorf("expression must evaluate to a string, not %s", t)
+	}
+	return env.Program(ast, cel.CostLimit(celCostLimit))
+}
+
+// evalString compiles and evaluates a string expression against vars.
+func evalString(expr string, vars map[string]any) (string, error) {
+	prg, err := compileStringExpr(expr)
+	if err != nil {
+		return "", err
+	}
+	defaults := map[string]any{
+		"input": "", "steps": map[string]any{}, "last": map[string]any{},
+		"iteration": int64(0), "maxIterations": int64(0), "body": map[string]any{},
+	}
+	for k, v := range defaults {
+		if _, ok := vars[k]; !ok {
+			vars[k] = v
+		}
+	}
+	out, _, err := prg.Eval(vars)
+	if err != nil {
+		return "", err
+	}
+	str, ok := out.Value().(string)
+	if !ok {
+		return "", fmt.Errorf("expression yielded %v (%T), not a string", out.Value(), out.Value())
+	}
+	return str, nil
+}
+
 // clipForCEL bounds an output handed to an expression.
 func clipForCEL(s string) string {
 	if len(s) <= celOutputLimit {
