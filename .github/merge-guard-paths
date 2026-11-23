@@ -1,0 +1,16 @@
+# Protected paths for .github/workflows/merge-guard.yml: one extended regex per
+# line, matched against changed file paths. PRs touching these get the
+# `protected-paths` label (visibility only). Read from the base branch.
+^\.github/
+# API types and CRDs: live resources and dapper-cluster manifests depend on them.
+^api/
+^config/crd/
+^charts/[^/]+/crds/
+# Task contract: consumed by the operator, both knight runtimes and rt-lead.
+^docs/knight-task-contract\.md$
+^pkg/nats/
+# Knight lifecycle: pod shape, scaling, drain.
+^internal/knight/pod_builder\.go$
+^internal/knight/scaling\.go$
+^internal/controller/knight_scaling\.go$
+drain[^/]*\.go$
