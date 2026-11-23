@@ -134,7 +134,7 @@ RoundTable maintains pre-warmed knight pods for instant mission startup:
 2. **Mission assembler** tries to claim warm knights before cold-starting
 3. **Optimistic locking** prevents race conditions — conflict → try next candidate
 4. **Pool replenishes** automatically (burst-limited to 5 per reconcile)
-5. **Idle recycling** deletes warm knights older than `maxIdleTime`
+5. **Idle recycling** deletes warm knights older than `maxIdleTimeSeconds`
 
 Result: Mission spin-up goes from ~30s to <1s.
 
@@ -145,10 +145,10 @@ Chains are multi-step DAG workflows with Go template output chaining:
 ```yaml
 steps:
   - name: scan
-    knightRef: galahad
+    knightRef: {name: galahad}
     prompt: "Scan for CVEs"
   - name: report
-    knightRef: kay
+    knightRef: {name: kay}
     prompt: "Summarize: {{ .Steps.scan.Output }}"
 ```
 

@@ -29,7 +29,7 @@ spec:
       - "Roundtable/"
 
   concurrency: 2
-  taskTimeout: 180
+  taskTimeoutSeconds: 180
 
   prompt:
     identity: |

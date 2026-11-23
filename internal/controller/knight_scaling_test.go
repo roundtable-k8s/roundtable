@@ -25,6 +25,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -84,7 +85,7 @@ func scalingKnight(ns, name string, mutate func(*aiv1alpha1.KnightSpec)) *aiv1al
 }
 
 func ephemeral(spec *aiv1alpha1.KnightSpec) {
-	spec.Workspace = &aiv1alpha1.KnightWorkspace{Mode: aiv1alpha1.WorkspaceModeEphemeral, Size: "2Gi"}
+	spec.Workspace = &aiv1alpha1.KnightWorkspace{Mode: aiv1alpha1.WorkspaceModeEphemeral, Size: new(resource.MustParse("2Gi"))}
 }
 
 func newScalingReconciler(kedaEnabled bool) *KnightReconciler {
@@ -243,7 +244,7 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 				ephemeral(s)
 				s.MaxReplicas = new(int32(3))
 				s.Concurrency = 2
-				s.Lifecycle = &aiv1alpha1.KnightLifecycle{SuspendPolicy: "auto", IdleTimeout: "10m"}
+				s.Lifecycle = &aiv1alpha1.KnightLifecycle{SuspendPolicy: "auto", IdleTimeoutSeconds: 600}
 			})
 			Expect(k8sClient.Create(ctx, k)).To(Succeed())
 			r := newScalingReconciler(true)
@@ -289,7 +290,7 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			Expect(avail.Reason).To(Equal(aiv1alpha1.ReasonKnightScaledToZero))
 
 			// Manual suspend removes the ScaledObject so KEDA can't wake it.
-			got.Spec.Suspended = true
+			got.Spec.Suspend = true
 			Expect(k8sClient.Update(ctx, got)).To(Succeed())
 			reconcileKnight(r, k)
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: k.Name, Namespace: k.Namespace}, so)

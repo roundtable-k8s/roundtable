@@ -7,7 +7,7 @@ spec:
   objective: "Conduct comprehensive penetration test of web application at https://target.example.com"
   
   # Reference the RoundTable with templates
-  roundTableRef: security-ops
+  roundTableRef: {name: security-ops}
   
   # Use RoundTable templates (no need to redefine knightTemplates)
   knights:
@@ -15,13 +15,13 @@ spec:
   - name: lead
     ephemeral: true
     role: lead
-    templateRef: pentester  # ← References security-ops.knightTemplates.pentester
+    templateName: pentester  # ← References security-ops.knightTemplates.pentester
   
   # Multiple auditors with different focuses
   - name: auditor-web
     ephemeral: true
     role: auditor
-    templateRef: auditor  # ← References security-ops.knightTemplates.auditor
+    templateName: auditor  # ← References security-ops.knightTemplates.auditor
     specOverrides:
       # Override skills for web-focused auditing
       skills:
@@ -36,7 +36,7 @@ spec:
   - name: auditor-network
     ephemeral: true
     role: auditor
-    templateRef: auditor  # ← Same template, different overrides
+    templateName: auditor  # ← Same template, different overrides
     specOverrides:
       skills:
       - security
@@ -50,7 +50,7 @@ spec:
   - name: infra
     ephemeral: true
     role: analyst
-    templateRef: infra-analyst  # ← References security-ops.knightTemplates.infra-analyst
+    templateName: infra-analyst  # ← References security-ops.knightTemplates.infra-analyst
     specOverrides:
       env:
       - name: CLOUD_PROVIDER
@@ -60,11 +60,11 @@ spec:
   - name: reporter
     ephemeral: true
     role: reporter
-    templateRef: reporter  # ← References security-ops.knightTemplates.reporter
+    templateName: reporter  # ← References security-ops.knightTemplates.reporter
   
   # Mission config
-  ttl: 14400  # 4 hours
-  timeout: 10800  # 3 hours
+  ttlSeconds: 14400  # 4 hours
+  timeoutSeconds: 10800  # 3 hours
   cleanupPolicy: Retain
   retainResults: true
   

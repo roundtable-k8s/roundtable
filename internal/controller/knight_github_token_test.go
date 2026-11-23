@@ -116,7 +116,7 @@ var _ = Describe("Knight GitHub token file", func() {
 				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "gh", TasksStream: "gh_tasks", ResultsStream: "gh_results"},
 				// key omitted: the CRD defaults it to "token".
 				GitHub: &aiv1alpha1.GitHubConfig{
-					TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "roundtable-github-token"},
+					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"},
 				},
 			},
 		}
@@ -153,7 +153,7 @@ var _ = Describe("Knight GitHub token file", func() {
 		name := knightName + "-own"
 		Expect(k8sClient.Create(ctx, newKnight(name,
 			map[string]string{aiv1alpha1.LabelRoundTable: rtName},
-			&aiv1alpha1.GitHubConfig{TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "own-token", Key: "gh"}},
+			&aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "own-token"}, Key: "gh"}},
 		))).To(Succeed())
 		reconcileTwice(name)
 		expectGitHubTokenMount(getDeployment(name).Spec.Template.Spec, "own-token", "gh")
@@ -195,7 +195,7 @@ var _ = Describe("Knight GitHub token file", func() {
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "ghp", TasksStream: "ghp_tasks", ResultsStream: "ghp_results"},
 				GitHub: &aiv1alpha1.GitHubConfig{
-					TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "roundtable-github-token", Key: "token"},
+					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"},
 				},
 				WarmPool: &aiv1alpha1.WarmPoolConfig{
 					Size: 1,
@@ -227,6 +227,6 @@ var _ = Describe("Knight GitHub token file", func() {
 		Expect(knights.Items).To(HaveLen(1))
 		gh := knights.Items[0].Spec.GitHub
 		Expect(gh).NotTo(BeNil())
-		Expect(gh.TokenSecretRef).To(Equal(&aiv1alpha1.GitHubTokenSecretRef{Name: "roundtable-github-token", Key: "token"}))
+		Expect(gh.TokenSecretRef).To(Equal(&corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"}))
 	})
 })

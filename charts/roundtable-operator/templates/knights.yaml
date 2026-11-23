@@ -35,8 +35,8 @@ spec:
   {{- if $spec.concurrency }}
   concurrency: {{ $spec.concurrency }}
   {{- end }}
-  {{- if $spec.taskTimeout }}
-  taskTimeout: {{ $spec.taskTimeout }}
+  {{- if $spec.taskTimeoutSeconds }}
+  taskTimeoutSeconds: {{ $spec.taskTimeoutSeconds }}
   {{- end }}
   {{- if $spec.github }}
   github:
@@ -70,7 +70,7 @@ spec:
   resources:
     {{- toYaml $spec.resources | nindent 4 }}
   {{- end }}
-  {{- if $spec.suspended }}
-  suspended: {{ $spec.suspended }}
+  {{- if $spec.suspend }}
+  suspend: {{ $spec.suspend }}
   {{- end }}
 {{- end }}

@@ -38,7 +38,7 @@ var _ = Describe("WithGitHubToken", func() {
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "t", TasksStream: "t", ResultsStream: "r"},
 				GitHub: &aiv1alpha1.GitHubConfig{
-					TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: secret, Key: key},
+					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: key},
 				},
 			},
 		}
@@ -92,7 +92,7 @@ var _ = Describe("WithGitHubToken", func() {
 
 	It("mounts the knight's own Secret read-only and sets GITHUB_TOKEN_FILE", func() {
 		knight.Spec.GitHub = &aiv1alpha1.GitHubConfig{
-			TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "gh-app-token"},
+			TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "gh-app-token"}},
 		}
 		spec := NewPodBuilder(knight, "img").WithGitHubToken(context.Background()).Build(context.Background())
 
@@ -132,6 +132,20 @@ var _ = Describe("WithGitHubToken", func() {
 		}
 	})
 
+	It("passes optional through to the Secret volume", func() {
+		knight.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+			TokenSecretRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "gh-app-token"},
+				Key:                  "token",
+				Optional:             new(true),
+			},
+		}
+		spec := NewPodBuilder(knight, "img").WithGitHubToken(context.Background()).Build(context.Background())
+		vol := tokenVolume(spec)
+		Expect(vol).NotTo(BeNil())
+		Expect(vol.Secret.Optional).To(HaveValue(BeTrue()))
+	})
+
 	It("inherits the RoundTable's Secret via the round-table label", func() {
 		knight.Labels[aiv1alpha1.LabelRoundTable] = "fleet"
 		reader := newReader(newTable("fleet", "fleet-token", "")).Build()
@@ -157,12 +171,12 @@ var _ = Describe("WithGitHubToken", func() {
 	It("prefers the knight's override over the RoundTable", func() {
 		knight.Labels[aiv1alpha1.LabelRoundTable] = "fleet"
 		knight.Spec.GitHub = &aiv1alpha1.GitHubConfig{
-			TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "own-token", Key: "pat"},
+			TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "own-token"}, Key: "pat"},
 		}
 		reader := newReader(newTable("fleet", "fleet-token", "")).Build()
 
 		ref := ResolveGitHubTokenSecretRef(context.Background(), reader, knight)
-		Expect(ref).To(Equal(&aiv1alpha1.GitHubTokenSecretRef{Name: "own-token", Key: "pat"}))
+		Expect(ref).To(Equal(&corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "own-token"}, Key: "pat"}))
 	})
 
 	It("ignores a missing RoundTable", func() {

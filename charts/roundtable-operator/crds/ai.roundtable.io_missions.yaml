@@ -26,11 +26,7 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.knights
-      name: Knights
-      priority: 1
-      type: integer
-    - jsonPath: .spec.ttl
+    - jsonPath: .spec.ttlSeconds
       name: TTL
       type: integer
     - jsonPath: .metadata.creationTimestamp
@@ -223,9 +219,21 @@ spec:
                             type: object
                           knightRef:
                             description: |-
-                              knightRef is the name of the Knight to execute this step. Required
-                              unless the step is a loop (whose body steps name their own knights).
-                            type: string
+                              knightRef names the Knight (same namespace) that executes this step.
+                              Required unless the step is a loop (whose body steps name their own
+                              knights).
+                            properties:
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                            type: object
+                            x-kubernetes-map-type: atomic
                           loop:
                             description: |-
                               loop makes this step a bounded loop: its body steps run in order, round
@@ -272,10 +280,20 @@ spec:
                                     body.
                                   properties:
                                     knightRef:
-                                      description: knightRef is the Knight that runs
-                                        this body step.
-                                      minLength: 1
-                                      type: string
+                                      description: knightRef names the Knight that
+                                        runs this body step.
+                                      properties:
+                                        name:
+                                          default: ""
+                                          description: |-
+                                            Name of the referent.
+                                            This field is effectively required, but due to backwards compatibility is
+                                            allowed to be empty. Instances of this type with an empty value here are
+                                            almost certainly wrong.
+                                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                          type: string
+                                      type: object
+                                      x-kubernetes-map-type: atomic
                                     model:
                                       description: |-
                                         model overrides the knight's model for this body step (same rules as
@@ -316,10 +334,11 @@ spec:
                                         ChainLoop.steps for the extra .Loop data).
                                       minLength: 1
                                       type: string
-                                    timeout:
+                                    timeoutSeconds:
                                       default: 120
-                                      description: timeout is the per-task timeout
-                                        in seconds, counted from knight pickup.
+                                      description: |-
+                                        timeoutSeconds is the per-task timeout in seconds, counted from knight
+                                        pickup.
                                       format: int32
                                       maximum: 3600
                                       minimum: 10
@@ -381,7 +400,7 @@ spec:
                             description: |-
                               outputPath is an optional file path where this step's output should be written.
                               Supports Go template variables: {{ .Date }} (YYYY-MM-DD), {{ .Chain }} (chain name), {{ .Step }} (step name).
-                              When set, the controller dispatches a write task to the outputKnight after the step succeeds.
+                              When set, the controller dispatches a write task to the outputKnightRef knight after the step succeeds.
                             type: string
                           retry:
                             description: |-
@@ -410,10 +429,11 @@ spec:
                               Supports Go template syntax with access to prior step outputs: {{ .Steps.step_name.Output }}
                               Required unless the step is a loop.
                             type: string
-                          timeout:
+                          timeoutSeconds:
                             default: 120
-                            description: timeout is the per-step timeout in seconds.
-                              Overrides the knight's default taskTimeout.
+                            description: |-
+                              timeoutSeconds is the per-step timeout in seconds, counted from knight
+                              pickup. Overrides the knight's default taskTimeoutSeconds.
                             format: int32
                             maximum: 3600
                             minimum: 10
@@ -441,8 +461,9 @@ spec:
                         type: object
                       minItems: 1
                       type: array
-                    timeout:
-                      description: timeout overrides the default chain timeout.
+                    timeoutSeconds:
+                      description: timeoutSeconds overrides the default chain timeout,
+                        in seconds.
                       format: int32
                       type: integer
                   required:
@@ -485,10 +506,13 @@ spec:
                               maxLength: 40
                               pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                               type: string
-                            period:
-                              default: 300s
-                              description: period is how often to sync (e.g., "300s").
-                              type: string
+                            periodSeconds:
+                              default: 300
+                              description: periodSeconds is how often git-sync pulls
+                                the repo, in seconds.
+                              format: int32
+                              minimum: 1
+                              type: integer
                             ref:
                               default: main
                               description: ref is the git ref to sync.
@@ -523,10 +547,13 @@ spec:
                                 maxLength: 40
                                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                                 type: string
-                              period:
-                                default: 300s
-                                description: period is how often to sync (e.g., "300s").
-                                type: string
+                              periodSeconds:
+                                default: 300
+                                description: periodSeconds is how often git-sync pulls
+                                  the repo, in seconds.
+                                format: int32
+                                minimum: 1
+                                type: integer
                               ref:
                                 default: main
                                 description: ref is the git ref to sync.
@@ -802,25 +829,35 @@ spec:
                           properties:
                             tokenSecretRef:
                               description: |-
-                                tokenSecretRef names a Secret holding a GitHub token (for example a
-                                GitHub App installation token that an external controller refreshes).
-                                The operator mounts it read-only into the knight at
-                                /var/run/secrets/roundtable/github/token and sets
-                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
-                                var, the kubelet refreshes the file in place when the Secret changes.
+                                tokenSecretRef selects the key of a Secret (in the knight's namespace)
+                                holding a GitHub token, for example a GitHub App installation token that
+                                an external controller refreshes. The operator mounts it read-only into
+                                the knight at /var/run/secrets/roundtable/github/token and sets
+                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
+                                the kubelet refreshes the file in place when the Secret changes. With
+                                optional: true the pod starts even if the Secret or key is missing.
                               properties:
                                 key:
-                                  default: token
-                                  description: key within the Secret that holds the
-                                    token.
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
                                   type: string
                                 name:
-                                  description: name of the Secret.
-                                  minLength: 1
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                                   type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
                               required:
-                              - name
+                              - key
                               type: object
+                              x-kubernetes-map-type: atomic
                           type: object
                         image:
                           description: |-
@@ -830,12 +867,15 @@ spec:
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
                           properties:
-                            idleTimeout:
+                            idleTimeoutSeconds:
                               description: |-
-                                idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
-                                the ScaledObject cooldownPeriod (default 5m).
-                              type: string
+                                idleTimeoutSeconds is how long, in seconds, the knight stays up after
+                                its last pending task before it is scaled down. It becomes the KEDA
+                                ScaledObject cooldownPeriod (default 300). Only used when the knight is
+                                autoscaled (suspendPolicy auto, or maxReplicas above 1).
+                              format: int32
+                              minimum: 1
+                              type: integer
                             suspendPolicy:
                               default: never
                               description: |-
@@ -907,13 +947,6 @@ spec:
                           required:
                           - subjects
                           type: object
-                        nixPackages:
-                          description: |-
-                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
-                            builds into a tools image the knight mounts read-only.
-                          items:
-                            type: string
-                          type: array
                         planBacked:
                           description: |-
                             planBacked marks a knight whose tasks spend the shared Claude plan
@@ -965,26 +998,67 @@ spec:
                           minimum: 1
                           type: integer
                         resources:
-                          description: resources defines compute resource requirements
-                            for the knight container.
+                          description: |-
+                            resources are the compute resource requests and limits of the knight's
+                            app container, applied verbatim. When unset the operator requests 100m
+                            CPU and 256Mi memory and sets no limits.
                           properties:
-                            cpu:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 200m
-                              description: cpu is the CPU limit for the knight container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
-                            memory:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 256Mi
-                              description: memory is the memory limit for the knight
-                                container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in
+                                  PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
                           type: object
                         runtime:
                           default: deployment
@@ -1009,15 +1083,15 @@ spec:
                             type: string
                           minItems: 1
                           type: array
-                        suspended:
+                        suspend:
                           default: false
-                          description: suspended, if true, scales the knight deployment
-                            to 0 replicas.
+                          description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
-                        taskTimeout:
+                        taskTimeoutSeconds:
                           default: 120
-                          description: taskTimeout is the default task timeout in
-                            seconds.
+                          description: |-
+                            taskTimeoutSeconds is the default task timeout, in seconds, for tasks
+                            that don't carry their own (chain steps send theirs).
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -1094,11 +1168,15 @@ spec:
                               - ephemeral
                               type: string
                             size:
+                              anyOf:
+                              - type: integer
+                              - type: string
                               default: 1Gi
                               description: |-
                                 size is the storage request for auto-created PVCs, or the emptyDir
                                 size limit in ephemeral mode.
-                              type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
                           type: object
                       required:
                       - domain
@@ -1115,7 +1193,7 @@ spec:
                       type: string
                     specOverrides:
                       description: |-
-                        specOverrides allows patching specific fields when using templateRef.
+                        specOverrides allows patching specific fields when using templateName.
                         Applied as a strategic merge patch on top of the template spec.
                       properties:
                         concurrency:
@@ -1346,9 +1424,10 @@ spec:
                               type: array
                           type: object
                       type: object
-                    templateRef:
+                    templateName:
                       description: |-
-                        templateRef references a MissionKnightTemplate by name.
+                        templateName names an entry of spec.knightTemplates (or of the
+                        RoundTable's knightTemplates) to build the ephemeral knight from.
                         Only used when ephemeral=true. Mutually exclusive with ephemeralSpec.
                       type: string
                   required:
@@ -1365,7 +1444,7 @@ spec:
                     template.
                   properties:
                     name:
-                      description: name is the template name, referenced by MissionKnight.TemplateRef.
+                      description: name is the template name, referenced by templateName.
                       type: string
                     spec:
                       description: spec is the knight spec to use when creating ephemeral
@@ -1388,10 +1467,13 @@ spec:
                               maxLength: 40
                               pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                               type: string
-                            period:
-                              default: 300s
-                              description: period is how often to sync (e.g., "300s").
-                              type: string
+                            periodSeconds:
+                              default: 300
+                              description: periodSeconds is how often git-sync pulls
+                                the repo, in seconds.
+                              format: int32
+                              minimum: 1
+                              type: integer
                             ref:
                               default: main
                               description: ref is the git ref to sync.
@@ -1426,10 +1508,13 @@ spec:
                                 maxLength: 40
                                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                                 type: string
-                              period:
-                                default: 300s
-                                description: period is how often to sync (e.g., "300s").
-                                type: string
+                              periodSeconds:
+                                default: 300
+                                description: periodSeconds is how often git-sync pulls
+                                  the repo, in seconds.
+                                format: int32
+                                minimum: 1
+                                type: integer
                               ref:
                                 default: main
                                 description: ref is the git ref to sync.
@@ -1705,25 +1790,35 @@ spec:
                           properties:
                             tokenSecretRef:
                               description: |-
-                                tokenSecretRef names a Secret holding a GitHub token (for example a
-                                GitHub App installation token that an external controller refreshes).
-                                The operator mounts it read-only into the knight at
-                                /var/run/secrets/roundtable/github/token and sets
-                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
-                                var, the kubelet refreshes the file in place when the Secret changes.
+                                tokenSecretRef selects the key of a Secret (in the knight's namespace)
+                                holding a GitHub token, for example a GitHub App installation token that
+                                an external controller refreshes. The operator mounts it read-only into
+                                the knight at /var/run/secrets/roundtable/github/token and sets
+                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
+                                the kubelet refreshes the file in place when the Secret changes. With
+                                optional: true the pod starts even if the Secret or key is missing.
                               properties:
                                 key:
-                                  default: token
-                                  description: key within the Secret that holds the
-                                    token.
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
                                   type: string
                                 name:
-                                  description: name of the Secret.
-                                  minLength: 1
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                                   type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
                               required:
-                              - name
+                              - key
                               type: object
+                              x-kubernetes-map-type: atomic
                           type: object
                         image:
                           description: |-
@@ -1733,12 +1828,15 @@ spec:
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
                           properties:
-                            idleTimeout:
+                            idleTimeoutSeconds:
                               description: |-
-                                idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
-                                the ScaledObject cooldownPeriod (default 5m).
-                              type: string
+                                idleTimeoutSeconds is how long, in seconds, the knight stays up after
+                                its last pending task before it is scaled down. It becomes the KEDA
+                                ScaledObject cooldownPeriod (default 300). Only used when the knight is
+                                autoscaled (suspendPolicy auto, or maxReplicas above 1).
+                              format: int32
+                              minimum: 1
+                              type: integer
                             suspendPolicy:
                               default: never
                               description: |-
@@ -1810,13 +1908,6 @@ spec:
                           required:
                           - subjects
                           type: object
-                        nixPackages:
-                          description: |-
-                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
-                            builds into a tools image the knight mounts read-only.
-                          items:
-                            type: string
-                          type: array
                         planBacked:
                           description: |-
                             planBacked marks a knight whose tasks spend the shared Claude plan
@@ -1868,26 +1959,67 @@ spec:
                           minimum: 1
                           type: integer
                         resources:
-                          description: resources defines compute resource requirements
-                            for the knight container.
+                          description: |-
+                            resources are the compute resource requests and limits of the knight's
+                            app container, applied verbatim. When unset the operator requests 100m
+                            CPU and 256Mi memory and sets no limits.
                           properties:
-                            cpu:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 200m
-                              description: cpu is the CPU limit for the knight container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
-                            memory:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 256Mi
-                              description: memory is the memory limit for the knight
-                                container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in
+                                  PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
                           type: object
                         runtime:
                           default: deployment
@@ -1912,15 +2044,15 @@ spec:
                             type: string
                           minItems: 1
                           type: array
-                        suspended:
+                        suspend:
                           default: false
-                          description: suspended, if true, scales the knight deployment
-                            to 0 replicas.
+                          description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
-                        taskTimeout:
+                        taskTimeoutSeconds:
                           default: 120
-                          description: taskTimeout is the default task timeout in
-                            seconds.
+                          description: |-
+                            taskTimeoutSeconds is the default task timeout, in seconds, for tasks
+                            that don't carry their own (chain steps send theirs).
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -1997,11 +2129,15 @@ spec:
                               - ephemeral
                               type: string
                             size:
+                              anyOf:
+                              - type: integer
+                              - type: string
                               default: 1Gi
                               description: |-
                                 size is the storage request for auto-created PVCs, or the emptyDir
                                 size limit in ephemeral mode.
-                              type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
                           type: object
                       required:
                       - domain
@@ -2048,10 +2184,13 @@ spec:
                               maxLength: 40
                               pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                               type: string
-                            period:
-                              default: 300s
-                              description: period is how often to sync (e.g., "300s").
-                              type: string
+                            periodSeconds:
+                              default: 300
+                              description: periodSeconds is how often git-sync pulls
+                                the repo, in seconds.
+                              format: int32
+                              minimum: 1
+                              type: integer
                             ref:
                               default: main
                               description: ref is the git ref to sync.
@@ -2086,10 +2225,13 @@ spec:
                                 maxLength: 40
                                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                                 type: string
-                              period:
-                                default: 300s
-                                description: period is how often to sync (e.g., "300s").
-                                type: string
+                              periodSeconds:
+                                default: 300
+                                description: periodSeconds is how often git-sync pulls
+                                  the repo, in seconds.
+                                format: int32
+                                minimum: 1
+                                type: integer
                               ref:
                                 default: main
                                 description: ref is the git ref to sync.
@@ -2365,25 +2507,35 @@ spec:
                           properties:
                             tokenSecretRef:
                               description: |-
-                                tokenSecretRef names a Secret holding a GitHub token (for example a
-                                GitHub App installation token that an external controller refreshes).
-                                The operator mounts it read-only into the knight at
-                                /var/run/secrets/roundtable/github/token and sets
-                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
-                                var, the kubelet refreshes the file in place when the Secret changes.
+                                tokenSecretRef selects the key of a Secret (in the knight's namespace)
+                                holding a GitHub token, for example a GitHub App installation token that
+                                an external controller refreshes. The operator mounts it read-only into
+                                the knight at /var/run/secrets/roundtable/github/token and sets
+                                GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
+                                the kubelet refreshes the file in place when the Secret changes. With
+                                optional: true the pod starts even if the Secret or key is missing.
                               properties:
                                 key:
-                                  default: token
-                                  description: key within the Secret that holds the
-                                    token.
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
                                   type: string
                                 name:
-                                  description: name of the Secret.
-                                  minLength: 1
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                                   type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
                               required:
-                              - name
+                              - key
                               type: object
+                              x-kubernetes-map-type: atomic
                           type: object
                         image:
                           description: |-
@@ -2393,12 +2545,15 @@ spec:
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
                           properties:
-                            idleTimeout:
+                            idleTimeoutSeconds:
                               description: |-
-                                idleTimeout is how long after the last task before auto-suspending.
-                                Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
-                                the ScaledObject cooldownPeriod (default 5m).
-                              type: string
+                                idleTimeoutSeconds is how long, in seconds, the knight stays up after
+                                its last pending task before it is scaled down. It becomes the KEDA
+                                ScaledObject cooldownPeriod (default 300). Only used when the knight is
+                                autoscaled (suspendPolicy auto, or maxReplicas above 1).
+                              format: int32
+                              minimum: 1
+                              type: integer
                             suspendPolicy:
                               default: never
                               description: |-
@@ -2470,13 +2625,6 @@ spec:
                           required:
                           - subjects
                           type: object
-                        nixPackages:
-                          description: |-
-                            nixPackages is deprecated and ignored. Use tools.nix, which the operator
-                            builds into a tools image the knight mounts read-only.
-                          items:
-                            type: string
-                          type: array
                         planBacked:
                           description: |-
                             planBacked marks a knight whose tasks spend the shared Claude plan
@@ -2528,26 +2676,67 @@ spec:
                           minimum: 1
                           type: integer
                         resources:
-                          description: resources defines compute resource requirements
-                            for the knight container.
+                          description: |-
+                            resources are the compute resource requests and limits of the knight's
+                            app container, applied verbatim. When unset the operator requests 100m
+                            CPU and 256Mi memory and sets no limits.
                           properties:
-                            cpu:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 200m
-                              description: cpu is the CPU limit for the knight container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
-                            memory:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              default: 256Mi
-                              description: memory is the memory limit for the knight
-                                container.
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in
+                                  PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
                           type: object
                         runtime:
                           default: deployment
@@ -2572,15 +2761,15 @@ spec:
                             type: string
                           minItems: 1
                           type: array
-                        suspended:
+                        suspend:
                           default: false
-                          description: suspended, if true, scales the knight deployment
-                            to 0 replicas.
+                          description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
-                        taskTimeout:
+                        taskTimeoutSeconds:
                           default: 120
-                          description: taskTimeout is the default task timeout in
-                            seconds.
+                          description: |-
+                            taskTimeoutSeconds is the default task timeout, in seconds, for tasks
+                            that don't carry their own (chain steps send theirs).
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -2657,11 +2846,15 @@ spec:
                               - ephemeral
                               type: string
                             size:
+                              anyOf:
+                              - type: integer
+                              - type: string
                               default: 1Gi
                               description: |-
                                 size is the storage request for auto-created PVCs, or the emptyDir
                                 size limit in ephemeral mode.
-                              type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
                           type: object
                       required:
                       - domain
@@ -2678,7 +2871,7 @@ spec:
                       type: string
                     specOverrides:
                       description: |-
-                        specOverrides allows patching specific fields when using templateRef.
+                        specOverrides allows patching specific fields when using templateName.
                         Applied as a strategic merge patch on top of the template spec.
                       properties:
                         concurrency:
@@ -2909,9 +3102,10 @@ spec:
                               type: array
                           type: object
                       type: object
-                    templateRef:
+                    templateName:
                       description: |-
-                        templateRef references a MissionKnightTemplate by name.
+                        templateName names an entry of spec.knightTemplates (or of the
+                        RoundTable's knightTemplates) to build the ephemeral knight from.
                         Only used when ephemeral=true. Mutually exclusive with ephemeralSpec.
                       type: string
                   required:
@@ -3009,7 +3203,7 @@ spec:
                   ephemeralSpec:
                     description: |-
                       ephemeralSpec defines an inline spec for an ephemeral planner knight.
-                      Mutually exclusive with knightRef and templateRef.
+                      Mutually exclusive with knightRef and templateName.
                     properties:
                       arsenal:
                         description: arsenal configures the skill arsenal git-sync
@@ -3027,10 +3221,13 @@ spec:
                             maxLength: 40
                             pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                             type: string
-                          period:
-                            default: 300s
-                            description: period is how often to sync (e.g., "300s").
-                            type: string
+                          periodSeconds:
+                            default: 300
+                            description: periodSeconds is how often git-sync pulls
+                              the repo, in seconds.
+                            format: int32
+                            minimum: 1
+                            type: integer
                           ref:
                             default: main
                             description: ref is the git ref to sync.
@@ -3065,10 +3262,13 @@ spec:
                               maxLength: 40
                               pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                               type: string
-                            period:
-                              default: 300s
-                              description: period is how often to sync (e.g., "300s").
-                              type: string
+                            periodSeconds:
+                              default: 300
+                              description: periodSeconds is how often git-sync pulls
+                                the repo, in seconds.
+                              format: int32
+                              minimum: 1
+                              type: integer
                             ref:
                               default: main
                               description: ref is the git ref to sync.
@@ -3344,25 +3544,35 @@ spec:
                         properties:
                           tokenSecretRef:
                             description: |-
-                              tokenSecretRef names a Secret holding a GitHub token (for example a
-                              GitHub App installation token that an external controller refreshes).
-                              The operator mounts it read-only into the knight at
-                              /var/run/secrets/roundtable/github/token and sets
-                              GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
-                              var, the kubelet refreshes the file in place when the Secret changes.
+                              tokenSecretRef selects the key of a Secret (in the knight's namespace)
+                              holding a GitHub token, for example a GitHub App installation token that
+                              an external controller refreshes. The operator mounts it read-only into
+                              the knight at /var/run/secrets/roundtable/github/token and sets
+                              GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
+                              the kubelet refreshes the file in place when the Secret changes. With
+                              optional: true the pod starts even if the Secret or key is missing.
                             properties:
                               key:
-                                default: token
-                                description: key within the Secret that holds the
-                                  token.
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
                                 type: string
                               name:
-                                description: name of the Secret.
-                                minLength: 1
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                                 type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
                             required:
-                            - name
+                            - key
                             type: object
+                            x-kubernetes-map-type: atomic
                         type: object
                       image:
                         description: |-
@@ -3372,12 +3582,15 @@ spec:
                       lifecycle:
                         description: lifecycle controls suspend/resume behavior.
                         properties:
-                          idleTimeout:
+                          idleTimeoutSeconds:
                             description: |-
-                              idleTimeout is how long after the last task before auto-suspending.
-                              Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
-                              the ScaledObject cooldownPeriod (default 5m).
-                            type: string
+                              idleTimeoutSeconds is how long, in seconds, the knight stays up after
+                              its last pending task before it is scaled down. It becomes the KEDA
+                              ScaledObject cooldownPeriod (default 300). Only used when the knight is
+                              autoscaled (suspendPolicy auto, or maxReplicas above 1).
+                            format: int32
+                            minimum: 1
+                            type: integer
                           suspendPolicy:
                             default: never
                             description: |-
@@ -3449,13 +3662,6 @@ spec:
                         required:
                         - subjects
                         type: object
-                      nixPackages:
-                        description: |-
-                          nixPackages is deprecated and ignored. Use tools.nix, which the operator
-                          builds into a tools image the knight mounts read-only.
-                        items:
-                          type: string
-                        type: array
                       planBacked:
                         description: |-
                           planBacked marks a knight whose tasks spend the shared Claude plan
@@ -3507,26 +3713,66 @@ spec:
                         minimum: 1
                         type: integer
                       resources:
-                        description: resources defines compute resource requirements
-                          for the knight container.
+                        description: |-
+                          resources are the compute resource requests and limits of the knight's
+                          app container, applied verbatim. When unset the operator requests 100m
+                          CPU and 256Mi memory and sets no limits.
                         properties:
-                          cpu:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            default: 200m
-                            description: cpu is the CPU limit for the knight container.
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
-                          memory:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            default: 256Mi
-                            description: memory is the memory limit for the knight
-                              container.
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
                         type: object
                       runtime:
                         default: deployment
@@ -3551,14 +3797,15 @@ spec:
                           type: string
                         minItems: 1
                         type: array
-                      suspended:
+                      suspend:
                         default: false
-                        description: suspended, if true, scales the knight deployment
-                          to 0 replicas.
+                        description: suspend, if true, scales the knight to 0 replicas.
                         type: boolean
-                      taskTimeout:
+                      taskTimeoutSeconds:
                         default: 120
-                        description: taskTimeout is the default task timeout in seconds.
+                        description: |-
+                          taskTimeoutSeconds is the default task timeout, in seconds, for tasks
+                          that don't carry their own (chain steps send theirs).
                         format: int32
                         maximum: 3600
                         minimum: 30
@@ -3634,11 +3881,15 @@ spec:
                             - ephemeral
                             type: string
                           size:
+                            anyOf:
+                            - type: integer
+                            - type: string
                             default: 1Gi
                             description: |-
                               size is the storage request for auto-created PVCs, or the emptyDir
                               size limit in ephemeral mode.
-                            type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                         type: object
                     required:
                     - domain
@@ -3647,9 +3898,23 @@ spec:
                     type: object
                   knightRef:
                     description: |-
-                      knightRef is the name of the knight to use as the planner.
-                      This knight should have planning, reasoning, and orchestration skills.
-                    type: string
+                      knightRef names an existing Knight to use as the planner. It should
+                      have planning, reasoning, and orchestration skills. One of knightRef,
+                      templateName or ephemeralSpec is used. When spec.planner is omitted on a
+                      meta-mission, the operator fills in a knight labelled
+                      ai.roundtable.io/role=planner.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                   maxChains:
                     default: 5
                     description: maxChains limits the number of chains the planner
@@ -3666,21 +3931,19 @@ spec:
                     maximum: 50
                     minimum: 1
                     type: integer
-                  templateRef:
+                  templateName:
                     description: |-
-                      templateRef references a KnightTemplate to use for the planner (alternative to knightRef).
-                      If set, an ephemeral planner knight is created from the template.
+                      templateName names a knight template (the mission's knightTemplates,
+                      then the RoundTable's) to build an ephemeral planner knight from.
                     type: string
-                  timeout:
+                  timeoutSeconds:
                     default: 300
-                    description: timeout is the maximum time in seconds for planning
-                      to complete.
+                    description: timeoutSeconds is the maximum time in seconds for
+                      planning to complete.
                     format: int32
                     maximum: 1800
                     minimum: 60
                     type: integer
-                required:
-                - knightRef
                 type: object
               recruitExisting:
                 default: false
@@ -3696,9 +3959,22 @@ spec:
                   The ConfigMap persists beyond mission deletion for post-mortem analysis.
                 type: boolean
               roundTableRef:
-                description: roundTableRef references the RoundTable this mission
-                  is conducted under.
-                type: string
+                description: |-
+                  roundTableRef names the RoundTable (same namespace) this mission is
+                  conducted under; its defaults, policies and GitHub config seed the
+                  mission's ephemeral table.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               roundTableTemplate:
                 description: |-
                   roundTableTemplate overrides defaults for the ephemeral RoundTable created
@@ -3724,10 +4000,13 @@ spec:
                             maxLength: 40
                             pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                             type: string
-                          period:
-                            default: 300s
-                            description: period is how often to sync (e.g., "300s").
-                            type: string
+                          periodSeconds:
+                            default: 300
+                            description: periodSeconds is how often git-sync pulls
+                              the repo, in seconds.
+                            format: int32
+                            minimum: 1
+                            type: integer
                           ref:
                             default: main
                             description: ref is the git ref to sync.
@@ -3752,30 +4031,73 @@ spec:
                           this table.
                         type: string
                       resources:
-                        description: resources defines default compute resource requirements.
+                        description: |-
+                          resources are the default compute resource requests and limits for
+                          the knights' app container.
                         properties:
-                          cpu:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            default: 200m
-                            description: cpu is the CPU limit for the knight container.
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
-                          memory:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            default: 256Mi
-                            description: memory is the memory limit for the knight
-                              container.
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
                         type: object
-                      taskTimeout:
+                      taskTimeoutSeconds:
                         default: 120
-                        description: taskTimeout is the default task timeout in seconds.
+                        description: taskTimeoutSeconds is the default task timeout
+                          in seconds.
                         format: int32
+                        maximum: 3600
+                        minimum: 30
                         type: integer
                     type: object
                   natsURL:
@@ -3861,20 +4183,20 @@ spec:
                   Can be a natural language description evaluated by a designated judge knight,
                   or structured criteria.
                 type: string
-              timeout:
+              timeoutSeconds:
                 default: 1800
                 description: |-
-                  timeout is the maximum time in seconds to wait for the mission objective
-                  to be achieved before marking it as failed.
+                  timeoutSeconds is the maximum time in seconds to wait for the mission
+                  objective to be achieved before marking it as failed.
                 format: int32
                 maximum: 86400
                 minimum: 60
                 type: integer
-              ttl:
+              ttlSeconds:
                 default: 3600
                 description: |-
-                  ttl is the mission's time-to-live in seconds. The mission is automatically
-                  cleaned up after this duration, regardless of completion status.
+                  ttlSeconds is the mission's time-to-live in seconds. The mission is
+                  automatically cleaned up after this long, regardless of completion status.
                 format: int32
                 maximum: 604800
                 minimum: 60

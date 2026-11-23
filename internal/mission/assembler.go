@@ -68,7 +68,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 		}
 		rtName := mission.Status.RoundTableName
 		if rtName == "" {
-			rtName = mission.Spec.RoundTableRef
+			rtName = aiv1alpha1.RefName(mission.Spec.RoundTableRef)
 		}
 		if rtName == "" {
 			return nil, fmt.Errorf("cannot create ephemeral knight: no RoundTable (neither status.roundTableName nor spec.roundTableRef is set)")
@@ -212,7 +212,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 	// Note: Caller should update status
 
 	// Check assembly timeout (Timeout/3, floored at minAssemblyTimeout)
-	assemblyTimeout := max(time.Duration(mission.Spec.Timeout/3)*time.Second, minAssemblyTimeout)
+	assemblyTimeout := max(time.Duration(mission.Spec.TimeoutSeconds/3)*time.Second, minAssemblyTimeout)
 	if mission.Status.StartedAt != nil && time.Since(mission.Status.StartedAt.Time) > assemblyTimeout {
 		log.Info("Assembly timeout exceeded",
 			"timeout", assemblyTimeout,
@@ -379,13 +379,13 @@ func (a *KnightAssembler) resolveKnightSpec(
 	// Path A: Inline spec
 	if mk.EphemeralSpec != nil {
 		baseSpec = mk.EphemeralSpec.DeepCopy()
-	} else if mk.TemplateRef != "" {
+	} else if mk.TemplateName != "" {
 		// Path B: Template reference (check both Mission and RoundTable)
 		var templateSpec *aiv1alpha1.KnightSpec
 
 		// 1. Check mission-level templates first (higher priority)
 		for i := range mission.Spec.KnightTemplates {
-			if mission.Spec.KnightTemplates[i].Name == mk.TemplateRef {
+			if mission.Spec.KnightTemplates[i].Name == mk.TemplateName {
 				templateSpec = mission.Spec.KnightTemplates[i].Spec.DeepCopy()
 				break
 			}
@@ -393,13 +393,13 @@ func (a *KnightAssembler) resolveKnightSpec(
 
 		// 2. If not found, check RoundTable-level templates
 		if templateSpec == nil && rt != nil && rt.Spec.KnightTemplates != nil {
-			if rtTemplate, ok := rt.Spec.KnightTemplates[mk.TemplateRef]; ok {
+			if rtTemplate, ok := rt.Spec.KnightTemplates[mk.TemplateName]; ok {
 				templateSpec = rtTemplate.DeepCopy()
 			}
 		}
 
 		if templateSpec == nil {
-			return nil, fmt.Errorf("template %q not found in mission.spec.knightTemplates or roundTable.spec.knightTemplates", mk.TemplateRef)
+			return nil, fmt.Errorf("template %q not found in mission.spec.knightTemplates or roundTable.spec.knightTemplates", mk.TemplateName)
 		}
 
 		baseSpec = templateSpec
@@ -409,7 +409,7 @@ func (a *KnightAssembler) resolveKnightSpec(
 			a.applySpecOverrides(baseSpec, mk.SpecOverrides)
 		}
 	} else {
-		return nil, fmt.Errorf("ephemeral knight %q has neither ephemeralSpec nor templateRef", mk.Name)
+		return nil, fmt.Errorf("ephemeral knight %q has neither ephemeralSpec nor templateName", mk.Name)
 	}
 
 	return baseSpec, nil
@@ -698,9 +698,9 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	var parentGitHub *aiv1alpha1.GitHubConfig
 	natsURL := "nats://nats.database.svc.cluster.local:4222" // Default
 
-	if mission.Spec.RoundTableRef != "" {
+	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 		parentRT := &aiv1alpha1.RoundTable{}
-		parentKey := types.NamespacedName{Name: mission.Spec.RoundTableRef, Namespace: mission.Namespace}
+		parentKey := types.NamespacedName{Name: aiv1alpha1.RefName(mission.Spec.RoundTableRef), Namespace: mission.Namespace}
 		// Propagate context for proper cancellation and tracing
 		if err := a.Client.Get(ctx, parentKey, parentRT); err == nil {
 			if parentRT.Spec.Defaults != nil {
@@ -746,7 +746,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 		},
 		Spec: aiv1alpha1.RoundTableSpec{
 			Ephemeral:  true,
-			MissionRef: mission.Name,
+			MissionRef: aiv1alpha1.LocalRef(mission.Name),
 			NATS: aiv1alpha1.RoundTableNATS{
 				URL:             natsURL,
 				SubjectPrefix:   natsPrefix,
@@ -764,9 +764,9 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 		rt.Spec.Defaults = parentDefaults
 	} else {
 		rt.Spec.Defaults = &aiv1alpha1.RoundTableDefaults{
-			Model:       "openrouter/deepseek/deepseek-v3.2",
-			Concurrency: 3,
-			TaskTimeout: 300,
+			Model:              "openrouter/deepseek/deepseek-v3.2",
+			Concurrency:        3,
+			TaskTimeoutSeconds: 300,
 		}
 	}
 

@@ -25,4 +25,4 @@ spec:
     size: 4Gi           # emptyDir size limit
   lifecycle:
     suspendPolicy: auto # scale to zero when idle
-    idleTimeout: 15m    # ScaledObject cooldownPeriod
+    idleTimeoutSeconds: 900    # ScaledObject cooldownPeriod

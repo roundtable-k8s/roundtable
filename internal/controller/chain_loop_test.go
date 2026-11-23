@@ -26,6 +26,7 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,8 +105,8 @@ func TestValidateConditionsAndLoops(t *testing.T) {
 	mk := func(steps ...aiv1alpha1.ChainStep) *aiv1alpha1.Chain {
 		return &aiv1alpha1.Chain{Spec: aiv1alpha1.ChainSpec{Steps: steps}}
 	}
-	review := aiv1alpha1.ChainStep{Name: "review", KnightRef: "k", Task: "review"}
-	body := []aiv1alpha1.ChainLoopStep{{Name: "fix", KnightRef: "k", Task: "fix"}, {Name: "review", KnightRef: "k", Task: "re-review"}}
+	review := aiv1alpha1.ChainStep{Name: "review", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "review"}
+	body := []aiv1alpha1.ChainLoopStep{{Name: "fix", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "fix"}, {Name: "review", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "re-review"}}
 	loop := func(mut func(*aiv1alpha1.ChainStep)) aiv1alpha1.ChainStep {
 		s := aiv1alpha1.ChainStep{Name: "fixloop", DependsOn: []string{"review"},
 			Loop: &aiv1alpha1.ChainLoop{From: "review", Until: `last.output.contains("ship it")`, MaxIterations: 3, Steps: body}}
@@ -119,12 +120,12 @@ func TestValidateConditionsAndLoops(t *testing.T) {
 		reason string
 	}{
 		"valid loop":   {mk(review, loop(nil)), ""},
-		"valid when":   {mk(review, aiv1alpha1.ChainStep{Name: "b", KnightRef: "k", Task: "t", When: `steps.review.phase == "Succeeded"`}), ""},
-		"bad when":     {mk(aiv1alpha1.ChainStep{Name: "b", KnightRef: "k", Task: "t", When: `steps.x.output.contains(`}), aiv1alpha1.ReasonInvalidCondition},
-		"non-bool":     {mk(aiv1alpha1.ChainStep{Name: "b", KnightRef: "k", Task: "t", When: `input`}), aiv1alpha1.ReasonInvalidCondition},
+		"valid when":   {mk(review, aiv1alpha1.ChainStep{Name: "b", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "t", When: `steps.review.phase == "Succeeded"`}), ""},
+		"bad when":     {mk(aiv1alpha1.ChainStep{Name: "b", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "t", When: `steps.x.output.contains(`}), aiv1alpha1.ReasonInvalidCondition},
+		"non-bool":     {mk(aiv1alpha1.ChainStep{Name: "b", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "t", When: `input`}), aiv1alpha1.ReasonInvalidCondition},
 		"bad until":    {mk(review, loop(func(s *aiv1alpha1.ChainStep) { s.Loop.Until = "1 +" })), aiv1alpha1.ReasonInvalidCondition},
 		"no knightRef": {mk(aiv1alpha1.ChainStep{Name: "b", Task: "t"}), aiv1alpha1.ReasonInvalidLoop},
-		"loop with knightRef and model": {mk(review, loop(func(s *aiv1alpha1.ChainStep) { s.KnightRef = "k"; s.Model = "opus" })),
+		"loop with knightRef and model": {mk(review, loop(func(s *aiv1alpha1.ChainStep) { s.KnightRef.Name = "k"; s.Model = "opus" })),
 			aiv1alpha1.ReasonInvalidLoop},
 		"loop with forEach": {mk(review, loop(func(s *aiv1alpha1.ChainStep) { s.ForEach = &aiv1alpha1.ChainForEach{From: "input"} })),
 			aiv1alpha1.ReasonInvalidLoop},
@@ -236,7 +237,7 @@ var _ = Describe("Chain when conditions and loops", func() {
 	start := func(steps []aiv1alpha1.ChainStep) {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
-			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: rtName, Steps: steps, Timeout: 86400, Input: "issue #56"},
+			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef(rtName), Steps: steps, TimeoutSeconds: 86400, Input: "issue #56"},
 		})).To(Succeed())
 		reconcileN(3)
 		Expect(get().Status.Phase).To(Equal(aiv1alpha1.ChainPhaseIdle))
@@ -274,17 +275,17 @@ var _ = Describe("Chain when conditions and loops", func() {
 	// pipeline is implement → review → fixloop → merge | escalate.
 	pipeline := func(maxIter int32, onExhausted aiv1alpha1.ChainLoopExhaustedPolicy) []aiv1alpha1.ChainStep {
 		return []aiv1alpha1.ChainStep{
-			{Name: "implement", KnightRef: knight, Task: "implement {{ .Input }}", Timeout: 120},
-			{Name: "review", KnightRef: knight, Task: "review {{ .Steps.implement.Output }}", Timeout: 120, DependsOn: []string{"implement"}},
+			{Name: "implement", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "implement {{ .Input }}", TimeoutSeconds: 120},
+			{Name: "review", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "review {{ .Steps.implement.Output }}", TimeoutSeconds: 120, DependsOn: []string{"implement"}},
 			{Name: "fixloop", DependsOn: []string{"review"}, Loop: &aiv1alpha1.ChainLoop{
 				From: "review", Until: `last.output.contains("Verdict: ship it")`, MaxIterations: maxIter, OnExhausted: onExhausted,
 				Steps: []aiv1alpha1.ChainLoopStep{
-					{Name: "fix", KnightRef: knight, Task: "round {{ .Loop.Iteration }}/{{ .Loop.MaxIterations }} fix: {{ .Loop.Last.Output }}", Model: "opus"},
-					{Name: "rereview", KnightRef: knight, Task: "re-review after: {{ .Loop.Last.Output }}"},
+					{Name: "fix", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "round {{ .Loop.Iteration }}/{{ .Loop.MaxIterations }} fix: {{ .Loop.Last.Output }}", Model: "opus"},
+					{Name: "rereview", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "re-review after: {{ .Loop.Last.Output }}"},
 				}}},
-			{Name: "merge", KnightRef: knight, Task: "merge {{ .Steps.fixloop.Output }}", Timeout: 120, DependsOn: []string{"fixloop"},
+			{Name: "merge", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "merge {{ .Steps.fixloop.Output }}", TimeoutSeconds: 120, DependsOn: []string{"fixloop"},
 				When: `steps.fixloop.outcome == "Converged"`},
-			{Name: "escalate", KnightRef: knight, Task: "label needs-human after {{ .Steps.fixloop.Iterations }} rounds", Timeout: 120,
+			{Name: "escalate", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "label needs-human after {{ .Steps.fixloop.Iterations }} rounds", TimeoutSeconds: 120,
 				DependsOn: []string{"fixloop"}, When: `steps.fixloop.outcome == "Exhausted"`},
 		}
 	}
@@ -315,7 +316,7 @@ var _ = Describe("Chain when conditions and loops", func() {
 				Spec: aiv1alpha1.KnightSpec{
 					Domain: "ops", Model: "claude-sonnet-4", Skills: []string{"ops"},
 					NATS:        aiv1alpha1.KnightNATS{URL: "nats://x:4222", Subjects: []string{"lp.tasks.ops.>"}, Stream: "lp_tasks", ResultsStream: "lp_results"},
-					Concurrency: 1, TaskTimeout: 120,
+					Concurrency: 1, TaskTimeoutSeconds: 120,
 				},
 			})).To(Succeed())
 		}
@@ -332,13 +333,13 @@ var _ = Describe("Chain when conditions and loops", func() {
 
 	It("skips steps whose when is false without dispatching, and their dependents still run", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "recon", KnightRef: knight, Task: "scan", Timeout: 120},
-			{Name: "ssh", KnightRef: knight, Task: "ssh", Timeout: 120, DependsOn: []string{"recon"},
+			{Name: "recon", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "scan", TimeoutSeconds: 120},
+			{Name: "ssh", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "ssh", TimeoutSeconds: 120, DependsOn: []string{"recon"},
 				When: `steps.recon.output.contains("22/tcp open")`},
-			{Name: "web", KnightRef: knight, Task: "web", Timeout: 120, DependsOn: []string{"recon"},
+			{Name: "web", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "web", TimeoutSeconds: 120, DependsOn: []string{"recon"},
 				When: `steps.recon.output.contains("80/tcp open")`},
-			{Name: "report", KnightRef: knight, Task: "report ssh={{ .Steps.ssh.Phase }} web={{ .Steps.web.Phase }}/{{ .Steps.web.Reason }}",
-				Timeout: 120, DependsOn: []string{"ssh", "web"}},
+			{Name: "report", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "report ssh={{ .Steps.ssh.Phase }} web={{ .Steps.web.Phase }}/{{ .Steps.web.Reason }}",
+				TimeoutSeconds: 120, DependsOn: []string{"ssh", "web"}},
 		})
 		reconcileN(1)
 		// The marker sits past the 4000-char status truncation: when must see the full output.
@@ -363,8 +364,8 @@ var _ = Describe("Chain when conditions and loops", func() {
 
 	It("fails a step whose when cannot be evaluated", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "a", KnightRef: knight, Task: "a", Timeout: 120},
-			{Name: "b", KnightRef: knight, Task: "b", Timeout: 120, DependsOn: []string{"a"}, When: `json(steps.a.output).ok`},
+			{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "a", TimeoutSeconds: 120},
+			{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "b", TimeoutSeconds: 120, DependsOn: []string{"a"}, When: `json(steps.a.output).ok`},
 		})
 		reconcileN(1)
 		finishLast("a", "not json")
@@ -538,10 +539,10 @@ var _ = Describe("Chain when conditions and loops", func() {
 
 	It("marks the chain invalid when a loop step sets knightRef", func() {
 		steps := pipeline(2, "")
-		steps[2].KnightRef = knight
+		steps[2].KnightRef.Name = knight
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
-			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: rtName, Timeout: 600, Steps: steps},
+			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 600, Steps: steps},
 		})).To(Succeed())
 		_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})

@@ -103,7 +103,7 @@ knights:
       apt: [nmap, whois]
     nats:
       subjects: ["fleet-a.tasks.security.>"]
-    taskTimeout: 300
+    taskTimeoutSeconds: 300
     # Platform skills from roundtable-k8s/arsenal, domain packs from your own repo.
     # Merged per skill into /skills; later arsenals win on a clash.
     arsenal: {}
@@ -113,7 +113,8 @@ knights:
     # Mount a refreshing GitHub token file instead of a frozen env token.
     github:
       tokenSecretRef:
-        name: roundtable-github-token  # key defaults to "token"
+        name: roundtable-github-token
+        key: token
 ```
 
 ### PR pipeline
@@ -125,13 +126,13 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 |-----|------|---------|-------------|
 | `prPipeline.enabled` | bool | `false` | Create the Chain |
 | `prPipeline.name` | string | `pr-pipeline` | Chain name |
-| `prPipeline.roundTableRef` | string | `roundtable-dev` | RoundTable; must define the `deep`, `fast` and `review` model aliases |
+| `prPipeline.roundTableRef.name` | string | `roundtable-dev` | RoundTable; must define the `deep`, `fast` and `review` model aliases |
 | `prPipeline.lead` | string | `rt-lead` | Knight that plans, reviews, merges and escalates |
 | `prPipeline.coders` | list | `[rt-operator]` | Coder knights the planner may pick; one implement/split step and fix loop each |
 | `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation |
 | `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
-| `prPipeline.timeout` | int | `86400` | Chain timeout (seconds) |
-| `prPipeline.maxQueueWait` | int | `3600` | Max seconds a task may wait for its knight |
+| `prPipeline.timeoutSeconds` | int | `86400` | Chain timeout (seconds) |
+| `prPipeline.maxQueueWaitSeconds` | int | `3600` | Max seconds a task may wait for its knight |
 | `prPipeline.input` | string | `""` | Initial input, `{"repo": "<owner>/<repo>", "issue": <n>}` |
 
 ### Planner
@@ -143,11 +144,11 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `planner.model` | string | `claude-sonnet-4-20250514` | Planner model |
 | `planner.skills` | list | `[operator, shared]` | Planner skills |
 | `planner.concurrency` | int | `1` | Max concurrent tasks |
-| `planner.taskTimeout` | int | `600` | Task timeout in seconds |
+| `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds |
 | `planner.arsenal.repo` | string | `https://github.com/roundtable-k8s/arsenal.git` | Skills git repo |
-| `planner.arsenals` | list | `[]` | Extra skill repos merged after `arsenal` (`name`, `repo`, `ref`, `period`; per-skill merge, later wins) |
+| `planner.arsenals` | list | `[]` | Extra skill repos merged after `arsenal` (`name`, `repo`, `ref`, `periodSeconds`; per-skill merge, later wins) |
 | `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). The planner belongs to no RoundTable, so it is configured here |
-| `planner.github.tokenSecretRef.key` | string | `token` | Key within that Secret |
+| `planner.github.tokenSecretRef.key` | string | required | Key within that Secret (`corev1.SecretKeySelector`; `optional` is honoured too) |
 
 ### GitHub token file
 

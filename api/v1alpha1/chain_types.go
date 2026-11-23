@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -42,21 +43,22 @@ type ChainSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Steps []ChainStep `json:"steps"`
 
-	// timeout is the overall chain timeout in seconds. The entire chain is failed if exceeded.
+	// timeoutSeconds is the overall chain timeout in seconds. The entire chain
+	// is failed if exceeded.
 	// +kubebuilder:default=600
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=86400
 	// +optional
-	Timeout int32 `json:"timeout,omitempty"`
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
-	// maxQueueWait is how long (seconds) a published step task may wait for its
+	// maxQueueWaitSeconds is how long a published step task may wait for its
 	// knight to pick it up before the step fails. The per-step timeout only
 	// starts counting once the knight has picked the task up, so a busy (or
 	// dead) knight is bounded by this guard instead. Defaults to 1800 when unset.
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=86400
 	// +optional
-	MaxQueueWait int32 `json:"maxQueueWait,omitempty"`
+	MaxQueueWaitSeconds int32 `json:"maxQueueWaitSeconds,omitempty"`
 
 	// schedule is an optional cron expression to trigger this chain on a recurring basis.
 	// Uses standard cron syntax (e.g., "0 */6 * * *").
@@ -76,30 +78,30 @@ type ChainSpec struct {
 	// +optional
 	Input string `json:"input,omitempty"`
 
-	// outputKnight is the knight responsible for writing chain artifacts when steps have outputPath set.
-	// Defaults to "gawain" if not specified.
-	// +kubebuilder:default="gawain"
+	// outputKnightRef names the Knight that writes chain artifacts when steps
+	// have outputPath set. Defaults to the knight "gawain".
 	// +optional
-	OutputKnight string `json:"outputKnight,omitempty"`
+	OutputKnightRef *corev1.LocalObjectReference `json:"outputKnightRef,omitempty"`
 
-	// roundTableRef references the RoundTable this chain belongs to.
-	// If omitted, the chain operates in the default namespace NATS prefix.
+	// roundTableRef names the RoundTable this chain belongs to (same namespace).
+	// It supplies the NATS subjects and streams the steps are published on.
 	// +optional
-	RoundTableRef string `json:"roundTableRef,omitempty"`
+	RoundTableRef *corev1.LocalObjectReference `json:"roundTableRef,omitempty"`
 
-	// suspended, if true, prevents scheduled runs and disallows new executions.
+	// suspend, if true, prevents scheduled runs and disallows new executions.
 	// +kubebuilder:default=false
 	// +optional
-	Suspended bool `json:"suspended,omitempty"`
+	Suspend bool `json:"suspend,omitempty"`
 
 	// retryPolicy configures retry behavior for failed steps.
 	// +optional
 	RetryPolicy *ChainRetryPolicy `json:"retryPolicy,omitempty"`
 
-	// missionRef is set by the mission controller when creating mission-scoped chains.
-	// The chain controller uses this to resolve NATS config from the mission's RoundTable.
+	// missionRef names the Mission that owns a mission-scoped chain. It is set
+	// by the mission controller; the chain controller resolves NATS config
+	// from the mission's RoundTable through it.
 	// +optional
-	MissionRef string `json:"missionRef,omitempty"`
+	MissionRef *corev1.LocalObjectReference `json:"missionRef,omitempty"`
 
 	// notify configures a completion notification fired exactly once per run
 	// when the chain reaches a terminal phase (Succeeded, Failed,
@@ -115,10 +117,11 @@ type ChainStep struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// knightRef is the name of the Knight to execute this step. Required
-	// unless the step is a loop (whose body steps name their own knights).
+	// knightRef names the Knight (same namespace) that executes this step.
+	// Required unless the step is a loop (whose body steps name their own
+	// knights).
 	// +optional
-	KnightRef string `json:"knightRef,omitempty"`
+	KnightRef corev1.LocalObjectReference `json:"knightRef,omitzero"`
 
 	// task is the task prompt or instruction to send to the knight.
 	// Supports Go template syntax with access to prior step outputs: {{ .Steps.step_name.Output }}
@@ -131,12 +134,13 @@ type ChainStep struct {
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
 
-	// timeout is the per-step timeout in seconds. Overrides the knight's default taskTimeout.
+	// timeoutSeconds is the per-step timeout in seconds, counted from knight
+	// pickup. Overrides the knight's default taskTimeoutSeconds.
 	// +kubebuilder:default=120
 	// +kubebuilder:validation:Minimum=10
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
-	Timeout int32 `json:"timeout,omitempty"`
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
 	// outputKey is the key name under which this step's output is stored for downstream steps.
 	// Defaults to the step name if not specified.
@@ -145,7 +149,7 @@ type ChainStep struct {
 
 	// outputPath is an optional file path where this step's output should be written.
 	// Supports Go template variables: {{ .Date }} (YYYY-MM-DD), {{ .Chain }} (chain name), {{ .Step }} (step name).
-	// When set, the controller dispatches a write task to the outputKnight after the step succeeds.
+	// When set, the controller dispatches a write task to the outputKnightRef knight after the step succeeds.
 	// +optional
 	OutputPath string `json:"outputPath,omitempty"`
 
@@ -299,22 +303,22 @@ type ChainLoopStep struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9_-]*$`
 	Name string `json:"name"`
 
-	// knightRef is the Knight that runs this body step.
+	// knightRef names the Knight that runs this body step.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	KnightRef string `json:"knightRef"`
+	KnightRef corev1.LocalObjectReference `json:"knightRef"`
 
 	// task is the task template (see ChainLoop.steps for the extra .Loop data).
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Task string `json:"task"`
 
-	// timeout is the per-task timeout in seconds, counted from knight pickup.
+	// timeoutSeconds is the per-task timeout in seconds, counted from knight
+	// pickup.
 	// +kubebuilder:default=120
 	// +kubebuilder:validation:Minimum=10
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
-	Timeout int32 `json:"timeout,omitempty"`
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
 	// model overrides the knight's model for this body step (same rules as
 	// ChainStep.model, including RoundTable model aliases).
@@ -593,15 +597,19 @@ type ChainFanOutStatus struct {
 	// +optional
 	ItemPhases string `json:"itemPhases,omitempty"`
 
-	// pending, running, succeeded, failed and skipped summarise itemPhases.
+	// pending is the number of items not dispatched yet.
 	// +optional
 	Pending int32 `json:"pending,omitempty"`
+	// running is the number of items in flight.
 	// +optional
 	Running int32 `json:"running,omitempty"`
+	// succeeded is the number of items that succeeded.
 	// +optional
 	Succeeded int32 `json:"succeeded,omitempty"`
+	// failed is the number of items that failed (after their retries).
 	// +optional
 	Failed int32 `json:"failed,omitempty"`
+	// skipped is the number of items that were never run.
 	// +optional
 	Skipped int32 `json:"skipped,omitempty"`
 
@@ -722,7 +730,6 @@ type ChainStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ch,categories=roundtable
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Steps",type=integer,JSONPath=`.spec.steps`,priority=1
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Runs",type=integer,JSONPath=`.status.runsCompleted`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

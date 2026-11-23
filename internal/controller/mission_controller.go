@@ -117,7 +117,7 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if mission.Status.Phase == "" {
 		now := metav1.Now()
 		mission.Status.StartedAt = &now
-		expiresAt := metav1.NewTime(now.Add(time.Duration(mission.Spec.TTL) * time.Second))
+		expiresAt := metav1.NewTime(now.Add(time.Duration(mission.Spec.TTLSeconds) * time.Second))
 		mission.Status.ExpiresAt = &expiresAt
 		r.initKnightStatuses(mission)
 		err := status.ForMission(mission).
@@ -304,22 +304,22 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 		}
 		knightNames[knight.Name] = true
 
-		// If using templateRef, validate it exists in mission-level templates.
+		// If using templateName, validate it exists in mission-level templates.
 		// Note: RoundTable-level templates are validated later during assembling
 		// (they require a Get call we defer to avoid premature fetches).
-		if knight.TemplateRef != "" && !templateNames[knight.TemplateRef] && mission.Spec.RoundTableRef == "" {
+		if knight.TemplateName != "" && !templateNames[knight.TemplateName] && aiv1alpha1.RefName(mission.Spec.RoundTableRef) == "" {
 			return ctrl.Result{}, status.ForMission(mission).
-				Failed(fmt.Sprintf("Knight %s references unknown template: %s", knight.Name, knight.TemplateRef)).
+				Failed(fmt.Sprintf("Knight %s references unknown template: %s", knight.Name, knight.TemplateName)).
 				Apply(ctx, r.Client)
 		}
 
-		// Validate ephemeral knights have spec OR templateRef (not both, not neither)
+		// Validate ephemeral knights have spec OR templateName (not both, not neither)
 		if knight.Ephemeral {
 			hasSpec := knight.EphemeralSpec != nil
-			hasTemplate := knight.TemplateRef != ""
+			hasTemplate := knight.TemplateName != ""
 			if hasSpec == hasTemplate { // XOR check
 				return ctrl.Result{}, status.ForMission(mission).
-					Failed(fmt.Sprintf("Ephemeral knight %s must have exactly one of ephemeralSpec or templateRef", knight.Name)).
+					Failed(fmt.Sprintf("Ephemeral knight %s must have exactly one of ephemeralSpec or templateName", knight.Name)).
 					Apply(ctx, r.Client)
 			}
 		}
@@ -366,8 +366,8 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 	log := logf.FromContext(ctx)
 
 	// If roundTableRef is already set, skip provisioning (using existing RT)
-	if mission.Spec.RoundTableRef != "" {
-		log.Info("Using existing RoundTable", "roundTable", mission.Spec.RoundTableRef)
+	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
+		log.Info("Using existing RoundTable", "roundTable", aiv1alpha1.RefName(mission.Spec.RoundTableRef))
 		mission.Status.Phase = nextPhaseAfterProvisioning(mission)
 		mission.Status.ObservedGeneration = mission.Generation
 		return ctrl.Result{RequeueAfter: RequeueFast}, r.Status().Update(ctx, mission)
@@ -559,12 +559,12 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 	// Check timeout
 	if mission.Status.StartedAt != nil {
 		elapsed := time.Since(mission.Status.StartedAt.Time)
-		if elapsed > time.Duration(mission.Spec.Timeout)*time.Second {
+		if elapsed > time.Duration(mission.Spec.TimeoutSeconds)*time.Second {
 			log.Info("Mission timed out", "mission", mission.Name, "elapsed", elapsed)
 			err := status.ForMission(mission).
-				Failed(fmt.Sprintf("Mission timed out after %ds", mission.Spec.Timeout)).
+				Failed(fmt.Sprintf("Mission timed out after %ds", mission.Spec.TimeoutSeconds)).
 				Condition(aiv1alpha1.ConditionMissionComplete, aiv1alpha1.ReasonMissionTimeout,
-					fmt.Sprintf("Mission timed out after %ds", mission.Spec.Timeout),
+					fmt.Sprintf("Mission timed out after %ds", mission.Spec.TimeoutSeconds),
 					metav1.ConditionTrue).
 				Apply(ctx, r.Client)
 			if apierrors.IsConflict(err) {
@@ -962,10 +962,10 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 	// prefer the referenced RoundTable's prefix (covered by its tasks stream)
 	// over the mission-scoped prefix, which only exists for ephemeral tables.
 	fallbackPrefix := natsPrefix(mission)
-	if mission.Spec.RoundTableRef != "" {
+	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 		rt := &aiv1alpha1.RoundTable{}
 		if err := r.Get(ctx, types.NamespacedName{
-			Name:      mission.Spec.RoundTableRef,
+			Name:      aiv1alpha1.RefName(mission.Spec.RoundTableRef),
 			Namespace: mission.Namespace,
 		}, rt); err == nil && rt.Spec.NATS.SubjectPrefix != "" {
 			fallbackPrefix = rt.Spec.NATS.SubjectPrefix
@@ -1170,8 +1170,8 @@ func (r *MissionReconciler) suspendMissionChains(ctx context.Context, mission *a
 		}
 
 		// Set suspended flag
-		if !chain.Spec.Suspended {
-			chain.Spec.Suspended = true
+		if !chain.Spec.Suspend {
+			chain.Spec.Suspend = true
 			if err := r.Update(ctx, chain); err != nil {
 				log.Error(err, "Failed to suspend chain", "chain", cs.ChainCRName)
 				continue
@@ -1267,7 +1267,7 @@ func (r *MissionReconciler) ensureMissionChain(ctx context.Context, mission *aiv
 	}
 
 	// Get RoundTable reference for this mission
-	rtRef := mission.Spec.RoundTableRef
+	rtRef := aiv1alpha1.RefName(mission.Spec.RoundTableRef)
 	if rtRef == "" {
 		rtRef = defaultRoundTableRef // fallback to default if not specified
 	}
@@ -1283,12 +1283,12 @@ func (r *MissionReconciler) ensureMissionChain(ctx context.Context, mission *aiv
 			},
 		},
 		Spec: aiv1alpha1.ChainSpec{
-			Description:   fmt.Sprintf("Mission %s: %s", mission.Name, sourceChain.Spec.Description),
-			Steps:         sourceChain.Spec.Steps,
-			Timeout:       sourceChain.Spec.Timeout,
-			RoundTableRef: rtRef,
-			OutputKnight:  sourceChain.Spec.OutputKnight,
-			RetryPolicy:   sourceChain.Spec.RetryPolicy,
+			Description:     fmt.Sprintf("Mission %s: %s", mission.Name, sourceChain.Spec.Description),
+			Steps:           sourceChain.Spec.Steps,
+			TimeoutSeconds:  sourceChain.Spec.TimeoutSeconds,
+			RoundTableRef:   aiv1alpha1.LocalRef(rtRef),
+			OutputKnightRef: sourceChain.Spec.OutputKnightRef,
+			RetryPolicy:     sourceChain.Spec.RetryPolicy,
 		},
 	}
 

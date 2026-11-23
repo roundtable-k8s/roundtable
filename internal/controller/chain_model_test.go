@@ -25,6 +25,7 @@ import (
 	"github.com/nats-io/nats.go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -107,8 +108,8 @@ var _ = Describe("Chain per-step model override", func() {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 			Spec: aiv1alpha1.ChainSpec{
-				RoundTableRef: rtName, Timeout: 86400,
-				Steps: []aiv1alpha1.ChainStep{{Name: "work", KnightRef: knightRef, Task: "do it", Timeout: 120, Model: model}},
+				RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 86400,
+				Steps: []aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: knightRef}, Task: "do it", TimeoutSeconds: 120, Model: model}},
 			},
 		})).To(Succeed())
 		reconcileN(3)
@@ -125,7 +126,7 @@ var _ = Describe("Chain per-step model override", func() {
 		return aiv1alpha1.KnightSpec{
 			Domain: "ops", Model: "default-model", Image: image, Skills: []string{"ops"},
 			NATS:        aiv1alpha1.KnightNATS{URL: "nats://x:4222", Subjects: []string{"mdl.tasks.ops.>"}, Stream: "mdl_tasks", ResultsStream: "mdl_results"},
-			Concurrency: 1, TaskTimeout: 120,
+			Concurrency: 1, TaskTimeoutSeconds: 120,
 		}
 	}
 
@@ -237,8 +238,8 @@ var _ = Describe("Chain per-step model override", func() {
 		err := k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 			Spec: aiv1alpha1.ChainSpec{
-				RoundTableRef: rtName,
-				Steps:         []aiv1alpha1.ChainStep{{Name: "work", KnightRef: claudeKnight, Task: "x", Model: "opus --dangerously"}},
+				RoundTableRef: aiv1alpha1.LocalRef(rtName),
+				Steps:         []aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "x", Model: "opus --dangerously"}},
 			},
 		})
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "got %v", err)

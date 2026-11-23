@@ -34,12 +34,12 @@ func ephemeralFixtures() (*aiv1alpha1.Mission, aiv1alpha1.MissionKnight, *aiv1al
 	}
 	mission := &aiv1alpha1.Mission{
 		ObjectMeta: metav1.ObjectMeta{Name: "itertest", Namespace: "roundtable"},
-		Spec:       aiv1alpha1.MissionSpec{RoundTableRef: "personal"},
+		Spec:       aiv1alpha1.MissionSpec{RoundTableRef: aiv1alpha1.LocalRef("personal")},
 	}
 	mk := aiv1alpha1.MissionKnight{
-		Name:        "haiku-writer",
-		Ephemeral:   true,
-		TemplateRef: "base",
+		Name:         "haiku-writer",
+		Ephemeral:    true,
+		TemplateName: "base",
 		SpecOverrides: &aiv1alpha1.KnightSpecOverrides{
 			Domain: "creative",
 		},
@@ -126,7 +126,7 @@ func TestBuildEphemeralKnightDedupesSecrets(t *testing.T) {
 func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
 	mission, mk, rt := ephemeralFixtures()
 	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
-		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: testGitHubTokenSecret, Key: "token"},
+		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: testGitHubTokenSecret}, Key: "token"},
 	}
 	a := &KnightAssembler{}
 
@@ -148,11 +148,11 @@ func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
 func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
 	mission, mk, rt := ephemeralFixtures()
 	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
-		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "table-token"},
+		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "table-token"}},
 	}
 	tmpl := rt.Spec.KnightTemplates["base"]
 	tmpl.GitHub = &aiv1alpha1.GitHubConfig{
-		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: "template-token"},
+		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "template-token"}},
 	}
 	rt.Spec.KnightTemplates["base"] = tmpl
 	a := &KnightAssembler{}
@@ -169,7 +169,7 @@ func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
 func TestBuildEphemeralRoundTableInheritsParentGitHub(t *testing.T) {
 	mission, _, parent := ephemeralFixtures()
 	parent.Spec.GitHub = &aiv1alpha1.GitHubConfig{
-		TokenSecretRef: &aiv1alpha1.GitHubTokenSecretRef{Name: testGitHubTokenSecret, Key: "token"},
+		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: testGitHubTokenSecret}, Key: "token"},
 	}
 	s := k8sruntime.NewScheme()
 	if err := aiv1alpha1.AddToScheme(s); err != nil {

@@ -110,8 +110,8 @@ var _ = Describe("Completion notifications", func() {
 						Subjects: []string{"notify-table.tasks.notify.>"},
 						Stream:   "notify_table_tasks",
 					},
-					Concurrency: 1,
-					TaskTimeout: 120,
+					Concurrency:        1,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, knight)).To(Succeed())
@@ -137,10 +137,10 @@ var _ = Describe("Completion notifications", func() {
 		chain := &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: aiv1alpha1.ChainSpec{
-				RoundTableRef: roundTableName,
+				RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 				Notify:        sinkSpec,
 				Steps: []aiv1alpha1.ChainStep{
-					{Name: "do-it", KnightRef: knightName, Task: "do the thing"},
+					{Name: "do-it", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "do the thing"},
 				},
 			},
 		}

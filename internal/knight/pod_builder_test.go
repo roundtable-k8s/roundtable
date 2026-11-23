@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -45,11 +46,11 @@ var _ = Describe("PodBuilder", func() {
 				Namespace: "default",
 			},
 			Spec: aiv1alpha1.KnightSpec{
-				Model:       "anthropic/claude-3-5-sonnet-20241022",
-				Domain:      "testing",
-				Concurrency: 1,
-				TaskTimeout: 300,
-				Skills:      []string{"testing", "validation"},
+				Model:              "anthropic/claude-3-5-sonnet-20241022",
+				Domain:             "testing",
+				Concurrency:        1,
+				TaskTimeoutSeconds: 300,
+				Skills:             []string{"testing", "validation"},
 				NATS: aiv1alpha1.KnightNATS{
 					URL:           "nats://nats.default.svc:4222",
 					Stream:        "test_tasks",
@@ -327,10 +328,10 @@ var _ = Describe("PodBuilder", func() {
 
 		It("uses custom arsenal configuration", func() {
 			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{
-				Repo:   "https://github.com/custom/arsenal",
-				Ref:    "develop",
-				Period: "60s",
-				Image:  "custom/git-sync:v1.0",
+				Repo:          "https://github.com/custom/arsenal",
+				Ref:           "develop",
+				PeriodSeconds: 60,
+				Image:         "custom/git-sync:v1.0",
 			}
 			builder.WithGitSync()
 
@@ -362,6 +363,32 @@ var _ = Describe("PodBuilder", func() {
 
 			// Check automount service account token
 			Expect(*spec.AutomountServiceAccountToken).To(BeTrue())
+		})
+
+		It("gives the app container the default requests when spec.resources is unset", func() {
+			spec := builder.Build(context.Background())
+			res := spec.Containers[0].Resources
+			Expect(res.Requests.Cpu().String()).To(Equal("100m"))
+			Expect(res.Requests.Memory().String()).To(Equal("256Mi"))
+			Expect(res.Limits).To(BeEmpty())
+		})
+
+		It("applies spec.resources verbatim to the app container", func() {
+			knight.Spec.Resources = &corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("2"),
+					corev1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			spec := builder.Build(context.Background())
+			Expect(spec.Containers[0].Resources).To(Equal(*knight.Spec.Resources))
+			// A copy, not an alias of the Knight's spec.
+			spec.Containers[0].Resources.Limits[corev1.ResourceCPU] = resource.MustParse("1")
+			Expect(knight.Spec.Resources.Limits.Cpu().String()).To(Equal("2"))
 		})
 
 		It("sets a container PATH env exposing nix/mise tools to all processes", func() {

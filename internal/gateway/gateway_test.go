@@ -202,7 +202,7 @@ func knight(name, domain, image string, suspended bool) *aiv1alpha1.Knight {
 	return &aiv1alpha1.Knight{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS, Labels: map[string]string{aiv1alpha1.LabelRoundTable: "dev"}},
 		Spec: aiv1alpha1.KnightSpec{
-			Domain: domain, Image: image, Model: "default", Suspended: suspended,
+			Domain: domain, Image: image, Model: "default", Suspend: suspended,
 			NATS: aiv1alpha1.KnightNATS{Subjects: []string{prefix + ".tasks." + domain + ".>"}},
 		},
 	}

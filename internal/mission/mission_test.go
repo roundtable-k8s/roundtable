@@ -95,7 +95,7 @@ func TestParsePlannerOutput(t *testing.T) {
 				"planVersion": "v1alpha1",
 				"metadata": {"objective": "test"},
 				"knights": [{"name": "k1", "role": "tester", "ephemeral": true}],
-				"chains": [{"name": "c1", "steps": [{"name": "s1", "knightRef": "k1", "task": "do it"}]}]
+				"chains": [{"name": "c1", "steps": [{"name": "s1", "knightRef": {"name": "k1"}, "task": "do it"}]}]
 			}`,
 			wantErr: false,
 			check: func(t *testing.T, po *PlannerOutput) {

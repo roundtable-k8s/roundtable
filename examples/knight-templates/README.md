@@ -16,7 +16,7 @@ Knight templates allow you to define reusable knight configurations at the Round
 
 ## Template Priority
 
-When resolving a `templateRef`, the controller checks templates in this order:
+When resolving a `templateName`, the controller checks templates in this order:
 
 1. **Mission-level templates** (`mission.spec.knightTemplates`) - highest priority
 2. **RoundTable-level templates** (`roundTable.spec.knightTemplates`) - fallback
@@ -35,7 +35,7 @@ A complete RoundTable with 4 knight templates:
 
 ### `mission-using-templates.yaml`
 
-A mission that uses RoundTable templates with `templateRef`:
+A mission that uses RoundTable templates with `templateName`:
 - References 5 knights using templates
 - Shows how to override skills and environment variables
 - Demonstrates template reuse (2 auditors use same template with different overrides)
@@ -71,7 +71,7 @@ spec:
       - nmap
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 2
-      taskTimeout: 300
+      taskTimeoutSeconds: 300
       nats:
         subjects: ["fleet.tasks.security.>"]
 ```
@@ -80,11 +80,11 @@ spec:
 
 ```yaml
 spec:
-  roundTableRef: my-roundtable
+  roundTableRef: {name: my-roundtable}
   knights:
   - name: knight1
     ephemeral: true
-    templateRef: my-template  # ← References roundTable.spec.knightTemplates.my-template
+    templateName: my-template  # ← References roundTable.spec.knightTemplates.my-template
 ```
 
 ### Overriding Template Fields
@@ -94,7 +94,7 @@ spec:
   knights:
   - name: knight1
     ephemeral: true
-    templateRef: my-template
+    templateName: my-template
     specOverrides:
       model: claude-opus-4-20250514  # Override model
       skills:  # Replace skills entirely
@@ -147,14 +147,14 @@ spec:
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Mission
 spec:
-  roundTableRef: my-roundtable
+  roundTableRef: {name: my-roundtable}
   knights:
   - name: auditor1
     ephemeral: true
-    templateRef: auditor  # ← 2 lines instead of 100
+    templateName: auditor  # ← 2 lines instead of 100
   - name: auditor2
     ephemeral: true
-    templateRef: auditor  # ← 2 lines instead of 100
+    templateName: auditor  # ← 2 lines instead of 100
 ```
 
 **Result**: 90% reduction in mission YAML size!
@@ -167,7 +167,7 @@ Missions can override RoundTable templates for special cases:
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Mission
 spec:
-  roundTableRef: security-ops
+  roundTableRef: {name: security-ops}
   
   # Mission-specific template (overrides RoundTable template)
   knightTemplates:
@@ -181,7 +181,7 @@ spec:
   knights:
   - name: emergency-auditor
     ephemeral: true
-    templateRef: auditor  # ← Uses mission-level template (higher priority)
+    templateName: auditor  # ← Uses mission-level template (higher priority)
 ```
 
 ## Best Practices

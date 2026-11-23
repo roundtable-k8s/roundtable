@@ -102,9 +102,11 @@ type KnightSpec struct {
 	// +optional
 	Capabilities *KnightCapabilities `json:"capabilities,omitempty"`
 
-	// resources defines compute resource requirements for the knight container.
+	// resources are the compute resource requests and limits of the knight's
+	// app container, applied verbatim. When unset the operator requests 100m
+	// CPU and 256Mi memory and sets no limits.
 	// +optional
-	Resources *KnightResources `json:"resources,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// concurrency is the maximum number of concurrent tasks the knight can process.
 	// +kubebuilder:default=2
@@ -143,17 +145,13 @@ type KnightSpec struct {
 	// +optional
 	PlanBacked *bool `json:"planBacked,omitempty"`
 
-	// taskTimeout is the default task timeout in seconds.
+	// taskTimeoutSeconds is the default task timeout, in seconds, for tasks
+	// that don't carry their own (chain steps send theirs).
 	// +kubebuilder:default=120
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
-	TaskTimeout int32 `json:"taskTimeout,omitempty"`
-
-	// nixPackages is deprecated and ignored. Use tools.nix, which the operator
-	// builds into a tools image the knight mounts read-only.
-	// +optional
-	NixPackages []string `json:"nixPackages,omitempty"`
+	TaskTimeoutSeconds int32 `json:"taskTimeoutSeconds,omitempty"`
 
 	// generatedSkills contains inline skill definitions created by the planner.
 	// Each skill is a markdown document mounted at /skills/<name>.md
@@ -196,10 +194,10 @@ type KnightSpec struct {
 	// +optional
 	GitHub *GitHubConfig `json:"github,omitempty"`
 
-	// suspended, if true, scales the knight deployment to 0 replicas.
+	// suspend, if true, scales the knight to 0 replicas.
 	// +kubebuilder:default=false
 	// +optional
-	Suspended bool `json:"suspended,omitempty"`
+	Suspend bool `json:"suspend,omitempty"`
 }
 
 // KnightArsenal configures the git-sync sidecar for the skill arsenal.
@@ -222,10 +220,11 @@ type KnightArsenal struct {
 	// +optional
 	Ref string `json:"ref,omitempty"`
 
-	// period is how often to sync (e.g., "300s").
-	// +kubebuilder:default="300s"
+	// periodSeconds is how often git-sync pulls the repo, in seconds.
+	// +kubebuilder:default=300
+	// +kubebuilder:validation:Minimum=1
 	// +optional
-	Period string `json:"period,omitempty"`
+	PeriodSeconds int32 `json:"periodSeconds,omitempty"`
 
 	// image overrides the git-sync container image.
 	// +kubebuilder:default="registry.k8s.io/git-sync/git-sync:v4.4.0"
@@ -264,7 +263,7 @@ type KnightWorkspace struct {
 	// size limit in ephemeral mode.
 	// +kubebuilder:default="1Gi"
 	// +optional
-	Size string `json:"size,omitempty"`
+	Size *resource.Quantity `json:"size,omitempty"`
 }
 
 // KnightLifecycle controls suspend/resume behavior for the knight.
@@ -279,36 +278,26 @@ type KnightLifecycle struct {
 	// +optional
 	SuspendPolicy string `json:"suspendPolicy,omitempty"`
 
-	// idleTimeout is how long after the last task before auto-suspending.
-	// Only used when SuspendPolicy is "auto" (e.g., "30m", "1h"). It becomes
-	// the ScaledObject cooldownPeriod (default 5m).
+	// idleTimeoutSeconds is how long, in seconds, the knight stays up after
+	// its last pending task before it is scaled down. It becomes the KEDA
+	// ScaledObject cooldownPeriod (default 300). Only used when the knight is
+	// autoscaled (suspendPolicy auto, or maxReplicas above 1).
+	// +kubebuilder:validation:Minimum=1
 	// +optional
-	IdleTimeout string `json:"idleTimeout,omitempty"`
+	IdleTimeoutSeconds int32 `json:"idleTimeoutSeconds,omitempty"`
 }
 
 // GitHubConfig configures GitHub credentials for knights.
 type GitHubConfig struct {
-	// tokenSecretRef names a Secret holding a GitHub token (for example a
-	// GitHub App installation token that an external controller refreshes).
-	// The operator mounts it read-only into the knight at
-	// /var/run/secrets/roundtable/github/token and sets
-	// GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
-	// var, the kubelet refreshes the file in place when the Secret changes.
+	// tokenSecretRef selects the key of a Secret (in the knight's namespace)
+	// holding a GitHub token, for example a GitHub App installation token that
+	// an external controller refreshes. The operator mounts it read-only into
+	// the knight at /var/run/secrets/roundtable/github/token and sets
+	// GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
+	// the kubelet refreshes the file in place when the Secret changes. With
+	// optional: true the pod starts even if the Secret or key is missing.
 	// +optional
-	TokenSecretRef *GitHubTokenSecretRef `json:"tokenSecretRef,omitempty"`
-}
-
-// GitHubTokenSecretRef selects a key of a Secret in the knight's namespace.
-type GitHubTokenSecretRef struct {
-	// name of the Secret.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-
-	// key within the Secret that holds the token.
-	// +kubebuilder:default=token
-	// +optional
-	Key string `json:"key,omitempty"`
+	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
 }
 
 // KnightCapabilities defines optional runtime capabilities for the knight pod.
@@ -403,19 +392,6 @@ type KnightPrompt struct {
 	// Keys: "AGENTS.md", "TOOLS.md", "SOUL.md"
 	// +optional
 	ConfigMapRef *corev1.LocalObjectReference `json:"configMapRef,omitempty"`
-}
-
-// KnightResources defines compute resource requirements.
-type KnightResources struct {
-	// memory is the memory limit for the knight container.
-	// +kubebuilder:default="256Mi"
-	// +optional
-	Memory resource.Quantity `json:"memory,omitempty"`
-
-	// cpu is the CPU limit for the knight container.
-	// +kubebuilder:default="200m"
-	// +optional
-	CPU resource.Quantity `json:"cpu,omitempty"`
 }
 
 // KnightPhase represents the current lifecycle phase of the Knight.

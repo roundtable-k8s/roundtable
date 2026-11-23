@@ -67,8 +67,8 @@ var _ = Describe("RoundTable Controller - Warm Pool", func() {
 								Stream:        "test_tasks",
 								ResultsStream: "test_results",
 							},
-							Concurrency: 2,
-							TaskTimeout: 120,
+							Concurrency:        2,
+							TaskTimeoutSeconds: 120,
 						},
 					},
 					WarmPool: &aiv1alpha1.WarmPoolConfig{
@@ -83,10 +83,10 @@ var _ = Describe("RoundTable Controller - Warm Pool", func() {
 								Stream:        "test_tasks",
 								ResultsStream: "test_results",
 							},
-							Concurrency: 2,
-							TaskTimeout: 120,
+							Concurrency:        2,
+							TaskTimeoutSeconds: 120,
 						},
-						MaxIdleTime: "1h",
+						MaxIdleTimeSeconds: 3600,
 					},
 				},
 			}
@@ -175,8 +175,8 @@ var _ = Describe("RoundTable Controller - Warm Pool", func() {
 						Stream:        "test_tasks",
 						ResultsStream: "test_results",
 					},
-					Concurrency: 2,
-					TaskTimeout: 120,
+					Concurrency:        2,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, oldKnight)).To(Succeed())

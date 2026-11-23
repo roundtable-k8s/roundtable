@@ -44,30 +44,32 @@ type MissionSpec struct {
 	// +optional
 	Chains []MissionChainRef `json:"chains,omitempty"`
 
-	// ttl is the mission's time-to-live in seconds. The mission is automatically
-	// cleaned up after this duration, regardless of completion status.
+	// ttlSeconds is the mission's time-to-live in seconds. The mission is
+	// automatically cleaned up after this long, regardless of completion status.
 	// +kubebuilder:default=3600
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=604800
 	// +optional
-	TTL int32 `json:"ttl,omitempty"`
+	TTLSeconds int32 `json:"ttlSeconds,omitempty"`
 
-	// timeout is the maximum time in seconds to wait for the mission objective
-	// to be achieved before marking it as failed.
+	// timeoutSeconds is the maximum time in seconds to wait for the mission
+	// objective to be achieved before marking it as failed.
 	// +kubebuilder:default=1800
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=86400
 	// +optional
-	Timeout int32 `json:"timeout,omitempty"`
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
 	// natsPrefix overrides the NATS subject prefix for this mission.
 	// Defaults to "mission-{name}".
 	// +optional
 	NATSPrefix string `json:"natsPrefix,omitempty"`
 
-	// roundTableRef references the RoundTable this mission is conducted under.
+	// roundTableRef names the RoundTable (same namespace) this mission is
+	// conducted under; its defaults, policies and GitHub config seed the
+	// mission's ephemeral table.
 	// +optional
-	RoundTableRef string `json:"roundTableRef,omitempty"`
+	RoundTableRef *corev1.LocalObjectReference `json:"roundTableRef,omitempty"`
 
 	// metaMission enables the built-in planner knight to generate the execution plan.
 	// When true, the operator dispatches the objective to the planner knight,
@@ -162,12 +164,13 @@ type MissionKnight struct {
 	// +optional
 	EphemeralSpec *KnightSpec `json:"ephemeralSpec,omitempty"`
 
-	// templateRef references a MissionKnightTemplate by name.
+	// templateName names an entry of spec.knightTemplates (or of the
+	// RoundTable's knightTemplates) to build the ephemeral knight from.
 	// Only used when ephemeral=true. Mutually exclusive with ephemeralSpec.
 	// +optional
-	TemplateRef string `json:"templateRef,omitempty"`
+	TemplateName string `json:"templateName,omitempty"`
 
-	// specOverrides allows patching specific fields when using templateRef.
+	// specOverrides allows patching specific fields when using templateName.
 	// Applied as a strategic merge patch on top of the template spec.
 	// +optional
 	SpecOverrides *KnightSpecOverrides `json:"specOverrides,omitempty"`
@@ -302,7 +305,7 @@ type MissionStatus struct {
 
 // MissionKnightTemplate is a named, reusable knight spec template.
 type MissionKnightTemplate struct {
-	// name is the template name, referenced by MissionKnight.TemplateRef.
+	// name is the template name, referenced by templateName.
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
@@ -387,27 +390,30 @@ type MissionChainStatus struct {
 
 // MissionPlanner configures the planning phase.
 type MissionPlanner struct {
-	// knightRef is the name of the knight to use as the planner.
-	// This knight should have planning, reasoning, and orchestration skills.
-	// +kubebuilder:validation:Required
-	KnightRef string `json:"knightRef"`
-
-	// templateRef references a KnightTemplate to use for the planner (alternative to knightRef).
-	// If set, an ephemeral planner knight is created from the template.
+	// knightRef names an existing Knight to use as the planner. It should
+	// have planning, reasoning, and orchestration skills. One of knightRef,
+	// templateName or ephemeralSpec is used. When spec.planner is omitted on a
+	// meta-mission, the operator fills in a knight labelled
+	// ai.roundtable.io/role=planner.
 	// +optional
-	TemplateRef string `json:"templateRef,omitempty"`
+	KnightRef *corev1.LocalObjectReference `json:"knightRef,omitempty"`
+
+	// templateName names a knight template (the mission's knightTemplates,
+	// then the RoundTable's) to build an ephemeral planner knight from.
+	// +optional
+	TemplateName string `json:"templateName,omitempty"`
 
 	// ephemeralSpec defines an inline spec for an ephemeral planner knight.
-	// Mutually exclusive with knightRef and templateRef.
+	// Mutually exclusive with knightRef and templateName.
 	// +optional
 	EphemeralSpec *KnightSpec `json:"ephemeralSpec,omitempty"`
 
-	// timeout is the maximum time in seconds for planning to complete.
+	// timeoutSeconds is the maximum time in seconds for planning to complete.
 	// +kubebuilder:default=300
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=1800
 	// +optional
-	Timeout int32 `json:"timeout,omitempty"`
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
 	// context provides additional information to the planner beyond the objective.
 	// Can include constraints, available resources, success criteria, etc.
@@ -459,9 +465,9 @@ type GeneratedChain struct {
 	// +optional
 	Input string `json:"input,omitempty"`
 
-	// timeout overrides the default chain timeout.
+	// timeoutSeconds overrides the default chain timeout, in seconds.
 	// +optional
-	Timeout *int32 `json:"timeout,omitempty"`
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
 
 	// retryPolicy configures retry behavior.
 	// +optional
@@ -500,8 +506,7 @@ type PlanningResult struct {
 // +kubebuilder:resource:shortName=msn,categories=roundtable
 // +kubebuilder:printcolumn:name="Objective",type=string,JSONPath=`.spec.objective`,priority=1
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Knights",type=integer,JSONPath=`.spec.knights`,priority=1
-// +kubebuilder:printcolumn:name="TTL",type=integer,JSONPath=`.spec.ttl`
+// +kubebuilder:printcolumn:name="TTL",type=integer,JSONPath=`.spec.ttlSeconds`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Mission is the Schema for the missions API.

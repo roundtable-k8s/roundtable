@@ -24,6 +24,7 @@ import (
 	"github.com/nats-io/nats.go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -96,7 +97,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
 	}
 	create := func(steps []aiv1alpha1.ChainStep, mut func(*aiv1alpha1.ChainSpec)) {
-		spec := aiv1alpha1.ChainSpec{RoundTableRef: rtName, Steps: steps, Timeout: 86400, Input: "issue-122"}
+		spec := aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef(rtName), Steps: steps, TimeoutSeconds: 86400, Input: "issue-122"}
 		if mut != nil {
 			mut(&spec)
 		}
@@ -106,7 +107,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		reconcileN(3) // finalizer, status init, settle
 		Expect(get().Status.Phase).To(Equal(aiv1alpha1.ChainPhaseIdle))
 	}
-	oneStep := []aiv1alpha1.ChainStep{{Name: "review", KnightRef: knight, Task: "review {{ .Input }}", Timeout: 120}}
+	oneStep := []aiv1alpha1.ChainStep{{Name: "review", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "review {{ .Input }}", TimeoutSeconds: 120}}
 
 	BeforeEach(func() {
 		fake = &pickupFakeNATS{fakeNATSClient: newFakeNATSClient()}
@@ -130,7 +131,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 				Spec: aiv1alpha1.KnightSpec{
 					Domain: "ops", Model: "claude-sonnet-4", Skills: []string{"ops"},
 					NATS:        aiv1alpha1.KnightNATS{URL: "nats://x:4222", Subjects: []string{"trig.tasks.ops.>"}, Stream: "trig_tasks", ResultsStream: "trig_results"},
-					Concurrency: 1, TaskTimeout: 120,
+					Concurrency: 1, TaskTimeoutSeconds: 120,
 				},
 			})).To(Succeed())
 		}
@@ -248,9 +249,9 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 
 	It("retry-failed resumes only the failed and skipped steps of the same run", func() {
 		steps := []aiv1alpha1.ChainStep{
-			{Name: "scan", KnightRef: knight, Task: "scan", Timeout: 120},
-			{Name: "review", KnightRef: knight, Task: "review", Timeout: 120, DependsOn: []string{"scan"}},
-			{Name: "report", KnightRef: knight, Task: "report", Timeout: 120, DependsOn: []string{"review"}},
+			{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "scan", TimeoutSeconds: 120},
+			{Name: "review", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "review", TimeoutSeconds: 120, DependsOn: []string{"scan"}},
+			{Name: "report", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "report", TimeoutSeconds: 120, DependsOn: []string{"review"}},
 		}
 		create(steps, nil)
 		setStatus(func(s *aiv1alpha1.ChainStatus) {
@@ -344,7 +345,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		})
 
 		It("fails a task the knight never picks up once maxQueueWait elapses", func() {
-			create(oneStep, func(s *aiv1alpha1.ChainSpec) { s.MaxQueueWait = 60 })
+			create(oneStep, func(s *aiv1alpha1.ChainSpec) { s.MaxQueueWaitSeconds = 60 })
 			queued(30 * time.Second)
 			reconcileN(1)
 			Expect(get().Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))

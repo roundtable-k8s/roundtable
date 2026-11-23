@@ -391,8 +391,8 @@ func taskDeadlineError(chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, star
 		return ""
 	}
 	if pickedUpAt != nil {
-		if time.Since(pickedUpAt.Time) > time.Duration(spec.Timeout)*time.Second {
-			return fmt.Sprintf("step timed out after %ds", spec.Timeout)
+		if time.Since(pickedUpAt.Time) > time.Duration(spec.TimeoutSeconds)*time.Second {
+			return fmt.Sprintf("step timed out after %ds", spec.TimeoutSeconds)
 		}
 		return ""
 	}
@@ -428,7 +428,7 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 		if it.PickedUpAt == nil && it.StartedAt != nil {
 			if it.TaskSeq == 0 {
 				it.PickedUpAt = it.StartedAt
-			} else if r.ackFloorReached(ctx, nc, spec.KnightRef, it.TaskSeq) {
+			} else if r.ackFloorReached(ctx, nc, spec.KnightRef.Name, it.TaskSeq) {
 				now := metav1.Now()
 				it.PickedUpAt = &now
 			}
@@ -469,14 +469,14 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 			it.Phase = aiv1alpha1.ChainStepPhaseFailed
 			it.Error = truncateUTF8(errMsg, itemErrorLimit)
 			setItemPhase(fo, idx, itemFailed)
-			r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, fmt.Sprintf("%s.%d", ss.Name, idx), "", errMsg, spec.KnightRef, it.StartedAt, &now)
+			r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, fmt.Sprintf("%s.%d", ss.Name, idx), "", errMsg, spec.KnightRef.Name, it.StartedAt, &now)
 			continue
 		}
 		it.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 		it.Error = ""
 		it.Output = truncateUTF8(output, budget)
 		setItemPhase(fo, idx, itemSucceeded)
-		r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, fmt.Sprintf("%s.%d", ss.Name, idx), output, "", spec.KnightRef, it.StartedAt, &now)
+		r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, fmt.Sprintf("%s.%d", ss.Name, idx), output, "", spec.KnightRef.Name, it.StartedAt, &now)
 	}
 	summariseFanOut(fo)
 
@@ -500,8 +500,8 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 	log := logf.FromContext(ctx).WithValues("step", ss.Name)
 	fo := ss.FanOut
 	knight := &aiv1alpha1.Knight{}
-	if err := r.Get(ctx, types.NamespacedName{Name: spec.KnightRef, Namespace: chain.Namespace}, knight); err != nil {
-		log.Error(err, "Failed to get knight", "knightRef", spec.KnightRef)
+	if err := r.Get(ctx, types.NamespacedName{Name: spec.KnightRef.Name, Namespace: chain.Namespace}, knight); err != nil {
+		log.Error(err, "Failed to get knight", "knightRef", spec.KnightRef.Name)
 		return
 	}
 	// Every item runs on the step's model override (#217); a model the
@@ -510,7 +510,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", spec.Name, err)
 		ss.Model = ""
-		r.failFanOutStep(chain, ss, fmt.Sprintf("invalid model for knight %q: %v", spec.KnightRef, err))
+		r.failFanOutStep(chain, ss, fmt.Sprintf("invalid model for knight %q: %v", spec.KnightRef.Name, err))
 		return
 	}
 	ss.Model = model
@@ -574,7 +574,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 			Task:      taskStr,
 			Model:     model,
 		}
-		seq, err := r.publishTask(nc, knight.Spec.Domain, spec.KnightRef, payload)
+		seq, err := r.publishTask(nc, knight.Spec.Domain, spec.KnightRef.Name, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish item task", "item", idx)
 			return
@@ -640,7 +640,7 @@ func (r *ChainReconciler) finalizeFanOutIfDone(ctx context.Context, chain *aiv1a
 		ss.Phase = aiv1alpha1.ChainStepPhaseFailed
 		ss.Error = fmt.Sprintf("%d/%d item(s) failed, %d skipped", fo.Failed, fo.Total, fo.Skipped)
 	}
-	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, ss.Output, "", spec.KnightRef, ss.StartedAt, &now)
+	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, ss.Output, "", spec.KnightRef.Name, ss.StartedAt, &now)
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "FanOutJoined", "Step %s joined: %d succeeded, %d failed, %d skipped of %d",
 		ss.Name, fo.Succeeded, fo.Failed, fo.Skipped, fo.Total)
 }

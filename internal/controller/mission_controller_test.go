@@ -70,8 +70,8 @@ var _ = Describe("Mission Controller", func() {
 						ResultsStream: "test_results",
 						MaxDeliver:    1,
 					},
-					Concurrency: 1,
-					TaskTimeout: 120,
+					Concurrency:        1,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, knight)).To(Succeed())
@@ -107,12 +107,12 @@ var _ = Describe("Mission Controller", func() {
 					Steps: []aiv1alpha1.ChainStep{
 						{
 							Name:      "step1",
-							KnightRef: knightName,
+							KnightRef: corev1.LocalObjectReference{Name: knightName},
 							Task:      "Execute test task",
 						},
 					},
-					RoundTableRef: "default",
-					Timeout:       300,
+					RoundTableRef:  aiv1alpha1.LocalRef("default"),
+					TimeoutSeconds: 300,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -289,8 +289,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -332,8 +332,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -376,9 +376,9 @@ var _ = Describe("Mission Controller", func() {
 						Phase: "Active",
 					},
 				},
-				RoundTableRef: "test-rt",
-				TTL:           3600,
-				Timeout:       1800,
+				RoundTableRef:  aiv1alpha1.LocalRef("test-rt"),
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -411,7 +411,7 @@ var _ = Describe("Mission Controller", func() {
 			Expect(missionChain.Name).To(Equal(missionChainName))
 			Expect(missionChain.Labels).To(HaveKeyWithValue("ai.roundtable.io/mission", missionName))
 			Expect(missionChain.Labels).To(HaveKeyWithValue("ai.roundtable.io/chain-phase", "Active"))
-			Expect(missionChain.Spec.RoundTableRef).To(Equal("test-rt"))
+			Expect(aiv1alpha1.RefName(missionChain.Spec.RoundTableRef)).To(Equal("test-rt"))
 
 			// Verify owner reference
 			Expect(missionChain.OwnerReferences).To(HaveLen(1))
@@ -448,9 +448,9 @@ var _ = Describe("Mission Controller", func() {
 				Chains: []aiv1alpha1.MissionChainRef{
 					{Name: chainName, Phase: "Active"},
 				},
-				RoundTableRef: "test-rt",
-				TTL:           3600,
-				Timeout:       1800,
+				RoundTableRef:  aiv1alpha1.LocalRef("test-rt"),
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 
 			r := newReconciler()
@@ -504,9 +504,9 @@ var _ = Describe("Mission Controller", func() {
 				Chains: []aiv1alpha1.MissionChainRef{
 					{Name: chainName, Phase: "Active"},
 				},
-				RoundTableRef: "test-rt",
-				TTL:           3600,
-				Timeout:       1800,
+				RoundTableRef:  aiv1alpha1.LocalRef("test-rt"),
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 
 			r := newReconciler()
@@ -568,8 +568,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 
 			r := newReconciler()
@@ -599,8 +599,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 
 			r := newReconciler()
@@ -639,15 +639,15 @@ var _ = Describe("Mission Controller", func() {
 			createMission(aiv1alpha1.MissionSpec{
 				Objective:     "Test result retention",
 				RetainResults: true,
-				RoundTableRef: "test-rt",
+				RoundTableRef: aiv1alpha1.LocalRef("test-rt"),
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
 				Chains: []aiv1alpha1.MissionChainRef{
 					{Name: chainName, Phase: "Active"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -704,8 +704,8 @@ var _ = Describe("Mission Controller", func() {
 				Chains: []aiv1alpha1.MissionChainRef{
 					{Name: chainName, Phase: "Active"},
 				},
-				TTL:     3600,
-				Timeout: 60,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 60,
 			})
 		})
 
@@ -751,8 +751,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: "nonexistent-knight", Role: "ghost"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -789,8 +789,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "listener"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -823,8 +823,8 @@ var _ = Describe("Mission Controller", func() {
 				Knights: []aiv1alpha1.MissionKnight{
 					{Name: knightName, Role: "tester"},
 				},
-				TTL:     3600,
-				Timeout: 1800,
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
 			})
 		})
 
@@ -919,8 +919,8 @@ var _ = Describe("Mission Controller", func() {
 								NATS: aiv1alpha1.KnightNATS{
 									Subjects: []string{"test-fleet.tasks.security.>"},
 								},
-								Concurrency: 2,
-								TaskTimeout: 300,
+								Concurrency:        2,
+								TaskTimeoutSeconds: 300,
 							},
 							"pentester": {
 								Domain: "security",
@@ -929,8 +929,8 @@ var _ = Describe("Mission Controller", func() {
 								NATS: aiv1alpha1.KnightNATS{
 									Subjects: []string{"test-fleet.tasks.security.>"},
 								},
-								Concurrency: 1,
-								TaskTimeout: 600,
+								Concurrency:        1,
+								TaskTimeoutSeconds: 600,
 							},
 							"reporter": {
 								Domain: "research",
@@ -939,8 +939,8 @@ var _ = Describe("Mission Controller", func() {
 								NATS: aiv1alpha1.KnightNATS{
 									Subjects: []string{"test-fleet.tasks.research.>"},
 								},
-								Concurrency: 4,
-								TaskTimeout: 120,
+								Concurrency:        4,
+								TaskTimeoutSeconds: 120,
 							},
 						},
 					},
@@ -973,17 +973,17 @@ var _ = Describe("Mission Controller", func() {
 			It("should create ephemeral knight from RoundTable template", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test RoundTable templates",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "test-auditor",
-							Ephemeral:   true,
-							TemplateRef: "auditor",
-							Role:        "security-analyst",
+							Name:         "test-auditor",
+							Ephemeral:    true,
+							TemplateName: "auditor",
+							Role:         "security-analyst",
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1005,7 +1005,7 @@ var _ = Describe("Mission Controller", func() {
 				Expect(knight.Spec.Model).To(Equal("claude-sonnet-4-20250514"))
 				Expect(knight.Spec.Skills).To(ConsistOf("security", "nmap", "reconnaissance"))
 				Expect(knight.Spec.Concurrency).To(Equal(int32(2)))
-				Expect(knight.Spec.TaskTimeout).To(Equal(int32(300)))
+				Expect(knight.Spec.TaskTimeoutSeconds).To(Equal(int32(300)))
 
 				// Verify labels
 				Expect(knight.Labels[aiv1alpha1.LabelMission]).To(Equal(missionName))
@@ -1020,12 +1020,12 @@ var _ = Describe("Mission Controller", func() {
 				overrideConcurrency := int32(5)
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test template overrides",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "test-pentester",
-							Ephemeral:   true,
-							TemplateRef: "pentester",
+							Name:         "test-pentester",
+							Ephemeral:    true,
+							TemplateName: "pentester",
 							SpecOverrides: &aiv1alpha1.KnightSpecOverrides{
 								Model:       "claude-sonnet-4-20250514", // Override opus → sonnet
 								Skills:      []string{"security", "custom-skill"},
@@ -1036,8 +1036,8 @@ var _ = Describe("Mission Controller", func() {
 							},
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1056,7 +1056,7 @@ var _ = Describe("Mission Controller", func() {
 				Expect(knight.Spec.Skills).To(ConsistOf("security", "custom-skill")) // Overridden
 				Expect(knight.Spec.Concurrency).To(Equal(int32(5)))                  // Overridden
 				Expect(knight.Spec.Domain).To(Equal("security"))                     // From template
-				Expect(knight.Spec.TaskTimeout).To(Equal(int32(600)))                // From template
+				Expect(knight.Spec.TaskTimeoutSeconds).To(Equal(int32(600)))         // From template
 
 				// Verify environment variables added
 				found := false
@@ -1075,17 +1075,17 @@ var _ = Describe("Mission Controller", func() {
 			It("should prioritize mission-level template over RoundTable template", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test template priority",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					// Mission-level template overrides RoundTable template with same name
 					KnightTemplates: []aiv1alpha1.MissionKnightTemplate{
 						{
 							Name: "auditor", // Same name as RoundTable template
 							Spec: aiv1alpha1.KnightSpec{
-								Domain:      "incident-response",
-								Model:       "claude-opus-4-20250514",
-								Skills:      []string{"forensics", "incident-response"},
-								Concurrency: 10,
-								TaskTimeout: 900,
+								Domain:             "incident-response",
+								Model:              "claude-opus-4-20250514",
+								Skills:             []string{"forensics", "incident-response"},
+								Concurrency:        10,
+								TaskTimeoutSeconds: 900,
 								NATS: aiv1alpha1.KnightNATS{
 									Subjects: []string{"mission.tasks.ir.>"},
 								},
@@ -1094,13 +1094,13 @@ var _ = Describe("Mission Controller", func() {
 					},
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "test-auditor",
-							Ephemeral:   true,
-							TemplateRef: "auditor", // Should use mission-level template
+							Name:         "test-auditor",
+							Ephemeral:    true,
+							TemplateName: "auditor", // Should use mission-level template
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1116,7 +1116,7 @@ var _ = Describe("Mission Controller", func() {
 				Expect(knight.Spec.Model).To(Equal("claude-opus-4-20250514"))              // From mission template
 				Expect(knight.Spec.Skills).To(ConsistOf("forensics", "incident-response")) // From mission template
 				Expect(knight.Spec.Concurrency).To(Equal(int32(10)))                       // From mission template
-				Expect(knight.Spec.TaskTimeout).To(Equal(int32(900)))                      // From mission template
+				Expect(knight.Spec.TaskTimeoutSeconds).To(Equal(int32(900)))               // From mission template
 
 				// Should NOT have RoundTable template values
 				Expect(knight.Spec.Domain).NotTo(Equal("security"))
@@ -1129,26 +1129,26 @@ var _ = Describe("Mission Controller", func() {
 			It("should use multiple templates from RoundTable", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test multiple templates",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "auditor1",
-							Ephemeral:   true,
-							TemplateRef: "auditor",
+							Name:         "auditor1",
+							Ephemeral:    true,
+							TemplateName: "auditor",
 						},
 						{
-							Name:        "pentester1",
-							Ephemeral:   true,
-							TemplateRef: "pentester",
+							Name:         "pentester1",
+							Ephemeral:    true,
+							TemplateName: "pentester",
 						},
 						{
-							Name:        "reporter1",
-							Ephemeral:   true,
-							TemplateRef: "reporter",
+							Name:         "reporter1",
+							Ephemeral:    true,
+							TemplateName: "reporter",
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1195,19 +1195,19 @@ var _ = Describe("Mission Controller", func() {
 				deleteRoundTable()
 			})
 
-			It("should fail when templateRef not found in mission or RoundTable", func() {
+			It("should fail when templateName not found in mission or RoundTable", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test invalid template",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "test-knight",
-							Ephemeral:   true,
-							TemplateRef: "nonexistent-template", // Template doesn't exist
+							Name:         "test-knight",
+							Ephemeral:    true,
+							TemplateName: "nonexistent-template", // Template doesn't exist
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1232,19 +1232,19 @@ var _ = Describe("Mission Controller", func() {
 				}
 			})
 
-			It("should fail when ephemeral=true but neither ephemeralSpec nor templateRef", func() {
+			It("should fail when ephemeral=true but neither ephemeralSpec nor templateName", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test missing spec",
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
 							Name:      "test-knight",
 							Ephemeral: true,
-							// No ephemeralSpec, no templateRef
+							// No ephemeralSpec, no templateName
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1296,19 +1296,19 @@ var _ = Describe("Mission Controller", func() {
 				}
 			})
 
-			It("should fail gracefully when templateRef used but RoundTable has no templates", func() {
+			It("should fail gracefully when templateName used but RoundTable has no templates", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test empty RoundTable",
-					RoundTableRef: emptyRTName,
+					RoundTableRef: aiv1alpha1.LocalRef(emptyRTName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "test-knight",
-							Ephemeral:   true,
-							TemplateRef: "auditor", // Template doesn't exist
+							Name:         "test-knight",
+							Ephemeral:    true,
+							TemplateName: "auditor", // Template doesn't exist
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1328,25 +1328,25 @@ var _ = Describe("Mission Controller", func() {
 			It("should work with inline ephemeralSpec when RoundTable has no templates", func() {
 				createMission(aiv1alpha1.MissionSpec{
 					Objective:     "Test inline spec",
-					RoundTableRef: emptyRTName,
+					RoundTableRef: aiv1alpha1.LocalRef(emptyRTName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
 							Name:      "test-knight",
 							Ephemeral: true,
 							EphemeralSpec: &aiv1alpha1.KnightSpec{
-								Domain:      "general",
-								Model:       "claude-sonnet-4-20250514",
-								Skills:      []string{"general"},
-								Concurrency: 3,
-								TaskTimeout: 180,
+								Domain:             "general",
+								Model:              "claude-sonnet-4-20250514",
+								Skills:             []string{"general"},
+								Concurrency:        3,
+								TaskTimeoutSeconds: 180,
 								NATS: aiv1alpha1.KnightNATS{
 									Subjects: []string{"test.tasks.general.>"},
 								},
 							},
 						},
 					},
-					TTL:     3600,
-					Timeout: 1800,
+					TTLSeconds:     3600,
+					TimeoutSeconds: 1800,
 				})
 
 				r := newReconciler()
@@ -1409,8 +1409,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 								Stream:        "warmpool_tasks",
 								ResultsStream: "warmpool_results",
 							},
-							Concurrency: 2,
-							TaskTimeout: 120,
+							Concurrency:        2,
+							TaskTimeoutSeconds: 120,
 						},
 					},
 					WarmPool: &aiv1alpha1.WarmPoolConfig{
@@ -1425,10 +1425,10 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 								Stream:        "warmpool_tasks",
 								ResultsStream: "warmpool_results",
 							},
-							Concurrency: 2,
-							TaskTimeout: 120,
+							Concurrency:        2,
+							TaskTimeoutSeconds: 120,
 						},
-						MaxIdleTime: "1h",
+						MaxIdleTimeSeconds: 3600,
 					},
 					Ephemeral: true,
 				},
@@ -1493,8 +1493,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 						Stream:        "warmpool_tasks",
 						ResultsStream: "warmpool_results",
 					},
-					Concurrency: 2,
-					TaskTimeout: 120,
+					Concurrency:        2,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
@@ -1510,16 +1510,16 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test warm pool claiming",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "knight1",
-							Ephemeral:   true,
-							TemplateRef: templateName,
+							Name:         "knight1",
+							Ephemeral:    true,
+							TemplateName: templateName,
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -1599,16 +1599,16 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test cold start fallback",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "knight1",
-							Ephemeral:   true,
-							TemplateRef: templateName,
+							Name:         "knight1",
+							Ephemeral:    true,
+							TemplateName: templateName,
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -1697,8 +1697,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 						Stream:        "warmpool_tasks",
 						ResultsStream: "warmpool_results",
 					},
-					Concurrency: 2,
-					TaskTimeout: 120,
+					Concurrency:        2,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
@@ -1719,16 +1719,16 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test double claim prevention",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "knight1",
-							Ephemeral:   true,
-							TemplateRef: templateName,
+							Name:         "knight1",
+							Ephemeral:    true,
+							TemplateName: templateName,
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -1810,8 +1810,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 						Stream:        "warmpool_tasks",
 						ResultsStream: "warmpool_results",
 					},
-					Concurrency: 2,
-					TaskTimeout: 120,
+					Concurrency:        2,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
@@ -1827,12 +1827,12 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test spec overrides",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Knights: []aiv1alpha1.MissionKnight{
 						{
-							Name:        "knight1",
-							Ephemeral:   true,
-							TemplateRef: templateName,
+							Name:         "knight1",
+							Ephemeral:    true,
+							TemplateName: templateName,
 							SpecOverrides: &aiv1alpha1.KnightSpecOverrides{
 								Concurrency: func() *int32 { i := int32(5); return &i }(),
 								Env: []corev1.EnvVar{
@@ -1841,8 +1841,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 							},
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -1930,8 +1930,8 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 								Stream:        "test_tasks",
 								ResultsStream: "test_results",
 							},
-							Concurrency: 2,
-							TaskTimeout: 120,
+							Concurrency:        2,
+							TaskTimeoutSeconds: 120,
 						},
 					},
 				},
@@ -1974,11 +1974,11 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 					Steps: []aiv1alpha1.ChainStep{
 						{
 							Name:      "step1",
-							KnightRef: "test-knight",
+							KnightRef: corev1.LocalObjectReference{Name: "test-knight"},
 							Task:      "Test task",
 						},
 					},
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 				},
 			}
 			Expect(k8sClient.Create(ctx, sourceChain)).To(Succeed())
@@ -1994,15 +1994,15 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test generated chains",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Chains: []aiv1alpha1.MissionChainRef{
 						{
 							Name:  "test-chain-template",
 							Phase: "Active",
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -2033,7 +2033,7 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				}, generatedChain)
 			}, "5s", "500ms").Should(Succeed())
 
-			Expect(generatedChain.Spec.RoundTableRef).To(Equal(rtName),
+			Expect(aiv1alpha1.RefName(generatedChain.Spec.RoundTableRef)).To(Equal(rtName),
 				"Generated chain should inherit roundTableRef from parent mission")
 		})
 
@@ -2046,7 +2046,7 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test planner-generated chains",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					GeneratedChains: []aiv1alpha1.GeneratedChain{
 						{
 							Name:        "planner-chain",
@@ -2054,16 +2054,16 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 							Steps: []aiv1alpha1.ChainStep{
 								{
 									Name:      "analyze",
-									KnightRef: "analyst",
+									KnightRef: corev1.LocalObjectReference{Name: "analyst"},
 									Task:      "Analyze the data",
 								},
 							},
-							Phase:   "Active",
-							Timeout: func() *int32 { t := int32(300); return &t }(),
+							Phase:          "Active",
+							TimeoutSeconds: func() *int32 { t := int32(300); return &t }(),
 						},
 					},
-					Timeout: 600,
-					TTL:     900,
+					TimeoutSeconds: 600,
+					TTLSeconds:     900,
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -2087,11 +2087,11 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 					Steps: []aiv1alpha1.ChainStep{
 						{
 							Name:      "analyze",
-							KnightRef: "analyst",
+							KnightRef: corev1.LocalObjectReference{Name: "analyst"},
 							Task:      "Analyze the data",
 						},
 					},
-					MissionRef:    missionName,
+					MissionRef:    aiv1alpha1.LocalRef(missionName),
 					RoundTableRef: mission.Spec.RoundTableRef, // This is the fix for issue #84
 				},
 			}
@@ -2104,9 +2104,9 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				Namespace: namespace,
 			}, chain)).To(Succeed())
 
-			Expect(chain.Spec.RoundTableRef).To(Equal(rtName),
+			Expect(aiv1alpha1.RefName(chain.Spec.RoundTableRef)).To(Equal(rtName),
 				"Planner-generated chain should inherit roundTableRef from parent mission (issue #84)")
-			Expect(chain.Spec.MissionRef).To(Equal(missionName),
+			Expect(aiv1alpha1.RefName(chain.Spec.MissionRef)).To(Equal(missionName),
 				"Planner-generated chain should have missionRef set")
 		})
 
@@ -2120,7 +2120,7 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: missionName, Namespace: namespace},
 				Spec: aiv1alpha1.MissionSpec{
 					Objective:     "Test meta-mission chain wiring",
-					RoundTableRef: rtName,
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 				},
 			}
 
@@ -2130,9 +2130,9 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: missionChainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
 					Description:   "Planner-created chain",
-					Steps:         []aiv1alpha1.ChainStep{{Name: "write_haiku", KnightRef: "haiku-writer", Task: "Write a haiku"}},
-					MissionRef:    missionName,
-					RoundTableRef: rtName,
+					Steps:         []aiv1alpha1.ChainStep{{Name: "write_haiku", KnightRef: corev1.LocalObjectReference{Name: "haiku-writer"}, Task: "Write a haiku"}},
+					MissionRef:    aiv1alpha1.LocalRef(missionName),
+					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 				},
 			}
 			Expect(k8sClient.Create(ctx, plannerChain)).To(Succeed())

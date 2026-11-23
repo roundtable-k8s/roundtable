@@ -19,7 +19,7 @@ spec:
     subjects:
       - "{{ .Values.planner.natsPrefix | default "fleet-a" }}.tasks.operator.>"
   concurrency: {{ .Values.planner.concurrency | default 1 }}
-  taskTimeout: {{ .Values.planner.taskTimeout | default 600 }}
+  taskTimeoutSeconds: {{ .Values.planner.taskTimeoutSeconds | default 600 }}
   {{- if .Values.planner.arsenal }}
   arsenal:
     {{- toYaml .Values.planner.arsenal | nindent 4 }}

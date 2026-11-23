@@ -161,7 +161,7 @@ func (r *KnightReconciler) resolveScaling(ctx context.Context, k *aiv1alpha1.Kni
 		}}
 		for j := range knights.Items {
 			sib := &knights.Items[j]
-			if sib.Name == k.Name || sib.Spec.Suspended || sib.DeletionTimestamp != nil ||
+			if sib.Name == k.Name || sib.Spec.Suspend || sib.DeletionTimestamp != nil ||
 				!r.isPlanBacked(sib) || !roundTableIncludes(rt, sib) {
 				continue
 			}

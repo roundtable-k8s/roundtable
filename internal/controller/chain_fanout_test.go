@@ -28,6 +28,7 @@ import (
 	"github.com/nats-io/nats.go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,9 +118,9 @@ func TestValidateForEach(t *testing.T) {
 	mk := func(steps ...aiv1alpha1.ChainStep) *aiv1alpha1.Chain {
 		return &aiv1alpha1.Chain{Spec: aiv1alpha1.ChainSpec{Steps: steps}}
 	}
-	plan := aiv1alpha1.ChainStep{Name: "plan", KnightRef: "k", Task: "plan"}
+	plan := aiv1alpha1.ChainStep{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "plan"}
 	fe := func(from string, deps ...string) aiv1alpha1.ChainStep {
-		return aiv1alpha1.ChainStep{Name: "impl", KnightRef: "k", Task: "do {{ .Item }}", DependsOn: deps,
+		return aiv1alpha1.ChainStep{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: "k"}, Task: "do {{ .Item }}", DependsOn: deps,
 			ForEach: &aiv1alpha1.ChainForEach{From: from}}
 	}
 	cases := map[string]struct {
@@ -282,7 +283,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 	start := func(steps []aiv1alpha1.ChainStep, input string) {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
-			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: rtName, Steps: steps, Timeout: 86400, Input: input},
+			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef(rtName), Steps: steps, TimeoutSeconds: 86400, Input: input},
 		})).To(Succeed())
 		reconcileN(3)
 		Expect(get().Status.Phase).To(Equal(aiv1alpha1.ChainPhaseIdle))
@@ -335,7 +336,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 				Spec: aiv1alpha1.KnightSpec{
 					Domain: "ops", Model: "claude-sonnet-4", Skills: []string{"ops"},
 					NATS:        aiv1alpha1.KnightNATS{URL: "nats://x:4222", Subjects: []string{"fan.tasks.ops.>"}, Stream: "fan_tasks", ResultsStream: "fan_results"},
-					Concurrency: 1, TaskTimeout: 120,
+					Concurrency: 1, TaskTimeoutSeconds: 120,
 				},
 			})).To(Succeed())
 		}
@@ -352,11 +353,11 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("fans out over a prior step's output with maxParallel, then joins into the next step", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "plan", KnightRef: knight, Task: "plan {{ .Input }}", Timeout: 120},
-			{Name: "impl", KnightRef: knight, Task: "implement #{{ .Item.number }} ({{ .ItemIndex }}): {{ .item.title }}", Timeout: 120,
+			{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "plan {{ .Input }}", TimeoutSeconds: 120},
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "implement #{{ .Item.number }} ({{ .ItemIndex }}): {{ .item.title }}", TimeoutSeconds: 120,
 				DependsOn: []string{"plan"}, MaxParallel: 2,
 				ForEach: &aiv1alpha1.ChainForEach{From: "steps.plan", Path: ".issues"}},
-			{Name: "summary", KnightRef: knight, Task: "summarise {{ .Steps.impl.Output }}", Timeout: 120, DependsOn: []string{"impl"}},
+			{Name: "summary", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "summarise {{ .Steps.impl.Output }}", TimeoutSeconds: 120, DependsOn: []string{"impl"}},
 		}, "epic-1")
 
 		reconcileN(1)
@@ -415,7 +416,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("failFast stops dispatching, and retry-failed resumes without redoing finished items", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120, MaxParallel: 1,
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, MaxParallel: 1,
 				ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
 		}, `["a","b","c"]`)
 
@@ -462,7 +463,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("continue runs every item and ends the chain PartiallySucceeded", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .ItemJSON }}", Timeout: 120, MaxParallel: 3,
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .ItemJSON }}", TimeoutSeconds: 120, MaxParallel: 3,
 				FailurePolicy: aiv1alpha1.ChainFailurePolicyContinue,
 				ForEach:       &aiv1alpha1.ChainForEach{From: "input", Path: "{.xs}"}},
 		}, `{"xs":[1,2,3]}`)
@@ -489,7 +490,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("retries a failed item per the step retry policy before failing it", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120,
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120,
 				Retry:   &aiv1alpha1.StepRetry{MaxAttempts: 1, BackoffSeconds: 1},
 				ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
 		}, `["x"]`)
@@ -512,7 +513,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 	It("passes the step model to every item and rejects a model the knight cannot run", func() {
 		r.DefaultKnightImage = "ghcr.io/roundtable-k8s/claude-knight:v1"
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120, MaxParallel: 2, Model: "opus",
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, MaxParallel: 2, Model: "opus",
 				ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
 		}, `["a","b"]`)
 		reconcileN(1)
@@ -540,7 +541,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("an empty list joins immediately as []", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120, ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
 		}, `[]`)
 		reconcileN(1)
 		c := get()
@@ -550,7 +551,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 
 	It("fails the step when the list exceeds maxItems or is not a list", func() {
 		start([]aiv1alpha1.ChainStep{
-			{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120,
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120,
 				ForEach: &aiv1alpha1.ChainForEach{From: "input", MaxItems: 2}},
 		}, `[1,2,3]`)
 		reconcileN(1)
@@ -564,9 +565,9 @@ var _ = Describe("Chain forEach fan-out", func() {
 	It("marks the chain invalid when forEach.from is not in dependsOn", func() {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
-			Spec: aiv1alpha1.ChainSpec{RoundTableRef: rtName, Timeout: 600, Steps: []aiv1alpha1.ChainStep{
-				{Name: "plan", KnightRef: knight, Task: "plan", Timeout: 120},
-				{Name: "impl", KnightRef: knight, Task: "do {{ .Item }}", Timeout: 120,
+			Spec: aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 600, Steps: []aiv1alpha1.ChainStep{
+				{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "plan", TimeoutSeconds: 120},
+				{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120,
 					ForEach: &aiv1alpha1.ChainForEach{From: "steps.plan"}},
 			}},
 		})).To(Succeed())

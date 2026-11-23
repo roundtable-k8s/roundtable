@@ -95,10 +95,8 @@ func (b *PodBuilder) WithReader(r client.Reader) *PodBuilder {
 func (b *PodBuilder) WithWorkspace() *PodBuilder {
 	if EphemeralWorkspace(b.knight) {
 		emptyDir := &corev1.EmptyDirVolumeSource{}
-		if size := b.knight.Spec.Workspace.Size; size != "" {
-			if q, err := resource.ParseQuantity(size); err == nil {
-				emptyDir.SizeLimit = &q
-			}
+		if size := b.knight.Spec.Workspace.Size; size != nil && !size.IsZero() {
+			emptyDir.SizeLimit = new(size.DeepCopy())
 		}
 		b.volumes = append(b.volumes, corev1.Volume{
 			Name:         "data",
@@ -304,9 +302,9 @@ const (
 // ResolveGitHubTokenSecretRef returns the GitHub token Secret for a knight:
 // the knight's own spec.github.tokenSecretRef, else the one on its RoundTable
 // (found via the ai.roundtable.io/round-table label, then the legacy
-// ai.roundtable.io/table label). Returns nil when neither is set. The key is
-// defaulted to "token".
-func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *aiv1alpha1.GitHubTokenSecretRef {
+// ai.roundtable.io/table label). Returns nil when neither is set. An empty
+// key falls back to "token".
+func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *corev1.SecretKeySelector {
 	ref := githubTokenRef(k.Spec.GitHub)
 	if ref == nil {
 		if rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
@@ -376,7 +374,7 @@ func (b *PodBuilder) WithTableSecrets(ctx context.Context) *PodBuilder {
 	return b
 }
 
-func githubTokenRef(g *aiv1alpha1.GitHubConfig) *aiv1alpha1.GitHubTokenSecretRef {
+func githubTokenRef(g *aiv1alpha1.GitHubConfig) *corev1.SecretKeySelector {
 	if g == nil || g.TokenSecretRef == nil || g.TokenSecretRef.Name == "" {
 		return nil
 	}
@@ -399,6 +397,7 @@ func (b *PodBuilder) WithGitHubToken(ctx context.Context) *PodBuilder {
 			Secret: &corev1.SecretVolumeSource{
 				SecretName: ref.Name,
 				Items:      []corev1.KeyToPath{{Key: ref.Key, Path: "token"}},
+				Optional:   ref.Optional,
 			},
 		},
 	})
@@ -431,10 +430,10 @@ func (b *PodBuilder) WithArsenal() *PodBuilder {
 }
 
 const (
-	defaultArsenalRepo   = "https://github.com/roundtable-k8s/arsenal"
-	defaultArsenalRef    = "main"
-	defaultArsenalPeriod = "300s"
-	defaultGitSyncImage  = "registry.k8s.io/git-sync/git-sync:v4.4.0"
+	defaultArsenalRepo                = "https://github.com/roundtable-k8s/arsenal"
+	defaultArsenalRef                 = "main"
+	defaultArsenalPeriodSeconds int32 = 300
+	defaultGitSyncImage               = "registry.k8s.io/git-sync/git-sync:v4.4.0"
 )
 
 // resolvedArsenal is a KnightArsenal with defaults applied and its on-disk path.
@@ -487,8 +486,8 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 		if a.Ref == "" {
 			a.Ref = defaultArsenalRef
 		}
-		if a.Period == "" {
-			a.Period = defaultArsenalPeriod
+		if a.PeriodSeconds <= 0 {
+			a.PeriodSeconds = defaultArsenalPeriodSeconds
 		}
 		if a.Image == "" {
 			a.Image = defaultGitSyncImage
@@ -626,7 +625,7 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 			{Name: "GITSYNC_REF", Value: a.Ref},
 			{Name: "GITSYNC_ROOT", Value: "/arsenal/.sync/" + a.Name},
 			{Name: "GITSYNC_LINK", Value: a.path},
-			{Name: "GITSYNC_PERIOD", Value: a.Period},
+			{Name: "GITSYNC_PERIOD", Value: fmt.Sprintf("%ds", a.PeriodSeconds)},
 		}
 
 		b.sidecars = append(b.sidecars, corev1.Container{
@@ -691,7 +690,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	image := EffectiveImage(b.knight, b.defaultImg)
 
 	// Build environment variables
-	taskTimeoutMs := int64(b.knight.Spec.TaskTimeout) * 1000
+	taskTimeoutMs := int64(b.knight.Spec.TaskTimeoutSeconds) * 1000
 	env := []corev1.EnvVar{
 		{Name: "KNIGHT_NAME", Value: util.Capitalize(b.knight.Name)},
 		{Name: "KNIGHT_MODEL", Value: b.knight.Spec.Model},
@@ -723,16 +722,11 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	// Main knight container
 	probePort := 3000
 	knightContainer := corev1.Container{
-		Name:    "app",
-		Image:   image,
-		Env:     env,
-		EnvFrom: append(append([]corev1.EnvFromSource{}, b.knight.Spec.EnvFrom...), b.envFrom...),
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("256Mi"),
-				corev1.ResourceCPU:    resource.MustParse("100m"),
-			},
-		},
+		Name:         "app",
+		Image:        image,
+		Env:          env,
+		EnvFrom:      append(append([]corev1.EnvFromSource{}, b.knight.Spec.EnvFrom...), b.envFrom...),
+		Resources:    KnightResources(b.knight),
 		VolumeMounts: b.mounts,
 		StartupProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -799,4 +793,19 @@ func DeriveResultsPrefix(subjects []string) string {
 		}
 	}
 	return ""
+}
+
+// KnightResources returns the app container's resource requirements:
+// spec.resources verbatim when set, else the operator default (requests of
+// 100m CPU and 256Mi memory, no limits).
+func KnightResources(k *aiv1alpha1.Knight) corev1.ResourceRequirements {
+	if k.Spec.Resources != nil {
+		return *k.Spec.Resources.DeepCopy()
+	}
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+		},
+	}
 }
