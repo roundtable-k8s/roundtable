@@ -72,6 +72,16 @@ spec:
                 description: input provides initial data passed to the first step(s)
                   as JSON.
                 type: string
+              maxQueueWait:
+                description: |-
+                  maxQueueWait is how long (seconds) a published step task may wait for its
+                  knight to pick it up before the step fails. The per-step timeout only
+                  starts counting once the knight has picked the task up, so a busy (or
+                  dead) knight is bounded by this guard instead. Defaults to 1800 when unset.
+                format: int32
+                maximum: 86400
+                minimum: 30
+                type: integer
               missionRef:
                 description: |-
                   missionRef is set by the mission controller when creating mission-scoped chains.
@@ -339,6 +349,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastRetryTrigger:
+                description: |-
+                  lastRetryTrigger is the last value of the ai.roundtable.io/retry-failed
+                  annotation that was handled.
+                type: string
+              lastRunTrigger:
+                description: |-
+                  lastRunTrigger is the last value of the ai.roundtable.io/run annotation
+                  that was handled. A run is only started when the annotation differs.
+                type: string
               lastScheduledAt:
                 description: lastScheduledAt is when the chain was last triggered
                   by its cron schedule.
@@ -407,12 +427,19 @@ spec:
                       - Failed
                       - Skipped
                       type: string
+                    pickedUpAt:
+                      description: |-
+                        pickedUpAt is when the knight picked the task up. The step timeout is
+                        measured from here, not from startedAt.
+                      format: date-time
+                      type: string
                     retries:
                       description: retries is the number of retry attempts made.
                       format: int32
                       type: integer
                     startedAt:
-                      description: startedAt is when the step began execution.
+                      description: startedAt is when the step's task was published
+                        (queued) to the knight.
                       format: date-time
                       type: string
                     taskId:
@@ -420,6 +447,12 @@ spec:
                         taskID is the unique NATS task identifier for this step's current execution.
                         Used to poll for the exact result message, preventing stale result replay.
                       type: string
+                    taskSeq:
+                      description: |-
+                        taskSeq is the tasks-stream sequence number of the published task. It is
+                        used to detect knight pickup (the knight's consumer acknowledging it).
+                      format: int64
+                      type: integer
                   required:
                   - name
                   type: object

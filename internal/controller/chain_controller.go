@@ -238,14 +238,19 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// A new run gets its own completion notification.
 		meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionNotificationSent)
 
-		// Attempt to restore completed steps from NATS KV (resume capability)
-		restored := r.restoreStepOutputsFromKV(ctx, chain)
-		if restored > 0 {
-			log.Info("Restored step outputs from NATS KV after spec change", "restored", restored)
-		}
+		// A spec change (e.g. new input) never resumes the previous run: drop
+		// its identity so cached outputs from it can't be picked up.
+		chain.Status.RunID = ""
+		chain.Status.StartedAt = nil
+		chain.Status.CompletedAt = nil
 
 		chain.Status.ObservedGeneration = chain.Generation
 		return r.updateStatus(ctx, chain, 0)
+	}
+
+	// Handle run-now / retry-failed annotations.
+	if handled, res, err := r.handleRunTriggers(ctx, chain); handled {
+		return res, err
 	}
 
 	switch chain.Status.Phase {
@@ -477,15 +482,24 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				log.Info("Step running but no taskID — skipping poll, will requeue", "step", ss.Name)
 				continue
 			}
-			// Check per-step timeout
+			// The step timeout runs from knight pickup, not from publish, so
+			// time spent queued behind a busy knight doesn't eat the budget.
 			spec := specMap[ss.Name]
+			r.detectPickup(ctx, nc, chain, ss, specMap[ss.Name])
 			if ss.StartedAt != nil && spec != nil {
-				elapsed := time.Since(ss.StartedAt.Time)
-				if elapsed > time.Duration(spec.Timeout)*time.Second {
-					log.Info("Step timed out", "step", ss.Name)
+				now := metav1.Now()
+				if ss.PickedUpAt != nil {
+					if time.Since(ss.PickedUpAt.Time) > time.Duration(spec.Timeout)*time.Second {
+						log.Info("Step timed out", "step", ss.Name)
+						ss.Phase = aiv1alpha1.ChainStepPhaseFailed
+						ss.Error = fmt.Sprintf("step timed out after %ds", spec.Timeout)
+						ss.CompletedAt = &now
+						continue
+					}
+				} else if wait := maxQueueWait(chain); time.Since(ss.StartedAt.Time) > wait {
+					log.Info("Step not picked up in time", "step", ss.Name)
 					ss.Phase = aiv1alpha1.ChainStepPhaseFailed
-					ss.Error = fmt.Sprintf("step timed out after %ds", spec.Timeout)
-					now := metav1.Now()
+					ss.Error = fmt.Sprintf("task not picked up by knight within %ds (max queue wait)", int64(wait.Seconds()))
 					ss.CompletedAt = &now
 					continue
 				}
@@ -643,7 +657,8 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Task:      taskStr,
 		}
 
-		if err := r.publishTask(ctx, nc, knight.Spec.Domain, step.KnightRef, payload); err != nil {
+		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, step.KnightRef, payload)
+		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
 		}
@@ -651,6 +666,8 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		now := metav1.Now()
 		ss.Phase = aiv1alpha1.ChainStepPhaseRunning
 		ss.StartedAt = &now
+		ss.PickedUpAt = nil
+		ss.TaskSeq = seq
 		ss.TaskID = taskID
 		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef)
 	}
@@ -835,14 +852,130 @@ func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alph
 }
 
 // publishTask publishes a task to NATS JetStream.
-func (r *ChainReconciler) publishTask(ctx context.Context, nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) error {
+// It returns the tasks-stream sequence of the published message.
+func (r *ChainReconciler) publishTask(ctx context.Context, nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
 	client, err := r.natsClient()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	subject := natspkg.TaskSubject(nc.SubjectPrefix, domain, knightName)
-	return client.PublishJSON(subject, payload)
+	return client.PublishJSONSeq(subject, payload)
+}
+
+// defaultMaxQueueWait bounds how long a task may sit unclaimed by its knight.
+const defaultMaxQueueWait = 1800 * time.Second
+
+func maxQueueWait(chain *aiv1alpha1.Chain) time.Duration {
+	if chain.Spec.MaxQueueWait > 0 {
+		return time.Duration(chain.Spec.MaxQueueWait) * time.Second
+	}
+	return defaultMaxQueueWait
+}
+
+// detectPickup records ss.PickedUpAt once the knight has picked the task up.
+//
+// Pickup signal: knights consume the tasks stream through a durable
+// "<knight>-consumer" and ack each message immediately on receipt (pi-knight
+// delivers at-most-once and processes afterwards), so the consumer's ack floor
+// reaching the task's stream sequence means the knight started it. No knight
+// runtime change is needed. A step without a recorded sequence (published by
+// an older operator) falls back to the legacy behaviour: the clock starts at
+// publish time.
+func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
+	if ss.PickedUpAt != nil || ss.StartedAt == nil {
+		return
+	}
+	if ss.TaskSeq == 0 || spec == nil {
+		ss.PickedUpAt = ss.StartedAt
+		return
+	}
+	client, err := r.natsClient()
+	if err != nil {
+		return
+	}
+	floor, err := client.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(spec.KnightRef))
+	if err != nil {
+		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "step", ss.Name, "error", err.Error())
+		return
+	}
+	if floor >= ss.TaskSeq {
+		now := metav1.Now()
+		ss.PickedUpAt = &now
+		logf.FromContext(ctx).Info("Knight picked up step task", "step", ss.Name, "queuedFor", now.Sub(ss.StartedAt.Time).Round(time.Second).String())
+	}
+}
+
+// handleRunTriggers processes the run-now and retry-failed annotations. It
+// returns handled=true when it changed (or deliberately consumed) state and the
+// caller should return the given result.
+func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alpha1.Chain) (bool, ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	runVal := chain.Annotations[aiv1alpha1.AnnotationChainRun]
+	retryVal := chain.Annotations[aiv1alpha1.AnnotationChainRetryFailed]
+	runPending := runVal != "" && runVal != chain.Status.LastRunTrigger
+	retryPending := retryVal != "" && retryVal != chain.Status.LastRetryTrigger
+	if !runPending && !retryPending {
+		return false, ctrl.Result{}, nil
+	}
+
+	// Never clobber a run in flight: leave the trigger pending; it fires once
+	// the run finishes (the status update re-queues this chain).
+	if chain.Status.Phase == aiv1alpha1.ChainPhaseRunning {
+		return false, ctrl.Result{}, nil
+	}
+
+	now := metav1.Now()
+	if runPending {
+		r.initStepStatuses(chain)
+		meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionNotificationSent)
+		meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionChainComplete)
+		chain.Status.RunID = string(uuid.NewUUID())
+		chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
+		chain.Status.StartedAt = &now
+		chain.Status.CompletedAt = nil
+		chain.Status.LastRunTrigger = runVal
+		if retryPending {
+			chain.Status.LastRetryTrigger = retryVal // run-now supersedes retry
+		}
+		chain.Status.ObservedGeneration = chain.Generation
+		r.Recorder.Eventf(chain, corev1.EventTypeNormal, "RunTriggered", "New run %s started by %s=%s", chain.Status.RunID, aiv1alpha1.AnnotationChainRun, runVal)
+		log.Info("Started new run from annotation", "runId", chain.Status.RunID, "value", runVal)
+		res, err := r.updateStatus(ctx, chain, RequeueFast)
+		return true, res, err
+	}
+
+	// retry-failed only: resume the current run from its failed/skipped steps.
+	chain.Status.LastRetryTrigger = retryVal
+	retried := 0
+	if chain.Status.Phase == aiv1alpha1.ChainPhaseFailed || chain.Status.Phase == aiv1alpha1.ChainPhasePartiallySucceeded {
+		for i := range chain.Status.StepStatuses {
+			ss := &chain.Status.StepStatuses[i]
+			if ss.Phase != aiv1alpha1.ChainStepPhaseFailed && ss.Phase != aiv1alpha1.ChainStepPhaseSkipped {
+				continue
+			}
+			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending}
+			retried++
+		}
+	}
+	if retried == 0 {
+		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "RetryIgnored", "%s=%s ignored: no failed steps to retry", aiv1alpha1.AnnotationChainRetryFailed, retryVal)
+		res, err := r.updateStatus(ctx, chain, 0)
+		return true, res, err
+	}
+	meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionNotificationSent)
+	meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionChainComplete)
+	if chain.Status.RunID == "" {
+		chain.Status.RunID = string(uuid.NewUUID())
+	}
+	chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
+	// The overall timeout applies to the resumed leg, not the whole old run.
+	chain.Status.StartedAt = &now
+	chain.Status.CompletedAt = nil
+	chain.Status.ObservedGeneration = chain.Generation
+	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "RetryTriggered", "Retrying %d failed step(s) of run %s", retried, chain.Status.RunID)
+	res, err := r.updateStatus(ctx, chain, RequeueFast)
+	return true, res, err
 }
 
 // pollResult checks for a result message for a given chain step.

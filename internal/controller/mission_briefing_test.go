@@ -251,3 +251,11 @@ var _ = Describe("MissionReconciler.publishBriefing", func() {
 		Expect(fake.subjects()).To(BeEmpty())
 	})
 })
+
+func (f *fakeNATSClient) PublishJSONSeq(subject string, v interface{}) (uint64, error) {
+	if err := f.PublishJSON(subject, v); err != nil {
+		return 0, err
+	}
+	return uint64(len(f.subjects())), nil
+}
+func (f *fakeNATSClient) ConsumerAckFloor(string, string) (uint64, error) { return 0, nil }

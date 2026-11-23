@@ -116,6 +116,37 @@ kubectl apply -f chain.yaml
 kubectl get chains -n roundtable -w
 ```
 
+### Running a chain by hand
+
+Annotate the Chain with `ai.roundtable.io/run` — any value works, and it starts a **new run**
+(new `runId`, all steps reset) whenever the value differs from `status.lastRunTrigger`:
+
+```bash
+kubectl annotate chain hello-chain -n roundtable ai.roundtable.io/run="$(date +%s)" --overwrite
+```
+
+Re-applying the same value never re-triggers. If a run is still in flight the trigger waits
+and fires when it finishes. Changing `spec.input` never resumes an old run either; it resets
+the chain to Idle, so trigger it with the annotation afterwards.
+
+To resume a failed run from its failed (and skipped) steps only, keeping the steps that
+already succeeded, use the opt-in `ai.roundtable.io/retry-failed` annotation:
+
+```bash
+kubectl annotate chain hello-chain -n roundtable ai.roundtable.io/retry-failed="$(date +%s)" --overwrite
+```
+
+Do not set `status.phase=Running` by hand: it resumes the previous run.
+
+### Step timeouts and queueing
+
+A step's `timeout` starts when the knight picks the task up, not when it is published, so
+time spent queued behind a busy knight does not count. Pickup is detected from the knight's
+durable `<knight>-consumer` on the tasks stream: knights ack each task as they receive it, so
+the consumer's ack floor passing the task's stream sequence (`status.stepStatuses[].taskSeq`)
+sets `pickedUpAt`. `spec.maxQueueWait` (default 1800s) fails a step whose task is never
+picked up. The overall chain `timeout` still counts from the start of the run.
+
 ## What's Next?
 
 - [Example Manifests](../examples/) — Real-world Knight, Chain, Mission examples
