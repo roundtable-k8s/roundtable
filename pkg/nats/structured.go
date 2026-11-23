@@ -78,10 +78,11 @@ func NormalizeVerdict(v string) string {
 }
 
 var (
-	verdictLineRe = regexp.MustCompile(`(?im)^[\s>*_#-]*verdict[\s*_]*[:=-][\s*_` + "`" + `]*(ship[ _-]?it|needs[ _-]?changes)\b`)
-	prURLRe       = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)`)
-	prRepoRefRe   = regexp.MustCompile(`\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)\b`)
-	prBareRefRe   = regexp.MustCompile(`(?:^|[^\w/#&])#(\d+)\b`)
+	verdictLineRe = regexp.MustCompile(
+		`(?im)^[\s>*_#-]*verdict[\s*_]*[:=-][\s*_` + "`" + `]*(ship[ _-]?it|needs[ _-]?changes)\b`)
+	prURLRe     = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)`)
+	prRepoRefRe = regexp.MustCompile(`\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)\b`)
+	prBareRefRe = regexp.MustCompile(`(?:^|[^\w/#&])#(\d+)\b`)
 )
 
 // ParseStructured is the prose fallback: it extracts a verdict (from a

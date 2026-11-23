@@ -46,10 +46,15 @@ func TestParseStructuredProse(t *testing.T) {
 		want Structured
 	}{
 		"url": {"Opened https://github.com/roundtable-k8s/roundtable/pull/245 for review",
-			Structured{PRs: []PRRef{{Repo: "roundtable-k8s/roundtable", Number: 245, URL: "https://github.com/roundtable-k8s/roundtable/pull/245"}}}},
-		"repo ref":              {"see roundtable-k8s/arsenal#12", Structured{PRs: []PRRef{{Repo: "roundtable-k8s/arsenal", Number: 12}}}},
-		"bare ref":              {"PR #245 is up", Structured{PRs: []PRRef{{Number: 245}}}},
-		"url wins over bare":    {"PR #9: https://github.com/o/r/pull/9", Structured{PRs: []PRRef{{Repo: "o/r", Number: 9, URL: "https://github.com/o/r/pull/9"}}}},
+			Structured{PRs: []PRRef{{
+				Repo: "roundtable-k8s/roundtable", Number: 245,
+				URL: "https://github.com/roundtable-k8s/roundtable/pull/245",
+			}}}},
+		"repo ref": {"see roundtable-k8s/arsenal#12",
+			Structured{PRs: []PRRef{{Repo: "roundtable-k8s/arsenal", Number: 12}}}},
+		"bare ref": {"PR #245 is up", Structured{PRs: []PRRef{{Number: 245}}}},
+		"url wins over bare": {"PR #9: https://github.com/o/r/pull/9",
+			Structured{PRs: []PRRef{{Repo: "o/r", Number: 9, URL: "https://github.com/o/r/pull/9"}}}},
 		"verdict":               {"Looks good.\n**Verdict: SHIP IT**", Structured{Verdict: VerdictShipIt}},
 		"verdict nc":            {"Verdict: needs changes\n- fix x", Structured{Verdict: VerdictNeedsChanges}},
 		"last verdict wins":     {"Verdict: needs_changes\n...\nVerdict: ship_it", Structured{Verdict: VerdictShipIt}},
