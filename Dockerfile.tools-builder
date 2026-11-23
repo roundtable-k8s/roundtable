@@ -1,0 +1,28 @@
+# Builder image for knight tools image Jobs: stock Nix with the nix2container
+# tooling and the pinned flake inputs already in the Nix store.
+#
+# A build Job on plain nixos/nix compiles nix2container's patched skopeo from
+# source every time, which takes most of the build (8 to 18 minutes observed).
+# Here that is done once, at image build time, by building the operator's own
+# tools image flake for a one-package tool list. Job builds then only download
+# the knight's packages and push.
+#
+# The pins come from the operator code (cmd/toolsflake), so this image always
+# matches the operator built from the same commit. The published tag is derived
+# from those pins; see knight.ToolsBuilderImage.
+
+FROM golang:1.26 AS flake
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ api/
+COPY internal/ internal/
+COPY cmd/toolsflake/ cmd/toolsflake/
+RUN go run ./cmd/toolsflake > /flake.nix
+
+# Keep in sync with stockNixImage in internal/knight/tools_image.go (a test checks).
+FROM nixos/nix@sha256:746280551ddc1c72177d1a597c05eacac86dfaa18d5d649bf86411278bcd5470
+COPY --from=flake /flake.nix /opt/tools-builder/warmup/flake.nix
+RUN cd /opt/tools-builder/warmup \
+    && NIX_CONFIG="experimental-features = nix-command flakes" \
+       nix build .#tools .#tools.copyTo --out-link /opt/tools-builder/warmup/result
