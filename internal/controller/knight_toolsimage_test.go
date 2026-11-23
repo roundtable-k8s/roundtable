@@ -159,6 +159,44 @@ var _ = Describe("Knight tools image", func() {
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
+		It("keeps the pod on the published image until a changed tool list is built", func() {
+			nixVolumeRef := func(k *aiv1alpha1.Knight) string {
+				for _, v := range r.BuildPodSpec(ctx, k).Volumes {
+					if v.Name == "nix" && v.Image != nil {
+						return v.Image.Reference
+					}
+				}
+				return ""
+			}
+
+			k := newKnight("palamedes", []string{"curl"})
+			oldRef := knightpkg.ToolsImageRef(k)
+			k.Status.ToolsImage = oldRef
+			Expect(nixVolumeRef(k)).To(Equal(oldRef))
+
+			// Tool list changes: a Job starts, the pod spec does not move.
+			k.Spec.Tools.Nix = []string{"curl", "nmap"}
+			newRef := knightpkg.ToolsImageRef(k)
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			job, err := getJob(k)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = k8sClient.Delete(ctx, job) }()
+			Expect(nixVolumeRef(k)).To(Equal(oldRef), "pod must stay on the old tools while the new image builds")
+
+			// Job succeeds: the same reconcile pass now yields the new image.
+			now := metav1.Now()
+			job.Status.Succeeded = 1
+			job.Status.StartTime = &now
+			job.Status.CompletionTime = &now
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+			Expect(r.reconcileToolsImage(ctx, k)).To(Succeed())
+			Expect(nixVolumeRef(k)).To(Equal(newRef))
+		})
+
 		It("builds again when the tool list changes", func() {
 			k := newKnight("ector", []string{"curl"})
 			k.Status.ToolsImage = knightpkg.ToolsImageRef(k)

@@ -132,3 +132,41 @@ func TestGenerateToolsImageFlake(t *testing.T) {
 		t.Error("equal tool sets must generate identical flakes")
 	}
 }
+
+func TestMountedToolsImageRefTrailsUntilPublished(t *testing.T) {
+	t.Setenv("KNIGHT_TOOLS_IMAGE_REPO", "registry.example.com/knight-tools")
+	k := knightWithNix("nmap")
+	desired := ToolsImageRef(k)
+
+	// Nothing published yet: mount the desired image and wait for it.
+	if got := MountedToolsImageRef(k); got != desired {
+		t.Errorf("unpublished knight mounts %q, want desired %q", got, desired)
+	}
+
+	// Published and current.
+	k.Status.ToolsImage = desired
+	if got := MountedToolsImageRef(k); got != desired {
+		t.Errorf("published knight mounts %q, want %q", got, desired)
+	}
+
+	// Tool list changed, new image still building: keep the published one.
+	k.Spec.Tools.Nix = []string{"nmap", "jq"}
+	if ToolsImageRef(k) == desired {
+		t.Fatal("test setup: changing the tool list must change the desired image")
+	}
+	if got := MountedToolsImageRef(k); got != desired {
+		t.Errorf("mid-build knight mounts %q, want the previously published %q", got, desired)
+	}
+
+	// Tools removed, or tools images disabled: mount nothing, whatever the status says.
+	k.Spec.Tools = nil
+	if got := MountedToolsImageRef(k); got != "" {
+		t.Errorf("knight without nix tools mounts %q, want nothing", got)
+	}
+	k = knightWithNix("nmap")
+	k.Status.ToolsImage = desired
+	t.Setenv("KNIGHT_TOOLS_IMAGE_REPO", "")
+	if got := MountedToolsImageRef(k); got != "" {
+		t.Errorf("with tools images disabled the knight mounts %q, want nothing", got)
+	}
+}

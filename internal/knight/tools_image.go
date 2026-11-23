@@ -145,6 +145,23 @@ func ToolsImageRef(knight *aiv1alpha1.Knight) string {
 	return ToolsImageRepo() + ":" + tag
 }
 
+// MountedToolsImageRef returns the tools image the knight's pod should mount.
+// That is the image last published for the knight (status.toolsImage), which
+// trails ToolsImageRef while a changed tool list is still building: the pod
+// keeps its current tools until the new image exists and then rolls once,
+// instead of being recreated against a tag that is not in the registry yet.
+// A knight with nothing published mounts the desired image and waits for it.
+func MountedToolsImageRef(knight *aiv1alpha1.Knight) string {
+	desired := ToolsImageRef(knight)
+	if desired == "" {
+		return ""
+	}
+	if published := knight.Status.ToolsImage; published != "" {
+		return published
+	}
+	return desired
+}
+
 // ToolsImagePushRef returns the reference the build Job pushes to.
 func ToolsImagePushRef(knight *aiv1alpha1.Knight) string {
 	tag := ToolsImageTag(knight)
