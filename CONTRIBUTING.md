@@ -20,6 +20,24 @@ Thanks for your interest in contributing! 🏰
 - [kubebuilder](https://book.kubebuilder.io/) (for CRD generation)
 - NATS CLI (`nats`) — optional, for debugging
 
+### Nix dev shell (recommended)
+
+`flake.nix` pins the whole toolchain: Go, golangci-lint v2.8.0, helm v3.19.x,
+controller-gen v0.20.x, kustomize, kubectl, kind, setup-envtest and the envtest
+assets (kube-apiserver/etcd, exported as `KUBEBUILDER_ASSETS`). With
+[Nix flakes](https://nixos.org/download) enabled:
+
+```bash
+nix develop        # or `direnv allow` with `use flake` in .envrc
+make test lint helm-check
+```
+
+The Makefile prefers tools found on `PATH` and an existing `KUBEBUILDER_ASSETS`,
+and falls back to downloading/building them into `./bin` when they are missing,
+so Nix is optional. When changing a `*_VERSION` in the Makefile, update the
+matching version and hashes in `flake.nix` (`nix flake check` verifies them).
+Humans and knights should use the same shell.
+
 ### Build & Test
 
 ```bash

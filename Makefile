@@ -58,8 +58,8 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet $(if $(KUBEBUILDER_ASSETS),,setup-envtest) ## Run tests (uses KUBEBUILDER_ASSETS when set, e.g. by `nix develop`).
+	KUBEBUILDER_ASSETS="$(or $(KUBEBUILDER_ASSETS),$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path))" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -184,13 +184,22 @@ $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
 
 ## Tool Binaries
+# Each tool is taken from PATH when present (the `nix develop` shell in flake.nix
+# provides the pinned versions, see the *_VERSION variables below) and otherwise
+# installed into $(LOCALBIN). Override any of them on the command line or in the
+# environment, e.g. `make HELM=/usr/local/bin/helm helm-check`.
+tool-path = $(or $(shell command -v $(1) 2>/dev/null),$(LOCALBIN)/$(1))
 KUBECTL ?= kubectl
 KIND ?= kind
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
-HELM ?= $(LOCALBIN)/helm
+KUSTOMIZE ?= $(call tool-path,kustomize)
+CONTROLLER_GEN ?= $(call tool-path,controller-gen)
+ENVTEST ?= $(call tool-path,setup-envtest)
+# `make lint` needs a golangci-lint built with the module plugins from
+# .custom-gcl.yml (logcheck), so GOLANGCI_LINT defaults to the custom binary in
+# $(LOCALBIN). A stock golangci-lint on PATH is only used to build it (below).
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+GOLANGCI_LINT_STOCK ?= $(shell command -v golangci-lint 2>/dev/null)
+HELM ?= $(call tool-path,helm)
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
@@ -213,12 +222,12 @@ HELM_VERSION ?= v3.19.0
 GO_TOOLCHAIN ?= $(shell sed -n "s/^toolchain //p" go.mod)+auto
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
+$(KUSTOMIZE): | $(LOCALBIN)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
+$(CONTROLLER_GEN): | $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: setup-envtest
@@ -231,18 +240,27 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
+$(ENVTEST): | $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: helm
 helm: $(HELM) ## Download helm locally if necessary.
 $(HELM): export CGO_ENABLED = 0
-$(HELM): $(LOCALBIN)
+$(HELM): | $(LOCALBIN)
 	$(call go-install-tool,$(HELM),helm.sh/helm/v3/cmd/helm,$(HELM_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
+$(GOLANGCI_LINT): | $(LOCALBIN)
+	@if [ -n "$(GOLANGCI_LINT_STOCK)" ] && [ -f .custom-gcl.yml ] && [ "$(GOLANGCI_LINT_STOCK)" != "$(GOLANGCI_LINT)" ]; then \
+		echo "Building custom golangci-lint with plugins using $(GOLANGCI_LINT_STOCK)..." && \
+		GOTOOLCHAIN=$(GO_TOOLCHAIN) "$(GOLANGCI_LINT_STOCK)" custom --destination "$(LOCALBIN)" --name golangci-lint; \
+	else \
+		$(MAKE) --no-print-directory install-golangci-lint-from-source; \
+	fi
+
+.PHONY: install-golangci-lint-from-source
+install-golangci-lint-from-source:
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 	@test -f .custom-gcl.yml && { \
 		echo "Building custom golangci-lint with plugins..." && \
