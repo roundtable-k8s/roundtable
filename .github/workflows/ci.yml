@@ -40,8 +40,24 @@ jobs:
           ENVTEST_ASSETS=$(setup-envtest use --print path)
           echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
 
+      # -race: flaky tests only surfaced in the merge queue before (#253).
       - name: Test
-        run: go test ./... -coverprofile cover.out
+        run: go test -race ./... -coverprofile cover.out
+
+  # Runs on PRs and in the merge queue: the chart's pipeline template drifted
+  # from the CRDs once because only the main-branch helm job touched the chart.
+  helm-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Helm lint + PR pipeline example check
+        run: make helm-check
 
   # Fails on any golangci-lint finding (main is clean as of #207). `make lint`
   # builds the custom golangci-lint with the logcheck plugin (.custom-gcl.yml)
