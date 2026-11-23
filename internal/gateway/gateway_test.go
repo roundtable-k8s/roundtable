@@ -60,8 +60,8 @@ type fakeKnight struct {
 
 	mu      sync.Mutex
 	stopped bool
-	seen map[string]natspkg.TaskPayload // by subject's knight token
-	last natspkg.TaskPayload
+	seen    map[string]natspkg.TaskPayload // by subject's knight token
+	last    natspkg.TaskPayload
 }
 
 func startFakeKnight(t *testing.T, url string) *fakeKnight {
