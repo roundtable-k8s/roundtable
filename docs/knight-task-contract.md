@@ -109,3 +109,30 @@ spec:
   the model the knight reports having used.
 - A model mismatch is a spec error: the step fails immediately and is **not**
   retried, regardless of `retry` / `retryPolicy`.
+
+## Draining on rollout
+
+Knight Deployments are rolled while tasks may be in flight, so the operator and
+the knight runtime share a drain contract (#246).
+
+**Operator side**
+
+- `terminationGracePeriodSeconds` is `spec.taskTimeoutSeconds + 60`.
+- Strategy is `RollingUpdate` with `maxSurge: 1, maxUnavailable: 0` when more
+  than one pod can mount the workspace: `workspace.mode: ephemeral`, or a
+  `workspace.existingClaim` with `replicas`/`maxReplicas` above 1 (which the
+  Knight CEL rules require to be ReadWriteMany). The new pod starts pulling
+  while the old one drains.
+- A single-replica knight on the default PVC (or a single-replica
+  `existingClaim`, assumed ReadWriteOnce) keeps `Recreate`: two pods cannot
+  mount the volume, so the old pod must be gone first. It still gets the longer
+  grace period, so it drains before it is killed, but there is a gap with no
+  pod pulling. Use `workspace.mode: ephemeral` or an RWX claim for gap-free
+  rollouts.
+
+**Runtime side** (claude-knight / pi-knight; not implemented by the operator)
+
+On SIGTERM a knight must stop fetching new tasks, keep heartbeating in-flight
+tasks, publish their results, then exit, waiting up to the grace period rather
+than a fixed 60s. `/ready` must report `draining` (not ready) so the pod leaves
+Service endpoints.

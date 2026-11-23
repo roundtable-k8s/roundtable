@@ -174,6 +174,50 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 		})
 	})
 
+	Describe("drain on rollout", func() {
+		var k *aiv1alpha1.Knight
+		AfterEach(func() { deleteKnight(k) })
+
+		It("rolls ephemeral knights with surge 1 / unavailable 0 and a task-timeout grace period", func() {
+			k = scalingKnight("default", "drain-ephemeral", func(s *aiv1alpha1.KnightSpec) {
+				ephemeral(s)
+				s.TaskTimeoutSeconds = 300
+			})
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			d := getKnightDeployment(k)
+			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RollingUpdateDeploymentStrategyType))
+			Expect(d.Spec.Strategy.RollingUpdate.MaxSurge.IntValue()).To(Equal(1))
+			Expect(d.Spec.Strategy.RollingUpdate.MaxUnavailable.IntValue()).To(Equal(0))
+			Expect(*d.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(360)))
+		})
+
+		It("rolls a shared existingClaim knight with several replicas", func() {
+			k = scalingKnight("default", "drain-rwx", func(s *aiv1alpha1.KnightSpec) {
+				s.Workspace = &aiv1alpha1.KnightWorkspace{ExistingClaim: "shared-rwx"}
+				s.Replicas = new(int32(2))
+			})
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			d := getKnightDeployment(k)
+			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RollingUpdateDeploymentStrategyType))
+			Expect(d.Spec.Strategy.RollingUpdate.MaxUnavailable.IntValue()).To(Equal(0))
+		})
+
+		It("keeps Recreate for a single RWO PVC knight but still sets the grace period", func() {
+			k = scalingKnight("default", "drain-rwo", nil)
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			d := getKnightDeployment(k)
+			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
+			Expect(d.Spec.Strategy.RollingUpdate).To(BeNil())
+			Expect(*d.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(k.Spec.TaskTimeoutSeconds) + 60))
+		})
+	})
+
 	Describe("without KEDA", func() {
 		var k *aiv1alpha1.Knight
 		AfterEach(func() { deleteKnight(k) })

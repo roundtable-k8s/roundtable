@@ -20,6 +20,9 @@ import (
 	"sort"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 )
@@ -181,4 +184,46 @@ func AllotPlanReplicas(capTasks int32, demands []PlanDemand) map[string]int32 {
 // capitalised knight name the operator sets (see PodBuilder.Build).
 func TaskConsumerName(k *aiv1alpha1.Knight) string {
 	return util.Capitalize(k.Name) + "-consumer"
+}
+
+// DrainGraceBufferSeconds is added to taskTimeoutSeconds to form the pod's
+// terminationGracePeriodSeconds, covering result publishing and shutdown.
+const DrainGraceBufferSeconds int64 = 60
+
+// TerminationGracePeriod returns taskTimeoutSeconds + 60 so a terminating pod
+// can finish its in-flight task. The API default (120s) applies when unset.
+func TerminationGracePeriod(k *aiv1alpha1.Knight) int64 {
+	t := int64(k.Spec.TaskTimeoutSeconds)
+	if t <= 0 {
+		t = 120
+	}
+	return t + DrainGraceBufferSeconds
+}
+
+// SharedWorkspace reports whether more than one pod can mount the workspace
+// at once: ephemeral, or an existingClaim (ReadWriteMany when replicas or
+// maxReplicas exceed 1, which the Knight CEL rules enforce). Single-replica
+// existingClaim knights are treated as ReadWriteOnce, the safe assumption.
+func SharedWorkspace(k *aiv1alpha1.Knight) bool {
+	if EphemeralWorkspace(k) {
+		return true
+	}
+	if k.Spec.Workspace == nil || k.Spec.Workspace.ExistingClaim == "" {
+		return false
+	}
+	return SpecReplicas(k) > 1 || (k.Spec.MaxReplicas != nil && *k.Spec.MaxReplicas > 1)
+}
+
+// RolloutStrategy picks the Deployment strategy: a zero-downtime rolling
+// update (surge 1, unavailable 0) when the workspace is shareable, otherwise
+// Recreate because a ReadWriteOnce PVC cannot be mounted by two pods.
+func RolloutStrategy(k *aiv1alpha1.Knight) appsv1.DeploymentStrategy {
+	if !SharedWorkspace(k) {
+		return appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	}
+	surge, unavailable := intstr.FromInt32(1), intstr.FromInt32(0)
+	return appsv1.DeploymentStrategy{
+		Type:          appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{MaxSurge: &surge, MaxUnavailable: &unavailable},
+	}
 }
