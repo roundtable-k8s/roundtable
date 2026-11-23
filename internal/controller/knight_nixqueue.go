@@ -48,7 +48,13 @@ func buildQueueDir() string {
 // legacy build Job when the queue PVC is not mounted. It returns a non-zero
 // requeue interval while a build is pending so the operator polls for the
 // result — queue results are plain files, not watched Kubernetes objects.
+//
+// When a tools image repository is configured none of that applies: the tools
+// are built into an OCI image instead (see reconcileToolsImage).
 func (r *KnightReconciler) reconcileNixBuild(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
+	if knightpkg.ToolsImageEnabled() {
+		return 0, r.reconcileToolsImage(ctx, knight)
+	}
 	queue := buildQueueDir()
 	if _, err := os.Stat(queue); err != nil {
 		// Queue not mounted — legacy Job path (requeue driven by owner watch).

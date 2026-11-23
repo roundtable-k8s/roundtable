@@ -409,6 +409,13 @@ type KnightStatus struct {
 	// +optional
 	NixToolsHash string `json:"nixToolsHash,omitempty"`
 
+	// toolsImage is the tools image reference that has been built and pushed
+	// for this knight's current Nix tool list. Empty until the build Job
+	// succeeds; used to avoid rebuilding unchanged tool lists. Only set when
+	// the operator is configured with a tools image repository.
+	// +optional
+	ToolsImage string `json:"toolsImage,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

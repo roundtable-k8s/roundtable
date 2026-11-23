@@ -395,11 +395,22 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 			cm.Data["flake.nix"] = knightpkg.GenerateFlakeNix(knight)
 		}
 
+		// Flake for the tools image build Job (tools image mode only).
+		if knightpkg.ToolsImageEnabled() && knightpkg.HasToolsImage(knight) {
+			cm.Data[toolsImageFlakeKey] = knightpkg.GenerateToolsImageFlake(knight)
+		} else {
+			delete(cm.Data, toolsImageFlakeKey)
+		}
+
 		// Generate TOOLS.md listing available tools and paths
 		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Nix) > 0 {
 			var toolsDoc strings.Builder
 			toolsDoc.WriteString("# Available Tools\n\n")
-			toolsDoc.WriteString("Tools are installed at `/data/nix-env/bin/` and are in your PATH.\n\n")
+			if knightpkg.ToolsImageEnabled() {
+				toolsDoc.WriteString("Tools are installed at `" + knightpkg.ToolsImageProfilePath + "/bin/` (a read-only tools image) and are in your PATH.\n\n")
+			} else {
+				toolsDoc.WriteString("Tools are installed at `/data/nix-env/bin/` and are in your PATH.\n\n")
+			}
 			toolsDoc.WriteString("## Nix Packages\n")
 			for _, pkg := range knight.Spec.Tools.Nix {
 				toolsDoc.WriteString(fmt.Sprintf("- %s\n", pkg))
@@ -412,16 +423,23 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 			toolsDoc.WriteString("- `GH_TOKEN` / `GITHUB_TOKEN` env vars are set for GitHub API access\n")
 			toolsDoc.WriteString("- Use `gh` CLI for PR creation: `gh pr create --title ... --body ...`\n")
 			toolsDoc.WriteString("- Use authenticated clone: `git clone https://${GH_TOKEN}@github.com/...`\n")
-			toolsDoc.WriteString("\n## Self-Installing Tools\n")
-			toolsDoc.WriteString("You can install additional tools at runtime using Nix:\n")
-			toolsDoc.WriteString("```bash\n")
-			toolsDoc.WriteString("# Install a package (persists on your PVC across restarts)\n")
-			toolsDoc.WriteString("nix profile install nixpkgs#<package>\n")
-			toolsDoc.WriteString("# Search for packages\n")
-			toolsDoc.WriteString("nix search nixpkgs <query>\n")
-			toolsDoc.WriteString("```\n")
-			toolsDoc.WriteString("Installed tools persist in /nix on your PVC. For permanent additions,\n")
-			toolsDoc.WriteString("request them via the fleet-self-improvement chain.\n")
+			if knightpkg.ToolsImageEnabled() {
+				toolsDoc.WriteString("\n## Adding Tools\n")
+				toolsDoc.WriteString("The tool set is fixed by `spec.tools.nix` on your Knight resource and is\n")
+				toolsDoc.WriteString("read-only at runtime. To add a tool, request it via the\n")
+				toolsDoc.WriteString("fleet-self-improvement chain.\n")
+			} else {
+				toolsDoc.WriteString("\n## Self-Installing Tools\n")
+				toolsDoc.WriteString("You can install additional tools at runtime using Nix:\n")
+				toolsDoc.WriteString("```bash\n")
+				toolsDoc.WriteString("# Install a package (persists on your PVC across restarts)\n")
+				toolsDoc.WriteString("nix profile install nixpkgs#<package>\n")
+				toolsDoc.WriteString("# Search for packages\n")
+				toolsDoc.WriteString("nix search nixpkgs <query>\n")
+				toolsDoc.WriteString("```\n")
+				toolsDoc.WriteString("Installed tools persist in /nix on your PVC. For permanent additions,\n")
+				toolsDoc.WriteString("request them via the fleet-self-improvement chain.\n")
+			}
 			cm.Data["TOOLS.md"] = toolsDoc.String()
 		}
 

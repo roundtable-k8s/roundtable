@@ -738,6 +738,13 @@ spec:
                 description: tasksFailed is the total number of tasks that failed.
                 format: int64
                 type: integer
+              toolsImage:
+                description: |-
+                  toolsImage is the tools image reference that has been built and pushed
+                  for this knight's current Nix tool list. Empty until the build Job
+                  succeeds; used to avoid rebuilding unchanged tool lists. Only set when
+                  the operator is configured with a tools image repository.
+                type: string
               totalCost:
                 description: totalCost is the cumulative cost in USD of all tasks
                   processed.

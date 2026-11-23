@@ -18,6 +18,7 @@ package knight
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -135,6 +136,43 @@ var _ = Describe("PodBuilder", func() {
 
 			Expect(builder.volumes).To(HaveLen(1))
 			Expect(builder.volumes[0].PersistentVolumeClaim.ClaimName).To(Equal("custom-store"))
+		})
+	})
+
+	Describe("WithNixStore with a tools image repository", func() {
+		BeforeEach(func() {
+			GinkgoT().Setenv("KNIGHT_TOOLS_IMAGE_REPO", "registry.example.com/knight-tools")
+		})
+
+		It("does nothing when no Nix tools configured", func() {
+			builder.WithNixStore()
+			Expect(builder.volumes).To(BeEmpty())
+			Expect(builder.mounts).To(BeEmpty())
+		})
+
+		It("mounts the knight's tools image read-only at /nix instead of the shared store", func() {
+			knight.Spec.Tools = &aiv1alpha1.KnightTools{Nix: []string{"kubectl", "helm"}}
+			builder.WithNixStore()
+
+			Expect(builder.volumes).To(HaveLen(1))
+			vol := builder.volumes[0]
+			Expect(vol.Name).To(Equal("nix"))
+			Expect(vol.PersistentVolumeClaim).To(BeNil())
+			Expect(vol.Image).NotTo(BeNil())
+			Expect(vol.Image.Reference).To(Equal("registry.example.com/knight-tools:" + ToolsImageTag(knight)))
+			Expect(vol.Image.PullPolicy).To(Equal(corev1.PullIfNotPresent))
+
+			// subPath "nix": the image carries /nix/store and /nix/profile.
+			Expect(builder.mounts).To(Equal([]corev1.VolumeMount{{
+				Name: "nix", MountPath: "/nix", SubPath: "nix", ReadOnly: true,
+			}}))
+			Expect(builder.env).To(ContainElement(corev1.EnvVar{
+				Name: "KNIGHT_NIX_PROFILE", Value: "/nix/profile",
+			}))
+		})
+
+		It("has the tools image profile on the container PATH", func() {
+			Expect(strings.Split(knightToolPATH("test-knight"), ":")).To(ContainElement("/nix/profile/bin"))
 		})
 	})
 
