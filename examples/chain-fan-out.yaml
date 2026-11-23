@@ -1,0 +1,51 @@
+# Planner pattern: one step produces a JSON list, a forEach step fans out
+# over it, a second forEach reviews each result, and a final step joins.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: epic-implementation
+  namespace: roundtable
+spec:
+  roundTableRef: fleet-a
+  timeout: 86400
+  input: "Epic: https://github.com/example/repo/issues/100"
+  steps:
+    - name: plan
+      knightRef: rt-lead
+      timeout: 900
+      task: |
+        Break this epic into independent issues: {{ .Input }}
+        Reply with ONLY a fenced ```json block of the form
+        {"issues": [{"number": 101, "title": "..."}]}
+
+    - name: implement
+      knightRef: rt-operator
+      dependsOn: [plan]
+      timeout: 3600
+      forEach:
+        from: steps.plan        # or "input"
+        path: .issues           # JSONPath; omit when the document is the list
+        maxItems: 20
+      maxParallel: 2            # defaults to the knight's concurrency
+      failurePolicy: continue   # or failFast (default)
+      task: |
+        Implement issue #{{ .Item.number }}: {{ .Item.title }}
+        Open one PR and reply with its URL.
+
+    - name: review
+      knightRef: rt-lead
+      dependsOn: [implement]
+      timeout: 1800
+      forEach:
+        from: steps.implement   # the join: [{index, item, phase, output, error}]
+      maxParallel: 4
+      failurePolicy: continue
+      task: |
+        {{ if eq .Item.phase "Succeeded" }}Review the PR in: {{ .Item.output }}{{ else }}Explain why issue {{ .ItemJSON }} failed.{{ end }}
+
+    - name: summary
+      knightRef: rt-lead
+      dependsOn: [review]
+      task: |
+        Summarise the epic's outcome from these reviews:
+        {{ .Steps.review.Output }}

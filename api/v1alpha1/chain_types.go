@@ -153,6 +153,7 @@ type ChainStep struct {
 	ContinueOnFailure bool `json:"continueOnFailure,omitempty"`
 
 	// retry configures per-step retry behavior, overriding the chain-level retryPolicy.
+	// For a forEach step it applies to each item individually.
 	// +optional
 	Retry *StepRetry `json:"retry,omitempty"`
 
@@ -167,6 +168,68 @@ type ChainStep struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$`
 	// +optional
 	Model string `json:"model,omitempty"`
+
+	// forEach fans this step out: it runs once per element of a JSON list taken
+	// from the chain input or a prior step's output. The task template gets the
+	// element as {{ .Item }} (alias {{ .item }}), its compact JSON as
+	// {{ .ItemJSON }} and its zero-based position as {{ .ItemIndex }}. Every
+	// item is its own task with its own taskId and a per-item runId. When all
+	// items are done the step output is the joined JSON array of per-item
+	// results ({index, item, phase, output, error}), which downstream steps read
+	// through {{ .Steps.<name>.Output }}.
+	// +optional
+	ForEach *ChainForEach `json:"forEach,omitempty"`
+
+	// maxParallel caps how many items of a forEach step are in flight at once.
+	// Defaults to the knight's concurrency. Only valid together with forEach.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	MaxParallel int32 `json:"maxParallel,omitempty"`
+
+	// failurePolicy decides what a failed item does to a forEach step.
+	// failFast (default): no further items are dispatched once an item fails
+	// (after its retries); in-flight items finish, the rest are Skipped and the
+	// step fails. continue: every item runs; the step succeeds unless every
+	// item failed, and a chain with failed items ends PartiallySucceeded.
+	// Only valid together with forEach.
+	// +optional
+	FailurePolicy ChainFailurePolicy `json:"failurePolicy,omitempty"`
+}
+
+// ChainFailurePolicy controls how item failures affect a forEach step.
+// +kubebuilder:validation:Enum=failFast;continue
+type ChainFailurePolicy string
+
+const (
+	ChainFailurePolicyFailFast ChainFailurePolicy = "failFast"
+	ChainFailurePolicyContinue ChainFailurePolicy = "continue"
+)
+
+// ChainForEach selects the list a forEach step fans out over.
+type ChainForEach struct {
+	// from names the JSON document holding the list: "input" (spec.input) or
+	// "steps.<stepName>" (that step's output; the step must be listed in
+	// dependsOn). Prose around the JSON is tolerated when the JSON sits in a
+	// fenced ```json code block.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^(input|steps\.[A-Za-z0-9_-]+)$`
+	From string `json:"from"`
+
+	// path is a JSONPath expression (kubectl syntax, e.g. "{.issues}" or
+	// ".issues[*].number") evaluated against the document. A single list
+	// result is the item list; otherwise the values found form the list. When
+	// empty the document itself must be a JSON array.
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// maxItems is the largest list the step accepts. A longer list fails the
+	// step instead of being silently truncated.
+	// +kubebuilder:default=50
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=200
+	// +optional
+	MaxItems int32 `json:"maxItems,omitempty"`
 }
 
 // StepRetry configures retry behavior for an individual step.
@@ -274,6 +337,100 @@ type ChainStepStatus struct {
 	// model the knight reports having used, when the knight reports one.
 	// +optional
 	Model string `json:"model,omitempty"`
+
+	// fanOut tracks the items of a forEach step. Unset for ordinary steps.
+	// +optional
+	FanOut *ChainFanOutStatus `json:"fanOut,omitempty"`
+}
+
+// ChainFanOutStatus is the bounded per-item state of a forEach step.
+//
+// Every item's phase is kept in itemPhases (one character per item) so a
+// resumed or retried fan-out never redoes finished items. Detailed entries are
+// kept for every in-flight item and for at most a fixed number of finished
+// ones (failed items first, then the most recently finished); the rest are
+// only counted in omittedItems and their outputs are read back from the
+// chain-outputs NATS KV bucket when the step joins.
+type ChainFanOutStatus struct {
+	// total is the number of items in the list.
+	Total int32 `json:"total"`
+
+	// itemsHash fingerprints the resolved list; a different list on a later
+	// reconcile of the same run fails the step instead of mixing item sets.
+	// +optional
+	ItemsHash string `json:"itemsHash,omitempty"`
+
+	// itemPhases holds one character per item, in list order:
+	// P=Pending, R=Running, S=Succeeded, F=Failed, K=Skipped.
+	// +optional
+	ItemPhases string `json:"itemPhases,omitempty"`
+
+	// pending, running, succeeded, failed and skipped summarise itemPhases.
+	// +optional
+	Pending int32 `json:"pending,omitempty"`
+	// +optional
+	Running int32 `json:"running,omitempty"`
+	// +optional
+	Succeeded int32 `json:"succeeded,omitempty"`
+	// +optional
+	Failed int32 `json:"failed,omitempty"`
+	// +optional
+	Skipped int32 `json:"skipped,omitempty"`
+
+	// items are the detailed per-item entries (bounded; see omittedItems).
+	// +optional
+	Items []ChainItemStatus `json:"items,omitempty"`
+
+	// omittedItems counts finished items whose detailed entry was dropped to
+	// keep the status bounded.
+	// +optional
+	OmittedItems int32 `json:"omittedItems,omitempty"`
+}
+
+// ChainItemStatus is the execution state of one forEach item.
+type ChainItemStatus struct {
+	// index is the item's zero-based position in the list.
+	Index int32 `json:"index"`
+
+	// phase is the item's execution phase.
+	// +optional
+	Phase ChainStepPhase `json:"phase,omitempty"`
+
+	// runId is the per-item run identity sent to the knight.
+	// +optional
+	RunID string `json:"runId,omitempty"`
+
+	// taskID is the NATS task identifier of the item's current execution.
+	// +optional
+	TaskID string `json:"taskId,omitempty"`
+
+	// taskSeq is the tasks-stream sequence of the published item task.
+	// +optional
+	TaskSeq uint64 `json:"taskSeq,omitempty"`
+
+	// startedAt is when the item task was published.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// pickedUpAt is when the knight picked the item task up.
+	// +optional
+	PickedUpAt *metav1.Time `json:"pickedUpAt,omitempty"`
+
+	// completedAt is when the item finished.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// output is the item's result (truncated).
+	// +optional
+	Output string `json:"output,omitempty"`
+
+	// error is the item's error message (truncated).
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// retries is the number of retry attempts made for this item.
+	// +optional
+	Retries int32 `json:"retries,omitempty"`
 }
 
 // ChainStatus defines the observed state of Chain.

@@ -171,10 +171,68 @@ spec:
                             items:
                               type: string
                             type: array
+                          failurePolicy:
+                            description: |-
+                              failurePolicy decides what a failed item does to a forEach step.
+                              failFast (default): no further items are dispatched once an item fails
+                              (after its retries); in-flight items finish, the rest are Skipped and the
+                              step fails. continue: every item runs; the step succeeds unless every
+                              item failed, and a chain with failed items ends PartiallySucceeded.
+                              Only valid together with forEach.
+                            enum:
+                            - failFast
+                            - continue
+                            type: string
+                          forEach:
+                            description: |-
+                              forEach fans this step out: it runs once per element of a JSON list taken
+                              from the chain input or a prior step's output. The task template gets the
+                              element as {{ .Item }} (alias {{ .item }}), its compact JSON as
+                              {{ .ItemJSON }} and its zero-based position as {{ .ItemIndex }}. Every
+                              item is its own task with its own taskId and a per-item runId. When all
+                              items are done the step output is the joined JSON array of per-item
+                              results ({index, item, phase, output, error}), which downstream steps read
+                              through {{ .Steps.<name>.Output }}.
+                            properties:
+                              from:
+                                description: |-
+                                  from names the JSON document holding the list: "input" (spec.input) or
+                                  "steps.<stepName>" (that step's output; the step must be listed in
+                                  dependsOn). Prose around the JSON is tolerated when the JSON sits in a
+                                  fenced ```json code block.
+                                pattern: ^(input|steps\.[A-Za-z0-9_-]+)$
+                                type: string
+                              maxItems:
+                                default: 50
+                                description: |-
+                                  maxItems is the largest list the step accepts. A longer list fails the
+                                  step instead of being silently truncated.
+                                format: int32
+                                maximum: 200
+                                minimum: 1
+                                type: integer
+                              path:
+                                description: |-
+                                  path is a JSONPath expression (kubectl syntax, e.g. "{.issues}" or
+                                  ".issues[*].number") evaluated against the document. A single list
+                                  result is the item list; otherwise the values found form the list. When
+                                  empty the document itself must be a JSON array.
+                                type: string
+                            required:
+                            - from
+                            type: object
                           knightRef:
                             description: knightRef is the name of the Knight to execute
                               this step.
                             type: string
+                          maxParallel:
+                            description: |-
+                              maxParallel caps how many items of a forEach step are in flight at once.
+                              Defaults to the knight's concurrency. Only valid together with forEach.
+                            format: int32
+                            maximum: 100
+                            minimum: 1
+                            type: integer
                           model:
                             description: |-
                               model overrides the knight's spec.model for this step only. It is either
@@ -204,8 +262,9 @@ spec:
                               When set, the controller dispatches a write task to the outputKnight after the step succeeds.
                             type: string
                           retry:
-                            description: retry configures per-step retry behavior,
-                              overriding the chain-level retryPolicy.
+                            description: |-
+                              retry configures per-step retry behavior, overriding the chain-level retryPolicy.
+                              For a forEach step it applies to each item individually.
                             properties:
                               backoffSeconds:
                                 default: 30

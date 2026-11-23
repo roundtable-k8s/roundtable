@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -181,6 +182,22 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Type:               aiv1alpha1.ConditionChainValid,
 			Status:             metav1.ConditionFalse,
 			Reason:             aiv1alpha1.ReasonCyclicDependency,
+			Message:            err.Error(),
+			ObservedGeneration: chain.Generation,
+		})
+		chain.Status.ObservedGeneration = chain.Generation
+		if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
+			log.Error(statusErr, "Failed to update status during validation error")
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Validate forEach / maxParallel / failurePolicy
+	if err := validateForEach(chain); err != nil {
+		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
+			Type:               aiv1alpha1.ConditionChainValid,
+			Status:             metav1.ConditionFalse,
+			Reason:             aiv1alpha1.ReasonInvalidForEach,
 			Message:            err.Error(),
 			ObservedGeneration: chain.Generation,
 		})
@@ -370,6 +387,12 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 			"Steps": mockSteps,
 			"Input": "",
 		}
+		if step.ForEach != nil {
+			mockData["Item"] = map[string]any{}
+			mockData["item"] = map[string]any{}
+			mockData["ItemIndex"] = 0
+			mockData["ItemJSON"] = "{}"
+		}
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, mockData); err != nil {
 			return fmt.Errorf("step %q template execution error (hint: use .Steps.stepname.Output not steps.stepname.output): %w", step.Name, err)
@@ -488,6 +511,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			// Skip polling if no taskID — step was set to Running by a previous
 			// operator version or before the status was persisted. Requeue will
 			// handle it once the taskID is saved.
+			if spec := specMap[ss.Name]; spec != nil && spec.ForEach != nil {
+				r.reconcileFanOut(ctx, nc, chain, spec, ss)
+				continue
+			}
 			if ss.TaskID == "" {
 				log.Info("Step running but no taskID — skipping poll, will requeue", "step", ss.Name)
 				continue
@@ -639,6 +666,16 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			continue
 		}
 
+		// forEach: fan out into one task per item.
+		if step.ForEach != nil {
+			if msg := r.startFanOut(ctx, chain, step, ss); msg != "" {
+				r.failFanOutStep(chain, ss, msg)
+				continue
+			}
+			r.reconcileFanOut(ctx, nc, chain, step, ss)
+			continue
+		}
+
 		// Render task template
 		taskStr, err := r.renderTemplate(chain, step.Task)
 		if err != nil {
@@ -723,8 +760,16 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 	// If a step failed without continueOnFailure, skip remaining pending steps and fail chain
 	if anyFailed {
 		for i := range chain.Status.StepStatuses {
-			if chain.Status.StepStatuses[i].Phase == aiv1alpha1.ChainStepPhasePending {
-				chain.Status.StepStatuses[i].Phase = aiv1alpha1.ChainStepPhaseSkipped
+			ss := &chain.Status.StepStatuses[i]
+			if ss.Phase == aiv1alpha1.ChainStepPhasePending {
+				ss.Phase = aiv1alpha1.ChainStepPhaseSkipped
+			}
+			// A running fan-out dispatches no further items once the chain
+			// is failing; it joins as soon as its in-flight items finish.
+			if spec := specMap[ss.Name]; ss.Phase == aiv1alpha1.ChainStepPhaseRunning && ss.FanOut != nil && spec != nil {
+				skipPendingItems(ss.FanOut)
+				r.finalizeFanOutIfDone(ctx, chain, spec, ss)
+				compactItemDetails(ss.FanOut)
 			}
 		}
 		// Check if still have running steps
@@ -756,6 +801,9 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			switch ss.Phase {
 			case aiv1alpha1.ChainStepPhaseSucceeded:
 				succeededSteps++
+				if ss.FanOut != nil && ss.FanOut.Failed > 0 {
+					softFailures++ // failurePolicy=continue with failed items
+				}
 			case aiv1alpha1.ChainStepPhaseFailed:
 				spec := specMap[ss.Name]
 				if spec != nil && spec.ContinueOnFailure {
@@ -809,7 +857,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// stale KV entries are masking a problem — make it visible.
 		executedSteps := 0
 		for _, ss := range chain.Status.StepStatuses {
-			if ss.TaskID != "" {
+			if ss.TaskID != "" || (ss.FanOut != nil && len(ss.FanOut.Items) > 0) {
 				executedSteps++
 			}
 		}
@@ -832,6 +880,12 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 
 // renderTemplate renders Go templates in the task string with step outputs and input.
 func (r *ChainReconciler) renderTemplate(chain *aiv1alpha1.Chain, taskStr string) (string, error) {
+	return r.renderTemplateWith(chain, taskStr, nil)
+}
+
+// renderTemplateWith renders a task template with extra top-level data
+// (forEach items add Item, item, ItemIndex and ItemJSON).
+func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr string, extra map[string]any) (string, error) {
 	if !strings.Contains(taskStr, "{{") {
 		return taskStr, nil
 	}
@@ -849,6 +903,7 @@ func (r *ChainReconciler) renderTemplate(chain *aiv1alpha1.Chain, taskStr string
 		"Steps": steps,
 		"Input": chain.Spec.Input,
 	}
+	maps.Copy(data, extra)
 
 	tmpl, err := template.New("task").Parse(taskStr)
 	if err != nil {
@@ -922,20 +977,26 @@ func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *a
 		ss.PickedUpAt = ss.StartedAt
 		return
 	}
-	natsCli, err := r.natsClient()
-	if err != nil {
-		return
-	}
-	floor, err := natsCli.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(spec.KnightRef))
-	if err != nil {
-		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "step", ss.Name, "error", err.Error())
-		return
-	}
-	if floor >= ss.TaskSeq {
+	if r.ackFloorReached(ctx, nc, spec.KnightRef, ss.TaskSeq) {
 		now := metav1.Now()
 		ss.PickedUpAt = &now
 		logf.FromContext(ctx).Info("Knight picked up step task", "step", ss.Name, "queuedFor", now.Sub(ss.StartedAt.Time).Round(time.Second).String())
 	}
+}
+
+// ackFloorReached reports whether the knight's task consumer has acknowledged
+// the tasks-stream message with sequence seq (i.e. picked the task up).
+func (r *ChainReconciler) ackFloorReached(ctx context.Context, nc natsConfig, knightRef string, seq uint64) bool {
+	natsCli, err := r.natsClient()
+	if err != nil {
+		return false
+	}
+	floor, err := natsCli.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(knightRef))
+	if err != nil {
+		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "knight", knightRef, "error", err.Error())
+		return false
+	}
+	return floor >= seq
 }
 
 // handleRunTriggers processes the run-now and retry-failed annotations. It
@@ -986,7 +1047,13 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 			if ss.Phase != aiv1alpha1.ChainStepPhaseFailed && ss.Phase != aiv1alpha1.ChainStepPhaseSkipped {
 				continue
 			}
-			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending}
+			// A fan-out resumes from its failed/skipped items only; finished
+			// items are never redone.
+			fanOut := ss.FanOut
+			if fanOut != nil {
+				resetFailedItems(fanOut)
+			}
+			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending, FanOut: fanOut}
 			retried++
 		}
 	}
