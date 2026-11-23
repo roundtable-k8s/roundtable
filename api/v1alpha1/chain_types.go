@@ -115,14 +115,16 @@ type ChainStep struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// knightRef is the name of the Knight to execute this step.
-	// +kubebuilder:validation:Required
-	KnightRef string `json:"knightRef"`
+	// knightRef is the name of the Knight to execute this step. Required
+	// unless the step is a loop (whose body steps name their own knights).
+	// +optional
+	KnightRef string `json:"knightRef,omitempty"`
 
 	// task is the task prompt or instruction to send to the knight.
 	// Supports Go template syntax with access to prior step outputs: {{ .Steps.step_name.Output }}
-	// +kubebuilder:validation:Required
-	Task string `json:"task"`
+	// Required unless the step is a loop.
+	// +optional
+	Task string `json:"task,omitempty"`
 
 	// dependsOn lists step names that must complete successfully before this step runs.
 	// If empty, the step runs immediately (or after the previous step in sequence).
@@ -195,7 +197,150 @@ type ChainStep struct {
 	// Only valid together with forEach.
 	// +optional
 	FailurePolicy ChainFailurePolicy `json:"failurePolicy,omitempty"`
+
+	// when is a CEL expression that gates the step. It is evaluated once the
+	// step's dependencies are done; false skips the step (phase Skipped,
+	// reason WhenFalse) without dispatching anything, and a skipped step
+	// satisfies its dependents' dependsOn. An evaluation error fails the step.
+	// Variables: input (string) and steps, a map from step name to
+	// {phase, output, error, reason, outcome, iterations}; outputs are the
+	// full outputs (read back from the chain-outputs KV bucket), not the
+	// truncated status copies. Besides standard CEL (contains, startsWith,
+	// matches, size, exists, ...) the extended string library and
+	// json(string) (parses a JSON document, tolerating a fenced ```json
+	// block) are available. Examples:
+	//   steps.recon.output.contains("22/tcp open")
+	//   steps.review.phase == "Succeeded" && !steps.review.output.contains("Verdict: ship it")
+	//   steps.fixloop.outcome == "Exhausted"
+	// +kubebuilder:validation:MaxLength=4096
+	// +optional
+	When string `json:"when,omitempty"`
+
+	// loop makes this step a bounded loop: its body steps run in order, round
+	// after round, until the until expression holds or maxIterations rounds
+	// have run. A loop step has no knightRef, task, forEach, model, retry or
+	// outputPath of its own; its output is the output of the last step that
+	// ran in it.
+	// +optional
+	Loop *ChainLoop `json:"loop,omitempty"`
 }
+
+// ChainLoopExhaustedPolicy decides what an exhausted loop does to its step.
+// +kubebuilder:validation:Enum=fail;continue
+type ChainLoopExhaustedPolicy string
+
+const (
+	// ChainLoopExhaustedFail fails the loop step when maxIterations rounds
+	// ran without until holding.
+	ChainLoopExhaustedFail ChainLoopExhaustedPolicy = "fail"
+	// ChainLoopExhaustedContinue lets the loop step succeed with outcome
+	// Exhausted so later steps can branch on it with when; the chain then
+	// ends PartiallySucceeded at best.
+	ChainLoopExhaustedContinue ChainLoopExhaustedPolicy = "continue"
+)
+
+// ChainLoop is a bounded loop over an ordered list of body steps.
+//
+// The loop tracks "last": the most recent step in its flow, i.e. the from
+// step on entry, then each body step as it finishes. until is evaluated
+// against last on entry (only when from is set) and after each full round.
+type ChainLoop struct {
+	// from names the step (listed in dependsOn) whose result the loop starts
+	// from, e.g. the first review. It seeds last, so until is checked before
+	// the first round (a review that already passes runs zero rounds) and the
+	// first body step sees it as {{ .Loop.Last.Output }}.
+	// +optional
+	From string `json:"from,omitempty"`
+
+	// until is a CEL expression; the loop ends with outcome Converged as soon
+	// as it is true. Variables: everything when gets (input, steps), plus
+	// last ({step, phase, output, error}), iteration (the round just
+	// finished, 0 on entry), maxIterations and body, a map from body step
+	// name to {phase, output, error, iteration}. Example:
+	//   last.output.contains("Verdict: ship it")
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=4096
+	Until string `json:"until"`
+
+	// maxIterations bounds the number of rounds.
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	MaxIterations int32 `json:"maxIterations,omitempty"`
+
+	// onExhausted decides the step's phase when maxIterations rounds ran
+	// without until holding: fail (default) fails the step; continue
+	// succeeds it with outcome Exhausted so dependents can branch on
+	// steps.<name>.outcome. Either way the outcome is Exhausted.
+	// +optional
+	OnExhausted ChainLoopExhaustedPolicy `json:"onExhausted,omitempty"`
+
+	// steps is the loop body, run in order each round. Body tasks are
+	// published with the chain's runId, so a knight that already worked on
+	// this run (e.g. the coder of an earlier implement step) resumes the same
+	// agent session. Body task templates get, besides .Steps and .Input,
+	// .Loop.Iteration (1-based), .Loop.MaxIterations, .Loop.Last (the
+	// previous step in the flow: {Step, Phase, Output, Error}) and
+	// .Loop.Steps.<body>.Output/.Error (latest round each ran in).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=5
+	Steps []ChainLoopStep `json:"steps"`
+}
+
+// ChainLoopStep is one step of a loop body.
+type ChainLoopStep struct {
+	// name identifies the body step within its loop.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9_-]*$`
+	Name string `json:"name"`
+
+	// knightRef is the Knight that runs this body step.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	KnightRef string `json:"knightRef"`
+
+	// task is the task template (see ChainLoop.steps for the extra .Loop data).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Task string `json:"task"`
+
+	// timeout is the per-task timeout in seconds, counted from knight pickup.
+	// +kubebuilder:default=120
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=3600
+	// +optional
+	Timeout int32 `json:"timeout,omitempty"`
+
+	// model overrides the knight's model for this body step (same rules as
+	// ChainStep.model, including RoundTable model aliases).
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$`
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// retry configures retries of a failed body task (per round), overriding
+	// the chain-level retryPolicy.
+	// +optional
+	Retry *StepRetry `json:"retry,omitempty"`
+}
+
+// ChainLoopOutcome is how a loop ended.
+type ChainLoopOutcome string
+
+const (
+	// ChainLoopConverged: until held (possibly on entry, after zero rounds).
+	ChainLoopConverged ChainLoopOutcome = "Converged"
+	// ChainLoopExhausted: maxIterations rounds ran without until holding.
+	ChainLoopExhausted ChainLoopOutcome = "Exhausted"
+	// ChainLoopFailed: a body step failed (after its retries) or until could
+	// not be evaluated.
+	ChainLoopFailed ChainLoopOutcome = "Failed"
+)
 
 // ChainFailurePolicy controls how item failures affect a forEach step.
 // +kubebuilder:validation:Enum=failFast;continue
@@ -341,6 +486,89 @@ type ChainStepStatus struct {
 	// fanOut tracks the items of a forEach step. Unset for ordinary steps.
 	// +optional
 	FanOut *ChainFanOutStatus `json:"fanOut,omitempty"`
+
+	// reason is a short machine-readable reason for the step's phase, e.g.
+	// WhenFalse (skipped by its when expression) or ChainFailed (skipped
+	// because the chain failed first).
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
+	// loop tracks a loop step. Unset for ordinary steps.
+	// +optional
+	Loop *ChainLoopStatus `json:"loop,omitempty"`
+}
+
+// ChainLoopStatus is the bounded state of a loop step: the round counter,
+// the outcome and one entry per body step holding its latest round only.
+type ChainLoopStatus struct {
+	// iteration is the current (or last) round, 1-based; 0 before the first.
+	// +optional
+	Iteration int32 `json:"iteration,omitempty"`
+
+	// maxIterations is the round cap for this run. It starts at
+	// spec.loop.maxIterations and grows by that much each time
+	// ai.roundtable.io/retry-failed resumes an exhausted loop.
+	// +optional
+	MaxIterations int32 `json:"maxIterations,omitempty"`
+
+	// outcome is set once the loop ends: Converged, Exhausted or Failed.
+	// +optional
+	Outcome ChainLoopOutcome `json:"outcome,omitempty"`
+
+	// steps holds the latest state of each body step, in body order.
+	// +optional
+	Steps []ChainLoopStepStatus `json:"steps,omitempty"`
+}
+
+// ChainLoopStepStatus is the state of a loop body step in its latest round.
+type ChainLoopStepStatus struct {
+	// name matches the body step name.
+	Name string `json:"name"`
+
+	// iteration is the round this entry belongs to.
+	// +optional
+	Iteration int32 `json:"iteration,omitempty"`
+
+	// phase is the body step's phase in that round.
+	// +optional
+	Phase ChainStepPhase `json:"phase,omitempty"`
+
+	// taskID is the NATS task identifier of the body step's current task.
+	// +optional
+	TaskID string `json:"taskId,omitempty"`
+
+	// taskSeq is the tasks-stream sequence of the published task.
+	// +optional
+	TaskSeq uint64 `json:"taskSeq,omitempty"`
+
+	// startedAt is when the task was published.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// pickedUpAt is when the knight picked the task up.
+	// +optional
+	PickedUpAt *metav1.Time `json:"pickedUpAt,omitempty"`
+
+	// completedAt is when the task finished.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// output is the task's result (truncated; the full output is in the
+	// chain-outputs KV bucket under <chain>.<loopStep>.<bodyStep>).
+	// +optional
+	Output string `json:"output,omitempty"`
+
+	// error is the task's error message (truncated).
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// retries is the number of retry attempts made in this round.
+	// +optional
+	Retries int32 `json:"retries,omitempty"`
+
+	// model is the model requested for (or reported by) the task.
+	// +optional
+	Model string `json:"model,omitempty"`
 }
 
 // ChainFanOutStatus is the bounded per-item state of a forEach step.

@@ -449,7 +449,7 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 			done = true
 			errMsg, output = result.GetError(), result.GetOutput()
 			if errMsg == "" && isEmptyStepOutput(output) {
-				errMsg = "knight returned empty output"
+				errMsg = errEmptyOutput
 			}
 		}
 		if !done {

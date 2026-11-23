@@ -1,0 +1,93 @@
+# PR pipeline (#225): implement → review → bounded fix loop → merge | escalate.
+#
+# - fixloop starts from the first review (loop.from). A review that already
+#   says "Verdict: ship it" runs zero rounds.
+# - Each round sends the latest review back to the coder, then re-reviews.
+#   Body tasks carry the chain's runId, so the coder resumes the agent session
+#   it opened in "implement".
+# - After maxIterations rounds without a passing review the loop is Exhausted.
+#   With onExhausted: continue the chain branches to "escalate" through `when`
+#   and ends PartiallySucceeded.
+# Conditions are CEL; see docs/conditional-steps.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: pr-pipeline
+  namespace: roundtable
+spec:
+  roundTableRef: roundtable-dev
+  timeout: 86400
+  maxQueueWait: 3600
+  input: "https://github.com/roundtable-k8s/roundtable/issues/56"
+  steps:
+    - name: implement
+      knightRef: rt-operator
+      model: deep                 # RoundTable modelAliases (#219)
+      timeout: 3600
+      task: |
+        Implement {{ .Input }}. Open a PR whose body ends "Closes #<n>".
+        Reply with the PR URL on the first line.
+
+    - name: review
+      knightRef: rt-lead
+      model: review
+      dependsOn: [implement]
+      timeout: 1800
+      task: |
+        Review the PR in: {{ .Steps.implement.Output }}
+        End your reply with exactly one line:
+        "Verdict: ship it" or "Verdict: needs changes".
+
+    - name: fixloop
+      dependsOn: [review]
+      loop:
+        from: review
+        until: 'last.output.contains("Verdict: ship it")'
+        maxIterations: 3
+        onExhausted: continue     # or fail (default)
+        steps:
+          - name: fix
+            knightRef: rt-operator
+            model: deep
+            timeout: 3600
+            retry:
+              maxAttempts: 1
+              backoffSeconds: 60
+            task: |
+              Round {{ .Loop.Iteration }}/{{ .Loop.MaxIterations }}. The reviewer asked for changes
+              on your PR ({{ .Steps.implement.Output }}):
+
+              {{ .Loop.Last.Output }}
+
+              Address every point, push to the same branch and summarise what changed.
+          - name: review
+            knightRef: rt-lead
+            model: review
+            timeout: 1800
+            task: |
+              The author pushed fixes to {{ .Steps.implement.Output }}:
+              {{ .Loop.Last.Output }}
+
+              Re-review the PR. End with exactly one line:
+              "Verdict: ship it" or "Verdict: needs changes".
+
+    - name: merge
+      knightRef: rt-lead
+      dependsOn: [fixloop]
+      when: 'steps.fixloop.outcome == "Converged"'
+      timeout: 1800
+      task: |
+        Queue the PR in {{ .Steps.implement.Output }} for merge with
+        `gh pr merge --auto --squash` and reply with its final state.
+
+    - name: escalate
+      knightRef: rt-lead
+      dependsOn: [fixloop]
+      when: 'steps.fixloop.outcome == "Exhausted"'
+      timeout: 600
+      task: |
+        The PR {{ .Steps.implement.Output }} still needs changes after
+        {{ .Steps.fixloop.Iterations }} fix rounds. Label it `needs-human`
+        and comment with the last review:
+
+        {{ .Steps.fixloop.Output }}
