@@ -194,7 +194,7 @@ var _ = Describe("WithTableSecrets", func() {
 		return NewPodBuilder(k, "img").WithReader(reader).WithTableSecrets(context.Background()).Build(context.Background())
 	}
 	names := func(spec corev1.PodSpec) []string {
-		var out []string
+		out := make([]string, 0, len(spec.Containers[0].EnvFrom))
 		for _, e := range spec.Containers[0].EnvFrom {
 			out = append(out, e.SecretRef.Name)
 		}

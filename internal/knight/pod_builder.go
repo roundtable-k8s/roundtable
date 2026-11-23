@@ -481,8 +481,9 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 	skillCategories := strings.Join(b.knight.Spec.Skills, " ")
 
-	paths := []string{}
-	for _, a := range b.arsenals() {
+	arsenals := b.arsenals()
+	paths := make([]string, 0, len(arsenals))
+	for _, a := range arsenals {
 		paths = append(paths, a.path)
 	}
 	if len(paths) == 0 {
@@ -736,7 +737,8 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	}
 
 	// Combine main container with sidecars
-	containers := []corev1.Container{knightContainer}
+	containers := make([]corev1.Container, 0, 1+len(b.sidecars))
+	containers = append(containers, knightContainer)
 	containers = append(containers, b.sidecars...)
 
 	return corev1.PodSpec{
