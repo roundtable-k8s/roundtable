@@ -211,7 +211,25 @@ gateway:
 #       tokenSecretRef:
 #         name: roundtable-github-token
 #         key: token
+#   rt-operator:
+#     domain: operator
+#     skills: [operator, shared]
+#     coder: true   # build/test code: gets codingKnightDefaults below unless
+#                   # the knight sets its own resources / workspace
 knights: {}
+
+# Defaults for knights with `coder: true` (they clone, build and test code).
+# Each of resources / workspace applies only when the knight doesn't set its
+# own. Without ephemeral-storage the namespace LimitRange default (often 4Gi)
+# evicts the pod mid-build, so it is set explicitly. For knights that live in a
+# RoundTable, set the same under RoundTable spec.defaults.resources /
+# spec.defaults.workspace; standing knights with the table label inherit them.
+codingKnightDefaults:
+  resources:
+    requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi}
+    limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+  workspace:
+    size: 20Gi
 
 # Built-in planner knight — ships with the operator for meta-missions
 planner:

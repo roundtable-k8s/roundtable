@@ -1342,6 +1342,11 @@ func (in *RoundTableDefaults) DeepCopyInto(out *RoundTableDefaults) {
 		*out = new(v1.ResourceRequirements)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Workspace != nil {
+		in, out := &in.Workspace, &out.Workspace
+		*out = new(KnightWorkspace)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Arsenal != nil {
 		in, out := &in.Arsenal, &out.Arsenal
 		*out = new(KnightArsenal)

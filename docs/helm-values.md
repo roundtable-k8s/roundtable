@@ -91,6 +91,12 @@ Off by default; enabling it requires a bearer-token Secret.
 
 ### Knights
 
+Knights with `coder: true` get `codingKnightDefaults.resources` (including
+`ephemeral-storage`) and `codingKnightDefaults.workspace` unless they set their
+own `resources` / `workspace`. Knights in a RoundTable (label
+`ai.roundtable.io/round-table`) also inherit `RoundTable.spec.defaults.resources`
+and `spec.defaults.workspace` when unset.
+
 Define knights inline in values to deploy them with the operator:
 
 ```yaml

@@ -62,13 +62,19 @@ spec:
   arsenals:
     {{- toYaml $spec.arsenals | nindent 4 }}
   {{- end }}
-  {{- if $spec.workspace }}
-  workspace:
-    {{- toYaml $spec.workspace | nindent 4 }}
+  {{- $workspace := $spec.workspace }}
+  {{- $resources := $spec.resources }}
+  {{- if $spec.coder }}
+  {{- $workspace = default $.Values.codingKnightDefaults.workspace $workspace }}
+  {{- $resources = default $.Values.codingKnightDefaults.resources $resources }}
   {{- end }}
-  {{- if $spec.resources }}
+  {{- if $workspace }}
+  workspace:
+    {{- toYaml $workspace | nindent 4 }}
+  {{- end }}
+  {{- if $resources }}
   resources:
-    {{- toYaml $spec.resources | nindent 4 }}
+    {{- toYaml $resources | nindent 4 }}
   {{- end }}
   {{- if $spec.suspend }}
   suspend: {{ $spec.suspend }}

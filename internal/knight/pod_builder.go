@@ -346,6 +346,32 @@ func findTable(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight, accep
 	return nil
 }
 
+// ApplyTableDefaults fills k.Spec.Resources and k.Spec.Workspace in memory
+// from the knight's RoundTable spec.defaults (found via findTable) when the
+// knight leaves them unset. Call it on the reconciler's working copy only; it
+// is never persisted. A table's workspace existingClaim is not inherited.
+func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) {
+	if k.Spec.Resources != nil && k.Spec.Workspace != nil {
+		return
+	}
+	rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
+		d := rt.Spec.Defaults
+		return d != nil && (d.Resources != nil || d.Workspace != nil)
+	})
+	if rt == nil {
+		return
+	}
+	d := rt.Spec.Defaults
+	if k.Spec.Resources == nil && d.Resources != nil {
+		k.Spec.Resources = d.Resources.DeepCopy()
+	}
+	if k.Spec.Workspace == nil && d.Workspace != nil {
+		ws := d.Workspace.DeepCopy()
+		ws.ExistingClaim = ""
+		k.Spec.Workspace = ws
+	}
+}
+
 // WithTableSecrets appends the knight's RoundTable spec.secrets (found via
 // findTable) to the container's envFrom, skipping Secrets already referenced
 // by the knight's own envFrom. The Knight object itself is not modified.

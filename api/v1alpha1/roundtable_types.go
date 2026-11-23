@@ -175,10 +175,18 @@ type RoundTableDefaults struct {
 	// +optional
 	Concurrency int32 `json:"concurrency,omitempty"`
 
-	// resources are the default compute resource requests and limits for
-	// the knights' app container.
+	// resources are the default compute resource requests and limits (cpu,
+	// memory, ephemeral-storage, ...) for the app container of the table's
+	// standing knights (those labelled ai.roundtable.io/round-table). A knight
+	// that sets its own spec.resources keeps it; resources are not merged.
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// workspace is the default workspace storage (mode and size) for the
+	// table's standing knights. A knight that sets its own spec.workspace
+	// keeps it. existingClaim is never inherited: a claim is per knight.
+	// +optional
+	Workspace *KnightWorkspace `json:"workspace,omitempty"`
 
 	// arsenal configures the default skill arsenal for knights.
 	// +optional
