@@ -197,14 +197,14 @@ var _ = Describe("Chain Controller", func() {
 			if err := k8sClient.Get(ctx, chainNN, chain); err == nil {
 				chain.Finalizers = nil
 				_ = k8sClient.Update(ctx, chain)
-				k8sClient.Delete(ctx, chain)
+				_ = k8sClient.Delete(ctx, chain)
 			}
 			for _, nn := range []types.NamespacedName{knightNN, knightNN2} {
 				knight := &aiv1alpha1.Knight{}
 				if err := k8sClient.Get(ctx, nn, knight); err == nil {
 					knight.Finalizers = nil
 					_ = k8sClient.Update(ctx, knight)
-					k8sClient.Delete(ctx, knight)
+					_ = k8sClient.Delete(ctx, knight)
 				}
 			}
 		})
@@ -378,11 +378,11 @@ var _ = Describe("Chain Controller", func() {
 			if err := k8sClient.Get(ctx, chainNN, chain); err == nil {
 				chain.Finalizers = nil
 				_ = k8sClient.Update(ctx, chain)
-				k8sClient.Delete(ctx, chain)
+				_ = k8sClient.Delete(ctx, chain)
 			}
 			mission := &aiv1alpha1.Mission{}
 			if err := k8sClient.Get(ctx, missionNN, mission); err == nil {
-				k8sClient.Delete(ctx, mission)
+				_ = k8sClient.Delete(ctx, mission)
 			}
 		})
 

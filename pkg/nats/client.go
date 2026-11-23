@@ -412,7 +412,7 @@ func (c *JetStreamClient) PollMessage(subject string, timeout time.Duration, opt
 	if err != nil {
 		return nil, err
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	msg, err := sub.NextMsg(timeout)
 	if err != nil {
