@@ -177,3 +177,24 @@ func TestWithWorkspaceEphemeral(t *testing.T) {
 		t.Errorf("pvc mode volume = %+v", spec.Volumes[0])
 	}
 }
+
+func TestScaleDownStabilizationSeconds(t *testing.T) {
+	k := &aiv1alpha1.Knight{}
+	if got := ScaleDownStabilizationSeconds(k); got != 600 {
+		t.Fatalf("default = %d, want 600", got)
+	}
+	k.Spec.Lifecycle = &aiv1alpha1.KnightLifecycle{}
+	if got := ScaleDownStabilizationSeconds(k); got != 600 {
+		t.Fatalf("unset = %d, want 600", got)
+	}
+	v := int32(120)
+	k.Spec.Lifecycle.ScaleDownStabilizationSeconds = &v
+	if got := ScaleDownStabilizationSeconds(k); got != 120 {
+		t.Fatalf("set = %d, want 120", got)
+	}
+	zero := int32(0)
+	k.Spec.Lifecycle.ScaleDownStabilizationSeconds = &zero
+	if got := ScaleDownStabilizationSeconds(k); got != 0 {
+		t.Fatalf("zero = %d, want 0", got)
+	}
+}

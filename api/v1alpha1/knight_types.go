@@ -129,7 +129,7 @@ type KnightSpec struct {
 
 	// maxReplicas is the upper bound for autoscaling (KEDA maxReplicaCount).
 	// A value above 1 makes the operator render a KEDA ScaledObject that
-	// scales the knight on its consumer's pending tasks. concurrency stays
+	// scales the knight on its consumer's pending and in-flight (ack-pending) tasks. concurrency stays
 	// the number of tasks per pod. Requires KEDA; without it the knight runs
 	// spec.replicas pods and reports Autoscaled=False.
 	// +kubebuilder:validation:Minimum=1
@@ -285,6 +285,18 @@ type KnightLifecycle struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	IdleTimeoutSeconds int32 `json:"idleTimeoutSeconds,omitempty"`
+
+	// scaleDownStabilizationSeconds is the HPA scale-down stabilization
+	// window: the autoscaler only scales in to the highest replica count
+	// recommended during this many seconds, so a brief dip in load does not
+	// remove a pod that is still running tasks. It becomes the ScaledObject's
+	// advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.
+	// stabilizationWindowSeconds. Defaults to 600; 0 disables stabilization.
+	// Only used when the knight is autoscaled.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=3600
+	// +optional
+	ScaleDownStabilizationSeconds *int32 `json:"scaleDownStabilizationSeconds,omitempty"`
 }
 
 // GitHubConfig configures GitHub credentials for knights.
