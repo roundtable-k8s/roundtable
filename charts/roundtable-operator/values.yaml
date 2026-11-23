@@ -136,6 +136,12 @@ dashboard:
 #     nats:
 #       subjects: ["fleet-a.tasks.security.>"]
 #     taskTimeout: 300
+#     # Mount a refreshing GitHub token file (GITHUB_TOKEN_FILE) instead of
+#     # a frozen env token. Overrides the knight's RoundTable spec.github.
+#     github:
+#       tokenSecretRef:
+#         name: roundtable-github-token
+#         key: token
 knights: {}
 
 # Built-in planner knight — ships with the operator for meta-missions
@@ -156,3 +162,13 @@ planner:
   # arsenals:
   #   - name: personal
   #     repo: https://github.com/<you>/<your-skills>.git
+  # GitHub token Secret mounted read-only at
+  # /var/run/secrets/roundtable/github/token (GITHUB_TOKEN_FILE). The kubelet
+  # refreshes the file when the Secret rotates, so short-lived GitHub App
+  # installation tokens keep working; the knight image's git credential
+  # helper and gh shim read it on every call. The planner is not part of a
+  # RoundTable, so it does not inherit spec.github from one; set it here.
+  github: {}
+  #   tokenSecretRef:
+  #     name: roundtable-github-token
+  #     key: token

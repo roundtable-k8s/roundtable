@@ -383,6 +383,33 @@ spec:
                   - name
                   type: object
                 type: array
+              github:
+                description: |-
+                  github configures GitHub credentials for the knight. When
+                  github.tokenSecretRef is set it overrides the RoundTable's
+                  spec.github.tokenSecretRef.
+                properties:
+                  tokenSecretRef:
+                    description: |-
+                      tokenSecretRef names a Secret holding a GitHub token (for example a
+                      GitHub App installation token that an external controller refreshes).
+                      The operator mounts it read-only into the knight at
+                      /var/run/secrets/roundtable/github/token and sets
+                      GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env
+                      var, the kubelet refreshes the file in place when the Secret changes.
+                    properties:
+                      key:
+                        default: token
+                        description: key within the Secret that holds the token.
+                        type: string
+                      name:
+                        description: name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
               image:
                 description: |-
                   image is the container image for the knight runtime.

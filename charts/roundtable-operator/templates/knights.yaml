@@ -38,6 +38,10 @@ spec:
   {{- if $spec.taskTimeout }}
   taskTimeout: {{ $spec.taskTimeout }}
   {{- end }}
+  {{- if $spec.github }}
+  github:
+    {{- toYaml $spec.github | nindent 4 }}
+  {{- end }}
   {{- if $spec.envFrom }}
   envFrom:
     {{- toYaml $spec.envFrom | nindent 4 }}

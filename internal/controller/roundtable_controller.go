@@ -543,6 +543,11 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 		spec.Runtime = wp.Runtime
 	}
 
+	// Inherit the table's GitHub token Secret unless the template sets one
+	if (spec.GitHub == nil || spec.GitHub.TokenSecretRef == nil) && rt.Spec.GitHub != nil {
+		spec.GitHub = rt.Spec.GitHub.DeepCopy()
+	}
+
 	// Set domain to warm-pool if not specified in template
 	if spec.Domain == "" {
 		spec.Domain = "warm-pool"

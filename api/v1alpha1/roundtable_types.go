@@ -50,6 +50,12 @@ type RoundTableSpec struct {
 	// +optional
 	Secrets []corev1.LocalObjectReference `json:"secrets,omitempty"`
 
+	// github configures GitHub credentials inherited by the table's knights
+	// (including mission and warm-pool knights). A Knight's own
+	// spec.github.tokenSecretRef takes precedence.
+	// +optional
+	GitHub *GitHubConfig `json:"github,omitempty"`
+
 	// vault configures the shared Obsidian vault for all knights in this table.
 	// +optional
 	Vault *KnightVault `json:"vault,omitempty"`

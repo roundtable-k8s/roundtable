@@ -267,6 +267,86 @@ func (b *PodBuilder) WithSharedWorkspace(ctx context.Context) *PodBuilder {
 	return b
 }
 
+const (
+	// GitHubTokenDir is where the GitHub token Secret is mounted in the knight.
+	GitHubTokenDir = "/var/run/secrets/roundtable/github"
+	// GitHubTokenFile is the token file inside GitHubTokenDir, exported to the
+	// knight as GITHUB_TOKEN_FILE.
+	GitHubTokenFile = GitHubTokenDir + "/token"
+	// defaultGitHubTokenKey is the Secret key used when tokenSecretRef.key is empty.
+	defaultGitHubTokenKey = "token"
+	// legacyTableLabel is the older knight-to-table label (still read by
+	// WithSharedWorkspace and the planner prompt).
+	legacyTableLabel = "ai.roundtable.io/table"
+)
+
+// ResolveGitHubTokenSecretRef returns the GitHub token Secret for a knight:
+// the knight's own spec.github.tokenSecretRef, else the one on its RoundTable
+// (found via the ai.roundtable.io/round-table label, then the legacy
+// ai.roundtable.io/table label). Returns nil when neither is set. The key is
+// defaulted to "token".
+func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *aiv1alpha1.GitHubTokenSecretRef {
+	ref := githubTokenRef(k.Spec.GitHub)
+	if ref == nil && r != nil {
+		for _, label := range []string{aiv1alpha1.LabelRoundTable, legacyTableLabel} {
+			tableName := k.Labels[label]
+			if tableName == "" {
+				continue
+			}
+			rt := &aiv1alpha1.RoundTable{}
+			if err := r.Get(ctx, types.NamespacedName{Name: tableName, Namespace: k.Namespace}, rt); err != nil {
+				continue
+			}
+			if ref = githubTokenRef(rt.Spec.GitHub); ref != nil {
+				break
+			}
+		}
+	}
+	if ref == nil {
+		return nil
+	}
+	out := ref.DeepCopy()
+	if out.Key == "" {
+		out.Key = defaultGitHubTokenKey
+	}
+	return out
+}
+
+func githubTokenRef(g *aiv1alpha1.GitHubConfig) *aiv1alpha1.GitHubTokenSecretRef {
+	if g == nil || g.TokenSecretRef == nil || g.TokenSecretRef.Name == "" {
+		return nil
+	}
+	return g.TokenSecretRef
+}
+
+// WithGitHubToken mounts the knight's GitHub token Secret (see
+// ResolveGitHubTokenSecretRef) read-only at GitHubTokenDir and sets
+// GITHUB_TOKEN_FILE. The whole directory is mounted (no subPath) so the
+// kubelet refreshes the file in place when the Secret is rotated; the token is
+// never put in the environment.
+func (b *PodBuilder) WithGitHubToken(ctx context.Context) *PodBuilder {
+	ref := ResolveGitHubTokenSecretRef(ctx, b.reader, b.knight)
+	if ref == nil {
+		return b
+	}
+	b.volumes = append(b.volumes, corev1.Volume{
+		Name: "github-token",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: ref.Name,
+				Items:      []corev1.KeyToPath{{Key: ref.Key, Path: "token"}},
+			},
+		},
+	})
+	b.mounts = append(b.mounts, corev1.VolumeMount{
+		Name:      "github-token",
+		MountPath: GitHubTokenDir,
+		ReadOnly:  true,
+	})
+	b.env = append(b.env, corev1.EnvVar{Name: "GITHUB_TOKEN_FILE", Value: GitHubTokenFile})
+	return b
+}
+
 // WithArsenal adds emptyDir volumes for git-sync and skills.
 func (b *PodBuilder) WithArsenal() *PodBuilder {
 	b.volumes = append(b.volumes,
