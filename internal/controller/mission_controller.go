@@ -847,7 +847,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 
 		// Step 2: Delete NATS consumers (best effort)
 		log.Info("Deleting NATS consumers")
-		if err := r.deleteNATSConsumers(ctx, mission); err != nil {
+		if err := r.deleteNATSConsumers(mission); err != nil {
 			log.Error(err, "Failed to delete NATS consumers (best effort, continuing)")
 			// Continue even if this fails - consumers will be deleted when stream is deleted
 		}
@@ -857,7 +857,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			log.Info("Deleting NATS streams",
 				"tasksStream", mission.Status.NATSTasksStream,
 				"resultsStream", mission.Status.NATSResultsStream)
-			if err := r.deleteNATSStreams(ctx, mission); err != nil {
+			if err := r.deleteNATSStreams(mission); err != nil {
 				log.Error(err, "Failed to delete NATS streams, retrying with backoff")
 				return ctrl.Result{RequeueAfter: RequeueModerate}, nil
 			}
@@ -1143,6 +1143,8 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 }
 
 // suspendMissionChains suspends all mission-owned chains to prevent further cost accumulation.
+//
+//nolint:unparam // error return kept so failures can propagate without a caller change
 func (r *MissionReconciler) suspendMissionChains(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
@@ -1439,7 +1441,9 @@ func (r *MissionReconciler) deleteEphemeralKnights(ctx context.Context, mission 
 }
 
 // deleteNATSConsumers deletes all NATS consumers for this mission's streams (best effort).
-func (r *MissionReconciler) deleteNATSConsumers(ctx context.Context, mission *aiv1alpha1.Mission) error {
+//
+//nolint:unparam // error return kept so failures can propagate without a caller change
+func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) error {
 	client, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
@@ -1470,7 +1474,7 @@ func (r *MissionReconciler) deleteNATSConsumers(ctx context.Context, mission *ai
 }
 
 // deleteNATSStreams deletes the mission's task and result streams.
-func (r *MissionReconciler) deleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mission) error {
+func (r *MissionReconciler) deleteNATSStreams(mission *aiv1alpha1.Mission) error {
 	client, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client

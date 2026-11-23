@@ -51,7 +51,7 @@ func TestBuildEphemeralKnightSubscribesToExactSubject(t *testing.T) {
 	mission, mk, rt := ephemeralFixtures()
 	a := &KnightAssembler{}
 
-	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	knight, err := a.buildEphemeralKnight(mission, mk, rt)
 	if err != nil {
 		t.Fatalf("buildEphemeralKnight: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestBuildEphemeralKnightInjectsRoundTableAndMissionSecrets(t *testing.T) {
 	mission.Spec.Secrets = []corev1.LocalObjectReference{{Name: "mission-extra"}}
 	a := &KnightAssembler{}
 
-	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	knight, err := a.buildEphemeralKnight(mission, mk, rt)
 	if err != nil {
 		t.Fatalf("buildEphemeralKnight: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBuildEphemeralKnightDedupesSecrets(t *testing.T) {
 	mission.Spec.Secrets = []corev1.LocalObjectReference{{Name: "roundtable-secret"}}
 	a := &KnightAssembler{}
 
-	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	knight, err := a.buildEphemeralKnight(mission, mk, rt)
 	if err != nil {
 		t.Fatalf("buildEphemeralKnight: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
 	}
 	a := &KnightAssembler{}
 
-	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	knight, err := a.buildEphemeralKnight(mission, mk, rt)
 	if err != nil {
 		t.Fatalf("buildEphemeralKnight: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
 	rt.Spec.KnightTemplates["base"] = tmpl
 	a := &KnightAssembler{}
 
-	knight, err := a.buildEphemeralKnight(context.Background(), mission, mk, rt)
+	knight, err := a.buildEphemeralKnight(mission, mk, rt)
 	if err != nil {
 		t.Fatalf("buildEphemeralKnight: %v", err)
 	}

@@ -35,7 +35,7 @@ import (
 // var so EVERY process — kubectl exec shells, the agent, and any subprocess —
 // resolves the knight's tools, not just the entrypoint's exec'd process tree.
 // Missing dirs are ignored, so the list covers every tool source at once.
-func knightToolPATH(name string) string {
+func knightToolPATH() string {
 	return strings.Join([]string{
 		"/home/node/.nix-profile/bin",
 		"/data/nix-env/bin",
@@ -677,7 +677,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		{Name: "TZ", Value: "America/Chicago"},
 		// PATH at the container level so exec shells and all subprocesses see
 		// the knight's nix/mise tools (not just the entrypoint's process tree).
-		{Name: "PATH", Value: knightToolPATH(b.knight.Name)},
+		{Name: "PATH", Value: knightToolPATH()},
 	}
 
 	// Browser capability

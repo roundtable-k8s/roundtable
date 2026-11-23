@@ -63,7 +63,7 @@ func stubPodSpecBuilder(_ context.Context, knight *aiv1alpha1.Knight) appsv1.Dep
 }
 
 // newTestKnight creates a minimal Knight CR for testing.
-func newTestKnight(name, namespace string) *aiv1alpha1.Knight {
+func newTestKnight(name string) *aiv1alpha1.Knight {
 	return &aiv1alpha1.Knight{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "ai.roundtable.io/v1alpha1",
@@ -71,7 +71,7 @@ func newTestKnight(name, namespace string) *aiv1alpha1.Knight {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "ai",
 			UID:       types.UID("test-uid-1234"),
 		},
 		Spec: aiv1alpha1.KnightSpec{
@@ -104,7 +104,7 @@ func TestDeploymentBackend_Reconcile_CreatesDeployment(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 
 	err := b.Reconcile(ctx, knight)
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestDeploymentBackend_Reconcile_UpdatesOnSpecChange(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 
 	// First reconcile — creates
 	require.NoError(t, b.Reconcile(ctx, knight))
@@ -162,7 +162,7 @@ func TestDeploymentBackend_Reconcile_SkipsWhenHashUnchanged(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 
 	require.NoError(t, b.Reconcile(ctx, knight))
 
@@ -181,7 +181,7 @@ func TestDeploymentBackend_Reconcile_SkipsWhenHashUnchanged(t *testing.T) {
 func TestDeploymentBackend_Cleanup_DeletesDeployment(t *testing.T) {
 	ctx := context.Background()
 	s := newTestScheme(t)
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 
 	// Pre-create a deployment
 	deploy := &appsv1.Deployment{
@@ -215,7 +215,7 @@ func TestDeploymentBackend_Cleanup_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Cleanup(ctx, knight)
 	assert.NoError(t, err, "cleanup of non-existent deployment should not error")
 }
@@ -241,7 +241,7 @@ func TestDeploymentBackend_IsReady_TrueWhenAvailable(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(deploy).WithStatusSubresource(deploy).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.True(t, ready)
@@ -253,7 +253,7 @@ func TestDeploymentBackend_IsReady_FalseWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.False(t, ready)
@@ -280,7 +280,7 @@ func TestDeploymentBackend_IsReady_FalseWhenZeroReplicas(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(deploy).WithStatusSubresource(deploy).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.False(t, ready)
@@ -306,7 +306,7 @@ func TestDeploymentBackend_Suspend_ScalesToZero(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(deploy).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 	err := b.Suspend(ctx, knight)
 	require.NoError(t, err)
 
@@ -321,7 +321,7 @@ func TestDeploymentBackend_Suspend_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Suspend(ctx, knight)
 	assert.NoError(t, err)
 }
@@ -346,7 +346,7 @@ func TestDeploymentBackend_Resume_ScalesToOne(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(deploy).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("percival", "ai")
+	knight := newTestKnight("percival")
 	err := b.Resume(ctx, knight)
 	require.NoError(t, err)
 
@@ -361,7 +361,7 @@ func TestDeploymentBackend_Resume_ErrorsWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Resume(ctx, knight)
 	assert.Error(t, err, "resume should error when deployment not found")
 	assert.Contains(t, err.Error(), "not found")

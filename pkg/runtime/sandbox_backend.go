@@ -202,6 +202,8 @@ func (b *SandboxBackend) Resume(ctx context.Context, knight *aiv1alpha1.Knight) 
 }
 
 // buildVolumeClaimTemplates constructs PVC templates for the Sandbox from Knight workspace config.
+//
+//nolint:unparam // intentionally nil until Sandbox-native storage is supported
 func (b *SandboxBackend) buildVolumeClaimTemplates(
 	knight *aiv1alpha1.Knight,
 ) []sandboxv1alpha1.PersistentVolumeClaimTemplate {

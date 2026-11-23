@@ -76,7 +76,7 @@ func TestSandboxBackend_Reconcile_CreatesSandbox(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 
 	err := b.Reconcile(ctx, knight)
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestSandboxBackend_Cleanup_DeletesSandbox(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Cleanup(ctx, knight)
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestSandboxBackend_Cleanup_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Cleanup(ctx, knight)
 	assert.NoError(t, err)
 }
@@ -154,7 +154,7 @@ func TestSandboxBackend_IsReady_TrueWithReadyCondition(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).WithStatusSubresource(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.True(t, ready)
@@ -166,7 +166,7 @@ func TestSandboxBackend_IsReady_FalseWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.False(t, ready)
@@ -192,7 +192,7 @@ func TestSandboxBackend_IsReady_FallbackToReplicas(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).WithStatusSubresource(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	ready, err := b.IsReady(ctx, knight)
 	require.NoError(t, err)
 	assert.True(t, ready)
@@ -215,7 +215,7 @@ func TestSandboxBackend_Suspend_ScalesToZero(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Suspend(ctx, knight)
 	require.NoError(t, err)
 
@@ -230,7 +230,7 @@ func TestSandboxBackend_Suspend_NotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Suspend(ctx, knight)
 	assert.NoError(t, err)
 }
@@ -252,7 +252,7 @@ func TestSandboxBackend_Resume_ScalesToOne(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sandbox).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	err := b.Resume(ctx, knight)
 	require.NoError(t, err)
 
@@ -267,7 +267,7 @@ func TestSandboxBackend_Resume_ErrorsWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("ghost", "ai")
+	knight := newTestKnight("ghost")
 	err := b.Resume(ctx, knight)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
@@ -278,7 +278,7 @@ func TestSandboxBackend_BuildVolumeClaimTemplates_NilWhenExistingClaim(t *testin
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	knight.Spec.Workspace = &aiv1alpha1.KnightWorkspace{
 		ExistingClaim: "my-pvc",
 	}
@@ -292,7 +292,7 @@ func TestSandboxBackend_BuildVolumeClaimTemplates_NilWhenNoWorkspace(t *testing.
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
 
-	knight := newTestKnight("gawain", "ai")
+	knight := newTestKnight("gawain")
 	knight.Spec.Workspace = nil
 
 	templates := b.buildVolumeClaimTemplates(knight)

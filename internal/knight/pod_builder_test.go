@@ -159,7 +159,7 @@ var _ = Describe("PodBuilder", func() {
 		})
 
 		It("has the tools image profile on the container PATH", func() {
-			Expect(strings.Split(knightToolPATH("test-knight"), ":")).To(ContainElement("/nix/profile/bin"))
+			Expect(strings.Split(knightToolPATH(), ":")).To(ContainElement("/nix/profile/bin"))
 		})
 	})
 

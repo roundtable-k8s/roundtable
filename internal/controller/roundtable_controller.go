@@ -132,7 +132,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// 3. NATS Stream Management
 	if rt.Spec.NATS.CreateStreams {
-		if err := r.ensureStreams(ctx, rt); err != nil {
+		if err := r.ensureStreams(rt); err != nil {
 			log.Error(err, "Failed to ensure NATS streams")
 			meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionNATSReady,
@@ -315,7 +315,7 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 }
 
 // ensureStreams creates or verifies JetStream streams for this RoundTable.
-func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1.RoundTable) error {
+func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 	// Get shared NATS client
 	client, err := r.natsClient()
 	if err != nil {

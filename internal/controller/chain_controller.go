@@ -486,7 +486,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			// The step timeout runs from knight pickup, not from publish, so
 			// time spent queued behind a busy knight doesn't eat the budget.
 			spec := specMap[ss.Name]
-			r.detectPickup(ctx, nc, chain, ss, specMap[ss.Name])
+			r.detectPickup(ctx, nc, ss, specMap[ss.Name])
 			if ss.StartedAt != nil && spec != nil {
 				now := metav1.Now()
 				if ss.PickedUpAt != nil {
@@ -658,7 +658,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Task:      taskStr,
 		}
 
-		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, step.KnightRef, payload)
+		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -855,7 +855,7 @@ func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alph
 
 // publishTask publishes a task to NATS JetStream.
 // It returns the tasks-stream sequence of the published message.
-func (r *ChainReconciler) publishTask(ctx context.Context, nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
+func (r *ChainReconciler) publishTask(nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
 	client, err := r.natsClient()
 	if err != nil {
 		return 0, err
@@ -884,7 +884,7 @@ func maxQueueWait(chain *aiv1alpha1.Chain) time.Duration {
 // runtime change is needed. A step without a recorded sequence (published by
 // an older operator) falls back to the legacy behaviour: the clock starts at
 // publish time.
-func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
+func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
 	if ss.PickedUpAt != nil || ss.StartedAt == nil {
 		return
 	}

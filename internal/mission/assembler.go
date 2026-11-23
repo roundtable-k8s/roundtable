@@ -166,7 +166,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 			}
 
 			// No warm knight available — cold start
-			knight, err := a.buildEphemeralKnight(ctx, mission, mk, resolvedRT)
+			knight, err := a.buildEphemeralKnight(mission, mk, resolvedRT)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to build ephemeral knight %q: %w", mk.Name, err)
 			}
@@ -335,7 +335,7 @@ func (a *KnightAssembler) claimWarmKnight(
 
 		// Create the mission knight under its prefixed name so chain steps
 		// (which reference "<mission>-<knight>") resolve to a real CR.
-		missionKnight, err := a.buildEphemeralKnight(ctx, mission, mk, rt)
+		missionKnight, err := a.buildEphemeralKnight(mission, mk, rt)
 		if err != nil {
 			return false, fmt.Errorf("failed to build mission knight for warm claim: %w", err)
 		}
@@ -461,7 +461,6 @@ func appendSecretEnvFrom(spec *aiv1alpha1.KnightSpec, secretRef corev1.LocalObje
 
 // buildEphemeralKnight creates a Knight CR for an ephemeral mission knight.
 func (a *KnightAssembler) buildEphemeralKnight(
-	ctx context.Context,
 	mission *aiv1alpha1.Mission,
 	mk aiv1alpha1.MissionKnight,
 	rt *aiv1alpha1.RoundTable,
