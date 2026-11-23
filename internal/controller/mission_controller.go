@@ -36,7 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/internal/mission"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 	"github.com/roundtable-k8s/roundtable/internal/status"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -54,8 +54,8 @@ type MissionReconciler struct {
 
 	NATS      *natspkg.Provider
 	Notify    *notify.Notifier
-	Planner   *mission.Planner
-	Assembler *mission.KnightAssembler
+	Planner   *missionpkg.Planner
+	Assembler *missionpkg.KnightAssembler
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -949,7 +949,7 @@ func (r *MissionReconciler) updateKnightStatuses(ctx context.Context, mission *a
 func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return err
 	}
@@ -1003,7 +1003,7 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 			}
 		}
 		taskSubject := natspkg.TaskSubject(briefingPrefix, knight.Spec.Domain, mk.Name)
-		if err := client.PublishJSON(taskSubject, taskPayload); err != nil {
+		if err := natsCli.PublishJSON(taskSubject, taskPayload); err != nil {
 			log.Error(err, "Failed to publish briefing to knight", "knight", mk.Name, "subject", taskSubject)
 			continue
 		}
@@ -1026,8 +1026,8 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	log := logf.FromContext(ctx)
 
-	client, err := r.natsClient()
-	if err != nil || !client.IsConnected() {
+	natsCli, err := r.natsClient()
+	if err != nil || !natsCli.IsConnected() {
 		log.Info("NATS not available, skipping KV results storage")
 		return fmt.Errorf("NATS client not available: %w", err)
 	}
@@ -1132,7 +1132,7 @@ func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1a
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
 
-	if err := client.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
+	if err := natsCli.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
 		return fmt.Errorf("failed to store results in NATS KV: %w", err)
 	}
 
@@ -1444,7 +1444,7 @@ func (r *MissionReconciler) deleteEphemeralKnights(ctx context.Context, mission 
 //
 //nolint:unparam // error return kept so failures can propagate without a caller change
 func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) error {
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
 	}
@@ -1461,12 +1461,12 @@ func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) err
 
 		// Delete from tasks stream (best effort)
 		if tasksStream != "" {
-			_ = client.DeleteConsumer(tasksStream, consumerName)
+			_ = natsCli.DeleteConsumer(tasksStream, consumerName)
 		}
 
 		// Delete from results stream (best effort)
 		if resultsStream != "" {
-			_ = client.DeleteConsumer(resultsStream, consumerName)
+			_ = natsCli.DeleteConsumer(resultsStream, consumerName)
 		}
 	}
 
@@ -1475,21 +1475,21 @@ func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) err
 
 // deleteNATSStreams deletes the mission's task and result streams.
 func (r *MissionReconciler) deleteNATSStreams(mission *aiv1alpha1.Mission) error {
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
 	}
 
 	// Delete tasks stream
 	if mission.Status.NATSTasksStream != "" {
-		if err := client.DeleteStream(mission.Status.NATSTasksStream); err != nil {
+		if err := natsCli.DeleteStream(mission.Status.NATSTasksStream); err != nil {
 			return fmt.Errorf("failed to delete tasks stream: %w", err)
 		}
 	}
 
 	// Delete results stream
 	if mission.Status.NATSResultsStream != "" {
-		if err := client.DeleteStream(mission.Status.NATSResultsStream); err != nil {
+		if err := natsCli.DeleteStream(mission.Status.NATSResultsStream); err != nil {
 			return fmt.Errorf("failed to delete results stream: %w", err)
 		}
 	}

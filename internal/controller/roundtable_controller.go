@@ -317,7 +317,7 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 // ensureStreams creates or verifies JetStream streams for this RoundTable.
 func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 	// Get shared NATS client
-	client, err := r.natsClient()
+	natsCli, err := r.natsClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -339,7 +339,7 @@ func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := client.CreateStream(tasksStreamConfig); err != nil {
+	if err := natsCli.CreateStream(tasksStreamConfig); err != nil {
 		return fmt.Errorf("tasks stream: %w", err)
 	}
 
@@ -351,7 +351,7 @@ func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := client.CreateStream(resultsStreamConfig); err != nil {
+	if err := natsCli.CreateStream(resultsStreamConfig); err != nil {
 		return fmt.Errorf("results stream: %w", err)
 	}
 
