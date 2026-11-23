@@ -28,7 +28,8 @@ EOV
 "$HELM" template rt "$chart" -n roundtable -f "$tmp/values.yaml" \
   --show-only templates/pr-pipeline.yaml > "$tmp/rendered.yaml"
 
-strip() { grep -v -e '^#' -e '^---$' "$1" || true; }
+# Trailing blank lines are dropped: Helm versions differ in how many they emit.
+strip() { { grep -v -e '^#' -e '^---$' "$1" || true; } | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'; }
 strip "$tmp/rendered.yaml" |
   grep -v -e '^  labels:$' -e '^    helm.sh/chart:' -e '^    app.kubernetes.io/' > "$tmp/chart.yaml"
 strip "$example" > "$tmp/example.yaml"
