@@ -7,6 +7,10 @@ model alias is applied through `when`: one implement step per coder × alias
 (single PR, same runId as the fix loop), one forEach step per coder (split into
 sub-issues) and one fix loop per coder. Exactly one of each set runs.
 
+Lead steps (plan, review, merge, escalate) set no model unless prPipeline.leadModel
+is set: the aliases are single-valued per RoundTable and only valid for the coders'
+runtime, so a lead on another runtime (e.g. pi-knight) uses its own default (#244).
+
 $o / $c emit the Chain's own Go-template delimiters, which the operator renders
 at dispatch time (Helm must not).
 */ -}}
@@ -15,6 +19,7 @@ at dispatch time (Helm must not).
 {{- $o := "{{" }}
 {{- $c := "}}" }}
 {{- $lead := .lead }}
+{{- $leadModel := .leadModel | default "" }}
 {{- $coders := .coders }}
 {{- $models := .implementModels }}
 {{- $impl := list }}
@@ -50,7 +55,9 @@ spec:
     - name: plan
       knightRef:
         name: {{ $lead }}
-      model: deep
+{{- if $leadModel }}
+      model: {{ $leadModel }}
+{{- end }}
       timeoutSeconds: 1800
       task: |
         Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
@@ -115,7 +122,9 @@ spec:
     - name: review
       knightRef:
         name: {{ $lead }}
-      model: review
+{{- if $leadModel }}
+      model: {{ $leadModel }}
+{{- end }}
       dependsOn: [{{ join ", " $impl }}]
       when: '{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
       timeoutSeconds: 1800
@@ -163,7 +172,9 @@ spec:
           - name: review
             knightRef:
               name: {{ $lead }}
-            model: review
+{{- if $leadModel }}
+            model: {{ $leadModel }}
+{{- end }}
             timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ $o }} .Input {{ $c }}:
@@ -181,7 +192,9 @@ spec:
     - name: merge
       knightRef:
         name: {{ $lead }}
-      model: fast
+{{- if $leadModel }}
+      model: {{ $leadModel }}
+{{- end }}
       dependsOn: [{{ join ", " $loops }}]
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Converged")'
       timeoutSeconds: 3600
@@ -202,7 +215,9 @@ spec:
     - name: escalate
       knightRef:
         name: {{ $lead }}
-      model: fast
+{{- if $leadModel }}
+      model: {{ $leadModel }}
+{{- end }}
       dependsOn: [{{ join ", " $loops }}]
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Exhausted") || !{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
       timeoutSeconds: 600

@@ -247,7 +247,8 @@ planner:
 # issue by setting spec.input to {"repo": "<owner>/<repo>", "issue": <n>} and
 # annotating ai.roundtable.io/run. See docs/pr-pipeline.md.
 # Every knight below must exist in the release namespace, and the RoundTable
-# must define the model aliases deep, fast and review (spec.modelAliases).
+# must define the model aliases deep and fast (spec.modelAliases), resolvable on
+# the coders' runtime. Lead steps use no alias (see leadModel).
 prPipeline:
   enabled: false
   name: pr-pipeline
@@ -255,6 +256,10 @@ prPipeline:
     name: roundtable-dev
   # Plans, reviews, merges and escalates.
   lead: rt-lead
+  # Optional model for the lead's steps (plan, review, merge, escalate): an alias
+  # or a model valid for the lead's runtime. Empty = the lead knight's default
+  # model, which works for any runtime (e.g. a pi-knight lead).
+  leadModel: ""
   # Coder knights the planner may pick from. One implement step per coder ×
   # implementModels entry, one split (forEach) step and one fix loop per coder
   # are rendered; `when` runs only the planner's pick.

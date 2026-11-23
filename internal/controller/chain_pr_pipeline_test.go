@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 // loadPRPipelineExample reads examples/chain-pr-pipeline.yaml strictly, so a
@@ -89,8 +90,8 @@ func TestPRPipelineExampleIsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range chain.Spec.Steps {
-		if s.Loop == nil && s.Model == "" {
-			t.Errorf("step %q has no model alias", s.Name)
+		if s.Loop == nil && s.Model == "" && s.KnightRef.Name != "rt-lead" {
+			t.Errorf("coder step %q has no model alias", s.Name)
 		}
 		if s.Loop != nil {
 			if s.Loop.MaxIterations != 3 || s.Loop.OnExhausted != aiv1alpha1.ChainLoopExhaustedContinue {
@@ -242,5 +243,50 @@ func TestPRPipelineExampleTemplates(t *testing.T) {
 	}
 	if esc := render("escalate"); strings.Contains(esc, "fix rounds. Last review") || strings.Contains(esc, "No implementation ran") {
 		t.Fatalf("escalate task mentions a loop or plan that didn't apply:\n%s", esc)
+	}
+}
+
+// TestPRPipelineExampleMixedRuntimes checks the chain on a RoundTable whose lead
+// runs pi-knight and whose coders run claude-knight (#244): lead steps set no
+// model, so none resolves to a Claude alias on the pi lead (the controller's
+// InvalidStepModel), and every coder step's alias resolves on claude-knight.
+func TestPRPipelineExampleMixedRuntimes(t *testing.T) {
+	chain := loadPRPipelineExample(t)
+	aliases := map[string]string{"deep": "opus", "fast": "haiku"}
+	const piImage, claudeImage = "ghcr.io/roundtable-k8s/pi-knight:latest", "ghcr.io/roundtable-k8s/claude-knight:latest"
+
+	check := func(name, knight, model string) {
+		image, lead := claudeImage, knight == "rt-lead"
+		if lead {
+			image = piImage
+			if model != "" {
+				t.Errorf("lead step %q sets model %q, want none (lead default)", name, model)
+			}
+		} else if model == "" {
+			t.Errorf("coder step %q has no model alias", name)
+		}
+		if _, err := knightpkg.ResolveModel(model, aliases, image); err != nil {
+			t.Errorf("step %q (knight %s): %v", name, knight, err)
+		}
+	}
+	leadSteps := 0
+	for _, s := range chain.Spec.Steps {
+		if s.Loop == nil {
+			check(s.Name, s.KnightRef.Name, s.Model)
+		} else {
+			for _, b := range s.Loop.Steps {
+				check(b.Name, b.KnightRef.Name, b.Model)
+			}
+		}
+		if s.KnightRef.Name == "rt-lead" {
+			leadSteps++
+		}
+	}
+	if leadSteps == 0 {
+		t.Fatal("no lead steps found")
+	}
+	// The pre-fix behaviour: a lead alias resolving to a Claude model is rejected on pi.
+	if _, err := knightpkg.ResolveModel("deep", aliases, piImage); err == nil {
+		t.Fatal("expected a Claude alias to be rejected on a pi-knight lead")
 	}
 }
