@@ -167,6 +167,13 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   start), after which KEDA owns `replicas`. A knight KEDA scaled to zero
   reports phase `Suspended`, `Available=False` reason `ScaledToZero`.
   `spec.suspended: true` deletes the ScaledObject before scaling to 0.
+- **Knight image requirement.** Lag-based scaling (`maxReplicas > 1`) and
+  `suspendPolicy: auto` need knight images built from main at or after
+  pull-when-free (claude-knight#13, pi-knight#61). Those runtimes fetch tasks
+  only into free slots and ack on completion, so consumer lag is the real
+  backlog. Older images ack on receipt and queue tasks in memory: lag stays 0
+  while work piles up, so KEDA never scales out, and `auto` can scale a pod
+  holding queued tasks to zero and lose them.
 - **KEDA is optional.** `--enable-keda=auto` probes discovery for
   `keda.sh/v1alpha1 ScaledObject` once at startup (like the sandbox backend).
   Without it the knight runs `spec.replicas` pods and reports
