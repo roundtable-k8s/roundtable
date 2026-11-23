@@ -53,7 +53,15 @@ func buildQueueDir() string {
 // are built into an OCI image instead (see reconcileToolsImage).
 func (r *KnightReconciler) reconcileNixBuild(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
 	if knightpkg.ToolsImageEnabled() {
-		return 0, r.reconcileToolsImage(ctx, knight)
+		if err := r.reconcileToolsImage(ctx, knight); err != nil {
+			return 0, err
+		}
+		// Come back periodically while an image is published, to notice if
+		// the registry has lost it (nothing else would wake us up).
+		if knight.Status.ToolsImage != "" {
+			return toolsImageVerifyInterval, nil
+		}
+		return 0, nil
 	}
 	queue := buildQueueDir()
 	if _, err := os.Stat(queue); err != nil {

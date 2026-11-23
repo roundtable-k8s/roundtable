@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -80,6 +81,15 @@ type KnightReconciler struct {
 	// would exit, see #186) and knights with runtime: sandbox are parked with
 	// RuntimeAvailable=False instead of being reconciled.
 	SandboxEnabled bool
+
+	// ToolsImageMissing reports whether the registry positively says the
+	// tools image manifest at the given URL does not exist. Nil uses an HTTP
+	// HEAD probe; tests replace it.
+	ToolsImageMissing func(ctx context.Context, manifestURL string) bool
+
+	// toolsImageVerifiedAt records, per image reference, when the operator
+	// last confirmed the image was in the registry (throttles the probe).
+	toolsImageVerifiedAt sync.Map
 }
 
 // runtimeSandbox is the spec.runtime value for the agent-sandbox backend.
