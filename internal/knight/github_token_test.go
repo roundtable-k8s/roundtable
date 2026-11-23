@@ -171,3 +171,49 @@ var _ = Describe("WithGitHubToken", func() {
 		Expect(ResolveGitHubTokenSecretRef(context.Background(), reader, knight)).To(BeNil())
 	})
 })
+
+var _ = Describe("WithTableSecrets", func() {
+	build := func(labels map[string]string, envFrom []corev1.EnvFromSource) corev1.PodSpec {
+		scheme := runtime.NewScheme()
+		Expect(aiv1alpha1.AddToScheme(scheme)).To(Succeed())
+		rt := &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: "fleet", Namespace: "default"},
+			Spec: aiv1alpha1.RoundTableSpec{
+				NATS:    aiv1alpha1.RoundTableNATS{SubjectPrefix: "t", TasksStream: "t", ResultsStream: "r"},
+				Secrets: []corev1.LocalObjectReference{{Name: "api-key"}, {Name: "shared"}},
+			},
+		}
+		reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rt).Build()
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: "k", Namespace: "default", Labels: labels},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain: "testing", Skills: []string{"testing"}, EnvFrom: envFrom,
+				NATS: aiv1alpha1.KnightNATS{Subjects: []string{"t.tasks.testing.>"}},
+			},
+		}
+		return NewPodBuilder(k, "img").WithReader(reader).WithTableSecrets(context.Background()).Build(context.Background())
+	}
+	names := func(spec corev1.PodSpec) []string {
+		var out []string
+		for _, e := range spec.Containers[0].EnvFrom {
+			out = append(out, e.SecretRef.Name)
+		}
+		return out
+	}
+
+	It("adds table secrets for knights with the round-table label, without duplicates", func() {
+		own := []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "shared"}}}}
+		spec := build(map[string]string{aiv1alpha1.LabelRoundTable: "fleet"}, own)
+		Expect(names(spec)).To(Equal([]string{"shared", "api-key"}))
+	})
+
+	It("supports the legacy table label", func() {
+		spec := build(map[string]string{"ai.roundtable.io/table": "fleet"}, nil)
+		Expect(names(spec)).To(Equal([]string{"api-key", "shared"}))
+	})
+
+	It("adds nothing for knights without a table label", func() {
+		spec := build(map[string]string{}, nil)
+		Expect(spec.Containers[0].EnvFrom).To(BeEmpty())
+	})
+})

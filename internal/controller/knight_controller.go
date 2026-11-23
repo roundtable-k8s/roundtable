@@ -664,6 +664,7 @@ func (r *KnightReconciler) BuildPodSpec(ctx context.Context, k *aiv1alpha1.Knigh
 		WithVault().
 		WithSharedWorkspace(ctx).
 		WithGitHubToken(ctx).
+		WithTableSecrets(ctx).
 		WithArsenal().
 		WithSkillFilter().
 		WithGitSync()
