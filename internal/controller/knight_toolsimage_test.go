@@ -306,7 +306,8 @@ var _ = Describe("Knight tools image", func() {
 			url := srv.URL + "/v2/knight-tools/manifests/abc"
 
 			Expect(probeToolsImageMissing(ctx, url)).To(BeFalse())
-			Expect(gotMethod).To(Equal(http.MethodHead))
+			// GET, so a registry with pull-based retention sees the check as a pull.
+			Expect(gotMethod).To(Equal(http.MethodGet))
 			Expect(gotAccept).To(ContainSubstring("application/vnd.oci.image.manifest.v1+json"))
 
 			status = http.StatusNotFound
