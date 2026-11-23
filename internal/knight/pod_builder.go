@@ -58,6 +58,7 @@ type PodBuilder struct {
 	mounts     []corev1.VolumeMount
 	sidecars   []corev1.Container
 	env        []corev1.EnvVar
+	envFrom    []corev1.EnvFromSource
 	defaultImg string
 	security   PodSecurity
 	reader     client.Reader
@@ -318,19 +319,11 @@ const (
 // defaulted to "token".
 func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *aiv1alpha1.GitHubTokenSecretRef {
 	ref := githubTokenRef(k.Spec.GitHub)
-	if ref == nil && r != nil {
-		for _, label := range []string{aiv1alpha1.LabelRoundTable, legacyTableLabel} {
-			tableName := k.Labels[label]
-			if tableName == "" {
-				continue
-			}
-			rt := &aiv1alpha1.RoundTable{}
-			if err := r.Get(ctx, types.NamespacedName{Name: tableName, Namespace: k.Namespace}, rt); err != nil {
-				continue
-			}
-			if ref = githubTokenRef(rt.Spec.GitHub); ref != nil {
-				break
-			}
+	if ref == nil {
+		if rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
+			return githubTokenRef(rt.Spec.GitHub) != nil
+		}); rt != nil {
+			ref = githubTokenRef(rt.Spec.GitHub)
 		}
 	}
 	if ref == nil {
@@ -341,6 +334,57 @@ func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1al
 		out.Key = defaultGitHubTokenKey
 	}
 	return out
+}
+
+// findTable looks up the RoundTable a knight belongs to via the
+// ai.roundtable.io/round-table label, then the legacy ai.roundtable.io/table
+// label, returning the first one for which accept is true (nil if none).
+func findTable(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight, accept func(*aiv1alpha1.RoundTable) bool) *aiv1alpha1.RoundTable {
+	if r == nil {
+		return nil
+	}
+	for _, label := range []string{aiv1alpha1.LabelRoundTable, legacyTableLabel} {
+		tableName := k.Labels[label]
+		if tableName == "" {
+			continue
+		}
+		rt := &aiv1alpha1.RoundTable{}
+		if err := r.Get(ctx, types.NamespacedName{Name: tableName, Namespace: k.Namespace}, rt); err != nil {
+			continue
+		}
+		if accept(rt) {
+			return rt
+		}
+	}
+	return nil
+}
+
+// WithTableSecrets appends the knight's RoundTable spec.secrets (found via
+// findTable) to the container's envFrom, skipping Secrets already referenced
+// by the knight's own envFrom. The Knight object itself is not modified.
+func (b *PodBuilder) WithTableSecrets(ctx context.Context) *PodBuilder {
+	rt := findTable(ctx, b.reader, b.knight, func(rt *aiv1alpha1.RoundTable) bool {
+		return len(rt.Spec.Secrets) > 0
+	})
+	if rt == nil {
+		return b
+	}
+	seen := map[string]bool{}
+	for _, e := range b.knight.Spec.EnvFrom {
+		if e.SecretRef != nil {
+			seen[e.SecretRef.Name] = true
+		}
+	}
+	for _, ref := range rt.Spec.Secrets {
+		if ref.Name == "" || seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		b.envFrom = append(b.envFrom, corev1.EnvFromSource{
+			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: ref},
+		})
+	}
+	return b
 }
 
 func githubTokenRef(g *aiv1alpha1.GitHubConfig) *aiv1alpha1.GitHubTokenSecretRef {
@@ -699,7 +743,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		Name:    "app",
 		Image:   image,
 		Env:     env,
-		EnvFrom: b.knight.Spec.EnvFrom,
+		EnvFrom: append(append([]corev1.EnvFromSource{}, b.knight.Spec.EnvFrom...), b.envFrom...),
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceMemory: resource.MustParse("256Mi"),

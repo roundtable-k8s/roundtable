@@ -225,6 +225,16 @@ spec:
       - "Roundtable/"
 ```
 
+#### Which RoundTable fields apply to which knights
+
+| Field | Standing knights (labelled `ai.roundtable.io/round-table`, or legacy `ai.roundtable.io/table`) | Mission knights |
+|-------|------|------|
+| `secrets` | Added to the pod's `envFrom` (deduplicated against the knight's own `envFrom`) | Injected by the mission assembler, followed by `mission.spec.secrets` |
+| `github` | Inherited unless the knight sets its own `spec.github` | Inherited unless the template sets its own |
+| `sharedWorkspace` | Mounted (legacy `table` label only) | Not applied |
+
+Standing knights without a table label get none of these.
+
 ### Chain
 
 ```yaml
