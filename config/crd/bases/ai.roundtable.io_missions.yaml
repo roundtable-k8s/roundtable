@@ -222,9 +222,131 @@ spec:
                             - from
                             type: object
                           knightRef:
-                            description: knightRef is the name of the Knight to execute
-                              this step.
+                            description: |-
+                              knightRef is the name of the Knight to execute this step. Required
+                              unless the step is a loop (whose body steps name their own knights).
                             type: string
+                          loop:
+                            description: |-
+                              loop makes this step a bounded loop: its body steps run in order, round
+                              after round, until the until expression holds or maxIterations rounds
+                              have run. A loop step has no knightRef, task, forEach, model, retry or
+                              outputPath of its own; its output is the output of the last step that
+                              ran in it.
+                            properties:
+                              from:
+                                description: |-
+                                  from names the step (listed in dependsOn) whose result the loop starts
+                                  from, e.g. the first review. It seeds last, so until is checked before
+                                  the first round (a review that already passes runs zero rounds) and the
+                                  first body step sees it as {{ .Loop.Last.Output }}.
+                                type: string
+                              maxIterations:
+                                default: 3
+                                description: maxIterations bounds the number of rounds.
+                                format: int32
+                                maximum: 20
+                                minimum: 1
+                                type: integer
+                              onExhausted:
+                                description: |-
+                                  onExhausted decides the step's phase when maxIterations rounds ran
+                                  without until holding: fail (default) fails the step; continue
+                                  succeeds it with outcome Exhausted so dependents can branch on
+                                  steps.<name>.outcome. Either way the outcome is Exhausted.
+                                enum:
+                                - fail
+                                - continue
+                                type: string
+                              steps:
+                                description: |-
+                                  steps is the loop body, run in order each round. Body tasks are
+                                  published with the chain's runId, so a knight that already worked on
+                                  this run (e.g. the coder of an earlier implement step) resumes the same
+                                  agent session. Body task templates get, besides .Steps and .Input,
+                                  .Loop.Iteration (1-based), .Loop.MaxIterations, .Loop.Last (the
+                                  previous step in the flow: {Step, Phase, Output, Error}) and
+                                  .Loop.Steps.<body>.Output/.Error (latest round each ran in).
+                                items:
+                                  description: ChainLoopStep is one step of a loop
+                                    body.
+                                  properties:
+                                    knightRef:
+                                      description: knightRef is the Knight that runs
+                                        this body step.
+                                      minLength: 1
+                                      type: string
+                                    model:
+                                      description: |-
+                                        model overrides the knight's model for this body step (same rules as
+                                        ChainStep.model, including RoundTable model aliases).
+                                      maxLength: 256
+                                      pattern: ^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$
+                                      type: string
+                                    name:
+                                      description: name identifies the body step within
+                                        its loop.
+                                      maxLength: 63
+                                      minLength: 1
+                                      pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                                      type: string
+                                    retry:
+                                      description: |-
+                                        retry configures retries of a failed body task (per round), overriding
+                                        the chain-level retryPolicy.
+                                      properties:
+                                        backoffSeconds:
+                                          default: 30
+                                          description: backoffSeconds is the delay
+                                            between retries in seconds.
+                                          format: int32
+                                          minimum: 1
+                                          type: integer
+                                        maxAttempts:
+                                          default: 0
+                                          description: maxAttempts is the maximum
+                                            number of retry attempts for this step.
+                                          format: int32
+                                          maximum: 10
+                                          minimum: 0
+                                          type: integer
+                                      type: object
+                                    task:
+                                      description: task is the task template (see
+                                        ChainLoop.steps for the extra .Loop data).
+                                      minLength: 1
+                                      type: string
+                                    timeout:
+                                      default: 120
+                                      description: timeout is the per-task timeout
+                                        in seconds, counted from knight pickup.
+                                      format: int32
+                                      maximum: 3600
+                                      minimum: 10
+                                      type: integer
+                                  required:
+                                  - knightRef
+                                  - name
+                                  - task
+                                  type: object
+                                maxItems: 5
+                                minItems: 1
+                                type: array
+                              until:
+                                description: |-
+                                  until is a CEL expression; the loop ends with outcome Converged as soon
+                                  as it is true. Variables: everything when gets (input, steps), plus
+                                  last ({step, phase, output, error}), iteration (the round just
+                                  finished, 0 on entry), maxIterations and body, a map from body step
+                                  name to {phase, output, error, iteration}. Example:
+                                    last.output.contains("Verdict: ship it")
+                                maxLength: 4096
+                                minLength: 1
+                                type: string
+                            required:
+                            - steps
+                            - until
+                            type: object
                           maxParallel:
                             description: |-
                               maxParallel caps how many items of a forEach step are in flight at once.
@@ -286,6 +408,7 @@ spec:
                             description: |-
                               task is the task prompt or instruction to send to the knight.
                               Supports Go template syntax with access to prior step outputs: {{ .Steps.step_name.Output }}
+                              Required unless the step is a loop.
                             type: string
                           timeout:
                             default: 120
@@ -295,10 +418,26 @@ spec:
                             maximum: 3600
                             minimum: 10
                             type: integer
+                          when:
+                            description: |-
+                              when is a CEL expression that gates the step. It is evaluated once the
+                              step's dependencies are done; false skips the step (phase Skipped,
+                              reason WhenFalse) without dispatching anything, and a skipped step
+                              satisfies its dependents' dependsOn. An evaluation error fails the step.
+                              Variables: input (string) and steps, a map from step name to
+                              {phase, output, error, reason, outcome, iterations}; outputs are the
+                              full outputs (read back from the chain-outputs KV bucket), not the
+                              truncated status copies. Besides standard CEL (contains, startsWith,
+                              matches, size, exists, ...) the extended string library and
+                              json(string) (parses a JSON document, tolerating a fenced ```json
+                              block) are available. Examples:
+                                steps.recon.output.contains("22/tcp open")
+                                steps.review.phase == "Succeeded" && !steps.review.output.contains("Verdict: ship it")
+                                steps.fixloop.outcome == "Exhausted"
+                            maxLength: 4096
+                            type: string
                         required:
-                        - knightRef
                         - name
-                        - task
                         type: object
                       minItems: 1
                       type: array

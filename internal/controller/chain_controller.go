@@ -208,6 +208,22 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	// Validate when / loop.until expressions and loop settings
+	if reason, err := validateConditionsAndLoops(chain); err != nil {
+		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
+			Type:               aiv1alpha1.ConditionChainValid,
+			Status:             metav1.ConditionFalse,
+			Reason:             reason,
+			Message:            err.Error(),
+			ObservedGeneration: chain.Generation,
+		})
+		chain.Status.ObservedGeneration = chain.Generation
+		if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
+			log.Error(statusErr, "Failed to update status during validation error")
+		}
+		return ctrl.Result{}, err
+	}
+
 	// Validate templates parse correctly
 	if err := r.validateTemplates(chain); err != nil {
 		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
@@ -321,13 +337,30 @@ func (r *ChainReconciler) updateStatus(ctx context.Context, chain *aiv1alpha1.Ch
 
 // validateKnightRefs checks that all knightRef values resolve to Knight CRs.
 func (r *ChainReconciler) validateKnightRefs(ctx context.Context, chain *aiv1alpha1.Chain) error {
-	for _, step := range chain.Spec.Steps {
+	check := func(stepName, knightRef string) error {
+		if knightRef == "" {
+			return fmt.Errorf("step %q has no knightRef", stepName)
+		}
 		knight := &aiv1alpha1.Knight{}
 		if err := r.Get(ctx, types.NamespacedName{
-			Name:      step.KnightRef,
+			Name:      knightRef,
 			Namespace: chain.Namespace,
 		}, knight); err != nil {
-			return fmt.Errorf("step %q references non-existent knight %q: %w", step.Name, step.KnightRef, err)
+			return fmt.Errorf("step %q references non-existent knight %q: %w", stepName, knightRef, err)
+		}
+		return nil
+	}
+	for _, step := range chain.Spec.Steps {
+		if step.Loop == nil {
+			if err := check(step.Name, step.KnightRef); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, b := range step.Loop.Steps {
+			if err := check(step.Name+"/"+b.Name, b.KnightRef); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -367,35 +400,53 @@ func (r *ChainReconciler) owningMissionInactive(ctx context.Context, chain *aiv1
 // validateTemplates pre-parses all step task templates to catch syntax errors early.
 // Also warns about common mistakes like using lowercase field names.
 func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
-	for _, step := range chain.Spec.Steps {
-		if !strings.Contains(step.Task, "{{") {
-			continue
+	// Dry-run execute with mock data to catch field access errors
+	mockSteps := make(map[string]map[string]string)
+	for _, s := range chain.Spec.Steps {
+		mockSteps[s.Name] = stepTemplateData(aiv1alpha1.ChainStepStatus{})
+	}
+	check := func(name, task string, extra map[string]any) error {
+		if !strings.Contains(task, "{{") {
+			return nil
 		}
-		tmpl, err := template.New("validate").Parse(step.Task)
+		tmpl, err := template.New("validate").Parse(task)
 		if err != nil {
-			return fmt.Errorf("step %q has invalid template: %w", step.Name, err)
-		}
-		// Dry-run execute with mock data to catch field access errors
-		mockSteps := make(map[string]map[string]string)
-		for _, s := range chain.Spec.Steps {
-			mockSteps[s.Name] = map[string]string{
-				"Output": "",
-				"Error":  "",
-			}
+			return fmt.Errorf("step %q has invalid template: %w", name, err)
 		}
 		mockData := map[string]any{
 			"Steps": mockSteps,
 			"Input": "",
 		}
-		if step.ForEach != nil {
-			mockData["Item"] = map[string]any{}
-			mockData["item"] = map[string]any{}
-			mockData["ItemIndex"] = 0
-			mockData["ItemJSON"] = "{}"
-		}
+		maps.Copy(mockData, extra)
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, mockData); err != nil {
-			return fmt.Errorf("step %q template execution error (hint: use .Steps.stepname.Output not steps.stepname.output): %w", step.Name, err)
+			return fmt.Errorf("step %q template execution error (hint: use .Steps.stepname.Output not steps.stepname.output): %w", name, err)
+		}
+		return nil
+	}
+	for _, step := range chain.Spec.Steps {
+		var extra map[string]any
+		if step.ForEach != nil {
+			extra = map[string]any{"Item": map[string]any{}, "item": map[string]any{}, "ItemIndex": 0, "ItemJSON": "{}"}
+		}
+		if err := check(step.Name, step.Task, extra); err != nil {
+			return err
+		}
+		if step.Loop == nil {
+			continue
+		}
+		body := make(map[string]map[string]string, len(step.Loop.Steps))
+		for _, b := range step.Loop.Steps {
+			body[b.Name] = map[string]string{"Output": "", "Error": "", "Phase": ""}
+		}
+		loopData := map[string]any{"Loop": map[string]any{
+			"Iteration": 1, "MaxIterations": 1, "Steps": body,
+			"Last": map[string]string{"Step": "", "Phase": "", "Output": "", "Error": ""},
+		}}
+		for _, b := range step.Loop.Steps {
+			if err := check(step.Name+"/"+b.Name, b.Task, loopData); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -504,17 +555,24 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		specMap[chain.Spec.Steps[i].Name] = &chain.Spec.Steps[i]
 	}
 
+	// A chain that already has a hard failure starts no further loop rounds.
+	failing := hasHardFailure(chain, specMap)
+
 	// Check for completed running steps (poll NATS results)
 	for i := range chain.Status.StepStatuses {
 		ss := &chain.Status.StepStatuses[i]
 		if ss.Phase == aiv1alpha1.ChainStepPhaseRunning {
-			// Skip polling if no taskID — step was set to Running by a previous
-			// operator version or before the status was persisted. Requeue will
-			// handle it once the taskID is saved.
 			if spec := specMap[ss.Name]; spec != nil && spec.ForEach != nil {
 				r.reconcileFanOut(ctx, nc, chain, spec, ss)
 				continue
 			}
+			if spec := specMap[ss.Name]; spec != nil && spec.Loop != nil {
+				r.reconcileLoop(ctx, nc, chain, spec, ss, failing)
+				continue
+			}
+			// Skip polling if no taskID — step was set to Running by a previous
+			// operator version or before the status was persisted. Requeue will
+			// handle it once the taskID is saved.
 			if ss.TaskID == "" {
 				log.Info("Step running but no taskID — skipping poll, will requeue", "step", ss.Name)
 				continue
@@ -557,7 +615,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				resultErr := result.GetError()
 				resultOutput := result.GetOutput()
 				if resultErr == "" && isEmptyStepOutput(resultOutput) {
-					resultErr = "knight returned empty output"
+					resultErr = errEmptyOutput
 					r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepEmptyOutput",
 						"Step %s returned empty output, treating as failure", ss.Name)
 				}
@@ -593,9 +651,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 					// Truncate CRD status output to avoid etcd bloat (4000 chars allows
 					// meaningful summaries for template resolution while staying well
 					// under etcd's 1.5MB object limit — 10 steps × 4KB = 40KB max)
-					if len(ss.Output) > 4000 {
-						ss.Output = ss.Output[:4000] + "\n\n... [truncated — full output in NATS KV bucket 'chain-outputs', key '" + chain.Name + "." + ss.Name + "']"
-					}
+					ss.Output = truncateStatusOutput(ss.Output, chain.Name+"."+ss.Name)
 
 					// Best-effort artifact write if outputPath is set
 					if spec != nil && spec.OutputPath != "" {
@@ -650,8 +706,9 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				break
 			}
 			switch depStatus.Phase {
-			case aiv1alpha1.ChainStepPhaseSucceeded:
-				// OK
+			case aiv1alpha1.ChainStepPhaseSucceeded, aiv1alpha1.ChainStepPhaseSkipped:
+				// OK — a step skipped by its when expression doesn't block
+				// its dependents (a chain-failure skip ends the run anyway).
 			case aiv1alpha1.ChainStepPhaseFailed:
 				if depSpec != nil && depSpec.ContinueOnFailure {
 					// OK
@@ -663,6 +720,34 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			}
 		}
 		if !ready {
+			continue
+		}
+
+		// when: skip the step without dispatching anything. A resumed loop or
+		// fan-out (retry-failed) already passed its gate.
+		if step.When != "" && ss.Loop == nil && ss.FanOut == nil {
+			run, err := r.evaluateWhen(ctx, chain, step)
+			if err != nil {
+				log.Info("Step when expression failed", "step", step.Name, "error", err.Error())
+				ss.Phase = aiv1alpha1.ChainStepPhaseFailed
+				ss.Error = fmt.Sprintf("when: %v", err)
+				now := metav1.Now()
+				ss.CompletedAt = &now
+				r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepWhenError", "Step %s: when: %v", step.Name, err)
+				continue
+			}
+			if !run {
+				log.Info("Skipping step, when is false", "step", step.Name)
+				skipStep(ss, stepReasonWhenFalse)
+				r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepSkipped", "Step %s skipped: when is false", step.Name)
+				continue
+			}
+		}
+
+		// loop: run the body round after round.
+		if step.Loop != nil {
+			r.startLoop(chain, step, ss)
+			r.reconcileLoop(ctx, nc, chain, step, ss, failing)
 			continue
 		}
 
@@ -762,7 +847,12 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		for i := range chain.Status.StepStatuses {
 			ss := &chain.Status.StepStatuses[i]
 			if ss.Phase == aiv1alpha1.ChainStepPhasePending {
-				ss.Phase = aiv1alpha1.ChainStepPhaseSkipped
+				skipStep(ss, stepReasonChainFailed)
+			}
+			// A running loop starts no further rounds; it stops as soon as
+			// its in-flight body task (if any) is done.
+			if ss.Phase == aiv1alpha1.ChainStepPhaseRunning && ss.Loop != nil && !loopInFlight(ss.Loop) {
+				skipStep(ss, stepReasonChainFailed)
 			}
 			// A running fan-out dispatches no further items once the chain
 			// is failing; it joins as soon as its in-flight items finish.
@@ -803,6 +893,9 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				succeededSteps++
 				if ss.FanOut != nil && ss.FanOut.Failed > 0 {
 					softFailures++ // failurePolicy=continue with failed items
+				}
+				if ss.Loop != nil && ss.Loop.Outcome == aiv1alpha1.ChainLoopExhausted {
+					softFailures++ // onExhausted=continue
 				}
 			case aiv1alpha1.ChainStepPhaseFailed:
 				spec := specMap[ss.Name]
@@ -857,7 +950,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// stale KV entries are masking a problem — make it visible.
 		executedSteps := 0
 		for _, ss := range chain.Status.StepStatuses {
-			if ss.TaskID != "" || (ss.FanOut != nil && len(ss.FanOut.Items) > 0) {
+			if ss.TaskID != "" || (ss.FanOut != nil && len(ss.FanOut.Items) > 0) || (ss.Loop != nil && ss.Loop.Iteration > 0) {
 				executedSteps++
 			}
 		}
@@ -893,10 +986,7 @@ func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr st
 	// Build template data
 	steps := make(map[string]map[string]string)
 	for _, ss := range chain.Status.StepStatuses {
-		steps[ss.Name] = map[string]string{
-			"Output": ss.Output,
-			"Error":  ss.Error,
-		}
+		steps[ss.Name] = stepTemplateData(ss)
 	}
 
 	data := map[string]any{
@@ -1041,6 +1131,10 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 	// retry-failed only: resume the current run from its failed/skipped steps.
 	chain.Status.LastRetryTrigger = retryVal
 	retried := 0
+	specs := make(map[string]*aiv1alpha1.ChainStep, len(chain.Spec.Steps))
+	for i := range chain.Spec.Steps {
+		specs[chain.Spec.Steps[i].Name] = &chain.Spec.Steps[i]
+	}
 	if chain.Status.Phase == aiv1alpha1.ChainPhaseFailed || chain.Status.Phase == aiv1alpha1.ChainPhasePartiallySucceeded {
 		for i := range chain.Status.StepStatuses {
 			ss := &chain.Status.StepStatuses[i]
@@ -1053,7 +1147,10 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 			if fanOut != nil {
 				resetFailedItems(fanOut)
 			}
-			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending, FanOut: fanOut}
+			// A loop resumes in the round it stopped in (a failed body step
+			// re-runs) or, when exhausted, gets another maxIterations rounds.
+			loop := resetLoopForRetry(ss.Loop, specs[ss.Name])
+			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending, FanOut: fanOut, Loop: loop}
 			retried++
 		}
 	}
@@ -1485,3 +1582,17 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // defaultOutputKnight is the knight that receives chain output when spec.outputKnight is unset.
 const defaultOutputKnight = "gawain"
+
+// hasHardFailure reports whether a step already failed without
+// continueOnFailure, i.e. the run is going to fail.
+func hasHardFailure(chain *aiv1alpha1.Chain, specMap map[string]*aiv1alpha1.ChainStep) bool {
+	for _, ss := range chain.Status.StepStatuses {
+		if ss.Phase != aiv1alpha1.ChainStepPhaseFailed {
+			continue
+		}
+		if spec := specMap[ss.Name]; spec == nil || !spec.ContinueOnFailure {
+			return true
+		}
+	}
+	return false
+}

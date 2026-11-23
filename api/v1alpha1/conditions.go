@@ -197,6 +197,12 @@ const (
 	// ReasonInvalidForEach indicates a step has an invalid forEach / maxParallel / failurePolicy configuration.
 	ReasonInvalidForEach = "InvalidForEach"
 
+	// ReasonInvalidCondition indicates a step's when or loop.until CEL expression does not compile.
+	ReasonInvalidCondition = "InvalidCondition"
+
+	// ReasonInvalidLoop indicates a step has an invalid loop configuration.
+	ReasonInvalidLoop = "InvalidLoop"
+
 	// ReasonChainSucceeded indicates all chain steps completed successfully.
 	ReasonChainSucceeded = "Succeeded"
 
