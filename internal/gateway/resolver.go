@@ -133,7 +133,7 @@ func knightInfo(k *aiv1alpha1.Knight, defaultImage string) KnightInfo {
 		Runtime:    string(knightpkg.AgentRuntimeForImage(knightpkg.EffectiveImage(k, defaultImage))),
 		Phase:      string(k.Status.Phase),
 		Ready:      k.Status.Ready,
-		Suspended:  k.Spec.Suspended,
+		Suspended:  k.Spec.Suspend,
 		RoundTable: table,
 	}
 }

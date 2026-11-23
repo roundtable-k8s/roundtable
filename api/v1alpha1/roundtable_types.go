@@ -86,10 +86,10 @@ type RoundTableSpec struct {
 	// +optional
 	ModelAliases map[string]string `json:"modelAliases,omitempty"`
 
-	// suspended, if true, suspends all knights in this table.
+	// suspend, if true, suspends all knights in this table.
 	// +kubebuilder:default=false
 	// +optional
-	Suspended bool `json:"suspended,omitempty"`
+	Suspend bool `json:"suspend,omitempty"`
 
 	// ephemeral marks this RoundTable as mission-owned. Ephemeral tables are
 	// excluded from fleet-wide aggregation and are garbage collected with their mission.
@@ -97,9 +97,10 @@ type RoundTableSpec struct {
 	// +optional
 	Ephemeral bool `json:"ephemeral,omitempty"`
 
-	// missionRef is set by the mission controller when creating ephemeral tables.
+	// missionRef names the Mission that owns this ephemeral table. It is set
+	// by the mission controller.
 	// +optional
-	MissionRef string `json:"missionRef,omitempty"`
+	MissionRef *corev1.LocalObjectReference `json:"missionRef,omitempty"`
 }
 
 // SharedWorkspaceConfig configures a shared RWX volume for collaborative knight work.
@@ -157,19 +158,22 @@ type RoundTableDefaults struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// taskTimeout is the default task timeout in seconds.
+	// taskTimeoutSeconds is the default task timeout in seconds.
 	// +kubebuilder:default=120
+	// +kubebuilder:validation:Minimum=30
+	// +kubebuilder:validation:Maximum=3600
 	// +optional
-	TaskTimeout int32 `json:"taskTimeout,omitempty"`
+	TaskTimeoutSeconds int32 `json:"taskTimeoutSeconds,omitempty"`
 
 	// concurrency is the default max concurrent tasks per knight.
 	// +kubebuilder:default=2
 	// +optional
 	Concurrency int32 `json:"concurrency,omitempty"`
 
-	// resources defines default compute resource requirements.
+	// resources are the default compute resource requests and limits for
+	// the knights' app container.
 	// +optional
-	Resources *KnightResources `json:"resources,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// arsenal configures the default skill arsenal for knights.
 	// +optional
@@ -316,11 +320,12 @@ type WarmPoolConfig struct {
 	// +kubebuilder:validation:Required
 	Template KnightSpec `json:"template"`
 
-	// maxIdleTime is how long a warm pod can sit idle before being recycled.
-	// Prevents stale state. Format: Go duration (e.g., "30m", "1h").
-	// +kubebuilder:default="1h"
+	// maxIdleTimeSeconds is how long, in seconds, a warm knight can sit
+	// unclaimed before it is recycled, which prevents stale state.
+	// +kubebuilder:default=3600
+	// +kubebuilder:validation:Minimum=60
 	// +optional
-	MaxIdleTime string `json:"maxIdleTime,omitempty"`
+	MaxIdleTimeSeconds int32 `json:"maxIdleTimeSeconds,omitempty"`
 
 	// replaceOnClaim controls whether claimed knights are immediately replaced.
 	// When true (default), the pool is replenished as soon as a knight is claimed.
@@ -348,7 +353,7 @@ type WarmPoolStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=rt,categories=roundtable
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Knights",type=string,JSONPath=`.status.knightsReady`,description="Ready/Total knights"
+// +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.knightsReady`,description="Knights in phase Ready"
 // +kubebuilder:printcolumn:name="Total",type=integer,JSONPath=`.status.knightsTotal`
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.totalTasksCompleted`
 // +kubebuilder:printcolumn:name="Cost",type=string,JSONPath=`.status.totalCost`

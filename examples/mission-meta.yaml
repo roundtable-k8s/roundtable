@@ -8,9 +8,9 @@ spec:
     Research the current state of Kubernetes AI agent orchestration tools,
     compare their approaches, and produce a detailed analysis report.
   successCriteria: "Comprehensive comparison with pros/cons and recommendation"
-  roundTableRef: fleet-a
-  ttl: 7200
-  timeout: 3600
+  roundTableRef: {name: fleet-a}
+  ttlSeconds: 7200
+  timeoutSeconds: 3600
   costBudgetUSD: "15"
 
   # Meta-mission: the planner knight auto-generates chains and ephemeral knights
@@ -18,8 +18,8 @@ spec:
   recruitExisting: true
 
   planner:
-    knightRef: kay
-    timeout: 300
+    knightRef: {name: kay}
+    timeoutSeconds: 300
     maxChains: 3
     maxKnights: 5
     allowSkillGeneration: true

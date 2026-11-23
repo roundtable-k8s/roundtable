@@ -63,7 +63,7 @@ var _ = Describe("PR pipeline example", func() {
 		Expect(err).NotTo(HaveOccurred())
 		chain.Namespace = "default"
 		chain.Name = "pr-pipeline-example"
-		chain.Spec.Suspended = true // validate only; never dispatch
+		chain.Spec.Suspend = true // validate only; never dispatch
 		Expect(k8sClient.Create(ctx, chain)).To(Succeed())
 		got := &aiv1alpha1.Chain{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: chain.Name, Namespace: chain.Namespace}, got)).To(Succeed())

@@ -65,8 +65,8 @@ var _ = Describe("Knight Controller", func() {
 							ResultsStream: "test_results",
 							MaxDeliver:    1,
 						},
-						Concurrency: 2,
-						TaskTimeout: 120,
+						Concurrency:        2,
+						TaskTimeoutSeconds: 120,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,8 +80,8 @@ var _ = Describe("Chain Controller", func() {
 						Subjects: []string{"fleet-a.tasks." + domain + ".>"},
 						Stream:   "fleet_a_tasks",
 					},
-					Concurrency: 2,
-					TaskTimeout: 120,
+					Concurrency:        2,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, knight)).To(Succeed())
@@ -99,11 +100,11 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "a", KnightRef: knightName, Task: "task-a", DependsOn: []string{"c"}},
-						{Name: "b", KnightRef: knightName, Task: "task-b", DependsOn: []string{"a"}},
-						{Name: "c", KnightRef: knightName, Task: "task-c", DependsOn: []string{"b"}},
+						{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-a", DependsOn: []string{"c"}},
+						{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-b", DependsOn: []string{"a"}},
+						{Name: "c", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-c", DependsOn: []string{"b"}},
 					},
 				},
 			}
@@ -116,12 +117,12 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "a", KnightRef: knightName, Task: "task-a"},
-						{Name: "b", KnightRef: knightName, Task: "task-b", DependsOn: []string{"a"}},
-						{Name: "c", KnightRef: knightName, Task: "task-c", DependsOn: []string{"a"}},
-						{Name: "d", KnightRef: knightName, Task: "task-d", DependsOn: []string{"b", "c"}},
+						{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-a"},
+						{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-b", DependsOn: []string{"a"}},
+						{Name: "c", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-c", DependsOn: []string{"a"}},
+						{Name: "d", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-d", DependsOn: []string{"b", "c"}},
 					},
 				},
 			}
@@ -132,9 +133,9 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "a", KnightRef: knightName, Task: "task-a", DependsOn: []string{"nonexistent"}},
+						{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-a", DependsOn: []string{"nonexistent"}},
 					},
 				},
 			}
@@ -149,11 +150,11 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Input:         "initial-data",
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "step1", KnightRef: knightName, Task: "first"},
-						{Name: "step2", KnightRef: knightName, Task: `Analyze: {{ .Input }} and {{ index .Steps "step1" "Output" }}`},
+						{Name: "step1", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "first"},
+						{Name: "step2", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: `Analyze: {{ .Input }} and {{ index .Steps "step1" "Output" }}`},
 					},
 				},
 				Status: aiv1alpha1.ChainStatus{
@@ -174,7 +175,7 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps:         []aiv1alpha1.ChainStep{{Name: "a"}},
 				},
 			}
@@ -213,11 +214,11 @@ var _ = Describe("Chain Controller", func() {
 			chain := &aiv1alpha1.Chain{
 				ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "scan", KnightRef: knightName, Task: "scan the network"},
+						{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "scan the network"},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -248,11 +249,11 @@ var _ = Describe("Chain Controller", func() {
 			chain := &aiv1alpha1.Chain{
 				ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "scan", KnightRef: "nonexistent-knight", Task: "scan"},
+						{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: "nonexistent-knight"}, Task: "scan"},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -271,12 +272,12 @@ var _ = Describe("Chain Controller", func() {
 			chain := &aiv1alpha1.Chain{
 				ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
-					Suspended:     true,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
+					Suspend:       true,
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "scan", KnightRef: knightName, Task: "scan"},
+						{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "scan"},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -295,14 +296,14 @@ var _ = Describe("Chain Controller", func() {
 			chain := &aiv1alpha1.Chain{
 				ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "start", KnightRef: knightName, Task: "begin"},
-						{Name: "branch-a", KnightRef: knightName, Task: "a", DependsOn: []string{"start"}},
-						{Name: "branch-b", KnightRef: knightName2, Task: "b", DependsOn: []string{"start"}},
-						{Name: "merge", KnightRef: knightName, Task: "merge", DependsOn: []string{"branch-a", "branch-b"}},
+						{Name: "start", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "begin"},
+						{Name: "branch-a", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "a", DependsOn: []string{"start"}},
+						{Name: "branch-b", KnightRef: corev1.LocalObjectReference{Name: knightName2}, Task: "b", DependsOn: []string{"start"}},
+						{Name: "merge", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "merge", DependsOn: []string{"branch-a", "branch-b"}},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -341,11 +342,11 @@ var _ = Describe("Chain Controller", func() {
 					Labels:    map[string]string{aiv1alpha1.LabelMission: missionName},
 				},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "scan", KnightRef: "mission-" + missionName + "-ghost", Task: "scan"},
+						{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: "mission-" + missionName + "-ghost"}, Task: "scan"},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 		}
@@ -455,11 +456,11 @@ var _ = Describe("Chain Controller", func() {
 			chain := &aiv1alpha1.Chain{
 				ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "scan", KnightRef: knightName, Task: "scan"},
+						{Name: "scan", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "scan"},
 					},
-					Timeout: 600,
+					TimeoutSeconds: 600,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -494,7 +495,7 @@ var _ = Describe("Chain Controller", func() {
 			}
 			step := &aiv1alpha1.ChainStep{
 				Name:       "synthesize",
-				KnightRef:  knightName,
+				KnightRef:  corev1.LocalObjectReference{Name: knightName},
 				Task:       "synthesize",
 				OutputPath: "/briefings/{{ .Date }}/{{ .Chain }}/{{ .Step }}.md",
 			}
@@ -527,10 +528,10 @@ var _ = Describe("Chain Controller", func() {
 		It("should default outputKnight to gawain", func() {
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 				},
 			}
-			knightName := chain.Spec.OutputKnight
+			knightName := aiv1alpha1.RefName(chain.Spec.OutputKnightRef)
 			if knightName == "" {
 				knightName = "gawain"
 			}
@@ -540,11 +541,11 @@ var _ = Describe("Chain Controller", func() {
 		It("should use specified outputKnight", func() {
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
-					OutputKnight:  "lancelot",
+					RoundTableRef:   aiv1alpha1.LocalRef(roundTableName),
+					OutputKnightRef: aiv1alpha1.LocalRef("lancelot"),
 				},
 			}
-			knightName := chain.Spec.OutputKnight
+			knightName := aiv1alpha1.RefName(chain.Spec.OutputKnightRef)
 			if knightName == "" {
 				knightName = "gawain"
 			}
@@ -557,10 +558,10 @@ var _ = Describe("Chain Controller", func() {
 			r := newReconciler()
 			chain := &aiv1alpha1.Chain{
 				Spec: aiv1alpha1.ChainSpec{
-					RoundTableRef: roundTableName,
+					RoundTableRef: aiv1alpha1.LocalRef(roundTableName),
 					Steps: []aiv1alpha1.ChainStep{
-						{Name: "a", KnightRef: knightName, Task: "task-a"},
-						{Name: "b", KnightRef: knightName, Task: "task-b"},
+						{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-a"},
+						{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "task-b"},
 					},
 				},
 			}

@@ -21,15 +21,15 @@ the PR pipeline described in [pr-pipeline.md](pr-pipeline.md).
 ```yaml
 steps:
   - name: recon
-    knightRef: tristan
+    knightRef: {name: tristan}
     task: "Scan ports 1-1000 of {{ .Input }}"
   - name: ssh_audit
-    knightRef: tristan
+    knightRef: {name: tristan}
     dependsOn: [recon]
     when: 'steps.recon.output.contains("22/tcp open")'
     task: "Audit SSH on {{ .Input }}"
   - name: report
-    knightRef: gawain
+    knightRef: {name: gawain}
     dependsOn: [ssh_audit]
     task: "Report. SSH audit: {{ .Steps.ssh_audit.Phase }} {{ .Steps.ssh_audit.Output }}"
 ```
@@ -60,14 +60,14 @@ steps:
     onExhausted: continue                          # fail (default) | continue
     steps:                                         # 1-5 body steps, run in order
       - name: fix
-        knightRef: rt-operator
+        knightRef: {name: rt-operator}
         model: deep                                # per-body-step model (#219)
-        timeout: 3600
+        timeoutSeconds: 3600
         retry: {maxAttempts: 1, backoffSeconds: 60}
         task: "Address this review: {{ .Loop.Last.Output }}"
       - name: review
-        knightRef: rt-lead
-        timeout: 1800
+        knightRef: {name: rt-lead}
+        timeoutSeconds: 1800
         task: "Re-review after: {{ .Loop.Last.Output }}"
 ```
 
@@ -211,7 +211,7 @@ iteration >= 2 && last.output.contains("only nits")
   one PR-pipeline Chain per item. Per-item loops are a follow-up.
 - Body steps run strictly in sequence. They have no `dependsOn`, `when`,
   `outputPath` or `continueOnFailure` of their own.
-- A loop is still bounded by the chain's `timeout`. Size it for
+- A loop is still bounded by the chain's `timeoutSeconds`. Size it for
   `maxIterations` × the body's step timeouts.
 - Round Table is not a durable-execution engine: no unbounded loops,
   arbitrary jumps, or loops spanning several DAG nodes.

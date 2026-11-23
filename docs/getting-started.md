@@ -43,7 +43,7 @@ spec:
   defaults:
     model: claude-sonnet-4-20250514
     concurrency: 2
-    taskTimeout: 120
+    taskTimeoutSeconds: 120
 ```
 
 ```bash
@@ -100,14 +100,14 @@ metadata:
   name: hello-chain
   namespace: roundtable
 spec:
-  timeout: 600
+  timeoutSeconds: 600
   input: "Tell me about Kubernetes operators"
   steps:
     - name: research
-      knightRef: my-first-knight
+      knightRef: {name: my-first-knight}
       prompt: "Research this topic: {{ .Input }}"
     - name: summarize
-      knightRef: my-first-knight
+      knightRef: {name: my-first-knight}
       prompt: "Summarize this in 3 bullet points: {{ .Steps.research.Output }}"
 ```
 
@@ -144,7 +144,7 @@ A step's `timeout` starts when the knight picks the task up, not when it is publ
 time spent queued behind a busy knight does not count. Pickup is detected from the knight's
 durable `<knight>-consumer` on the tasks stream: knights ack each task as they receive it, so
 the consumer's ack floor passing the task's stream sequence (`status.stepStatuses[].taskSeq`)
-sets `pickedUpAt`. `spec.maxQueueWait` (default 1800s) fails a step whose task is never
+sets `pickedUpAt`. `spec.maxQueueWaitSeconds` (default 1800s) fails a step whose task is never
 picked up. The overall chain `timeout` still counts from the start of the run.
 
 ## What's Next?

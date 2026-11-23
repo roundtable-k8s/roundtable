@@ -17,13 +17,13 @@ spec:
   defaults:
     model: claude-sonnet-4-20250514
     concurrency: 2
-    taskTimeout: 120
+    taskTimeoutSeconds: 120
 
   # Optional: pre-warm knights for instant mission startup
   warmPool:
     size: 2
     runtime: deployment
-    maxIdleTime: 1h
+    maxIdleTimeSeconds: 3600
     replaceOnClaim: true
     template:
       domain: warm-pool

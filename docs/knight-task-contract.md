@@ -87,14 +87,14 @@ spec:
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain
 spec:
-  roundTableRef: fleet-a
+  roundTableRef: {name: fleet-a}
   steps:
     - name: design
-      knightRef: rt-operator   # claude-knight
+      knightRef: {name: rt-operator}   # claude-knight
       model: deep              # → opus
       task: "…"
     - name: review
-      knightRef: reviewer      # pi-knight
+      knightRef: {name: reviewer}      # pi-knight
       model: review            # → openrouter/z-ai/glm-5.3
       dependsOn: [design]
       task: "…"

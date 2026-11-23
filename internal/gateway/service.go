@@ -151,7 +151,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	if err != nil {
 		return nil, err
 	}
-	if t.Knight.Spec.Suspended {
+	if t.Knight.Spec.Suspend {
 		return nil, fmt.Errorf("%w: knight %s/%s is suspended", ErrUnavailable, ns, knightName)
 	}
 	model, err := knightpkg.ResolveModel(req.Model, t.ModelAliases,

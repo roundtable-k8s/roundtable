@@ -28,7 +28,7 @@ import (
 // to zero when idle.
 const SuspendPolicyAuto = "auto"
 
-// DefaultCooldown is the ScaledObject cooldownPeriod when lifecycle.idleTimeout
+// DefaultCooldown is the ScaledObject cooldownPeriod when lifecycle.idleTimeoutSeconds
 // is unset or invalid (KEDA's own default).
 const DefaultCooldown = 5 * time.Minute
 
@@ -118,13 +118,11 @@ func (s Scaling) CapReplicas(allowed int32) Scaling {
 	return s
 }
 
-// CooldownSeconds returns the ScaledObject cooldownPeriod: lifecycle.idleTimeout
-// when it parses as a positive Go duration, DefaultCooldown otherwise.
+// CooldownSeconds returns the ScaledObject cooldownPeriod:
+// lifecycle.idleTimeoutSeconds when positive, DefaultCooldown otherwise.
 func CooldownSeconds(k *aiv1alpha1.Knight) int64 {
-	if k.Spec.Lifecycle != nil && k.Spec.Lifecycle.IdleTimeout != "" {
-		if d, err := time.ParseDuration(k.Spec.Lifecycle.IdleTimeout); err == nil && d > 0 {
-			return max(int64(d/time.Second), 1)
-		}
+	if k.Spec.Lifecycle != nil && k.Spec.Lifecycle.IdleTimeoutSeconds > 0 {
+		return int64(k.Spec.Lifecycle.IdleTimeoutSeconds)
 	}
 	return int64(DefaultCooldown / time.Second)
 }

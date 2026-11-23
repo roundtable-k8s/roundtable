@@ -39,17 +39,19 @@ metadata:
     {{- include "roundtable-operator.labels" $ | nindent 4 }}
 spec:
   description: "PR pipeline: plan → implement → review → fix loop → merge, or escalate to a human"
-  roundTableRef: {{ .roundTableRef }}
-  timeout: {{ .timeout }}
-  maxQueueWait: {{ .maxQueueWait }}
+  roundTableRef:
+    name: {{ .roundTableRef.name }}
+  timeoutSeconds: {{ .timeoutSeconds }}
+  maxQueueWaitSeconds: {{ .maxQueueWaitSeconds }}
   {{- if .input }}
   input: {{ .input | squote }}
   {{- end }}
   steps:
     - name: plan
-      knightRef: {{ $lead }}
+      knightRef:
+        name: {{ $lead }}
       model: deep
-      timeout: 1800
+      timeoutSeconds: 1800
       task: |
         Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
 
@@ -72,11 +74,12 @@ spec:
 {{- range $models }}
 
     - name: implement_{{ $k }}_{{ . }}
-      knightRef: {{ $coder }}
+      knightRef:
+        name: {{ $coder }}
       model: {{ . }}
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).model == "{{ . }}" && !json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
         Plan: {{ $o }} .Steps.plan.Output {{ $c }}
@@ -88,11 +91,12 @@ spec:
 {{- end }}
 
     - name: split_{{ $k }}
-      knightRef: {{ $coder }}
+      knightRef:
+        name: {{ $coder }}
       model: deep
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       forEach:
         from: steps.plan
         path: .issues
@@ -109,11 +113,12 @@ spec:
 {{- end }}
 
     - name: review
-      knightRef: {{ $lead }}
+      knightRef:
+        name: {{ $lead }}
       model: review
       dependsOn: [{{ join ", " $impl }}]
       when: '{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
-      timeout: 1800
+      timeoutSeconds: 1800
       task: |
         Review the pull request(s) for {{ $o }} .Input {{ $c }}.
         Implementation report:
@@ -139,9 +144,10 @@ spec:
         onExhausted: continue
         steps:
           - name: fix
-            knightRef: {{ $coder }}
+            knightRef:
+              name: {{ $coder }}
             model: deep
-            timeout: 3600
+            timeoutSeconds: 3600
             retry:
               maxAttempts: 1
               backoffSeconds: 60
@@ -155,9 +161,10 @@ spec:
               and lint, push, and reply with a short summary of what changed.
               Do not open new PRs and never merge.
           - name: review
-            knightRef: {{ $lead }}
+            knightRef:
+              name: {{ $lead }}
             model: review
-            timeout: 1800
+            timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ $o }} .Input {{ $c }}:
 
@@ -172,11 +179,12 @@ spec:
 {{- end }}
 
     - name: merge
-      knightRef: {{ $lead }}
+      knightRef:
+        name: {{ $lead }}
       model: fast
       dependsOn: [{{ join ", " $loops }}]
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Converged")'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         The review of {{ $o }} .Input {{ $c }} passed.
         {{- range $loops }}
@@ -192,11 +200,12 @@ spec:
         then a last line "Fix rounds: <n>".
 
     - name: escalate
-      knightRef: {{ $lead }}
+      knightRef:
+        name: {{ $lead }}
       model: fast
       dependsOn: [{{ join ", " $loops }}]
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Exhausted") || !{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
-      timeout: 600
+      timeoutSeconds: 600
       task: |
         Escalate {{ $o }} .Input {{ $c }} to a human.
         {{- range $loops }}

@@ -66,13 +66,13 @@ func validateConditionsAndLoops(chain *aiv1alpha1.Chain) (string, error) {
 		}
 		lp := step.Loop
 		if lp == nil {
-			if step.KnightRef == "" || step.Task == "" {
+			if step.KnightRef.Name == "" || step.Task == "" {
 				return aiv1alpha1.ReasonInvalidLoop, fmt.Errorf("step %q needs knightRef and task (only loop steps may omit them)", step.Name)
 			}
 			continue
 		}
 		var extra []string
-		if step.KnightRef != "" {
+		if step.KnightRef.Name != "" {
 			extra = append(extra, "knightRef")
 		}
 		if step.Task != "" {
@@ -106,7 +106,7 @@ func validateConditionsAndLoops(chain *aiv1alpha1.Chain) (string, error) {
 		}
 		seen := map[string]bool{}
 		for _, b := range lp.Steps {
-			if b.Name == "" || b.KnightRef == "" || b.Task == "" {
+			if b.Name == "" || b.KnightRef.Name == "" || b.Task == "" {
 				return aiv1alpha1.ReasonInvalidLoop, fmt.Errorf("loop step %q: every body step needs name, knightRef and task", step.Name)
 			}
 			if seen[b.Name] {
@@ -481,14 +481,14 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	if bs.PickedUpAt == nil && bs.StartedAt != nil {
 		if bs.TaskSeq == 0 {
 			bs.PickedUpAt = bs.StartedAt
-		} else if r.ackFloorReached(ctx, nc, body.KnightRef, bs.TaskSeq) {
+		} else if r.ackFloorReached(ctx, nc, body.KnightRef.Name, bs.TaskSeq) {
 			now := metav1.Now()
 			bs.PickedUpAt = &now
 		}
 	}
-	timing := &aiv1alpha1.ChainStep{Timeout: body.Timeout}
-	if timing.Timeout <= 0 {
-		timing.Timeout = 120
+	timing := &aiv1alpha1.ChainStep{TimeoutSeconds: body.TimeoutSeconds}
+	if timing.TimeoutSeconds <= 0 {
+		timing.TimeoutSeconds = 120
 	}
 	var errMsg, output string
 	if msg := taskDeadlineError(chain, timing, bs.StartedAt, bs.PickedUpAt); msg != "" {
@@ -527,7 +527,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	bs.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 	bs.Error = ""
 	bs.Output = truncateStatusOutput(output, key)
-	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef, bs.StartedAt, &now)
+	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef.Name, bs.StartedAt, &now)
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "LoopStepCompleted", "Loop step %s: %s completed round %d", spec.Name, bs.Name, bs.Iteration)
 }
 
@@ -578,15 +578,15 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 	}
 
 	knight := &aiv1alpha1.Knight{}
-	if err := r.Get(ctx, types.NamespacedName{Name: body.KnightRef, Namespace: chain.Namespace}, knight); err != nil {
-		log.Error(err, "Failed to get knight", "knightRef", body.KnightRef)
+	if err := r.Get(ctx, types.NamespacedName{Name: body.KnightRef.Name, Namespace: chain.Namespace}, knight); err != nil {
+		log.Error(err, "Failed to get knight", "knightRef", body.KnightRef.Name)
 		return
 	}
 	model, err := knightpkg.ResolveModel(body.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s/%s: %v", spec.Name, body.Name, err)
 		bs.Model = ""
-		fail(fmt.Sprintf("invalid model for knight %q: %v", body.KnightRef, err))
+		fail(fmt.Sprintf("invalid model for knight %q: %v", body.KnightRef.Name, err))
 		return
 	}
 
@@ -601,7 +601,7 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		Task:      taskStr,
 		Model:     model,
 	}
-	seq, err := r.publishTask(nc, knight.Spec.Domain, body.KnightRef, payload)
+	seq, err := r.publishTask(nc, knight.Spec.Domain, body.KnightRef.Name, payload)
 	if err != nil {
 		log.Error(err, "Failed to publish loop body task", "body", body.Name)
 		return
@@ -614,5 +614,5 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 	bs.PickedUpAt = nil
 	bs.CompletedAt = nil
 	bs.Model = model
-	log.Info("Published loop body task", "body", body.Name, "round", ls.Iteration, "taskId", taskID, "knight", body.KnightRef, "model", model)
+	log.Info("Published loop body task", "body", body.Name, "round", ls.Iteration, "taskId", taskID, "knight", body.KnightRef.Name, "model", model)
 }

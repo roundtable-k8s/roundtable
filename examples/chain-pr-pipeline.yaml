@@ -22,15 +22,17 @@ metadata:
   namespace: roundtable
 spec:
   description: "PR pipeline: plan → implement → review → fix loop → merge, or escalate to a human"
-  roundTableRef: roundtable-dev
-  timeout: 86400
-  maxQueueWait: 3600
+  roundTableRef:
+    name: roundtable-dev
+  timeoutSeconds: 86400
+  maxQueueWaitSeconds: 3600
   input: '{"repo": "roundtable-k8s/roundtable", "issue": 225}'
   steps:
     - name: plan
-      knightRef: rt-lead
+      knightRef:
+        name: rt-lead
       model: deep
-      timeout: 1800
+      timeoutSeconds: 1800
       task: |
         Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ .Input }}
 
@@ -49,11 +51,12 @@ spec:
          "issues": [{"number": <n>, "title": "<title>"}], "reason": "<one sentence>"}
 
     - name: implement_rt_operator_deep
-      knightRef: rt-operator
+      knightRef:
+        name: rt-operator
       model: deep
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).model == "deep" && !json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
         Plan: {{ .Steps.plan.Output }}
@@ -64,11 +67,12 @@ spec:
         Never merge. Reply with the PR URL on the first line.
 
     - name: implement_rt_operator_fast
-      knightRef: rt-operator
+      knightRef:
+        name: rt-operator
       model: fast
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).model == "fast" && !json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
         Plan: {{ .Steps.plan.Output }}
@@ -79,11 +83,12 @@ spec:
         Never merge. Reply with the PR URL on the first line.
 
     - name: split_rt_operator
-      knightRef: rt-operator
+      knightRef:
+        name: rt-operator
       model: deep
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       forEach:
         from: steps.plan
         path: .issues
@@ -99,11 +104,12 @@ spec:
         "Closes #{{ .Item.number }}". Never merge. Reply with the PR URL on the first line.
 
     - name: implement_rt_ui_deep
-      knightRef: rt-ui
+      knightRef:
+        name: rt-ui
       model: deep
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).model == "deep" && !json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
         Plan: {{ .Steps.plan.Output }}
@@ -114,11 +120,12 @@ spec:
         Never merge. Reply with the PR URL on the first line.
 
     - name: implement_rt_ui_fast
-      knightRef: rt-ui
+      knightRef:
+        name: rt-ui
       model: fast
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).model == "fast" && !json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
         Plan: {{ .Steps.plan.Output }}
@@ -129,11 +136,12 @@ spec:
         Never merge. Reply with the PR URL on the first line.
 
     - name: split_rt_ui
-      knightRef: rt-ui
+      knightRef:
+        name: rt-ui
       model: deep
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).split'
-      timeout: 3600
+      timeoutSeconds: 3600
       forEach:
         from: steps.plan
         path: .issues
@@ -149,11 +157,12 @@ spec:
         "Closes #{{ .Item.number }}". Never merge. Reply with the PR URL on the first line.
 
     - name: review
-      knightRef: rt-lead
+      knightRef:
+        name: rt-lead
       model: review
       dependsOn: [implement_rt_operator_deep, implement_rt_operator_fast, split_rt_operator, implement_rt_ui_deep, implement_rt_ui_fast, split_rt_ui]
       when: '["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded")'
-      timeout: 1800
+      timeoutSeconds: 1800
       task: |
         Review the pull request(s) for {{ .Input }}.
         Implementation report:
@@ -179,9 +188,10 @@ spec:
         onExhausted: continue
         steps:
           - name: fix
-            knightRef: rt-operator
+            knightRef:
+              name: rt-operator
             model: deep
-            timeout: 3600
+            timeoutSeconds: 3600
             retry:
               maxAttempts: 1
               backoffSeconds: 60
@@ -195,9 +205,10 @@ spec:
               and lint, push, and reply with a short summary of what changed.
               Do not open new PRs and never merge.
           - name: review
-            knightRef: rt-lead
+            knightRef:
+              name: rt-lead
             model: review
-            timeout: 1800
+            timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ .Input }}:
 
@@ -220,9 +231,10 @@ spec:
         onExhausted: continue
         steps:
           - name: fix
-            knightRef: rt-ui
+            knightRef:
+              name: rt-ui
             model: deep
-            timeout: 3600
+            timeoutSeconds: 3600
             retry:
               maxAttempts: 1
               backoffSeconds: 60
@@ -236,9 +248,10 @@ spec:
               and lint, push, and reply with a short summary of what changed.
               Do not open new PRs and never merge.
           - name: review
-            knightRef: rt-lead
+            knightRef:
+              name: rt-lead
             model: review
-            timeout: 1800
+            timeoutSeconds: 1800
             task: |
               The author pushed fixes for {{ .Input }}:
 
@@ -252,11 +265,12 @@ spec:
               "Verdict: ship it" or "Verdict: needs changes".
 
     - name: merge
-      knightRef: rt-lead
+      knightRef:
+        name: rt-lead
       model: fast
       dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
       when: '["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Converged")'
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         The review of {{ .Input }} passed.
         {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Converged" }}Fix rounds: {{ .Iterations }}
@@ -273,11 +287,12 @@ spec:
         then a last line "Fix rounds: <n>".
 
     - name: escalate
-      knightRef: rt-lead
+      knightRef:
+        name: rt-lead
       model: fast
       dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
       when: '["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Exhausted") || !["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded")'
-      timeout: 600
+      timeoutSeconds: 600
       task: |
         Escalate {{ .Input }} to a human.
         {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Exhausted" }}The PR(s) still need changes after {{ .Iterations }} fix rounds. Last review:

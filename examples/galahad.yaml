@@ -48,11 +48,15 @@ spec:
     existingClaim: galahad  # Adopt existing PVC from Helm deployment
 
   resources:
-    memory: "1Gi"
-    cpu: "1"
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
   concurrency: 2
-  taskTimeout: 300
+  taskTimeoutSeconds: 300
 
   envFrom:
     - secretRef:

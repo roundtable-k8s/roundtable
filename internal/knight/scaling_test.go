@@ -21,6 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -86,13 +88,9 @@ func TestCooldownSeconds(t *testing.T) {
 	if got := CooldownSeconds(k); got != 300 {
 		t.Errorf("default cooldown = %d, want 300", got)
 	}
-	k.Spec.Lifecycle.IdleTimeout = "30m"
+	k.Spec.Lifecycle.IdleTimeoutSeconds = 1800
 	if got := CooldownSeconds(k); got != 1800 {
-		t.Errorf("30m cooldown = %d, want 1800", got)
-	}
-	k.Spec.Lifecycle.IdleTimeout = "soon"
-	if got := CooldownSeconds(k); got != 300 {
-		t.Errorf("invalid idleTimeout cooldown = %d, want 300", got)
+		t.Errorf("idleTimeoutSeconds 1800 cooldown = %d, want 1800", got)
 	}
 }
 
@@ -147,7 +145,7 @@ func TestWithWorkspaceEphemeral(t *testing.T) {
 	k := &aiv1alpha1.Knight{
 		ObjectMeta: metav1.ObjectMeta{Name: "galahad"},
 		Spec: aiv1alpha1.KnightSpec{
-			Workspace: &aiv1alpha1.KnightWorkspace{Mode: aiv1alpha1.WorkspaceModeEphemeral, Size: "2Gi"},
+			Workspace: &aiv1alpha1.KnightWorkspace{Mode: aiv1alpha1.WorkspaceModeEphemeral, Size: new(resource.MustParse("2Gi"))},
 		},
 	}
 	spec := NewPodBuilder(k, "img").WithWorkspace().Build(context.Background())

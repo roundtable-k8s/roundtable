@@ -133,7 +133,7 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Validate roundTableRef is present
-	if chain.Spec.RoundTableRef == "" && chain.Spec.MissionRef == "" {
+	if aiv1alpha1.RefName(chain.Spec.RoundTableRef) == "" && aiv1alpha1.RefName(chain.Spec.MissionRef) == "" {
 		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionChainValid,
 			Status:             metav1.ConditionFalse,
@@ -256,7 +256,7 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Handle suspended
-	if chain.Spec.Suspended {
+	if chain.Spec.Suspend {
 		chain.Status.Phase = aiv1alpha1.ChainPhaseSuspended
 		chain.Status.ObservedGeneration = chain.Generation
 		return r.updateStatus(ctx, chain, 0)
@@ -352,13 +352,13 @@ func (r *ChainReconciler) validateKnightRefs(ctx context.Context, chain *aiv1alp
 	}
 	for _, step := range chain.Spec.Steps {
 		if step.Loop == nil {
-			if err := check(step.Name, step.KnightRef); err != nil {
+			if err := check(step.Name, step.KnightRef.Name); err != nil {
 				return err
 			}
 			continue
 		}
 		for _, b := range step.Loop.Steps {
-			if err := check(step.Name+"/"+b.Name, b.KnightRef); err != nil {
+			if err := check(step.Name+"/"+b.Name, b.KnightRef.Name); err != nil {
 				return err
 			}
 		}
@@ -524,7 +524,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 	// Check overall timeout
 	if chain.Status.StartedAt != nil {
 		elapsed := time.Since(chain.Status.StartedAt.Time)
-		if elapsed > time.Duration(chain.Spec.Timeout)*time.Second {
+		if elapsed > time.Duration(chain.Spec.TimeoutSeconds)*time.Second {
 			log.Info("Chain timed out", "elapsed", elapsed)
 			chain.Status.Phase = aiv1alpha1.ChainPhaseFailed
 			now := metav1.Now()
@@ -534,10 +534,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				Type:               aiv1alpha1.ConditionChainComplete,
 				Status:             metav1.ConditionTrue,
 				Reason:             aiv1alpha1.ReasonChainTimeout,
-				Message:            fmt.Sprintf("Chain timed out after %ds", chain.Spec.Timeout),
+				Message:            fmt.Sprintf("Chain timed out after %ds", chain.Spec.TimeoutSeconds),
 				ObservedGeneration: chain.Generation,
 			})
-			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain timed out after %ds", chain.Spec.Timeout)
+			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain timed out after %ds", chain.Spec.TimeoutSeconds)
 			chain.Status.ObservedGeneration = chain.Generation
 			return ctrl.Result{}, r.Status().Update(ctx, chain)
 		}
@@ -584,10 +584,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			if ss.StartedAt != nil && spec != nil {
 				now := metav1.Now()
 				if ss.PickedUpAt != nil {
-					if time.Since(ss.PickedUpAt.Time) > time.Duration(spec.Timeout)*time.Second {
+					if time.Since(ss.PickedUpAt.Time) > time.Duration(spec.TimeoutSeconds)*time.Second {
 						log.Info("Step timed out", "step", ss.Name)
 						ss.Phase = aiv1alpha1.ChainStepPhaseFailed
-						ss.Error = fmt.Sprintf("step timed out after %ds", spec.Timeout)
+						ss.Error = fmt.Sprintf("step timed out after %ds", spec.TimeoutSeconds)
 						ss.CompletedAt = &now
 						continue
 					}
@@ -645,7 +645,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 
 					// Store full output to NATS KV (best-effort)
 					if spec := specMap[ss.Name]; spec != nil {
-						r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, resultErr, spec.KnightRef, ss.StartedAt, &now)
+						r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, resultErr, spec.KnightRef.Name, ss.StartedAt, &now)
 					}
 
 					// Truncate CRD status output to avoid etcd bloat (4000 chars allows
@@ -774,8 +774,8 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 
 		// Get knight domain
 		knight := &aiv1alpha1.Knight{}
-		if err := r.Get(ctx, types.NamespacedName{Name: step.KnightRef, Namespace: chain.Namespace}, knight); err != nil {
-			log.Error(err, "Failed to get knight", "knightRef", step.KnightRef)
+		if err := r.Get(ctx, types.NamespacedName{Name: step.KnightRef.Name, Namespace: chain.Namespace}, knight); err != nil {
+			log.Error(err, "Failed to get knight", "knightRef", step.KnightRef.Name)
 			continue
 		}
 
@@ -784,10 +784,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// the knight silently fall back to its default model.
 		model, err := knightpkg.ResolveModel(step.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
 		if err != nil {
-			log.Info("Rejected step model", "step", step.Name, "knight", step.KnightRef, "reason", err.Error())
+			log.Info("Rejected step model", "step", step.Name, "knight", step.KnightRef.Name, "reason", err.Error())
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", step.Name, err)
 			ss.Phase = aiv1alpha1.ChainStepPhaseFailed
-			ss.Error = fmt.Sprintf("invalid model for knight %q: %v", step.KnightRef, err)
+			ss.Error = fmt.Sprintf("invalid model for knight %q: %v", step.KnightRef.Name, err)
 			ss.Model = ""
 			now := metav1.Now()
 			ss.CompletedAt = &now
@@ -808,7 +808,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Model:     model,
 		}
 
-		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef, payload)
+		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef.Name, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -821,7 +821,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		ss.TaskSeq = seq
 		ss.TaskID = taskID
 		ss.Model = model
-		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef, "model", model)
+		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef.Name, "model", model)
 	}
 
 	// Check if all steps are terminal
@@ -1011,13 +1011,13 @@ func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr st
 // resolveNATSConfig looks up the chain's RoundTable and returns the NATS configuration.
 // Falls back to defaultNATSConfig if no roundTableRef is specified.
 func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alpha1.Chain) (natsConfig, error) {
-	if chain.Spec.RoundTableRef == "" {
+	if aiv1alpha1.RefName(chain.Spec.RoundTableRef) == "" {
 		return natsConfig{}, fmt.Errorf("chain %s/%s has no roundTableRef configured", chain.Namespace, chain.Name)
 	}
 
 	rt := &aiv1alpha1.RoundTable{}
-	if err := r.Get(ctx, types.NamespacedName{Name: chain.Spec.RoundTableRef, Namespace: chain.Namespace}, rt); err != nil {
-		return natsConfig{}, fmt.Errorf("RoundTable %q not found: %w", chain.Spec.RoundTableRef, err)
+	if err := r.Get(ctx, types.NamespacedName{Name: aiv1alpha1.RefName(chain.Spec.RoundTableRef), Namespace: chain.Namespace}, rt); err != nil {
+		return natsConfig{}, fmt.Errorf("RoundTable %q not found: %w", aiv1alpha1.RefName(chain.Spec.RoundTableRef), err)
 	}
 
 	return natsConfig{
@@ -1044,8 +1044,8 @@ func (r *ChainReconciler) publishTask(nc natsConfig, domain, knightName string, 
 const defaultMaxQueueWait = 1800 * time.Second
 
 func maxQueueWait(chain *aiv1alpha1.Chain) time.Duration {
-	if chain.Spec.MaxQueueWait > 0 {
-		return time.Duration(chain.Spec.MaxQueueWait) * time.Second
+	if chain.Spec.MaxQueueWaitSeconds > 0 {
+		return time.Duration(chain.Spec.MaxQueueWaitSeconds) * time.Second
 	}
 	return defaultMaxQueueWait
 }
@@ -1067,7 +1067,7 @@ func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *a
 		ss.PickedUpAt = ss.StartedAt
 		return
 	}
-	if r.ackFloorReached(ctx, nc, spec.KnightRef, ss.TaskSeq) {
+	if r.ackFloorReached(ctx, nc, spec.KnightRef.Name, ss.TaskSeq) {
 		now := metav1.Now()
 		ss.PickedUpAt = &now
 		logf.FromContext(ctx).Info("Knight picked up step task", "step", ss.Name, "queuedFor", now.Sub(ss.StartedAt.Time).Round(time.Second).String())
@@ -1240,7 +1240,7 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 func (r *ChainReconciler) reconcileSchedule(ctx context.Context, chain *aiv1alpha1.Chain) bool {
 	key := chain.Namespace + "/" + chain.Name
 
-	if chain.Spec.Schedule == "" || chain.Spec.Suspended {
+	if chain.Spec.Schedule == "" || chain.Spec.Suspend {
 		r.removeCronEntry(types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name})
 		return false
 	}
@@ -1306,7 +1306,7 @@ func (r *ChainReconciler) triggerChain(ctx context.Context, nn types.NamespacedN
 			return err
 		}
 
-		if chain.Spec.Suspended {
+		if chain.Spec.Suspend {
 			return nil
 		}
 
@@ -1383,14 +1383,14 @@ func (r *ChainReconciler) renderOutputPath(chain *aiv1alpha1.Chain, step *aiv1al
 	return buf.String(), nil
 }
 
-// writeArtifact dispatches a write task to the outputKnight.
+// writeArtifact dispatches a write task to the outputKnightRef knight.
 func (r *ChainReconciler) writeArtifact(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, stepName, outputPath, content string) error {
 	natsCli, err := r.natsClient()
 	if err != nil {
 		return err
 	}
 
-	knightName := chain.Spec.OutputKnight
+	knightName := aiv1alpha1.RefName(chain.Spec.OutputKnightRef)
 	if knightName == "" {
 		knightName = defaultOutputKnight
 	}
@@ -1580,7 +1580,7 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// defaultOutputKnight is the knight that receives chain output when spec.outputKnight is unset.
+// defaultOutputKnight is the knight that receives chain output when spec.outputKnightRef is unset.
 const defaultOutputKnight = "gawain"
 
 // hasHardFailure reports whether a step already failed without

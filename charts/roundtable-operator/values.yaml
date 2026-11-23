@@ -200,7 +200,11 @@ gateway:
 #       apt: [nmap, whois, dnsutils]
 #     nats:
 #       subjects: ["fleet-a.tasks.security.>"]
-#     taskTimeout: 300
+#     taskTimeoutSeconds: 300
+#     # corev1.ResourceRequirements for the knight's app container.
+#     resources:
+#       requests: {cpu: 100m, memory: 256Mi}
+#       limits: {memory: 1Gi}
 #     # Mount a refreshing GitHub token file (GITHUB_TOKEN_FILE) instead of
 #     # a frozen env token. Overrides the knight's RoundTable spec.github.
 #     github:
@@ -218,11 +222,11 @@ planner:
     - operator
     - shared
   concurrency: 1
-  taskTimeout: 600
+  taskTimeoutSeconds: 600
   arsenal:
     repo: https://github.com/roundtable-k8s/arsenal.git
     ref: main
-    period: 5m
+    periodSeconds: 300
   # Extra skill repos merged into /skills after `arsenal` (per skill; later wins).
   # arsenals:
   #   - name: personal
@@ -247,7 +251,8 @@ planner:
 prPipeline:
   enabled: false
   name: pr-pipeline
-  roundTableRef: roundtable-dev
+  roundTableRef:
+    name: roundtable-dev
   # Plans, reviews, merges and escalates.
   lead: rt-lead
   # Coder knights the planner may pick from. One implement step per coder ×
@@ -261,7 +266,7 @@ prPipeline:
     - fast
   # Fix → re-review rounds before escalating.
   maxIterations: 3
-  timeout: 86400
-  maxQueueWait: 3600
+  timeoutSeconds: 86400
+  maxQueueWaitSeconds: 3600
   # Optional initial input, e.g. '{"repo": "roundtable-k8s/roundtable", "issue": 225}'.
   input: ""

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,22 +34,22 @@ func TestApplyPlanKnightRefPrefixing(t *testing.T) {
 		},
 		Spec: aiv1alpha1.MissionSpec{
 			Objective:     "test",
-			RoundTableRef: "personal",
+			RoundTableRef: aiv1alpha1.LocalRef("personal"),
 		},
 	}
 
 	plan := &PlannerOutput{
 		PlanVersion: "v1alpha1",
 		Knights: []PlannerKnight{
-			{Name: "haiku-writer", Ephemeral: true, TemplateRef: "base"},
+			{Name: "haiku-writer", Ephemeral: true, TemplateName: "base"},
 			{Name: "standing-knight", Ephemeral: false},
 		},
 		Chains: []PlannerChain{
 			{
 				Name: "haiku-creation",
 				Steps: []aiv1alpha1.ChainStep{
-					{Name: "write", KnightRef: "haiku-writer", Task: "write it"},
-					{Name: "review", KnightRef: "standing-knight", Task: "review it", DependsOn: []string{"write"}},
+					{Name: "write", KnightRef: corev1.LocalObjectReference{Name: "haiku-writer"}, Task: "write it"},
+					{Name: "review", KnightRef: corev1.LocalObjectReference{Name: "standing-knight"}, Task: "review it", DependsOn: []string{"write"}},
 				},
 			},
 		},
@@ -63,10 +64,10 @@ func TestApplyPlanKnightRefPrefixing(t *testing.T) {
 		t.Fatalf("expected 1 generated chain, got %d", len(mission.Spec.GeneratedChains))
 	}
 	steps := mission.Spec.GeneratedChains[0].Steps
-	if got, want := steps[0].KnightRef, "test-mission-haiku-writer"; got != want {
+	if got, want := steps[0].KnightRef.Name, "test-mission-haiku-writer"; got != want {
 		t.Errorf("ephemeral knightRef = %q, want %q (mission-prefixed)", got, want)
 	}
-	if got, want := steps[1].KnightRef, "standing-knight"; got != want {
+	if got, want := steps[1].KnightRef.Name, "standing-knight"; got != want {
 		t.Errorf("recruited knightRef = %q, want %q (unprefixed)", got, want)
 	}
 
@@ -77,7 +78,7 @@ func TestApplyPlanKnightRefPrefixing(t *testing.T) {
 	if err := p.Client.Get(context.Background(), chainKey, chain); err != nil {
 		t.Fatalf("expected chain CR to be created: %v", err)
 	}
-	if got, want := chain.Spec.Steps[0].KnightRef, "test-mission-haiku-writer"; got != want {
+	if got, want := chain.Spec.Steps[0].KnightRef.Name, "test-mission-haiku-writer"; got != want {
 		t.Errorf("chain CR ephemeral knightRef = %q, want %q", got, want)
 	}
 }

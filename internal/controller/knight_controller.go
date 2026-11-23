@@ -180,7 +180,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Handle suspended state. The ScaledObject goes first, or KEDA would
 	// scale the Deployment straight back up.
-	if knight.Spec.Suspended {
+	if knight.Spec.Suspend {
 		if err := r.deleteScaledObject(ctx, knight); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -520,9 +520,9 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: knight.Namespace}, pvc)
 
 	if apierrors.IsNotFound(err) {
-		storageSize := "1Gi"
-		if knight.Spec.Workspace != nil && knight.Spec.Workspace.Size != "" {
-			storageSize = knight.Spec.Workspace.Size
+		storageSize := resource.MustParse("1Gi")
+		if knight.Spec.Workspace != nil && knight.Spec.Workspace.Size != nil && !knight.Spec.Workspace.Size.IsZero() {
+			storageSize = knight.Spec.Workspace.Size.DeepCopy()
 		}
 
 		pvc = &corev1.PersistentVolumeClaim{
@@ -540,7 +540,7 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse(storageSize),
+						corev1.ResourceStorage: storageSize,
 					},
 				},
 			},

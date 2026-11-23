@@ -40,7 +40,7 @@ func TestConflictErrorsCauseCleanRequeue(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-mission", Namespace: "default"},
 		Spec: aiv1alpha1.MissionSpec{
 			Objective: "test",
-			TTL: 3600,
+			TTLSeconds: 3600,
 		},
 	}
 

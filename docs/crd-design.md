@@ -70,7 +70,7 @@ See the actual Go files for complete type definitions. Key design decisions:
 
 A step with `forEach` fans out over a JSON list taken from `spec.input` or a prior step's output (`from: input | steps.<name>`, optional JSONPath `path`, `maxItems` default 50). Each item is its own task (own taskId, runId `<runId>-i<index>`) rendered with `{{ .Item }}` / `{{ .ItemJSON }}` / `{{ .ItemIndex }}`; `maxParallel` caps items in flight (default: the knight's concurrency); a step `model` override applies to every item. When all items are terminal the step output becomes the join — a JSON array of `{index, item, phase, output, error}` — so a later step (or another `forEach` over `steps.<name>`) consumes per-item results. `failurePolicy: failFast` (default) stops dispatching after the first failed item and fails the step; `continue` runs every item and the chain ends `PartiallySucceeded` if any failed. Status is bounded: `status.stepStatuses[].fanOut` keeps one phase character per item plus counts, and detailed entries for in-flight items and at most 50 finished ones (the rest are read back from the `chain-outputs` KV bucket at join time). `ai.roundtable.io/retry-failed` re-runs only failed/skipped items. See `examples/chain-fan-out.yaml`.
 
-A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,output,error,reason,outcome,iterations}`, `input`, plus `json()` and the extended string functions). It is evaluated when the step's dependencies are done. When it is false the step is `Skipped` (`reason: WhenFalse`) without dispatching anything, and its dependents still run. A step with `loop` is a bounded loop. Its 1–5 body steps (each with its own `knightRef`, `task`, `model`, `timeout`, `retry`) run in order, round after round. The CEL `until` expression is checked against `last` (the `from` step on entry, then the last body step after each round). The loop ends `Converged`, `Exhausted` after `maxIterations` rounds (the step fails, or with `onExhausted: continue` succeeds so dependents can branch on `steps.<loop>.outcome`), or `Failed`. Body tasks reuse the chain `runId`, so a coder resumes its session. Status is bounded: `status.stepStatuses[].loop` holds the round counter, the outcome and one latest-round entry per body step. `retry-failed` resumes a failed loop at the failed body step and gives an exhausted one another `maxIterations` rounds. See `docs/conditional-steps.md` and `examples/chain-pr-pipeline.yaml`.
+A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,output,error,reason,outcome,iterations}`, `input`, plus `json()` and the extended string functions). It is evaluated when the step's dependencies are done. When it is false the step is `Skipped` (`reason: WhenFalse`) without dispatching anything, and its dependents still run. A step with `loop` is a bounded loop. Its 1–5 body steps (each with its own `knightRef`, `task`, `model`, `timeoutSeconds`, `retry`) run in order, round after round. The CEL `until` expression is checked against `last` (the `from` step on entry, then the last body step after each round). The loop ends `Converged`, `Exhausted` after `maxIterations` rounds (the step fails, or with `onExhausted: continue` succeeds so dependents can branch on `steps.<loop>.outcome`), or `Failed`. Body tasks reuse the chain `runId`, so a coder resumes its session. Status is bounded: `status.stepStatuses[].loop` holds the round counter, the outcome and one latest-round entry per body step. `retry-failed` resumes a failed loop at the failed body step and gives an exhausted one another `maxIterations` rounds. See `docs/conditional-steps.md` and `examples/chain-pr-pipeline.yaml`.
 
 **Mission:** Knights can be `ephemeral: true` with an inline `ephemeralSpec` (reusing `KnightSpec`), allowing missions to spin up purpose-built agents. The mission lifecycle (Assembling → Briefing → Active → Succeeded/Failed → CleaningUp) maps to real-world round table semantics.
 
@@ -163,12 +163,12 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   the operator renders a KEDA `ScaledObject` (same name as the Knight):
   `nats-jetstream` trigger on `spec.nats.stream` / `<Knight>-consumer`,
   `lagThreshold: "1"`, min `0` for `auto` (else `replicas`), max `maxReplicas`,
-  `cooldownPeriod` from `lifecycle.idleTimeout` (default 5m). The NATS
+  `cooldownPeriod` from `lifecycle.idleTimeoutSeconds` (default 300). The NATS
   monitoring endpoint is `--nats-monitoring-endpoint` or `<nats host>:8222`.
   The Deployment is created with one pod (the runtime creates its consumer on
   start), after which KEDA owns `replicas`. A knight KEDA scaled to zero
   reports phase `Suspended`, `Available=False` reason `ScaledToZero`.
-  `spec.suspended: true` deletes the ScaledObject before scaling to 0.
+  `spec.suspend: true` deletes the ScaledObject before scaling to 0.
 - **Knight image requirement.** Lag-based scaling (`maxReplicas > 1`) and
   `suspendPolicy: auto` need knight images built from main at or after
   pull-when-free (claude-knight#13, pi-knight#61). Those runtimes fetch tasks
@@ -244,7 +244,7 @@ spec:
   defaults:
     model: "claude-sonnet-4-20250514"
     image: "ghcr.io/roundtable-k8s/pi-knight:latest"
-    taskTimeout: 120
+    taskTimeoutSeconds: 120
     concurrency: 2
   policies:
     maxConcurrentTasks: 20
@@ -290,38 +290,38 @@ metadata:
   namespace: ai
 spec:
   description: "Run a security audit: scan, analyze, report"
-  roundTableRef: fleet-a
-  timeout: 900
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 900
   retryPolicy:
     maxRetries: 1
     backoffSeconds: 30
   steps:
     - name: scan
-      knightRef: mordred
+      knightRef: {name: mordred}
       task: "Run a comprehensive network scan of the internal cluster network 10.43.0.0/16. Output open ports and services as JSON."
-      timeout: 300
+      timeoutSeconds: 300
 
     - name: vuln-check
-      knightRef: mordred
+      knightRef: {name: mordred}
       task: "Analyze these scan results for known vulnerabilities: {{ .Steps.scan.Output }}"
       dependsOn: ["scan"]
-      timeout: 180
+      timeoutSeconds: 180
 
     - name: compliance-check
-      knightRef: percival
+      knightRef: {name: percival}
       task: "Check these services against our compliance policy: {{ .Steps.scan.Output }}"
       dependsOn: ["scan"]
-      timeout: 180
+      timeoutSeconds: 180
 
     - name: report
-      knightRef: gawain
+      knightRef: {name: gawain}
       task: |
         Compile a security audit report from:
         - Vulnerability findings: {{ .Steps.vuln-check.Output }}
         - Compliance findings: {{ .Steps.compliance-check.Output }}
         Write the report to the vault at Briefings/security-audit-latest.md
       dependsOn: ["vuln-check", "compliance-check"]
-      timeout: 120
+      timeoutSeconds: 120
 ```
 
 A step can override the knight's model for that task only with `model:` — a model
@@ -339,19 +339,19 @@ metadata:
   namespace: ai
 spec:
   description: "Generate daily briefing from all knight activity"
-  roundTableRef: fleet-a
+  roundTableRef: {name: fleet-a}
   schedule: "0 8 * * *"
-  timeout: 300
+  timeoutSeconds: 300
   steps:
     - name: gather
-      knightRef: gawain
+      knightRef: {name: gawain}
       task: "Query the last 24h of results from all knights and summarize key events."
-      timeout: 120
+      timeoutSeconds: 120
     - name: publish
-      knightRef: gawain
+      knightRef: {name: gawain}
       task: "Format this into a daily briefing and write to Briefings/daily/{{ now | date \"2006-01-02\" }}.md: {{ .Steps.gather.Output }}"
       dependsOn: ["gather"]
-      timeout: 60
+      timeoutSeconds: 60
 ```
 
 ### Mission
@@ -365,9 +365,9 @@ metadata:
 spec:
   objective: "Investigate and remediate the suspicious outbound traffic detected on node talos-3"
   successCriteria: "Root cause identified, affected services contained, and remediation applied or documented"
-  roundTableRef: fleet-a
-  ttl: 7200
-  timeout: 3600
+  roundTableRef: {name: fleet-a}
+  ttlSeconds: 7200
+  timeoutSeconds: 3600
   briefing: |
     Alert: Anomalous outbound traffic detected from node talos-3 to IP 203.0.113.42.
     Traffic pattern suggests potential data exfiltration. Priority: HIGH.
@@ -391,7 +391,7 @@ spec:
           subjects: ["mission-incident-response-2026-02.tasks.forensics.>"]
           stream: "fleet_a_tasks"
         concurrency: 3
-        taskTimeout: 300
+        taskTimeoutSeconds: 300
   chains:
     - name: security-audit
       phase: Setup
@@ -434,7 +434,7 @@ spec:
       roundtable.ai.roundtable.io/fleet: fleet-a
   defaults:
     model: "claude-sonnet-4-20250514"
-    taskTimeout: 120
+    taskTimeoutSeconds: 120
     concurrency: 2
   policies:
     costBudgetUSD: "50.00"

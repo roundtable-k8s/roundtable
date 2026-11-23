@@ -60,14 +60,14 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	if mission.Spec.Planner == nil {
 		log.Info("MetaMission enabled without explicit planner config, using defaults")
 		mission.Spec.Planner = &aiv1alpha1.MissionPlanner{
-			Timeout:    600,
-			MaxChains:  10,
-			MaxKnights: 10,
+			TimeoutSeconds: 600,
+			MaxChains:      10,
+			MaxKnights:     10,
 		}
 		// Find the built-in planner knight
 		plannerKnights := &aiv1alpha1.KnightList{}
 		if err := p.Client.List(ctx, plannerKnights, client.InNamespace(mission.Namespace), client.MatchingLabels{"ai.roundtable.io/role": "planner"}); err == nil && len(plannerKnights.Items) > 0 {
-			mission.Spec.Planner.KnightRef = plannerKnights.Items[0].Name
+			mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(plannerKnights.Items[0].Name)
 			log.Info("Auto-discovered planner knight", "name", plannerKnights.Items[0].Name)
 		}
 		if err := p.Client.Update(ctx, mission); err != nil {
@@ -114,7 +114,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	}
 
 	// Check timeout
-	timeout := mission.Spec.Planner.Timeout
+	timeout := mission.Spec.Planner.TimeoutSeconds
 	if timeout == 0 {
 		timeout = 300 // Default 5 minutes
 	}
@@ -280,14 +280,14 @@ func (p *Planner) ensurePlannerKnight(ctx context.Context, mission *aiv1alpha1.M
 	planner := mission.Spec.Planner
 
 	// If knightRef provided, fetch existing knight
-	if planner.KnightRef != "" && planner.TemplateRef == "" && planner.EphemeralSpec == nil {
+	if aiv1alpha1.RefName(planner.KnightRef) != "" && planner.TemplateName == "" && planner.EphemeralSpec == nil {
 		knight := &aiv1alpha1.Knight{}
 		err := p.Client.Get(ctx, types.NamespacedName{
-			Name:      planner.KnightRef,
+			Name:      aiv1alpha1.RefName(planner.KnightRef),
 			Namespace: mission.Namespace,
 		}, knight)
 		if err != nil {
-			return nil, fmt.Errorf("planner knight %q not found: %w", planner.KnightRef, err)
+			return nil, fmt.Errorf("planner knight %q not found: %w", aiv1alpha1.RefName(planner.KnightRef), err)
 		}
 		log.Info("Using existing planner knight", "knight", knight.Name)
 		return knight, nil
@@ -312,7 +312,7 @@ func (p *Planner) ensurePlannerKnight(ctx context.Context, mission *aiv1alpha1.M
 
 	// Resolve spec from template or inline
 	var spec *aiv1alpha1.KnightSpec
-	if planner.TemplateRef != "" {
+	if planner.TemplateName != "" {
 		// Fetch from RoundTable templates
 		rt, err := p.resolveRoundTable(ctx, mission)
 		if err != nil {
@@ -322,28 +322,28 @@ func (p *Planner) ensurePlannerKnight(ctx context.Context, mission *aiv1alpha1.M
 		// Check mission templates first (local override)
 		found := false
 		for _, template := range mission.Spec.KnightTemplates {
-			if template.Name == planner.TemplateRef {
+			if template.Name == planner.TemplateName {
 				spec = template.Spec.DeepCopy()
 				found = true
-				log.Info("Using mission template for planner", "template", planner.TemplateRef)
+				log.Info("Using mission template for planner", "template", planner.TemplateName)
 				break
 			}
 		}
 
 		// Fall back to RoundTable templates
 		if !found {
-			templateSpec, ok := rt.Spec.KnightTemplates[planner.TemplateRef]
+			templateSpec, ok := rt.Spec.KnightTemplates[planner.TemplateName]
 			if !ok {
-				return nil, fmt.Errorf("planner template %q not found in mission or RoundTable", planner.TemplateRef)
+				return nil, fmt.Errorf("planner template %q not found in mission or RoundTable", planner.TemplateName)
 			}
 			spec = &templateSpec
-			log.Info("Using RoundTable template for planner", "template", planner.TemplateRef)
+			log.Info("Using RoundTable template for planner", "template", planner.TemplateName)
 		}
 	} else if planner.EphemeralSpec != nil {
 		spec = planner.EphemeralSpec.DeepCopy()
 		log.Info("Using inline spec for planner")
 	} else {
-		return nil, fmt.Errorf("planner must have knightRef, templateRef, or ephemeralSpec")
+		return nil, fmt.Errorf("planner must have knightRef, templateName, or ephemeralSpec")
 	}
 
 	// Create knight CR
@@ -466,10 +466,10 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 			}
 		}
 
-		if mission.Spec.RoundTableRef != "" {
+		if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 			var rt aiv1alpha1.RoundTable
 			if err := p.Client.Get(ctx, types.NamespacedName{
-				Name:      mission.Spec.RoundTableRef,
+				Name:      aiv1alpha1.RefName(mission.Spec.RoundTableRef),
 				Namespace: mission.Namespace,
 			}, &rt); err == nil {
 				var knightList aiv1alpha1.KnightList
@@ -508,8 +508,8 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	if !mission.Spec.Planner.AllowSkillGeneration {
 		sb.WriteString("- Skill Generation: Not allowed (use existing skills only)\n")
 	}
-	if mission.Spec.Timeout > 0 {
-		sb.WriteString(fmt.Sprintf("- Mission Timeout: %d seconds\n", mission.Spec.Timeout))
+	if mission.Spec.TimeoutSeconds > 0 {
+		sb.WriteString(fmt.Sprintf("- Mission Timeout: %d seconds\n", mission.Spec.TimeoutSeconds))
 	}
 	if mission.Spec.CostBudgetUSD != "" && mission.Spec.CostBudgetUSD != "0" {
 		sb.WriteString(fmt.Sprintf("- Cost Budget: $%s USD\n", mission.Spec.CostBudgetUSD))
@@ -537,7 +537,7 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
       "name": "new-knight-name",
       "role": "description of role in this mission",
       "ephemeral": true,
-      "templateRef": "base",
+      "templateName": "base",
       "specOverrides": {
         "domain": "the-knights-domain",
         "skills": ["shared", "relevant-skill"],
@@ -555,12 +555,12 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
       "steps": [
         {
           "name": "step-name",
-          "knightRef": "knight-name",
+          "knightRef": {"name": "knight-name"},
           "task": "detailed task description",
-          "timeout": 300
+          "timeoutSeconds": 300
         }
       ],
-      "timeout": 1800
+      "timeoutSeconds": 1800
     }
   ]
 }
@@ -568,9 +568,9 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	sb.WriteString("```\n\n")
 
 	sb.WriteString("**Important Guidelines:**\n")
-	sb.WriteString("1. All knightRef values in chain steps must match knight names in the knights array\n")
+	sb.WriteString("1. Every chain step's knightRef.name must match a knight name in the knights array\n")
 	sb.WriteString("2. When recruitExisting=true, prefer ephemeral=false to use existing knights when they fit the task\n")
-	sb.WriteString("3. For ephemeral knights, ALWAYS use templateRef=\"base\" and customize via specOverrides\n")
+	sb.WriteString("3. For ephemeral knights, ALWAYS use templateName=\"base\" and customize via specOverrides\n")
 	sb.WriteString("3b. Do NOT set specOverrides.model unless the task truly needs a stronger model — omitting it inherits the base template's cheap default\n")
 	sb.WriteString("4. Design each ephemeral knight's tools.nix for its specific role — pick the right nixpkgs (e.g. go, python3, nmap, gh, nodejs_22, ripgrep, gopls, golangci-lint, kubectl, terraform)\n")
 	sb.WriteString("5. Chain phases can be: Setup, Active, or Teardown\n")
@@ -747,12 +747,12 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 				return fmt.Errorf("non-ephemeral knight %q not found: %w", k.Name, err)
 			}
 		} else {
-			if k.TemplateRef == "" && k.EphemeralSpec == nil {
-				return fmt.Errorf("ephemeral knight %q must have templateRef or ephemeralSpec", k.Name)
+			if k.TemplateName == "" && k.EphemeralSpec == nil {
+				return fmt.Errorf("ephemeral knight %q must have templateName or ephemeralSpec", k.Name)
 			}
 
-			if k.TemplateRef != "" {
-				if err := p.validateTemplateExists(ctx, mission, k.TemplateRef); err != nil {
+			if k.TemplateName != "" {
+				if err := p.validateTemplateExists(ctx, mission, k.TemplateName); err != nil {
 					return fmt.Errorf("knight %q: %w", k.Name, err)
 				}
 			}
@@ -767,8 +767,8 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 			// Update all references to this knight in chain steps
 			for ci := range plan.Chains {
 				for si := range plan.Chains[ci].Steps {
-					if plan.Chains[ci].Steps[si].KnightRef == k.Name {
-						plan.Chains[ci].Steps[si].KnightRef = sanitized
+					if plan.Chains[ci].Steps[si].KnightRef.Name == k.Name {
+						plan.Chains[ci].Steps[si].KnightRef.Name = sanitized
 					}
 				}
 			}
@@ -813,11 +813,11 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 			}
 			stepNames[step.Name] = true
 
-			if step.KnightRef == "" {
+			if step.KnightRef.Name == "" {
 				return fmt.Errorf("chain %q step %q: knightRef is required", chain.Name, step.Name)
 			}
-			if !knightNames[step.KnightRef] {
-				return fmt.Errorf("chain %q step %q: knight %q not found in plan", chain.Name, step.Name, step.KnightRef)
+			if !knightNames[step.KnightRef.Name] {
+				return fmt.Errorf("chain %q step %q: knight %q not found in plan", chain.Name, step.Name, step.KnightRef.Name)
 			}
 			if step.Task == "" {
 				return fmt.Errorf("chain %q step %q: task is required", chain.Name, step.Name)
@@ -893,7 +893,7 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 			Name:          pk.Name,
 			Role:          pk.Role,
 			Ephemeral:     pk.Ephemeral,
-			TemplateRef:   pk.TemplateRef,
+			TemplateName:  pk.TemplateName,
 			EphemeralSpec: pk.EphemeralSpec,
 			SpecOverrides: pk.SpecOverrides,
 		}
@@ -923,8 +923,8 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 			sanitizedSteps[i].Name = newName
 
 			// Prefix knightRef for ephemeral knights (they get mission-name prefix)
-			if ephemeralKnights[step.KnightRef] {
-				sanitizedSteps[i].KnightRef = fmt.Sprintf("%s-%s", mission.Name, step.KnightRef)
+			if ephemeralKnights[step.KnightRef.Name] {
+				sanitizedSteps[i].KnightRef.Name = fmt.Sprintf("%s-%s", mission.Name, step.KnightRef.Name)
 			}
 		}
 
@@ -951,13 +951,13 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 		}
 
 		gc := aiv1alpha1.GeneratedChain{
-			Name:        pc.Name,
-			Description: pc.Description,
-			Steps:       sanitizedSteps,
-			Phase:       pc.Phase,
-			Input:       pc.Input,
-			Timeout:     pc.Timeout,
-			RetryPolicy: pc.RetryPolicy,
+			Name:           pc.Name,
+			Description:    pc.Description,
+			Steps:          sanitizedSteps,
+			Phase:          pc.Phase,
+			Input:          pc.Input,
+			TimeoutSeconds: pc.TimeoutSeconds,
+			RetryPolicy:    pc.RetryPolicy,
 		}
 
 		if gc.Phase == "" {
@@ -985,13 +985,13 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 				Description:   pc.Description,
 				Steps:         sanitizedSteps,
 				Input:         pc.Input,
-				MissionRef:    mission.Name,
+				MissionRef:    aiv1alpha1.LocalRef(mission.Name),
 				RoundTableRef: mission.Spec.RoundTableRef, // Bug #84: Inherit roundTableRef from parent Mission
 			},
 		}
 
-		if pc.Timeout != nil {
-			chain.Spec.Timeout = *pc.Timeout
+		if pc.TimeoutSeconds != nil {
+			chain.Spec.TimeoutSeconds = *pc.TimeoutSeconds
 		}
 
 		if pc.RetryPolicy != nil {
@@ -1068,13 +1068,13 @@ func (p *Planner) createSkillConfigMaps(ctx context.Context, mission *aiv1alpha1
 
 // resolveRoundTable resolves the RoundTable for this mission.
 func (p *Planner) resolveRoundTable(ctx context.Context, mission *aiv1alpha1.Mission) (*aiv1alpha1.RoundTable, error) {
-	if mission.Spec.RoundTableRef == "" {
+	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) == "" {
 		return nil, fmt.Errorf("no RoundTable reference configured")
 	}
 
 	rt := &aiv1alpha1.RoundTable{}
 	err := p.Client.Get(ctx, types.NamespacedName{
-		Name:      mission.Spec.RoundTableRef,
+		Name:      aiv1alpha1.RefName(mission.Spec.RoundTableRef),
 		Namespace: mission.Namespace,
 	}, rt)
 	if err != nil {

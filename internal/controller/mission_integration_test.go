@@ -91,8 +91,8 @@ var _ = Describe("Mission Integration Tests", func() {
 						Stream:        "test_tasks",
 						ResultsStream: "test_results",
 					},
-					Concurrency: 1,
-					TaskTimeout: 120,
+					Concurrency:        1,
+					TaskTimeoutSeconds: 120,
 				},
 			}
 			Expect(k8sClient.Create(ctx, knight)).To(Succeed())
@@ -118,14 +118,14 @@ var _ = Describe("Mission Integration Tests", func() {
 					Description: "Test chain for integration",
 					Steps: []aiv1alpha1.ChainStep{
 						{
-							Name:      "step1",
-							KnightRef: knightName,
-							Task:      "Echo hello",
-							Timeout:   60,
-							OutputKey: "step1",
+							Name:           "step1",
+							KnightRef:      corev1.LocalObjectReference{Name: knightName},
+							Task:           "Echo hello",
+							TimeoutSeconds: 60,
+							OutputKey:      "step1",
 						},
 					},
-					Timeout: 300,
+					TimeoutSeconds: 300,
 				},
 			}
 			Expect(k8sClient.Create(ctx, chain)).To(Succeed())
@@ -151,10 +151,10 @@ var _ = Describe("Mission Integration Tests", func() {
 							Phase: "Active",
 						},
 					},
-					TTL:             3600,
-					Timeout:         1800,
+					TTLSeconds:      3600,
+					TimeoutSeconds:  1800,
 					RecruitExisting: true,
-					RoundTableRef:   "test-rt",
+					RoundTableRef:   aiv1alpha1.LocalRef("test-rt"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
@@ -204,7 +204,7 @@ var _ = Describe("Mission Integration Tests", func() {
 			Expect(missionChain.Labels).To(HaveKeyWithValue("ai.roundtable.io/mission", missionName))
 
 			// Verify roundTableRef set correctly
-			Expect(missionChain.Spec.RoundTableRef).To(Equal("test-rt"))
+			Expect(aiv1alpha1.RefName(missionChain.Spec.RoundTableRef)).To(Equal("test-rt"))
 
 			// Simulate chain completion
 			Eventually(func() error {
@@ -304,8 +304,8 @@ var _ = Describe("Mission Integration Tests", func() {
 							Ephemeral: false,
 						},
 					},
-					TTL:             3600,
-					Timeout:         1800,
+					TTLSeconds:      3600,
+					TimeoutSeconds:  1800,
 					RecruitExisting: true,
 				},
 			}
@@ -436,7 +436,7 @@ var _ = Describe("Mission Integration Tests", func() {
 					Steps: []aiv1alpha1.ChainStep{
 						{
 							Name:      "test-step",
-							KnightRef: knightName,
+							KnightRef: corev1.LocalObjectReference{Name: knightName},
 							Task:      "Test task",
 						},
 					},
@@ -458,8 +458,8 @@ var _ = Describe("Mission Integration Tests", func() {
 					Chains: []aiv1alpha1.MissionChainRef{
 						{Name: chainName, Phase: "Active"},
 					},
-					TTL:             3600,
-					Timeout:         1800,
+					TTLSeconds:      3600,
+					TimeoutSeconds:  1800,
 					RetainResults:   true,
 					RecruitExisting: true,
 				},
@@ -599,7 +599,7 @@ var _ = Describe("Mission Integration Tests", func() {
 					},
 					Spec: aiv1alpha1.ChainSpec{
 						Steps: []aiv1alpha1.ChainStep{
-							{Name: "step1", KnightRef: knightName, Task: "Test"},
+							{Name: "step1", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "Test"},
 						},
 					},
 				}
@@ -621,9 +621,9 @@ var _ = Describe("Mission Integration Tests", func() {
 						{Name: chainName1, Phase: "Active"},
 						{Name: chainName2, Phase: "Active"},
 					},
-					TTL:             3600,
-					Timeout:         1800,
-					RoundTableRef:   "test-rt",
+					TTLSeconds:      3600,
+					TimeoutSeconds:  1800,
+					RoundTableRef:   aiv1alpha1.LocalRef("test-rt"),
 					RecruitExisting: true,
 				},
 			}
@@ -656,7 +656,7 @@ var _ = Describe("Mission Integration Tests", func() {
 				// (Note: missionRef field may not exist yet in current CRD)
 
 				// Verify roundTableRef set correctly
-				Expect(mc.Spec.RoundTableRef).To(Equal("test-rt"))
+				Expect(aiv1alpha1.RefName(mc.Spec.RoundTableRef)).To(Equal("test-rt"))
 
 				// Verify owner reference
 				Expect(mc.OwnerReferences).To(HaveLen(1))
@@ -740,7 +740,7 @@ var _ = Describe("Mission Integration Tests", func() {
 					},
 					Spec: aiv1alpha1.ChainSpec{
 						Steps: []aiv1alpha1.ChainStep{
-							{Name: "step1", KnightRef: knightName, Task: "Test"},
+							{Name: "step1", KnightRef: corev1.LocalObjectReference{Name: knightName}, Task: "Test"},
 						},
 					},
 				}
@@ -762,8 +762,8 @@ var _ = Describe("Mission Integration Tests", func() {
 						{Name: chainName1, Phase: "Active"},
 						{Name: chainName2, Phase: "Active"},
 					},
-					TTL:             3600,
-					Timeout:         1800,
+					TTLSeconds:      3600,
+					TimeoutSeconds:  1800,
 					RecruitExisting: true,
 				},
 			}

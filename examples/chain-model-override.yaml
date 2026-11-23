@@ -25,19 +25,19 @@ metadata:
   name: operator-change
   namespace: roundtable
 spec:
-  roundTableRef: fleet-a
-  timeout: 7200
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 7200
   input: "Add a status condition for stale tools images"
   steps:
     - name: design
-      knightRef: rt-operator # claude-knight image
+      knightRef: {name: rt-operator} # claude-knight image
       model: deep # → opus
-      timeout: 3600
+      timeoutSeconds: 3600
       task: |
         Implement: {{ .Input }}
 
     - name: changelog
-      knightRef: rt-operator
+      knightRef: {name: rt-operator}
       model: fast # → haiku
       dependsOn: [design]
       task: |
@@ -45,10 +45,10 @@ spec:
         {{ .Steps.design.Output }}
 
     - name: review
-      knightRef: reviewer # pi-knight image
+      knightRef: {name: reviewer} # pi-knight image
       model: review # → openrouter/z-ai/glm-5.3
       dependsOn: [design]
-      timeout: 1800
+      timeoutSeconds: 1800
       task: |
         Review this change for correctness bugs:
         {{ .Steps.design.Output }}

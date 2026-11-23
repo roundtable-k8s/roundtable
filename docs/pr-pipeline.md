@@ -131,7 +131,8 @@ exist in the release namespace, or the Chain is `ChainValid=False`.
 # values.yaml
 prPipeline:
   enabled: true
-  roundTableRef: roundtable-dev
+  roundTableRef:
+    name: roundtable-dev
   lead: rt-lead
   coders: [rt-operator, rt-ui]
   implementModels: [deep, fast]
@@ -153,6 +154,10 @@ helm template rt charts/roundtable-operator -n roundtable \
 
 then drop the `# Source` line, `---` and the Helm labels, and keep the
 example's header comment.
+
+`make helm-check` lints the chart and fails if the example no longer matches
+the rendered template. CI doesn't run it yet, so run it after any change to
+the template, the `prPipeline` values or the Chain API.
 
 ## Run it for an issue
 

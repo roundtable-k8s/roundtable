@@ -79,7 +79,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Handle suspended state
-	if rt.Spec.Suspended {
+	if rt.Spec.Suspend {
 		rt.Status.Phase = aiv1alpha1.RoundTablePhaseSuspended
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
@@ -307,7 +307,7 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 
 	var count int32
 	for _, m := range missionList.Items {
-		if m.Spec.RoundTableRef == rt.Name {
+		if aiv1alpha1.RefName(m.Spec.RoundTableRef) == rt.Name {
 			switch m.Status.Phase {
 			case aiv1alpha1.MissionPhaseAssembling, aiv1alpha1.MissionPhaseBriefing, aiv1alpha1.MissionPhaseActive:
 				count++
@@ -384,32 +384,29 @@ func (r *RoundTableReconciler) reconcileWarmPool(ctx context.Context, rt *aiv1al
 	}
 
 	// Idle recycling: delete warm knights that have been idle too long
-	if wp.MaxIdleTime != "" {
-		maxIdle, err := time.ParseDuration(wp.MaxIdleTime)
-		if err == nil {
-			for i := range unclaimedKnights {
-				k := &unclaimedKnights[i]
-				createdAtStr, ok := k.Annotations[aiv1alpha1.AnnotationWarmPoolCreatedAt]
-				if !ok {
-					continue
-				}
-				createdAt, err := time.Parse(time.RFC3339, createdAtStr)
-				if err != nil {
-					continue
-				}
-				if time.Since(createdAt) > maxIdle {
-					log.Info("Recycling idle warm pool knight", "knight", k.Name,
-						"age", time.Since(createdAt).String())
-					if err := r.Delete(ctx, k); err != nil {
-						log.Error(err, "Failed to delete idle warm knight", "knight", k.Name)
+	if maxIdle := time.Duration(wp.MaxIdleTimeSeconds) * time.Second; maxIdle > 0 {
+		for i := range unclaimedKnights {
+			k := &unclaimedKnights[i]
+			createdAtStr, ok := k.Annotations[aiv1alpha1.AnnotationWarmPoolCreatedAt]
+			if !ok {
+				continue
+			}
+			createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+			if err != nil {
+				continue
+			}
+			if time.Since(createdAt) > maxIdle {
+				log.Info("Recycling idle warm pool knight", "knight", k.Name,
+					"age", time.Since(createdAt).String())
+				if err := r.Delete(ctx, k); err != nil {
+					log.Error(err, "Failed to delete idle warm knight", "knight", k.Name)
+				} else {
+					r.Recorder.Event(rt, corev1.EventTypeNormal, "WarmKnightRecycled", "Idle warm knight recycled")
+					// Adjust counts — the deleted knight is no longer available
+					if k.Status.Phase == aiv1alpha1.KnightPhaseReady && k.Status.Ready {
+						available--
 					} else {
-						r.Recorder.Event(rt, corev1.EventTypeNormal, "WarmKnightRecycled", "Idle warm knight recycled")
-						// Adjust counts — the deleted knight is no longer available
-						if k.Status.Phase == aiv1alpha1.KnightPhaseReady && k.Status.Ready {
-							available--
-						} else {
-							provisioning--
-						}
+						provisioning--
 					}
 				}
 			}
@@ -569,7 +566,7 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 	}
 
 	// Ensure not suspended
-	spec.Suspended = false
+	spec.Suspend = false
 
 	knight := &aiv1alpha1.Knight{
 		ObjectMeta: metav1.ObjectMeta{

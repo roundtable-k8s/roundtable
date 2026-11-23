@@ -22,10 +22,6 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.steps
-      name: Steps
-      priority: 1
-      type: integer
     - jsonPath: .spec.schedule
       name: Schedule
       type: string
@@ -72,9 +68,9 @@ spec:
                 description: input provides initial data passed to the first step(s)
                   as JSON.
                 type: string
-              maxQueueWait:
+              maxQueueWaitSeconds:
                 description: |-
-                  maxQueueWait is how long (seconds) a published step task may wait for its
+                  maxQueueWaitSeconds is how long a published step task may wait for its
                   knight to pick it up before the step fails. The per-step timeout only
                   starts counting once the knight has picked the task up, so a busy (or
                   dead) knight is bounded by this guard instead. Defaults to 1800 when unset.
@@ -84,9 +80,21 @@ spec:
                 type: integer
               missionRef:
                 description: |-
-                  missionRef is set by the mission controller when creating mission-scoped chains.
-                  The chain controller uses this to resolve NATS config from the mission's RoundTable.
-                type: string
+                  missionRef names the Mission that owns a mission-scoped chain. It is set
+                  by the mission controller; the chain controller resolves NATS config
+                  from the mission's RoundTable through it.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               notify:
                 description: |-
                   notify configures a completion notification fired exactly once per run
@@ -145,12 +153,22 @@ spec:
                     - url
                     type: object
                 type: object
-              outputKnight:
-                default: gawain
+              outputKnightRef:
                 description: |-
-                  outputKnight is the knight responsible for writing chain artifacts when steps have outputPath set.
-                  Defaults to "gawain" if not specified.
-                type: string
+                  outputKnightRef names the Knight that writes chain artifacts when steps
+                  have outputPath set. Defaults to the knight "gawain".
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               retryPolicy:
                 description: retryPolicy configures retry behavior for failed steps.
                 properties:
@@ -169,9 +187,20 @@ spec:
                 type: object
               roundTableRef:
                 description: |-
-                  roundTableRef references the RoundTable this chain belongs to.
-                  If omitted, the chain operates in the default namespace NATS prefix.
-                type: string
+                  roundTableRef names the RoundTable this chain belongs to (same namespace).
+                  It supplies the NATS subjects and streams the steps are published on.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               schedule:
                 description: |-
                   schedule is an optional cron expression to trigger this chain on a recurring basis.
@@ -258,9 +287,21 @@ spec:
                       type: object
                     knightRef:
                       description: |-
-                        knightRef is the name of the Knight to execute this step. Required
-                        unless the step is a loop (whose body steps name their own knights).
-                      type: string
+                        knightRef names the Knight (same namespace) that executes this step.
+                        Required unless the step is a loop (whose body steps name their own
+                        knights).
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
                     loop:
                       description: |-
                         loop makes this step a bounded loop: its body steps run in order, round
@@ -306,10 +347,20 @@ spec:
                             description: ChainLoopStep is one step of a loop body.
                             properties:
                               knightRef:
-                                description: knightRef is the Knight that runs this
-                                  body step.
-                                minLength: 1
-                                type: string
+                                description: knightRef names the Knight that runs
+                                  this body step.
+                                properties:
+                                  name:
+                                    default: ""
+                                    description: |-
+                                      Name of the referent.
+                                      This field is effectively required, but due to backwards compatibility is
+                                      allowed to be empty. Instances of this type with an empty value here are
+                                      almost certainly wrong.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                type: object
+                                x-kubernetes-map-type: atomic
                               model:
                                 description: |-
                                   model overrides the knight's model for this body step (same rules as
@@ -350,10 +401,11 @@ spec:
                                   for the extra .Loop data).
                                 minLength: 1
                                 type: string
-                              timeout:
+                              timeoutSeconds:
                                 default: 120
-                                description: timeout is the per-task timeout in seconds,
-                                  counted from knight pickup.
+                                description: |-
+                                  timeoutSeconds is the per-task timeout in seconds, counted from knight
+                                  pickup.
                                 format: int32
                                 maximum: 3600
                                 minimum: 10
@@ -415,7 +467,7 @@ spec:
                       description: |-
                         outputPath is an optional file path where this step's output should be written.
                         Supports Go template variables: {{ .Date }} (YYYY-MM-DD), {{ .Chain }} (chain name), {{ .Step }} (step name).
-                        When set, the controller dispatches a write task to the outputKnight after the step succeeds.
+                        When set, the controller dispatches a write task to the outputKnightRef knight after the step succeeds.
                       type: string
                     retry:
                       description: |-
@@ -444,10 +496,11 @@ spec:
                         Supports Go template syntax with access to prior step outputs: {{ .Steps.step_name.Output }}
                         Required unless the step is a loop.
                       type: string
-                    timeout:
+                    timeoutSeconds:
                       default: 120
-                      description: timeout is the per-step timeout in seconds. Overrides
-                        the knight's default taskTimeout.
+                      description: |-
+                        timeoutSeconds is the per-step timeout in seconds, counted from knight
+                        pickup. Overrides the knight's default taskTimeoutSeconds.
                       format: int32
                       maximum: 3600
                       minimum: 10
@@ -475,15 +528,16 @@ spec:
                   type: object
                 minItems: 1
                 type: array
-              suspended:
+              suspend:
                 default: false
-                description: suspended, if true, prevents scheduled runs and disallows
+                description: suspend, if true, prevents scheduled runs and disallows
                   new executions.
                 type: boolean
-              timeout:
+              timeoutSeconds:
                 default: 600
-                description: timeout is the overall chain timeout in seconds. The
-                  entire chain is failed if exceeded.
+                description: |-
+                  timeoutSeconds is the overall chain timeout in seconds. The entire chain
+                  is failed if exceeded.
                 format: int32
                 maximum: 86400
                 minimum: 30
@@ -625,6 +679,8 @@ spec:
                         for ordinary steps.
                       properties:
                         failed:
+                          description: failed is the number of items that failed (after
+                            their retries).
                           format: int32
                           type: integer
                         itemPhases:
@@ -706,17 +762,21 @@ spec:
                           format: int32
                           type: integer
                         pending:
-                          description: pending, running, succeeded, failed and skipped
-                            summarise itemPhases.
+                          description: pending is the number of items not dispatched
+                            yet.
                           format: int32
                           type: integer
                         running:
+                          description: running is the number of items in flight.
                           format: int32
                           type: integer
                         skipped:
+                          description: skipped is the number of items that were never
+                            run.
                           format: int32
                           type: integer
                         succeeded:
+                          description: succeeded is the number of items that succeeded.
                           format: int32
                           type: integer
                         total:

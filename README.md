@@ -112,26 +112,26 @@ metadata:
 spec:
   steps:
     - name: scan
-      knightRef: galahad
+      knightRef: {name: galahad}
       task: "Scan example.com for CVEs. Report findings."
-      timeout: 300
+      timeoutSeconds: 300
 
     - name: verify
-      knightRef: tristan
+      knightRef: {name: tristan}
       dependsOn: [scan]
       task: |
         Galahad found: {{ .Steps.scan.Output }}
         Check if any of these CVEs affect our cluster.
-      timeout: 300
+      timeoutSeconds: 300
 
     - name: report
-      knightRef: kay
+      knightRef: {name: kay}
       dependsOn: [verify]
       task: |
         Write a threat report:
         - Scan results: {{ .Steps.scan.Output }}
         - Exposure analysis: {{ .Steps.verify.Output }}
-      timeout: 600
+      timeoutSeconds: 600
 ```
 
 Steps run in dependency order. Parallel steps execute concurrently. Outputs are injected into downstream tasks via Go templates.
@@ -145,8 +145,8 @@ metadata:
   name: pentest-sprint
 spec:
   objective: "Penetration test the staging environment and produce a findings report."
-  ttl: 3600
-  timeout: 1800
+  ttlSeconds: 3600
+  timeoutSeconds: 1800
   cleanupPolicy: Delete
   knights:
     - name: lead

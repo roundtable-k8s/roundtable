@@ -131,8 +131,8 @@ var _ = Describe("MissionReconciler.publishBriefing", func() {
 					Stream:        "rt_dev_tasks",
 					ResultsStream: "rt_dev_results",
 				},
-				Concurrency: 1,
-				TaskTimeout: 120,
+				Concurrency:        1,
+				TaskTimeoutSeconds: 120,
 			},
 		}
 		Expect(k8sClient.Create(ctx, knight)).To(Succeed())
@@ -200,7 +200,7 @@ var _ = Describe("MissionReconciler.publishBriefing", func() {
 		createKnight("brief-knight-b", []string{"malformed-subject"})
 		createRoundTable("brief-rt", "rt-dev")
 		mission := newMission("brief-m2", "brief-knight-b")
-		mission.Spec.RoundTableRef = "brief-rt"
+		mission.Spec.RoundTableRef = aiv1alpha1.LocalRef("brief-rt")
 
 		Expect(reconciler.publishBriefing(ctx, mission)).To(Succeed())
 		Expect(fake.subjects()).To(ConsistOf("rt-dev.tasks.operator.brief-knight-b"))

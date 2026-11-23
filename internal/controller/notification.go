@@ -157,7 +157,7 @@ func chainNotifyPayload(chain *aiv1alpha1.Chain) notify.Payload {
 	steps := make([]notify.StepSummary, 0, len(chain.Status.StepStatuses))
 	knightByStep := make(map[string]string, len(chain.Spec.Steps))
 	for _, s := range chain.Spec.Steps {
-		knightByStep[s.Name] = s.KnightRef
+		knightByStep[s.Name] = s.KnightRef.Name
 	}
 
 	var output, outputStep string
@@ -196,7 +196,7 @@ func chainNotifyPayload(chain *aiv1alpha1.Chain) notify.Payload {
 		Namespace:      chain.Namespace,
 		UID:            string(chain.UID),
 		Phase:          string(chain.Status.Phase),
-		RoundTableRef:  chain.Spec.RoundTableRef,
+		RoundTableRef:  aiv1alpha1.RefName(chain.Spec.RoundTableRef),
 		StartedAt:      chain.Status.StartedAt,
 		FinishedAt:     chain.Status.CompletedAt,
 		Steps:          steps,
@@ -232,7 +232,7 @@ func missionNotifyPayload(mission *aiv1alpha1.Mission) notify.Payload {
 		Namespace:      mission.Namespace,
 		UID:            string(mission.UID),
 		Phase:          phase,
-		RoundTableRef:  mission.Spec.RoundTableRef,
+		RoundTableRef:  aiv1alpha1.RefName(mission.Spec.RoundTableRef),
 		StartedAt:      mission.Status.StartedAt,
 		FinishedAt:     mission.Status.CompletedAt,
 		Output:         output,

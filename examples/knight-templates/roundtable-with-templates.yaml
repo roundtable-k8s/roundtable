@@ -19,7 +19,7 @@ spec:
   defaults:
     model: claude-sonnet-4-20250514
     image: ghcr.io/roundtable-k8s/pi-knight:latest
-    taskTimeout: 180
+    taskTimeoutSeconds: 180
     concurrency: 3
   
   # Reusable knight templates
@@ -35,7 +35,7 @@ spec:
       - vulnerability-scanning
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 2
-      taskTimeout: 300
+      taskTimeoutSeconds: 300
       nats:
         subjects: ["security-ops.tasks.security.>"]
     
@@ -49,7 +49,7 @@ spec:
       - privilege-escalation
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 1
-      taskTimeout: 600
+      taskTimeoutSeconds: 600
       nats:
         subjects: ["security-ops.tasks.security.>"]
     
@@ -63,7 +63,7 @@ spec:
       - markdown
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 4
-      taskTimeout: 120
+      taskTimeoutSeconds: 120
       nats:
         subjects: ["security-ops.tasks.research.>"]
     
@@ -78,7 +78,7 @@ spec:
       - cloud
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 3
-      taskTimeout: 180
+      taskTimeoutSeconds: 180
       nats:
         subjects: ["security-ops.tasks.infrastructure.>"]
   

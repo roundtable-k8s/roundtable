@@ -139,10 +139,11 @@ spec:
     resultsStream: fleet_a_results
     maxDeliver: 1
   concurrency: 1
-  taskTimeout: 60
+  taskTimeoutSeconds: 60
   resources:
-    memory: 128Mi
-    cpu: 100m
+    requests:
+      memory: 128Mi
+      cpu: 100m
 EOF
 echo "   ✅ Test knight created"
 echo ""

@@ -5,29 +5,32 @@ metadata:
   namespace: roundtable
 spec:
   description: "Multi-step security report — scan, analyze, summarize"
-  timeout: 3600
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 3600
   input: "Generate a weekly security report for our Kubernetes cluster"
 
   steps:
     - name: threat_scan
-      knightRef: galahad
-      prompt: |
+      knightRef: {name: galahad}
+      task: |
         Scan for recent CVEs affecting our stack:
         - Kubernetes, Flux, Cilium, Rook-Ceph
         - Check NIST NVD and GitHub Security Advisories
         Input: {{ .Input }}
 
     - name: infra_check
-      knightRef: tristan
-      prompt: |
+      dependsOn: [threat_scan]
+      knightRef: {name: tristan}
+      task: |
         Check cluster health and recent changes:
         - Pod restarts, failed HelmReleases, pending PVCs
         - Any drift from GitOps state
         Context from security scan: {{ .Steps.threat_scan.Output }}
 
     - name: final_report
-      knightRef: kay
-      prompt: |
+      dependsOn: [threat_scan, infra_check]
+      knightRef: {name: kay}
+      task: |
         Compile a concise weekly security report from:
 
         ## Threat Intelligence

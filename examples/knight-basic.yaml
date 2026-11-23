@@ -16,6 +16,6 @@ spec:
     subjects:
       - "fleet-a.tasks.security.>"
   concurrency: 2
-  taskTimeout: 300
+  taskTimeoutSeconds: 300
   workspace:
     size: 2Gi
