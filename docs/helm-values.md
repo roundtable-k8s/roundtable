@@ -76,10 +76,13 @@ The egress NetworkPolicy the operator creates for each mission's knights. The NA
 
 ### Invoke gateway
 
+`dashboard.gateway.tokenSecret` / `tokenKey` (default empty = the gateway's Secret and key) give the dashboard its own token.
+
 Synchronous HTTP API + MCP endpoint for knights (see [gateway.md](gateway.md)).
 On by default. With no `gateway.auth.existingSecret` the chart generates a token Secret
 (`<fullname>-gateway-token`, annotated `helm.sh/resource-policy: keep`, reused on upgrade via `lookup`)
-and passes `GATEWAY_URL` / `GATEWAY_TOKEN` to the dashboard. Set `gateway.enabled=false` to turn it off.
+and gives the dashboard `GATEWAY_URL` and `GATEWAY_TOKEN_FILE` (the token Secret mounted read-only, so rotation needs no restart).
+Upgrade note: installs that never set `gateway.enabled` start a gateway on upgrade. Set `gateway.enabled=false` to turn it off.
 Note: `helm template` has no cluster to `lookup`, so it renders a fresh random token each time.
 
 | Key | Type | Default | Description |

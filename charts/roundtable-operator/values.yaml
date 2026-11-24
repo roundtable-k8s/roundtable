@@ -149,6 +149,11 @@ dashboard:
   vault:
     enabled: true
     claimName: "roundtable-vault"
+  # Token the dashboard sends to the gateway (mounted read-only; the dashboard
+  # re-reads it on a 401). Empty = the gateway's own token Secret and key.
+  gateway:
+    tokenSecret: ""
+    tokenKey: ""
 
 # Invoke gateway: a synchronous HTTP API and MCP (streamable HTTP) endpoint in
 # front of the knights. Callers POST a task, the gateway publishes it on the

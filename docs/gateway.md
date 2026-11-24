@@ -83,6 +83,22 @@ gateway:
             kubernetes.io/metadata.name: ai
 ```
 
+The gateway is **on by default**. If you set no `gateway.auth.existingSecret`,
+the chart generates a random token into `<fullname>-gateway-token` (kept on
+uninstall, reused on upgrade) and the dashboard reads it from a mounted file
+(`GATEWAY_TOKEN_FILE`). Read it with:
+
+```bash
+kubectl -n roundtable get secret <fullname>-gateway-token \
+  -o jsonpath='{.data.token}' | base64 -d
+```
+
+To use your own token, create a Secret and set `gateway.auth.existingSecret`;
+to rotate, put old and new tokens on separate lines, switch callers, then drop
+the old one (mounted files update without restarts). Note `helm template`
+cannot `lookup` the cluster, so it renders a new token every run. Disable the
+gateway with `gateway.enabled=false`.
+
 ```bash
 kubectl -n roundtable create secret generic roundtable-gateway-token \
   --from-literal=token="$(openssl rand -hex 32)"
