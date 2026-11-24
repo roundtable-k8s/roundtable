@@ -158,9 +158,18 @@ stepStatuses:
       steps:                                # one entry per body step, latest round only
         - {name: fix,    iteration: 2, phase: Succeeded, taskId: ..., model: opus, output: ...}
         - {name: review, iteration: 2, phase: Succeeded, taskId: ..., output: ...}
+      history:                              # earlier rounds too, oldest first
+        - {round: 1, step: fix,    phase: Succeeded, taskId: ..., startedAt: ..., finishedAt: ..., outputSummary: ...}
+        - {round: 1, step: review, phase: Failed,    taskId: ..., error: ...}
+        - {round: 2, step: fix,    phase: Succeeded, taskId: ..., outputSummary: ...}
 ```
 
-The status never grows with the number of rounds. Outputs in status are
+`loop.history` has one entry each time a body task finishes (a retried attempt
+adds one per attempt), so the dashboard can show every round. It keeps only the
+last `min(maxIterations, 20)` rounds and truncates `outputSummary` to 1 KiB.
+`until` and templates still read the latest round only (`steps`).
+
+The status stays bounded as rounds grow. Outputs in status are
 truncated at 4000 characters. The full outputs are in the `chain-outputs` KV
 bucket under `<chain>.<loop>.<body>` (latest round) and `<chain>.<loop>` (loop
 output).

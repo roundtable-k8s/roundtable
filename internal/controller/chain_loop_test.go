@@ -40,6 +40,42 @@ import (
 
 // ---- unit tests ----
 
+func TestRecordLoopHistory(t *testing.T) {
+	ss := &aiv1alpha1.ChainStepStatus{Loop: &aiv1alpha1.ChainLoopStatus{MaxIterations: 3}}
+	for round := int32(1); round <= 5; round++ {
+		for _, name := range []string{"review", "fix"} {
+			bs := &aiv1alpha1.ChainLoopStepStatus{Name: name, Iteration: round, TaskID: fmt.Sprintf("%s-%d", name, round)}
+			if name == "fix" && round%2 == 0 {
+				bs.Error = "boom"
+				recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseFailed, "")
+				continue
+			}
+			recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseSucceeded, strings.Repeat("x", 5000))
+		}
+		if round == 3 && len(ss.Loop.History) != 6 {
+			t.Fatalf("3 rounds should leave 6 entries, got %d", len(ss.Loop.History))
+		}
+	}
+	h := ss.Loop.History
+	if len(h) != 6 || h[0].Round != 3 || h[len(h)-1].Round != 5 {
+		t.Fatalf("history not capped to last 3 rounds: %+v", h)
+	}
+	if h[1].Step != "fix" || h[1].Phase != aiv1alpha1.ChainStepPhaseSucceeded || !strings.HasPrefix(h[1].OutputSummary, strings.Repeat("x", loopHistorySummaryBytes)) || len(h[1].OutputSummary) > loopHistorySummaryBytes+32 {
+		t.Fatalf("unexpected entry: %+v", h[1])
+	}
+	if h[3].Phase != aiv1alpha1.ChainStepPhaseFailed || h[3].Error != "boom" || h[3].OutputSummary != "" {
+		t.Fatalf("unexpected failed entry: %+v", h[3])
+	}
+	// The cap never exceeds 20 rounds even for a larger maxIterations.
+	ss = &aiv1alpha1.ChainStepStatus{Loop: &aiv1alpha1.ChainLoopStatus{MaxIterations: 100}}
+	for round := int32(1); round <= 30; round++ {
+		recordLoopHistory(ss, &aiv1alpha1.ChainLoopStepStatus{Name: "a", Iteration: round}, aiv1alpha1.ChainStepPhaseSucceeded, "ok")
+	}
+	if len(ss.Loop.History) != loopHistoryMaxRounds || ss.Loop.History[0].Round != 11 {
+		t.Fatalf("expected last %d rounds, got %d starting at %d", loopHistoryMaxRounds, len(ss.Loop.History), ss.Loop.History[0].Round)
+	}
+}
+
 func TestEvalCondition(t *testing.T) {
 	vars := func() map[string]any {
 		return map[string]any{
