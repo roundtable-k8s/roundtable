@@ -64,6 +64,7 @@ const (
 	prFeedbackDefaultAttempts   = 3
 	prFeedbackDefaultEscalation = "needs-human"
 	prFeedbackDefaultFlake      = "flaky-test"
+	prFeedbackDefaultIgnore     = "merge-guard"
 	prFeedbackDefaultAuthor     = "dunce-bot[bot]"
 	prFeedbackMaxRecords        = 200
 	// prFeedbackStartTimeout is how long the feedback chain may take to pick
@@ -383,15 +384,30 @@ func isFailedConclusion(c string) bool {
 	return c == "failure" || c == "timed_out"
 }
 
+// ignoredChecks is the set of check names that never count as a failure
+// (spec.prFeedback.ignoreChecks). Unset means the default: merge-guard.
+func ignoredChecks(cfg *aiv1alpha1.PRFeedbackSpec) map[string]bool {
+	names := cfg.IgnoreChecks
+	if names == nil {
+		names = []string{prFeedbackDefaultIgnore}
+	}
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[sanitizeCheckName(n)] = true
+	}
+	return out
+}
+
 // detectFailure reports the pull request's current failure: failed checks
-// on its head commit first, else a failed newest merge-queue attempt.
-func detectFailure(pr *github.PullRequest, checks []github.CheckRun, mg *mergeGroup) *failure {
+// on its head commit first, else a failed newest merge-queue attempt. Checks
+// named in ignore are skipped.
+func detectFailure(pr *github.PullRequest, checks []github.CheckRun, mg *mergeGroup, ignore map[string]bool) *failure {
 	latest, passed := latestChecks(checks)
 	var names []string
 	url := ""
 	flaky := true
 	for name, cr := range latest {
-		if cr.Status != ghCompleted || !isFailedConclusion(cr.Conclusion) {
+		if cr.Status != ghCompleted || !isFailedConclusion(cr.Conclusion) || ignore[name] {
 			continue
 		}
 		names = append(names, name)
@@ -413,7 +429,12 @@ func detectFailure(pr *github.PullRequest, checks []github.CheckRun, mg *mergeGr
 	}
 	f := &failure{kind: failureKindMergeQueue, key: "mq:" + mg.sha, url: failed[0].HTMLURL}
 	for _, run := range failed {
-		f.checks = append(f.checks, sanitizeCheckName(run.Name))
+		if name := sanitizeCheckName(run.Name); !ignore[name] {
+			f.checks = append(f.checks, name)
+		}
+	}
+	if len(f.checks) == 0 {
+		return nil
 	}
 	sort.Strings(f.checks)
 	return f
@@ -517,7 +538,7 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 			f = detectConflict(full)
 		}
 		if f == nil {
-			f = detectFailure(pr, checks, mg)
+			f = detectFailure(pr, checks, mg, ignoredChecks(cfg))
 		}
 		if f == nil && rec != nil && rec.Phase == aiv1alpha1.PRFeedbackQueued {
 			// Fixed or re-run before its turn came.

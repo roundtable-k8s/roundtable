@@ -56,6 +56,7 @@ spec:
     # pollIntervalSeconds: 300
     # escalationLabel: needs-human
     # flakeLabel: flaky-test
+    # ignoreChecks: [merge-guard]              # policy checks, never a failure
     # fallbackKnightRef: {name: rt-operator}   # PRs no chain run opened
     # tokenSecretRef: {name: ..., key: ...}    # else spec.github.tokenSecretRef
 ```
@@ -183,6 +184,10 @@ queue decision rests on the git diff.
   `maxAttempts` rounds labels the PR `escalationLabel` and comments the
   failure; from then on the PR is skipped. Removing the label resets the
   rounds.
+- **Policy checks.** Checks named in `ignoreChecks` (default `[merge-guard]`) are
+  never a failure: no fix round, no flake issue. merge-guard passes or fails with
+  the PR's hold and ship-it state, not with the code, so it can go green then red
+  on one commit. An empty list ignores nothing.
 - **Flaky now.** If every failed check also passed on the same head commit
   (for example a re-run went red after a green run), the watcher opens a
   `Flaky check: <name>` issue labelled `flakeLabel` (or comments on the open

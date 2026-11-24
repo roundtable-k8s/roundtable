@@ -505,6 +505,18 @@ type PRFeedbackSpec struct {
 	// +kubebuilder:validation:MaxLength=50
 	// +optional
 	FlakeLabel string `json:"flakeLabel,omitempty"`
+
+	// ignoreChecks are check names the watcher never treats as a failure:
+	// no fix round, no flake issue. Use them for policy checks that fail
+	// until a human acts (merge-guard fails while a PR is on hold or has no
+	// ship-it verdict, then passes on the same commit). An empty list
+	// ignores nothing.
+	// +kubebuilder:default={"merge-guard"}
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:MaxLength=100
+	// +listType=set
+	// +optional
+	IgnoreChecks []string `json:"ignoreChecks,omitempty"`
 }
 
 // PRFeedbackPhase is where a watched pull request stands.
