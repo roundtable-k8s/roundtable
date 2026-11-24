@@ -361,16 +361,6 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "PRFeedback")
 		os.Exit(1)
 	}
-	if err := (&controller.SmokeReconciler{
-		Client:        mgr.GetClient(),
-		Recorder:      mgr.GetEventRecorderFor("smoke-controller"), //nolint:staticcheck // SA1019: see note above
-		GitHubBaseURL: githubAPIURL,
-		OperatorImage: os.Getenv("OPERATOR_IMAGE"),
-		DefaultImage:  defaultImage,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "Smoke")
-		os.Exit(1)
-	}
 	missionPlanner := &mission.Planner{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
