@@ -73,9 +73,9 @@ type IssuePickupReconciler struct {
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
 
-	// ensuredLabels remembers which repo + label set combinations already
-	// have their labels, so polls do not call GitHub for them again. A
-	// changed label name in the spec is a new key and is ensured once.
+	// ensuredLabels remembers which repo + label name combinations already
+	// exist, so polls do not call GitHub for them again. A changed label
+	// name in the spec is a new key and is ensured once.
 	ensuredLabels sync.Map
 }
 
@@ -303,25 +303,30 @@ func pickupLabelDefs(l pickupLabelSet) []struct{ name, color, description string
 }
 
 // ensureLabels creates the pickup labels the repo lacks. Existing labels are
-// left alone. Success is cached per repo + label set, so it only calls GitHub
-// the first time a repo or label name is seen (and again after a restart);
-// failures are reported and retried on the next poll.
+// left alone. Every label is attempted even if an earlier one fails; the
+// errors are reported together as one failure. Success is cached per repo +
+// label name, so GitHub is only called for a label the first time it is seen
+// (and again after a restart) and failed labels are retried on the next poll.
 func (r *IssuePickupReconciler) ensureLabels(ctx context.Context, gh *github.Client, repo string, labels pickupLabelSet, res *pickupResult) {
-	key := repo + "\x00" + labels.ready + "\x00" + labels.inProgress + "\x00" + labels.needsHuman
-	if _, ok := r.ensuredLabels.Load(key); ok {
-		return
-	}
+	var errs []error
 	for _, d := range pickupLabelDefs(labels) {
+		key := repo + "\x00" + d.name
+		if _, ok := r.ensuredLabels.Load(key); ok {
+			continue
+		}
 		created, err := gh.EnsureLabel(ctx, repo, d.name, d.color, d.description)
 		if err != nil {
-			res.fail("%s: ensure label %s: %v", repo, d.name, err)
-			return
+			errs = append(errs, fmt.Errorf("%s: %w", d.name, err))
+			continue
 		}
 		if created {
 			logf.FromContext(ctx).Info("Created label", "repo", repo, "label", d.name)
 		}
+		r.ensuredLabels.Store(key, struct{}{})
 	}
-	r.ensuredLabels.Store(key, struct{}{})
+	if err := errors.Join(errs...); err != nil {
+		res.fail("%s: ensure labels: %v", repo, strings.ReplaceAll(err.Error(), "\n", "; "))
+	}
 }
 
 // startChain creates the issue's Chain from the template, or re-runs a
