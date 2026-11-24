@@ -301,6 +301,7 @@ func main() {
 
 		KEDAEnabled:            kedaEnabled,
 		NATSMonitoringEndpoint: natsMonitoringEndpoint,
+		NATS:                   natsProvider,
 	}
 
 	// Create runtime backends
