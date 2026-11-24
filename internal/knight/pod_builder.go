@@ -191,7 +191,8 @@ func (b *PodBuilder) WithVault() *PodBuilder {
 	}
 
 	// PVC must be ReadOnly=false when writablePaths exist
-	pvcReadOnly := b.knight.Spec.Vault.ReadOnly
+	baseReadOnly := b.knight.Spec.Vault.ReadOnly == nil || *b.knight.Spec.Vault.ReadOnly
+	pvcReadOnly := baseReadOnly
 	if len(b.knight.Spec.Vault.WritablePaths) > 0 {
 		pvcReadOnly = false
 	}
@@ -210,7 +211,7 @@ func (b *PodBuilder) WithVault() *PodBuilder {
 	b.mounts = append(b.mounts, corev1.VolumeMount{
 		Name:      "vault",
 		MountPath: "/vault",
-		ReadOnly:  b.knight.Spec.Vault.ReadOnly,
+		ReadOnly:  baseReadOnly,
 	})
 
 	// Writable subpaths override the read-only base

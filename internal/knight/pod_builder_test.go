@@ -174,7 +174,7 @@ var _ = Describe("PodBuilder", func() {
 		It("adds read-only vault mount", func() {
 			knight.Spec.Vault = &aiv1alpha1.KnightVault{
 				ClaimName: "my-vault",
-				ReadOnly:  true,
+				ReadOnly:  new(true),
 			}
 			builder.WithVault()
 
@@ -191,7 +191,7 @@ var _ = Describe("PodBuilder", func() {
 		It("adds writable subpaths correctly", func() {
 			knight.Spec.Vault = &aiv1alpha1.KnightVault{
 				ClaimName:     "my-vault",
-				ReadOnly:      true,
+				ReadOnly:      new(true),
 				WritablePaths: []string{"logs/", "temp"},
 			}
 			builder.WithVault()
@@ -216,9 +216,27 @@ var _ = Describe("PodBuilder", func() {
 			Expect(builder.mounts[2].ReadOnly).To(BeFalse())
 		})
 
+		It("treats an unset readOnly as read-only with a single mount", func() {
+			knight.Spec.Vault = &aiv1alpha1.KnightVault{ClaimName: "my-vault"}
+			builder.WithVault()
+
+			Expect(builder.volumes[0].PersistentVolumeClaim.ReadOnly).To(BeTrue())
+			Expect(builder.mounts).To(HaveLen(1))
+			Expect(builder.mounts[0].ReadOnly).To(BeTrue())
+		})
+
+		It("honours readOnly false", func() {
+			knight.Spec.Vault = &aiv1alpha1.KnightVault{ClaimName: "my-vault", ReadOnly: new(false)}
+			builder.WithVault()
+
+			Expect(builder.volumes[0].PersistentVolumeClaim.ReadOnly).To(BeFalse())
+			Expect(builder.mounts).To(HaveLen(1))
+			Expect(builder.mounts[0].ReadOnly).To(BeFalse())
+		})
+
 		It("uses default vault claim name", func() {
 			knight.Spec.Vault = &aiv1alpha1.KnightVault{
-				ReadOnly: true,
+				ReadOnly: new(true),
 			}
 			builder.WithVault()
 

@@ -151,8 +151,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(knight, knightFinalizer) {
+		// Merge patch so the operator never rewrites user-owned spec fields.
+		base := knight.DeepCopy()
 		controllerutil.AddFinalizer(knight, knightFinalizer)
-		if err := r.Update(ctx, knight); err != nil {
+		if err := r.Patch(ctx, knight, client.MergeFrom(base)); err != nil {
 			return ctrl.Result{}, err
 		}
 	}

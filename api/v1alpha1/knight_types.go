@@ -415,13 +415,12 @@ type KnightVault struct {
 	// +optional
 	ClaimName string `json:"claimName,omitempty"`
 
-	// readOnly mounts the base vault as read-only.
-	// +kubebuilder:default=true
+	// readOnly mounts the base vault as read-only. Unset means true.
 	// +optional
-	ReadOnly bool `json:"readOnly,omitempty"`
+	ReadOnly *bool `json:"readOnly,omitempty"`
 
 	// writablePaths are subpaths within the vault the knight can write to.
-	// +kubebuilder:default={"Briefings/","Roundtable/"}
+	// There is no default: an absent or empty list means no writable paths.
 	// +optional
 	WritablePaths []string `json:"writablePaths,omitempty"`
 }
