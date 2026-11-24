@@ -82,6 +82,9 @@ type ChainReconciler struct {
 	mu                 sync.Mutex
 	// cronEntries maps chain namespace/name to cron entry ID
 	cronEntries map[string]cron.EntryID
+	// cronSpecs maps chain namespace/name to the effective cron spec (with
+	// time zone) its entry was registered with, so edits re-register it.
+	cronSpecs map[string]string
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -217,6 +220,23 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Message:            err.Error(),
 			ObservedGeneration: chain.Generation,
 		})
+		chain.Status.ObservedGeneration = chain.Generation
+		if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
+			log.Error(statusErr, "Failed to update status during validation error")
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Validate schedule and time zone
+	if _, err := parseSchedule(chain); err != nil {
+		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
+			Type:               aiv1alpha1.ConditionChainValid,
+			Status:             metav1.ConditionFalse,
+			Reason:             aiv1alpha1.ReasonInvalidSchedule,
+			Message:            err.Error(),
+			ObservedGeneration: chain.Generation,
+		})
+		chain.Status.NextScheduledAt = nil
 		chain.Status.ObservedGeneration = chain.Generation
 		if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
 			log.Error(statusErr, "Failed to update status during validation error")
@@ -1347,8 +1367,16 @@ func (r *ChainReconciler) reconcileSchedule(ctx context.Context, chain *aiv1alph
 
 	if chain.Spec.Schedule == "" || chain.Spec.Suspend {
 		r.removeCronEntry(types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name})
+		chain.Status.NextScheduledAt = nil
 		return false
 	}
+
+	sched, err := parseSchedule(chain)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "Invalid schedule", "schedule", chain.Spec.Schedule)
+		return false
+	}
+	spec := cronSpec(chain)
 
 	r.mu.Lock()
 
@@ -1357,10 +1385,19 @@ func (r *ChainReconciler) reconcileSchedule(ctx context.Context, chain *aiv1alph
 		r.cronEntries = make(map[string]cron.EntryID)
 		r.cron.Start()
 	}
+	if r.cronSpecs == nil {
+		r.cronSpecs = make(map[string]string)
+	}
+
+	// Re-register when the schedule or time zone was edited.
+	if id, ok := r.cronEntries[key]; ok && r.cronSpecs[key] != spec {
+		r.cron.Remove(id)
+		delete(r.cronEntries, key)
+	}
 
 	if _, ok := r.cronEntries[key]; !ok {
 		nn := types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}
-		entryID, err := r.cron.AddFunc(chain.Spec.Schedule, func() {
+		entryID, err := r.cron.AddFunc(spec, func() {
 			r.triggerChain(context.Background(), nn)
 		})
 		if err != nil {
@@ -1369,10 +1406,48 @@ func (r *ChainReconciler) reconcileSchedule(ctx context.Context, chain *aiv1alph
 			return false
 		}
 		r.cronEntries[key] = entryID
+		r.cronSpecs[key] = spec
 	}
 	r.mu.Unlock()
 
+	next := metav1.NewTime(sched.Next(time.Now()))
+	chain.Status.NextScheduledAt = &next
+
 	return r.missedSchedule(chain)
+}
+
+// cronSpec returns the cron expression prefixed with the chain's time zone
+// (robfig/cron's "CRON_TZ=" syntax). An unset zone means UTC.
+func cronSpec(chain *aiv1alpha1.Chain) string {
+	tz := chain.Spec.TimeZone
+	if tz == "" {
+		tz = "UTC"
+	}
+	return "CRON_TZ=" + tz + " " + chain.Spec.Schedule
+}
+
+// parseSchedule parses the chain's schedule in its time zone. It returns a
+// nil schedule and no error when the chain has no schedule.
+func parseSchedule(chain *aiv1alpha1.Chain) (cron.Schedule, error) {
+	if chain.Spec.TimeZone != "" {
+		if chain.Spec.TimeZone == "Local" {
+			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\"", chain.Spec.TimeZone)
+		}
+		if _, err := time.LoadLocation(chain.Spec.TimeZone); err != nil {
+			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\": %w", chain.Spec.TimeZone, err)
+		}
+	}
+	if chain.Spec.Schedule == "" {
+		return nil, nil
+	}
+	if strings.Contains(chain.Spec.Schedule, "TZ=") {
+		return nil, fmt.Errorf("invalid schedule %q: set the time zone with spec.timeZone instead of a TZ= prefix", chain.Spec.Schedule)
+	}
+	sched, err := cron.ParseStandard(cronSpec(chain))
+	if err != nil {
+		return nil, fmt.Errorf("invalid schedule %q: %w", chain.Spec.Schedule, err)
+	}
+	return sched, nil
 }
 
 // missedSchedule reports whether the chain's next fire after lastScheduledAt
@@ -1383,8 +1458,8 @@ func (r *ChainReconciler) missedSchedule(chain *aiv1alpha1.Chain) bool {
 		return false
 	}
 
-	sched, err := cron.ParseStandard(chain.Spec.Schedule)
-	if err != nil {
+	sched, err := parseSchedule(chain)
+	if err != nil || sched == nil {
 		return false
 	}
 
@@ -1460,6 +1535,7 @@ func (r *ChainReconciler) removeCronEntry(nn types.NamespacedName) {
 			r.cron.Remove(id)
 		}
 		delete(r.cronEntries, key)
+		delete(r.cronSpecs, key)
 	}
 }
 

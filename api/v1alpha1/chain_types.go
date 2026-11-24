@@ -65,6 +65,15 @@ type ChainSpec struct {
 	// +optional
 	Schedule string `json:"schedule,omitempty"`
 
+	// timeZone is the IANA time zone name (e.g. "America/New_York") the
+	// schedule is evaluated in, so "0 7 * * *" fires at 07:00 local time on
+	// both sides of a daylight-saving change. Defaults to UTC when unset.
+	// "Local" is not accepted.
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$`
+	// +optional
+	TimeZone string `json:"timeZone,omitempty"`
+
 	// startingDeadlineSeconds bounds catch-up of missed scheduled runs.
 	// If the controller was down when a scheduled run should have fired, the
 	// run is triggered late only if fewer than this many seconds have passed
@@ -792,6 +801,11 @@ type ChainStatus struct {
 	// +optional
 	LastScheduledAt *metav1.Time `json:"lastScheduledAt,omitempty"`
 
+	// nextScheduledAt is the next time the cron schedule will fire, evaluated
+	// in spec.timeZone. Unset when the chain has no schedule or is suspended.
+	// +optional
+	NextScheduledAt *metav1.Time `json:"nextScheduledAt,omitempty"`
+
 	// runId uniquely identifies the current (or most recent) chain run.
 	// It is embedded in task IDs and NATS KV entries so results produced by
 	// a previous run can never be attributed to the current one.
@@ -824,6 +838,8 @@ type ChainStatus struct {
 // +kubebuilder:resource:shortName=ch,categories=roundtable
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
+// +kubebuilder:printcolumn:name="TimeZone",type=string,JSONPath=`.spec.timeZone`
+// +kubebuilder:printcolumn:name="Next",type=date,JSONPath=`.status.nextScheduledAt`
 // +kubebuilder:printcolumn:name="Runs",type=integer,JSONPath=`.status.runsCompleted`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
