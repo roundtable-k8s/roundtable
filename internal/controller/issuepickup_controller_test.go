@@ -66,14 +66,14 @@ type fakeGitHub struct {
 	failAutoMerge bool
 }
 
-func (f *fakeGitHub) setPR(n int, pr github.PullRequest) {
+func (f *fakeGitHub) setPR(pr github.PullRequest) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.prState == nil {
 		f.prState = map[string]*github.PullRequest{}
 	}
-	pr.Number = n
-	pr.NodeID = "acme/widgets#" + strconv.Itoa(n)
+	pr.Number = 7
+	pr.NodeID = "acme/widgets#7"
 	f.prState[pr.NodeID] = &pr
 }
 
@@ -636,7 +636,7 @@ var _ = Describe("IssuePickup controller", func() {
 		}
 
 		It("queues an open PR the merge step left alone", func() {
-			gh.setPR(7, github.PullRequest{State: "open"})
+			gh.setPR(github.PullRequest{State: "open"})
 			name := start()
 			tick()
 			Expect(gh.autoMerged).To(Equal([]string{"acme/widgets#7"}))
@@ -649,7 +649,7 @@ var _ = Describe("IssuePickup controller", func() {
 
 		It("accepts merged and already-queued PRs untouched", func() {
 			q := github.PullRequest{State: "open", AutoMerge: &struct{}{}}
-			gh.setPR(7, q)
+			gh.setPR(q)
 			name := start()
 			tick()
 			Expect(gh.autoMerged).To(BeEmpty())
@@ -658,7 +658,7 @@ var _ = Describe("IssuePickup controller", func() {
 		})
 
 		It("labels the issue needs-human when the PR is closed unmerged", func() {
-			gh.setPR(7, github.PullRequest{State: "closed"})
+			gh.setPR(github.PullRequest{State: "closed"})
 			name := start()
 			tick()
 			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
@@ -668,7 +668,7 @@ var _ = Describe("IssuePickup controller", func() {
 		})
 
 		It("labels the issue needs-human when the PR cannot be queued", func() {
-			gh.setPR(7, github.PullRequest{State: "open"})
+			gh.setPR(github.PullRequest{State: "open"})
 			gh.failAutoMerge = true
 			start()
 			tick()
