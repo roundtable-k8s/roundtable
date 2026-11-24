@@ -21,6 +21,8 @@ import (
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 // serverVersion is reported in the MCP initialize handshake.
@@ -50,6 +52,18 @@ type GetTaskInput struct {
 // ListTasksOutput is the output of the list_tasks tool.
 type ListTasksOutput struct {
 	Tasks []*TaskRecord `json:"tasks"`
+}
+
+// GetMissionInput is the input of the get_mission tool.
+type GetMissionInput struct {
+	Name        string `json:"name" jsonschema:"name of the mission (returned by start_mission)"`
+	Namespace   string `json:"namespace,omitempty" jsonschema:"namespace of the mission; omit for the default"`
+	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the mission to finish before returning (default 0)"`
+}
+
+// ListMissionsOutput is the output of the list_missions tool.
+type ListMissionsOutput struct {
+	Missions []*MissionView `json:"missions"`
 }
 
 // NewMCPServer builds the MCP server exposing the gateway's operations.
@@ -99,7 +113,66 @@ func NewMCPServer(svc *Service) *mcp.Server {
 		tasks, err := svc.ListTasks(ctx, in)
 		return nil, ListTasksOutput{Tasks: tasks}, err
 	})
+	if svc.MissionsEnabled() {
+		addMissionTools(s, svc)
+	}
 	return s
+}
+
+func addMissionTools(s *mcp.Server, svc *Service) {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "start_mission",
+		Description: "Launch a mission: an objective, a RoundTable and a cost budget. With a planner, a planner knight " +
+			"breaks the objective into chains over standing knights and the RoundTable's knight templates; otherwise " +
+			"the listed existing chains run. Returns the mission; poll get_mission with its name until done is true.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in StartMissionRequest) (*mcp.CallToolResult, *MissionView, error) {
+		v, err := svc.StartMission(ctx, in)
+		if err != nil {
+			return nil, nil, err
+		}
+		return missionResult(v), v, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_mission",
+		Description: "Get a mission's phase, planning result, chain and knight progress, cost and, once done, its result.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetMissionInput) (*mcp.CallToolResult, *MissionView, error) {
+		v, err := svc.GetMission(ctx, in.Namespace, in.Name, in.WaitSeconds)
+		if err != nil {
+			return nil, nil, err
+		}
+		return missionResult(v), v, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_missions",
+		Description: "List missions, newest first, optionally only those in one phase.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MissionFilter) (*mcp.CallToolResult, ListMissionsOutput, error) {
+		missions, err := svc.ListMissions(ctx, in)
+		return nil, ListMissionsOutput{Missions: missions}, err
+	})
+}
+
+// missionResult puts a finished mission's result first in the text content
+// and marks failed or expired missions as tool errors.
+func missionResult(v *MissionView) *mcp.CallToolResult {
+	id := v.Namespace + "/" + v.Name
+	if !v.Done {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Mission " + id + " is " + v.Phase + ". Call get_mission with name " + v.Name + " later."}}}
+	}
+	failed := v.Phase == string(aiv1alpha1.MissionPhaseFailed) || v.Phase == string(aiv1alpha1.MissionPhaseExpired)
+	for _, c := range v.Conditions {
+		if c.Type == aiv1alpha1.ConditionMissionComplete && c.Reason != "" && c.Reason != aiv1alpha1.ReasonMissionSucceeded {
+			failed = true
+		}
+	}
+	text := v.Result
+	if text == "" {
+		text = "Mission " + id + " finished: " + v.Phase
+	}
+	return &mcp.CallToolResult{IsError: failed, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }
 
 // taskResult puts a finished task's output first in the text content (what a

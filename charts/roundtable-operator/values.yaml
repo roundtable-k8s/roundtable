@@ -211,6 +211,21 @@ gateway:
     limits:
       memory: 128Mi
   extraArgs: []
+  # Mission endpoints (POST/GET/DELETE /v1/missions and the start_mission,
+  # get_mission and list_missions MCP tools). Callers send a restricted
+  # request (objective, table, budget, planner knight, existing knights and
+  # chains): never images, Secrets, pod specs or RoundTable templates. When
+  # enabled, the gateway gets create/delete on Missions in its namespace and
+  # allowedNamespaces (a ClusterRole if allowedNamespaces holds "*").
+  missions:
+    enabled: true
+    # Upper bound on a mission's costBudgetUSD (which callers must set).
+    maxBudgetUSD: 10
+    # Upper bounds on ttlSeconds and timeoutSeconds.
+    maxTTLSeconds: 86400
+    maxTimeoutSeconds: 21600
+    # Let callers set planner.allowSkillGeneration.
+    allowSkillGeneration: false
 
 # Knights to create alongside the operator
 # Example:

@@ -108,4 +108,5 @@ var (
 	ErrInvalid     = errors.New("invalid request")
 	ErrUnavailable = errors.New("unavailable")
 	ErrBusy        = errors.New("too many in-flight invocations")
+	ErrForbidden   = errors.New("forbidden")
 )

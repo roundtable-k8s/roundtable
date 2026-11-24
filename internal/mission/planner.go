@@ -508,6 +508,9 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	if !mission.Spec.Planner.AllowSkillGeneration {
 		sb.WriteString("- Skill Generation: Not allowed (use existing skills only)\n")
 	}
+	if templatesOnly(mission) {
+		sb.WriteString("- Ephemeral knights: templateName only (ephemeralSpec, specOverrides.env and specOverrides.tools are rejected)\n")
+	}
 	if mission.Spec.TimeoutSeconds > 0 {
 		sb.WriteString(fmt.Sprintf("- Mission Timeout: %d seconds\n", mission.Spec.TimeoutSeconds))
 	}
@@ -688,6 +691,29 @@ func extractJSON(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// templatesOnly reports whether the mission's plan may only build ephemeral
+// knights from templates. Missions created through the invoke gateway are
+// restricted this way so that a caller can't reach an image, a Secret or a
+// pod spec through the planner (e.g. by prompt-injecting the objective).
+func templatesOnly(mission *aiv1alpha1.Mission) bool {
+	return mission.Labels[aiv1alpha1.LabelCreatedBy] == aiv1alpha1.CreatedByGateway
+}
+
+// checkTemplatesOnly rejects a planned knight that sets its own spec, env
+// (which can reference Secrets) or tools on a templates-only mission.
+func checkTemplatesOnly(mission *aiv1alpha1.Mission, k PlannerKnight) error {
+	if !templatesOnly(mission) {
+		return nil
+	}
+	if k.EphemeralSpec != nil {
+		return fmt.Errorf("knight %q: ephemeralSpec is not allowed for gateway-created missions; use templateName", k.Name)
+	}
+	if o := k.SpecOverrides; o != nil && (len(o.Env) > 0 || o.Tools != nil) {
+		return fmt.Errorf("knight %q: specOverrides.env and specOverrides.tools are not allowed for gateway-created missions", k.Name)
+	}
+	return nil
+}
+
 // validatePlan validates the planner output against schema and constraints.
 func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission, plan *PlannerOutput) error {
 	log := logf.FromContext(ctx)
@@ -736,6 +762,10 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 			return fmt.Errorf("duplicate knight name: %s", k.Name)
 		}
 		knightNames[k.Name] = true
+
+		if err := checkTemplatesOnly(mission, k); err != nil {
+			return err
+		}
 
 		if !k.Ephemeral {
 			knight := &aiv1alpha1.Knight{}

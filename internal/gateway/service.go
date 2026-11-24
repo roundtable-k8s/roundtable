@@ -30,6 +30,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -66,6 +67,9 @@ type Options struct {
 	// DefaultKnightImage is the operator's DEFAULT_KNIGHT_IMAGE, used to
 	// infer a knight's runtime for model validation.
 	DefaultKnightImage string
+	// Missions configures the mission endpoints (served when
+	// Service.Missions is set).
+	Missions MissionOptions
 }
 
 // Service implements the gateway operations shared by the HTTP API and MCP.
@@ -74,6 +78,9 @@ type Service struct {
 	Bus      Bus
 	Opts     Options
 	Log      logr.Logger
+	// Missions creates, reads and deletes Missions. nil disables the
+	// mission endpoints.
+	Missions client.Client
 
 	now      func() time.Time
 	inflight chan struct{}
@@ -87,6 +94,7 @@ func NewService(resolver *Resolver, bus Bus, opts Options, log logr.Logger) *Ser
 	if opts.MaxTimeout < opts.DefaultTimeout {
 		opts.MaxTimeout = opts.DefaultTimeout
 	}
+	opts.Missions.defaults()
 	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now}
 	if opts.MaxInFlight > 0 {
 		s.inflight = make(chan struct{}, opts.MaxInFlight)

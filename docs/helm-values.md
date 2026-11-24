@@ -105,6 +105,11 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.networkPolicy.from` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed in (default: release namespace). An empty list allows any source. |
 | `gateway.resources` | object | 20m/32Mi req, 128Mi limit | Resources |
 | `gateway.extraArgs` | list | `[]` | Extra gateway flags |
+| `gateway.missions.enabled` | bool | `true` | Serve the mission endpoints and grant the gateway create/delete on Missions in its namespaces ([gateway.md](gateway.md#missions)) |
+| `gateway.missions.maxBudgetUSD` | number | `10` | Upper bound on a mission's `costBudgetUSD` |
+| `gateway.missions.maxTTLSeconds` | int | `86400` | Upper bound on a mission's `ttlSeconds` |
+| `gateway.missions.maxTimeoutSeconds` | int | `21600` | Upper bound on a mission's `timeoutSeconds` |
+| `gateway.missions.allowSkillGeneration` | bool | `false` | Let callers set `planner.allowSkillGeneration` |
 
 ### Knights
 

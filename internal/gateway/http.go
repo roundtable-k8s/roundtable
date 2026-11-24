@@ -45,6 +45,12 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	api.HandleFunc("POST /v1/knights/{name}/invoke", svc.handleInvoke)
 	api.HandleFunc("GET /v1/tasks", svc.handleListTasks)
 	api.HandleFunc("GET /v1/tasks/{taskId}", svc.handleGetTask)
+	if svc.MissionsEnabled() {
+		api.HandleFunc("POST /v1/missions", svc.handleStartMission)
+		api.HandleFunc("GET /v1/missions", svc.handleListMissions)
+		api.HandleFunc("GET /v1/missions/{namespace}/{name}", svc.handleGetMission)
+		api.HandleFunc("DELETE /v1/missions/{namespace}/{name}", svc.handleDeleteMission)
+	}
 	api.Handle("/mcp", MCPHandler(svc))
 
 	mux := http.NewServeMux()
@@ -113,6 +119,88 @@ func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
+func (s *Service) handleStartMission(w http.ResponseWriter, r *http.Request) {
+	var req StartMissionRequest
+	// Unknown fields are rejected: that is what keeps ephemeralSpec, secrets,
+	// roundTableTemplate, images and the like out of gateway missions.
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+		return
+	}
+	if dec.More() {
+		writeError(w, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid))
+		return
+	}
+	v, err := s.StartMission(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/missions/"+v.Namespace+"/"+v.Name)
+	code := http.StatusCreated
+	if !v.Done && req.WaitSeconds != nil && *req.WaitSeconds > 0 {
+		code = http.StatusAccepted
+	}
+	writeJSON(w, code, v)
+}
+
+func (s *Service) handleGetMission(w http.ResponseWriter, r *http.Request) {
+	wait, err := queryInt(r, "waitSeconds")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	v, err := s.GetMission(r.Context(), r.PathValue("namespace"), r.PathValue("name"), wait)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Service) handleListMissions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := MissionFilter{Namespace: q.Get("namespace"), Phase: q.Get("phase")}
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if limit != nil {
+		f.Limit = *limit
+	}
+	missions, err := s.ListMissions(r.Context(), f)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"missions": missions})
+}
+
+func (s *Service) handleDeleteMission(w http.ResponseWriter, r *http.Request) {
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	if err := s.DeleteMission(r.Context(), ns, name); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": ns + "/" + name})
+}
+
+// queryInt parses an optional integer query parameter.
+func queryInt(r *http.Request, key string) (*int, error) {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrInvalid, key, err)
+	}
+	return &n, nil
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -124,6 +212,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrInvalid):
 		code = http.StatusBadRequest
+	case errors.Is(err, ErrForbidden):
+		code = http.StatusForbidden
 	case errors.Is(err, ErrNotFound):
 		code = http.StatusNotFound
 	case errors.Is(err, ErrBusy):
