@@ -121,7 +121,7 @@ func wakeDeferredSteps(chain *aiv1alpha1.Chain, now time.Time) *metav1.Time {
 		}
 		if ss.DeferUntil == nil || !ss.DeferUntil.After(now) {
 			// The refused plan window has reset: run the step again, on its
-			// primary knight (a fallback re-run keeps its fallback knight).
+			// primary knight (deferral exhausted the fallback too).
 			ss.Phase = aiv1alpha1.ChainStepPhasePending
 			ss.Reason = ""
 			ss.Error = ""

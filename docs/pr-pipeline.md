@@ -65,6 +65,11 @@ instead of `needs-human`. Issue pickup counts a quota-deferred chain as
 active, so it holds its slot and no new chain starts for it until after the
 reset.
 
+One refusal shape still escalates: a refusal message that carries no reset
+time (e.g. `"Task refused: Claude plan five_hour limit reached"` with no
+`(resets ...)` suffix — the SDK normally supplies the reset time, so this is
+rare) is not recognized as a quota refusal and the step fails as before.
+
 Lead steps set no `model`, so the lead runs its own default model whatever its
 runtime. Model aliases are single-valued per RoundTable and validated against
 the runtime of the knight running the step, so one alias cannot suit both a

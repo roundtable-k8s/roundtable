@@ -56,15 +56,12 @@ type quotaFakeNATS struct {
 }
 
 func (f *quotaFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
-	if err := f.PublishJSON(subject, v); err != nil {
-		return 0, err
-	}
-	if p, ok := v.(natspkg.TaskPayload); ok {
-		f.tasks = append(f.tasks, p)
+	seq, err := f.fanoutFakeNATS.PublishJSONSeq(subject, v)
+	if err != nil {
+		return seq, err
 	}
 	f.subjects = append(f.subjects, subject)
-	f.seq++
-	return f.seq, nil
+	return seq, nil
 }
 
 func (f *quotaFakeNATS) taskSubjects() []string { return f.subjects }
@@ -289,6 +286,47 @@ var _ = Describe("Chain plan-quota refusals (#321)", func() {
 		finish(fake.tasks[2], &natspkg.TaskResult{Output: "fixed, Verdict: ship it"})
 		reconcileN(2)
 		Expect(status(get(), "fixloop").Loop.Outcome).To(Equal(aiv1alpha1.ChainLoopConverged))
+	})
+
+	It("dispatches the round after a fallback-rescued round to the primary coder with its model alias", func() {
+		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
+			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
+			Spec: aiv1alpha1.ChainSpec{
+				RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 86400,
+				Steps: []aiv1alpha1.ChainStep{
+					{Name: "review", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "review", TimeoutSeconds: 120},
+					{Name: "fixloop", DependsOn: []string{"review"},
+						FallbackRef: corev1.LocalObjectReference{Name: piKnight},
+						Loop: &aiv1alpha1.ChainLoop{
+							From: "review", Until: `last.output.contains("Verdict: ship it")`, MaxIterations: 3, OnExhausted: aiv1alpha1.ChainLoopExhaustedContinue,
+							Steps: []aiv1alpha1.ChainLoopStep{
+								{Name: "fix", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Model: "deep", Task: "fix {{ .Loop.Last.Output }}"},
+							},
+						}},
+				},
+			},
+		})).To(Succeed())
+		reconcileN(3)
+		annotate(aiv1alpha1.AnnotationChainRun, "go")
+		reconcileN(2)
+		finish(fake.tasks[0], &natspkg.TaskResult{Output: "PRs: https://github.com/o/r/pull/1\nVerdict: needs changes"})
+		reconcileN(1)
+		Expect(fake.taskSubjects()).To(HaveLen(2)) // fix round 1 on the claude coder
+
+		// Round 1 is quota-refused and rescued by the fallback coder.
+		finish(fake.tasks[1], quotaRefusalResult(time.Now().Add(time.Hour)))
+		reconcileN(1)
+		Expect(fake.taskSubjects()).To(HaveLen(3))
+		Expect(fake.taskSubjects()[2]).To(Equal(natspkg.TaskSubject(prefix, "ops", piKnight)))
+
+		// Round 1 does not converge: the next round goes back to the primary
+		// coder with its model alias — the fallback does not stick.
+		finish(fake.tasks[2], &natspkg.TaskResult{Output: "fixed, Verdict: needs changes"})
+		reconcileN(1)
+		Expect(fake.taskSubjects()).To(HaveLen(4))
+		Expect(fake.taskSubjects()[3]).To(Equal(natspkg.TaskSubject(prefix, "ops", claudeKnight)))
+		Expect(payloadAt(3)).To(HaveKeyWithValue("model", "opus"))
+		Expect(status(get(), "fixloop").Loop.Iteration).To(Equal(int32(2)))
 	})
 
 	It("defers a quota-refused step until the reset and requeues then, without escalating", func() {

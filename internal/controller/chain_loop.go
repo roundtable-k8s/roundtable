@@ -636,11 +636,14 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 	bs := &ls.Steps[idx]
 
 	if bs.Iteration != ls.Iteration {
-		// First attempt in this round.
+		// First attempt in this round: back to the primary knight (a fallback
+		// only sticks for re-runs within the same round, so the primary's
+		// model alias applies again from the next round on).
 		bs.Iteration = ls.Iteration
 		bs.Retries = 0
 		bs.Error = ""
 		bs.CompletedAt = nil
+		bs.Knight = ""
 		bs.Phase = aiv1alpha1.ChainStepPhasePending
 	} else if bs.Retries > 0 && bs.CompletedAt != nil {
 		if rp := stepRetryPolicy(chain, &aiv1alpha1.ChainStep{Retry: body.Retry}); rp != nil &&
