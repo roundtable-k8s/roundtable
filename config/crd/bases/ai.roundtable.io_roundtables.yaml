@@ -1083,6 +1083,42 @@ spec:
                           items:
                             type: string
                           type: array
+                        flakes:
+                          description: |-
+                            flakes adds packages from Nix flakes outside nixpkgs to the same tools
+                            image as nix. Each ref must be pinned to a commit, because the image is
+                            rebuilt only when the spec changes; a branch name would never refresh.
+                          items:
+                            description: KnightToolsFlake selects packages from one
+                              Nix flake for the tools image.
+                            properties:
+                              packages:
+                                description: packages are output names under the flake's
+                                  packages.<system> (x86_64-linux).
+                                items:
+                                  maxLength: 128
+                                  pattern: ^[A-Za-z0-9_][A-Za-z0-9_.+-]*$
+                                  type: string
+                                maxItems: 64
+                                minItems: 1
+                                type: array
+                                x-kubernetes-list-type: atomic
+                              ref:
+                                description: |-
+                                  ref is a flake reference pinned to a commit, e.g.
+                                  github:roundtable-k8s/roundtable/<40-hex-rev> or
+                                  git+https://host/repo.git?rev=<40-hex-rev>. Branch names and tags are
+                                  rejected.
+                                maxLength: 512
+                                pattern: ^((github|gitlab|sourcehut):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}(\?dir=[A-Za-z0-9_./-]+)?|git\+(https|ssh)://[A-Za-z0-9_.@:/-]+\?([A-Za-z0-9_.=/-]+&)*rev=[0-9a-f]{40}(&[A-Za-z0-9_.=/-]+)*)$
+                                type: string
+                            required:
+                            - packages
+                            - ref
+                            type: object
+                          maxItems: 16
+                          type: array
+                          x-kubernetes-list-type: atomic
                         mise:
                           description: mise is a list of tools to install via mise
                             (e.g., "shodan", "kubectl").
@@ -2010,6 +2046,42 @@ spec:
                             items:
                               type: string
                             type: array
+                          flakes:
+                            description: |-
+                              flakes adds packages from Nix flakes outside nixpkgs to the same tools
+                              image as nix. Each ref must be pinned to a commit, because the image is
+                              rebuilt only when the spec changes; a branch name would never refresh.
+                            items:
+                              description: KnightToolsFlake selects packages from
+                                one Nix flake for the tools image.
+                              properties:
+                                packages:
+                                  description: packages are output names under the
+                                    flake's packages.<system> (x86_64-linux).
+                                  items:
+                                    maxLength: 128
+                                    pattern: ^[A-Za-z0-9_][A-Za-z0-9_.+-]*$
+                                    type: string
+                                  maxItems: 64
+                                  minItems: 1
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                ref:
+                                  description: |-
+                                    ref is a flake reference pinned to a commit, e.g.
+                                    github:roundtable-k8s/roundtable/<40-hex-rev> or
+                                    git+https://host/repo.git?rev=<40-hex-rev>. Branch names and tags are
+                                    rejected.
+                                  maxLength: 512
+                                  pattern: ^((github|gitlab|sourcehut):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}(\?dir=[A-Za-z0-9_./-]+)?|git\+(https|ssh)://[A-Za-z0-9_.@:/-]+\?([A-Za-z0-9_.=/-]+&)*rev=[0-9a-f]{40}(&[A-Za-z0-9_.=/-]+)*)$
+                                  type: string
+                              required:
+                              - packages
+                              - ref
+                              type: object
+                            maxItems: 16
+                            type: array
+                            x-kubernetes-list-type: atomic
                           mise:
                             description: mise is a list of tools to install via mise
                               (e.g., "shodan", "kubectl").

@@ -81,6 +81,21 @@ spec:
 
 The operator reconciles this into a Deployment, PVC, ConfigMaps, NATS consumer, and optional ServiceAccount. One YAML, fully wired agent.
 
+#### Nix tools and flakes
+
+`spec.tools.nix` lists nixpkgs packages; the operator builds each unique list once into a tools image the knight mounts at `/nix`. To add packages from a flake outside nixpkgs, use `spec.tools.flakes`. Those packages go into the same image:
+
+```yaml
+spec:
+  tools:
+    nix: [nmap, whois]
+    flakes:
+      - ref: github:roundtable-k8s/roundtable/0123456789abcdef0123456789abcdef01234567
+        packages: [my-tool]   # output names under packages.x86_64-linux
+```
+
+`ref` must be pinned to a full 40-character commit: `github:`, `gitlab:` or `sourcehut:` `<owner>/<repo>/<rev>`, or `git+https://…?rev=<rev>` (also `git+ssh`). Branch names and tags are rejected at admission, because the image is rebuilt only when the spec changes, so a floating ref would never refresh. Changing a ref or its packages changes the image tag and triggers a rebuild.
+
 ### RoundTable — Fleet Configuration
 
 ```yaml

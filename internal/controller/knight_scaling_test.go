@@ -458,3 +458,39 @@ func nestedInt64(u *unstructured.Unstructured, fields ...string) int64 {
 	Expect(found).To(BeTrue(), "%v not set", fields)
 	return v
 }
+
+var _ = Describe("Knight tools.flakes validation (#248)", func() {
+	const rev = "0123456789abcdef0123456789abcdef01234567"
+	withFlake := func(ref string, pkgs ...string) func(*aiv1alpha1.KnightSpec) {
+		return func(s *aiv1alpha1.KnightSpec) {
+			s.Tools = &aiv1alpha1.KnightTools{Flakes: []aiv1alpha1.KnightToolsFlake{{Ref: ref, Packages: pkgs}}}
+		}
+	}
+
+	DescribeTable("rejects",
+		func(name string, mutate func(*aiv1alpha1.KnightSpec)) {
+			err := k8sClient.Create(ctx, scalingKnight("default", name, mutate))
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), err.Error())
+		},
+		Entry("a branch name", "flk-branch", withFlake("github:roundtable-k8s/roundtable/main", "p")),
+		Entry("no rev at all", "flk-norev", withFlake("github:roundtable-k8s/roundtable", "p")),
+		Entry("a short sha", "flk-short", withFlake("github:o/r/0123abc", "p")),
+		Entry("a floating git ref", "flk-gitref", withFlake("git+https://example.com/r.git?ref=main", "p")),
+		Entry("quote injection", "flk-quote", withFlake(`github:o/r/`+rev+`"; evil`, "p")),
+		Entry("no packages", "flk-nopkgs", withFlake("github:o/r/"+rev)),
+		Entry("an unsafe package name", "flk-badpkg", withFlake("github:o/r/"+rev, `x"; evil`)),
+	)
+
+	DescribeTable("accepts",
+		func(name, ref string) {
+			k := scalingKnight("default", name, withFlake(ref, "tool", "other-tool_1.2"))
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			deleteKnight(k)
+		},
+		Entry("a pinned github ref", "flk-ok-gh", "github:roundtable-k8s/roundtable/"+rev),
+		Entry("a pinned github ref with dir", "flk-ok-dir", "github:o/r/"+rev+"?dir=sub/pkg"),
+		Entry("a pinned git+https ref", "flk-ok-git", "git+https://example.com/r.git?rev="+rev),
+		Entry("a pinned git+https ref with branch", "flk-ok-gitref", "git+https://example.com/r.git?ref=main&rev="+rev),
+	)
+})
