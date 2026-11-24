@@ -1385,6 +1385,21 @@ spec:
                     description: flakeLabel labels the issues opened for flaky checks.
                     maxLength: 50
                     type: string
+                  ignoreChecks:
+                    default:
+                    - merge-guard
+                    description: |-
+                      ignoreChecks are check names the watcher never treats as a failure:
+                      no fix round, no flake issue. Use them for policy checks that fail
+                      until a human acts (merge-guard fails while a PR is on hold or has no
+                      ship-it verdict, then passes on the same commit). An empty list
+                      ignores nothing.
+                    items:
+                      maxLength: 100
+                      type: string
+                    maxItems: 20
+                    type: array
+                    x-kubernetes-list-type: set
                   maxAttempts:
                     default: 3
                     description: |-

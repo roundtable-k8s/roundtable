@@ -89,32 +89,74 @@ func TestDetectFailure(t *testing.T) {
 	f := detectFailure(pr, []github.CheckRun{
 		actionsCheck(1, "lint", "failure", 1),
 		actionsCheck(2, "build", "success", 1),
-	}, &mergeGroup{sha: "m1", runs: []github.WorkflowRun{mgRun(9, "5", "m1", "failure", 1)}})
+	}, &mergeGroup{sha: "m1", runs: []github.WorkflowRun{mgRun(9, "5", "m1", "failure", 1)}}, nil)
 	if f == nil || f.kind != failureKindCI || f.key != "ci:h1:lint" || f.flakyOn {
 		t.Fatalf("ci failure = %+v", f)
 	}
 
 	// A re-run that passed hides the earlier failure.
-	if f := detectFailure(pr, []github.CheckRun{actionsCheck(1, "lint", "failure", 1), actionsCheck(2, "lint", "success", 2)}, nil); f != nil {
+	if f := detectFailure(pr, []github.CheckRun{actionsCheck(1, "lint", "failure", 1), actionsCheck(2, "lint", "success", 2)}, nil, nil); f != nil {
 		t.Fatalf("passing re-run: %+v", f)
 	}
 
 	// Passed, then failed on the same commit: flaky.
-	f = detectFailure(pr, []github.CheckRun{actionsCheck(1, "test", "success", 1), actionsCheck(2, "test", "failure", 2)}, nil)
+	f = detectFailure(pr, []github.CheckRun{actionsCheck(1, "test", "success", 1), actionsCheck(2, "test", "failure", 2)}, nil, nil)
 	if f == nil || !f.flakyOn {
 		t.Fatalf("flaky failure = %+v", f)
 	}
 
 	// Merge queue rejection.
 	f = detectFailure(pr, []github.CheckRun{actionsCheck(1, "lint", "success", 1)},
-		&mergeGroup{sha: "m1", runs: []github.WorkflowRun{mgRun(9, "5", "m1", "failure", 1)}})
+		&mergeGroup{sha: "m1", runs: []github.WorkflowRun{mgRun(9, "5", "m1", "failure", 1)}}, nil)
 	if f == nil || f.kind != failureKindMergeQueue || f.key != "mq:m1" || !slices.Equal(f.checks, []string{"CI"}) {
 		t.Fatalf("merge-queue failure = %+v", f)
 	}
 
 	// In progress or green: nothing.
-	if f := detectFailure(pr, []github.CheckRun{{Name: "lint", Status: "in_progress"}}, &mergeGroup{sha: "m2", runs: []github.WorkflowRun{mgRun(9, "5", "m2", "success", 1)}}); f != nil {
+	if f := detectFailure(pr, []github.CheckRun{{Name: "lint", Status: "in_progress"}}, &mergeGroup{sha: "m2", runs: []github.WorkflowRun{mgRun(9, "5", "m2", "success", 1)}}, nil); f != nil {
 		t.Fatalf("green: %+v", f)
+	}
+}
+
+func TestDetectFailureIgnoresPolicyChecks(t *testing.T) {
+	pr := &github.PullRequest{Number: 5}
+	pr.Head.SHA = "h1"
+	ignore := ignoredChecks(&aiv1alpha1.PRFeedbackSpec{})
+	if !ignore["merge-guard"] || len(ignore) != 1 {
+		t.Fatalf("default ignore set = %v", ignore)
+	}
+
+	// merge-guard passed, then failed on the same commit (a label change
+	// re-ran it): without the ignore set this is a flake; with it, nothing.
+	flapping := []github.CheckRun{actionsCheck(1, "merge-guard", "success", 1), actionsCheck(2, "merge-guard", "failure", 2)}
+	if f := detectFailure(pr, flapping, nil, ignore); f != nil {
+		t.Fatalf("merge-guard flap = %+v", f)
+	}
+	if f := detectFailure(pr, flapping, nil, nil); f == nil || !f.flakyOn {
+		t.Fatalf("merge-guard flap without ignore = %+v", f)
+	}
+	// Still failing: ignored too.
+	if f := detectFailure(pr, []github.CheckRun{actionsCheck(1, "merge-guard", "failure", 1)}, nil, ignore); f != nil {
+		t.Fatalf("merge-guard failing = %+v", f)
+	}
+	// Without the ignore set it is reported.
+	if f := detectFailure(pr, []github.CheckRun{actionsCheck(1, "merge-guard", "failure", 1)}, nil, nil); f == nil {
+		t.Fatal("merge-guard not ignored without ignoreChecks")
+	}
+	// A real failure next to merge-guard: only the real check is reported.
+	f := detectFailure(pr, []github.CheckRun{actionsCheck(1, "merge-guard", "failure", 1), actionsCheck(2, "lint", "failure", 1)}, nil, ignore)
+	if f == nil || f.key != "ci:h1:lint" || !slices.Equal(f.checks, []string{"lint"}) || f.flakyOn {
+		t.Fatalf("lint with merge-guard = %+v", f)
+	}
+	// Merge-queue run named like an ignored check: nothing.
+	run := mgRun(9, "5", "m1", "failure", 1)
+	run.Name = "merge-guard"
+	if f := detectFailure(pr, nil, &mergeGroup{sha: "m1", runs: []github.WorkflowRun{run}}, ignore); f != nil {
+		t.Fatalf("merge-queue merge-guard = %+v", f)
+	}
+	// An explicitly empty list ignores nothing.
+	if f := detectFailure(pr, flapping, nil, ignoredChecks(&aiv1alpha1.PRFeedbackSpec{IgnoreChecks: []string{}})); f == nil || !f.flakyOn {
+		t.Fatalf("empty ignoreChecks = %+v", f)
 	}
 }
 

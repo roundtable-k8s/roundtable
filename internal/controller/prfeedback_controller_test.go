@@ -327,6 +327,22 @@ var _ = Describe("PR feedback watcher", func() {
 		Expect(gh.comments["6"]).To(HaveLen(1))
 	})
 
+	It("ignores merge-guard, a policy check that passes then fails on one commit: no flake issue, no fix round", func() {
+		gh.pulls = []map[string]any{fakePull(7, "h7")}
+		gh.checks["h7"] = []map[string]any{
+			fakeCheck(301, "merge-guard", "success", "2026-11-23T11:00:00Z"),
+			fakeCheck(302, "merge-guard", "failure", "2026-11-23T11:10:00Z"),
+		}
+		reconcileOnce()
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+
+		Expect(prRecord(7)).To(BeNil())
+		Expect(gh.issues).To(BeEmpty())
+		Expect(gh.comments).NotTo(HaveKey("7"))
+		Expect(feedbackChain().Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationChainRun))
+	})
+
 	It("feeds a merge-queue rejection and reports a flake when the same commit later passes the queue", func() {
 		gh.pulls = []map[string]any{fakePull(5, "h1")}
 		gh.checks["h1"] = []map[string]any{fakeCheck(101, "lint", "success", "2026-11-23T11:00:00Z")}
