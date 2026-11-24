@@ -35,6 +35,11 @@ at dispatch time (Helm must not).
 {{- $coders := .coders }}
 {{- $models := .implementModels }}
 {{- $fixModel := .fixModel | default "deep" }}
+{{- /* The tier the planner should default to (#360): fast when allowed, else the first allowed tier. */}}
+{{- $default := "fast" }}
+{{- if and $models (not (has "fast" $models)) }}
+{{- $default = index $models 0 }}
+{{- end }}
 {{- /* fallbackCoder (#321): a plan-quota refusal re-runs the implement,
      split or fix step on this knight with no model override (its own default:
      the cheap/fast/deep aliases are Claude models). Unset: the step is
@@ -85,11 +90,19 @@ spec:
         3. Pick the model alias for the implementation (cheapest tier that fits;
            a weaker draft is fixed by the stronger "{{ $fixModel }}" model in the fix loop).
            Allowed: {{ join ", " $models }}.
-           - "cheap" (Haiku drafts): only for small, well-specified issues: a single
+{{- /* Only the allowed tiers are described (#360): a planner that picks a tier
+     no implement step runs falls through to escalate. */}}
+{{- if has "cheap" $models }}
+           - "cheap" (Haiku drafts{{ if eq $default "cheap" }}, the default{{ end }}): only for small, well-specified issues: a single
              file or area, clear acceptance criteria, no API/CRD/contract change and
              no `breaking` label.
+{{- end }}
+{{- if has "fast" $models }}
            - "fast": the default.
-           - "deep": design-heavy, cross-cutting or risky work.
+{{- end }}
+{{- if has "deep" $models }}
+           - "deep"{{ if eq $default "deep" }} (the default){{ end }}: design-heavy, cross-cutting or risky work.
+{{- end }}
            Record why in "reason", naming the tier and the criteria that decided it.
         4. If the issue is too large for one reviewable PR, split it: create
            sub-issues in the same repo (gh issue create, body starting
