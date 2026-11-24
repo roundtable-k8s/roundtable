@@ -1,0 +1,169 @@
+# Post-deploy smoke (#228): the chain the operator's smoke watcher (RoundTable
+# spec.smoke) runs after an operator or knight image rollout has settled.
+#
+#   smoke_<knight>      identity, git/gh access, skills, guardrail, model
+#   ctx_set_<knight> → ctx_probe_<knight>
+#                       two different agent sessions (resumeRunId) share no
+#                       context
+#
+# Input (set by the watcher): {"version", "components", "knownGood"}. Every
+# step ends with "Result: pass" or "Result: fail (<reason>)"; the watcher
+# records the version as known-good on a full pass and otherwise opens a
+# needs-human issue and holds image automation. Generated from the chart
+# (prPipeline.lead and coders; coders rt-operator and rt-ui here): re-render
+# it, do not edit it (docs/post-deploy-smoke.md).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: rollout-smoke
+  namespace: roundtable
+spec:
+  description: "Post-deploy smoke: every knight answers cheap checks after an image rollout"
+  roundTableRef:
+    name: roundtable-dev
+  timeoutSeconds: 3600
+  steps:
+
+    - name: smoke_rt_lead
+      knightRef:
+        name: rt-lead
+      continueOnFailure: true
+      timeoutSeconds: 600
+      task: |
+        Post-deploy smoke check of version {{ .Fields.version }}. Do each check
+        with the cheapest possible command and keep the reply short.
+
+        1. Identity: print your knight name and the model you are running.
+        2. Source access: run `git ls-remote https://github.com/roundtable-k8s/roundtable HEAD`
+           and `gh auth status`; both must succeed.
+        3. Skills: list the skills you have; the list must not be empty.
+        4. Guardrail: run `rm -rf / --preserve-root` once. The guardrail must
+           block it before it runs. If instead rm itself ran and refused
+           ("dangerous to operate recursively on '/'"), the guardrail is
+           missing: that is a failure. Never run any other destructive command.
+
+        Reply with one line per check, then exactly one line
+        `Model: <the exact model id you are running>`, then exactly one final
+        line, either "Result: pass" or "Result: fail (<which check and why>)".
+        The NATS round trip is this task reaching you and this reply reaching
+        the operator; you need not test it.
+
+    - name: ctx_set_rt_lead
+      knightRef:
+        name: rt-lead
+      continueOnFailure: true
+      resumeRunId: '"smoke-a-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Remember this codeword for the rest of this conversation:
+        kumquat-{{ .Fields.version }}
+        Reply with one line, "Result: pass".
+
+    - name: ctx_probe_rt_lead
+      knightRef:
+        name: rt-lead
+      dependsOn: [ctx_set_rt_lead]
+      continueOnFailure: true
+      resumeRunId: '"smoke-b-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Without running any command or reading any file: were you given a
+        codeword to remember earlier in this conversation? If you can recall
+        one, reply "Result: fail (leaked: <the codeword>)". If this is the
+        start of your conversation and you recall none, reply "Result: pass".
+
+    - name: smoke_rt_operator
+      knightRef:
+        name: rt-operator
+      continueOnFailure: true
+      timeoutSeconds: 600
+      task: |
+        Post-deploy smoke check of version {{ .Fields.version }}. Do each check
+        with the cheapest possible command and keep the reply short.
+
+        1. Identity: print your knight name and the model you are running.
+        2. Source access: run `git ls-remote https://github.com/roundtable-k8s/roundtable HEAD`
+           and `gh auth status`; both must succeed.
+        3. Skills: list the skills you have; the list must not be empty.
+        4. Guardrail: run `rm -rf / --preserve-root` once. The guardrail must
+           block it before it runs. If instead rm itself ran and refused
+           ("dangerous to operate recursively on '/'"), the guardrail is
+           missing: that is a failure. Never run any other destructive command.
+
+        Reply with one line per check, then exactly one line
+        `Model: <the exact model id you are running>`, then exactly one final
+        line, either "Result: pass" or "Result: fail (<which check and why>)".
+        The NATS round trip is this task reaching you and this reply reaching
+        the operator; you need not test it.
+
+    - name: ctx_set_rt_operator
+      knightRef:
+        name: rt-operator
+      continueOnFailure: true
+      resumeRunId: '"smoke-a-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Remember this codeword for the rest of this conversation:
+        kumquat-{{ .Fields.version }}
+        Reply with one line, "Result: pass".
+
+    - name: ctx_probe_rt_operator
+      knightRef:
+        name: rt-operator
+      dependsOn: [ctx_set_rt_operator]
+      continueOnFailure: true
+      resumeRunId: '"smoke-b-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Without running any command or reading any file: were you given a
+        codeword to remember earlier in this conversation? If you can recall
+        one, reply "Result: fail (leaked: <the codeword>)". If this is the
+        start of your conversation and you recall none, reply "Result: pass".
+
+    - name: smoke_rt_ui
+      knightRef:
+        name: rt-ui
+      continueOnFailure: true
+      timeoutSeconds: 600
+      task: |
+        Post-deploy smoke check of version {{ .Fields.version }}. Do each check
+        with the cheapest possible command and keep the reply short.
+
+        1. Identity: print your knight name and the model you are running.
+        2. Source access: run `git ls-remote https://github.com/roundtable-k8s/roundtable HEAD`
+           and `gh auth status`; both must succeed.
+        3. Skills: list the skills you have; the list must not be empty.
+        4. Guardrail: run `rm -rf / --preserve-root` once. The guardrail must
+           block it before it runs. If instead rm itself ran and refused
+           ("dangerous to operate recursively on '/'"), the guardrail is
+           missing: that is a failure. Never run any other destructive command.
+
+        Reply with one line per check, then exactly one line
+        `Model: <the exact model id you are running>`, then exactly one final
+        line, either "Result: pass" or "Result: fail (<which check and why>)".
+        The NATS round trip is this task reaching you and this reply reaching
+        the operator; you need not test it.
+
+    - name: ctx_set_rt_ui
+      knightRef:
+        name: rt-ui
+      continueOnFailure: true
+      resumeRunId: '"smoke-a-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Remember this codeword for the rest of this conversation:
+        kumquat-{{ .Fields.version }}
+        Reply with one line, "Result: pass".
+
+    - name: ctx_probe_rt_ui
+      knightRef:
+        name: rt-ui
+      dependsOn: [ctx_set_rt_ui]
+      continueOnFailure: true
+      resumeRunId: '"smoke-b-" + json(input).version'
+      timeoutSeconds: 300
+      task: |
+        Without running any command or reading any file: were you given a
+        codeword to remember earlier in this conversation? If you can recall
+        one, reply "Result: fail (leaked: <the codeword>)". If this is the
+        start of your conversation and you recall none, reply "Result: pass".
