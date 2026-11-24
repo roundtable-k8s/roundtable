@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -89,7 +90,22 @@ func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knigh
 		sandbox.Labels["roundtable.io/domain"] = knight.Spec.Domain
 
 		// Build Sandbox spec from Knight
+		// Pod labels and annotations match the Deployment backend so that
+		// label-selecting policies and monitors see sandbox pods too.
 		sandbox.Spec.PodTemplate = sandboxv1alpha1.PodTemplate{
+			ObjectMeta: sandboxv1alpha1.PodMetadata{
+				Labels: map[string]string{
+					"app.kubernetes.io/name":       "knight",
+					"app.kubernetes.io/instance":   knight.Name,
+					"app.kubernetes.io/managed-by": "roundtable-operator",
+					"roundtable.io/domain":         knight.Spec.Domain,
+				},
+				Annotations: map[string]string{
+					"roundtable.io/model":  knight.Spec.Model,
+					"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
+					"roundtable.io/domain": knight.Spec.Domain,
+				},
+			},
 			Spec: podSpec,
 		}
 
