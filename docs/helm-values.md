@@ -145,6 +145,12 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `prPipeline.feedback.enabled` | bool | `false` | Create the feedback Chain the operator's PR feedback watcher feeds ([pr-feedback.md](pr-feedback.md)); the watcher itself is switched on per RoundTable (`spec.prFeedback`) |
 | `prPipeline.feedback.name` | string | `pr-pipeline-feedback` | Feedback Chain name (the RoundTable's `spec.prFeedback.chainRef`) |
 | `prPipeline.feedback.timeoutSeconds` | int | `7200` | Feedback Chain timeout (seconds) |
+| `smoke.enabled` | bool | `false` | Create the post-deploy smoke Chain the operator's smoke watcher runs ([post-deploy-smoke.md](post-deploy-smoke.md)); the watcher itself is switched on per RoundTable (`spec.smoke`) |
+| `smoke.name` | string | `rollout-smoke` | Smoke Chain name (the RoundTable's `spec.smoke.chainRef`) |
+| `smoke.roundTableRef.name` | string | `roundtable-dev` | RoundTable the smoke Chain runs in |
+| `smoke.knights` | list | `[]` | Knights to check; default `prPipeline.lead` and `prPipeline.coders` |
+| `smoke.model` | string | `""` | Per-task model override for the checks step; the knight must report running it. Empty: no override |
+| `smoke.timeoutSeconds` | int | `3600` | Smoke Chain timeout (seconds) |
 
 ### Planner
 

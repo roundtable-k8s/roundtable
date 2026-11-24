@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Renders the PR pipeline and PR feedback Chains from the Helm chart with
+# Renders the PR pipeline, PR feedback and smoke Chains from the Helm chart with
 # prPipeline.enabled and prPipeline.feedback.enabled and checks that
 # examples/chain-pr-pipeline.yaml and examples/chain-pr-feedback.yaml are that output, minus comments,
 # document separators and the Helm labels. The example itself is decoded
@@ -24,6 +24,8 @@ prPipeline:
   input: '{"repo": "roundtable-k8s/roundtable", "issue": 225}'
   feedback:
     enabled: true
+smoke:
+  enabled: true
 EOV
 
 "$HELM" lint "$chart" --quiet
@@ -50,3 +52,4 @@ check() {
 
 check pr-pipeline.yaml chain-pr-pipeline.yaml
 check pr-feedback.yaml chain-pr-feedback.yaml
+check smoke.yaml chain-smoke.yaml

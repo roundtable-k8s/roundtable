@@ -308,3 +308,20 @@ prPipeline:
     enabled: false
     name: pr-pipeline-feedback
     timeoutSeconds: 7200
+
+# Post-deploy smoke Chain (#228, docs/post-deploy-smoke.md), run by the
+# operator's smoke watcher (RoundTable spec.smoke) after every image rollout.
+# Off by default.
+smoke:
+  enabled: false
+  name: rollout-smoke
+  roundTableRef:
+    name: roundtable-dev
+  # Knights to check; default prPipeline.lead and prPipeline.coders.
+  knights: []
+  # Per-task model override for the checks step (an alias of the RoundTable
+  # or a model ID valid on every checked knight's runtime). The knight reports
+  # the model it runs and the watcher fails the smoke when it differs from the
+  # resolved model. Empty: no override, no model check.
+  model: ""
+  timeoutSeconds: 3600
