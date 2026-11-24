@@ -36,6 +36,10 @@ const (
 	// been claimed on GitHub for that run (labels swapped and commented), so
 	// a retried poll never comments twice.
 	AnnotationPickupClaimed = "ai.roundtable.io/pickup-claimed"
+
+	// AnnotationPickupVerified is set to the run trigger once the operator has
+	// checked on GitHub that the run's PRs are merged or queued (#301).
+	AnnotationPickupVerified = "ai.roundtable.io/pickup-verified"
 )
 
 // IssuePickupSpec configures polling GitHub for issues labelled ready and

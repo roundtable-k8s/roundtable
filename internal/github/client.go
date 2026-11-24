@@ -273,15 +273,19 @@ type User struct {
 
 // PullRequest is the subset of a pull request the PR feedback watcher reads.
 type PullRequest struct {
-	Number  int     `json:"number"`
-	HTMLURL string  `json:"html_url"`
-	State   string  `json:"state"`
-	Title   string  `json:"title"`
-	Draft   bool    `json:"draft"`
-	Merged  bool    `json:"merged"`
-	User    User    `json:"user"`
-	Labels  []Label `json:"labels"`
-	Head    struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+	Title   string `json:"title"`
+	Draft   bool   `json:"draft"`
+	Merged  bool   `json:"merged"`
+	// NodeID is the GraphQL ID (needed to enable auto-merge).
+	NodeID string `json:"node_id"`
+	// AutoMerge is set while auto-merge is enabled (queued).
+	AutoMerge *struct{} `json:"auto_merge"`
+	User      User      `json:"user"`
+	Labels    []Label   `json:"labels"`
+	Head      struct {
 		SHA string `json:"sha"`
 		Ref string `json:"ref"`
 	} `json:"head"`
@@ -341,6 +345,28 @@ func (c *Client) GetPull(ctx context.Context, repo string, number int) (*PullReq
 	out := &PullRequest{}
 	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, name, number), nil, nil, out)
 	return out, err
+}
+
+// EnableAutoMerge turns on squash auto-merge for a pull request (GraphQL: the
+// REST API has no endpoint for it). The pull request's merge-queue and
+// required-check rules still gate the merge.
+func (c *Client) EnableAutoMerge(ctx context.Context, nodeID string) error {
+	var out struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	body := map[string]any{
+		"query":     "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }",
+		"variables": map[string]string{"id": nodeID},
+	}
+	if err := c.do(ctx, http.MethodPost, "/graphql", nil, body, &out); err != nil {
+		return err
+	}
+	if len(out.Errors) > 0 {
+		return fmt.Errorf("enable auto-merge: %s", out.Errors[0].Message)
+	}
+	return nil
 }
 
 // CheckRun is one check run on a commit. For GitHub Actions the check run ID
