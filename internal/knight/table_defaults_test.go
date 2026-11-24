@@ -48,7 +48,7 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 		}
 		return k
 	}
-	tableVault := &aiv1alpha1.KnightVault{ClaimName: "table-vault", ReadOnly: true, WritablePaths: []string{"Briefings/"}}
+	tableVault := &aiv1alpha1.KnightVault{ClaimName: "table-vault", ReadOnly: new(true), WritablePaths: []string{"Briefings/"}}
 	table := func() *aiv1alpha1.RoundTable {
 		return &aiv1alpha1.RoundTable{
 			ObjectMeta: metav1.ObjectMeta{Name: "td-table", Namespace: "default"},
