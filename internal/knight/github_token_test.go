@@ -121,7 +121,9 @@ var _ = Describe("WithGitHubToken", func() {
 
 		// The token itself is never injected into the environment.
 		for _, e := range app.Env {
-			Expect(e.ValueFrom).To(BeNil(), "env %s must not reference a Secret", e.Name)
+			if e.ValueFrom != nil {
+				Expect(e.ValueFrom.SecretKeyRef).To(BeNil(), "env %s must not reference a Secret", e.Name)
+			}
 		}
 
 		// Sidecars do not get the token.

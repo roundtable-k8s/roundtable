@@ -436,6 +436,22 @@ var _ = Describe("PodBuilder", func() {
 			Expect(mainContainer.StartupProbe.FailureThreshold).To(Equal(int32(60)))
 		})
 
+		It("injects pod identity env from the downward API", func() {
+			spec := builder.Build(context.Background())
+			want := map[string]string{
+				"POD_NAME":      "metadata.name",
+				"POD_NAMESPACE": "metadata.namespace",
+				"NODE_NAME":     "spec.nodeName",
+			}
+			got := map[string]string{}
+			for _, e := range spec.Containers[0].Env {
+				if _, ok := want[e.Name]; ok && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil {
+					got[e.Name] = e.ValueFrom.FieldRef.FieldPath
+				}
+			}
+			Expect(got).To(Equal(want))
+		})
+
 		It("uses custom image if specified", func() {
 			knight.Spec.Image = "custom/knight:v1.0"
 			spec := builder.Build(context.Background())
