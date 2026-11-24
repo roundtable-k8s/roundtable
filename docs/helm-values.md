@@ -97,6 +97,19 @@ own `resources` / `workspace`. Knights in a RoundTable (label
 `ai.roundtable.io/round-table`) also inherit `RoundTable.spec.defaults.resources`
 and `spec.defaults.workspace` when unset.
 
+```yaml
+codingKnightDefaults:
+  resources:
+    requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi}
+    limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+  workspace:
+    size: 20Gi
+```
+
+These match the chart's `values.yaml` defaults. The default applies as a whole
+block: if a knight sets its own `resources` (or `workspace`), that block is used
+as written and no fields are merged in from the default.
+
 Define knights inline in values to deploy them with the operator:
 
 ```yaml
