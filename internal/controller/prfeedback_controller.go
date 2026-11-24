@@ -54,7 +54,9 @@ import (
 // to the PR's author knight through a feedback Chain run that carries the
 // original runId. Retries are capped (then the PR is labelled for a human)
 // and a check that fails and then passes on the same commit gets a flake
-// issue instead of another fix round. See docs/pr-feedback.md.
+// issue instead of another fix round. A PR with merge conflicts (GitHub
+// mergeable_state "dirty", e.g. a sibling PR of the same split merged first)
+// gets a rebase round the same way (#312). See docs/pr-feedback.md.
 
 const (
 	prFeedbackDefaultChain      = "pr-pipeline-feedback"
@@ -74,6 +76,10 @@ const (
 
 	failureKindMergeQueue = "merge-queue"
 	failureKindCI         = "ci"
+	failureKindConflict   = "conflict"
+
+	// ghMergeableDirty is the mergeable_state of a PR with merge conflicts.
+	ghMergeableDirty = "dirty"
 
 	// GitHub check run / workflow run status and conclusions.
 	ghCompleted = "completed"
@@ -413,6 +419,24 @@ func detectFailure(pr *github.PullRequest, checks []github.CheckRun, mg *mergeGr
 	return f
 }
 
+// detectConflict reports a merge conflict with the base branch, keyed by the
+// head commit: a rebase pushes a new head, so a conflict that remains after
+// it starts another round, and a round that pushes nothing does not repeat.
+func detectConflict(pr *github.PullRequest) *failure {
+	if !strings.EqualFold(pr.MergeableState, ghMergeableDirty) {
+		return nil
+	}
+	return &failure{kind: failureKindConflict, key: "conflict:" + pr.Head.SHA, url: pr.HTMLURL}
+}
+
+// describeFailure is a one-line summary of a failure for messages.
+func describeFailure(kind string, checks []string) string {
+	if kind == failureKindConflict {
+		return "merge conflict with the base branch"
+	}
+	return fmt.Sprintf("%s failure: %s", kind, strings.Join(checks, ", "))
+}
+
 // pollRepo checks every watched pull request of one repository.
 func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable, cfg *aiv1alpha1.PRFeedbackSpec, st *aiv1alpha1.PRFeedbackStatus, repo string) error {
 	log := logf.FromContext(ctx).WithValues("repo", repo)
@@ -483,7 +507,18 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 			r.touch(rec)
 		}
 
-		f := detectFailure(pr, checks, mg)
+		// The list endpoint has no mergeable_state: read the PR itself. A
+		// conflict comes first: the PR cannot merge until it is rebased, and
+		// the rebase re-runs CI anyway.
+		var f *failure
+		if full, err := gh.GetPull(ctx, repo, pr.Number); err != nil {
+			errs = append(errs, fmt.Errorf("PR #%d merge state: %w", pr.Number, err))
+		} else {
+			f = detectConflict(full)
+		}
+		if f == nil {
+			f = detectFailure(pr, checks, mg)
+		}
 		if f == nil && rec != nil && rec.Phase == aiv1alpha1.PRFeedbackQueued {
 			// Fixed or re-run before its turn came.
 			rec.Phase = aiv1alpha1.PRFeedbackWatching
@@ -539,6 +574,9 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 
 		if rec.Attempts >= maxAttempts {
 			body := fmt.Sprintf("CI is still failing after %d fix round(s) (%s: %s, %s). Escalating to a human.", rec.Attempts, f.kind, strings.Join(f.checks, ", "), f.url)
+			if f.kind == failureKindConflict {
+				body = fmt.Sprintf("Still conflicting with the base branch after %d fix round(s) (head %s). Escalating to a human.", rec.Attempts, pr.Head.SHA)
+			}
 			if err := gh.AddLabels(ctx, repo, pr.Number, escalation); err != nil {
 				errs = append(errs, err)
 				rec.LastFailure = "" // retry the escalation next poll
@@ -553,7 +591,7 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 			continue
 		}
 		rec.Phase = aiv1alpha1.PRFeedbackQueued
-		rec.Message = fmt.Sprintf("%s failure: %s", f.kind, strings.Join(f.checks, ", "))
+		rec.Message = describeFailure(f.kind, f.checks)
 		r.Recorder.Eventf(rt, corev1.EventTypeNormal, "PRFeedbackDetected", "%s#%d: %s", repo, pr.Number, rec.Message)
 	}
 
@@ -770,7 +808,10 @@ func (r *PRFeedbackReconciler) dispatchNext(ctx context.Context, gh *github.Clie
 		"headSha":      next.FailureHeadSHA,
 		"failedChecks": next.FailedChecks,
 		"failureUrl":   next.FailureURL,
-		"log":          r.failureLog(ctx, gh, next),
+	}
+	if next.FailureKind != failureKindConflict {
+		// A conflict has no failed job: no log to fetch.
+		input["log"] = r.failureLog(ctx, gh, next)
 	}
 	if next.Issue > 0 {
 		input["issue"] = next.Issue

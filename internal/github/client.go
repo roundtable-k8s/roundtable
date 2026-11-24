@@ -279,6 +279,10 @@ type PullRequest struct {
 	Title   string `json:"title"`
 	Draft   bool   `json:"draft"`
 	Merged  bool   `json:"merged"`
+	// MergeableState is GitHub's merge state (the REST form of GraphQL's
+	// mergeStateStatus): "dirty" means merge conflicts with the base branch.
+	// Only a single-PR GET returns it, and "unknown" until GitHub computed it.
+	MergeableState string `json:"mergeable_state"`
 	// NodeID is the GraphQL ID (needed to enable auto-merge).
 	NodeID string `json:"node_id"`
 	// AutoMerge is set while auto-merge is enabled (queued).

@@ -365,6 +365,71 @@ var _ = Describe("PR feedback watcher", func() {
 		Expect(gh.issues[0]["title"]).To(Equal("Flaky check: CI"))
 	})
 
+	It("sends a PR with merge conflicts back to its author for a rebase, then escalates when rounds run out", func() {
+		pr := fakePull(5, "h1")
+		pr["mergeable_state"] = "dirty"
+		gh.pulls = []map[string]any{pr}
+		gh.checks["h1"] = []map[string]any{fakeCheck(101, "lint", "success", "2026-11-23T11:00:00Z")}
+		reconcileOnce()
+
+		Expect(status().LastError).To(BeEmpty())
+		rec := prRecord(5)
+		Expect(rec).NotTo(BeNil())
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackFixing))
+		Expect(rec.Knight).To(Equal("rt-operator"))
+		Expect(rec.RunID).To(Equal("run-1"))
+		Expect(rec.Attempts).To(BeEquivalentTo(1))
+		Expect(rec.FailureKind).To(Equal(failureKindConflict))
+		Expect(rec.LastFailure).To(Equal("conflict:h1"))
+		Expect(rec.FailedChecks).To(BeEmpty())
+
+		c := feedbackChain()
+		trigger := c.Annotations[aiv1alpha1.AnnotationChainRun]
+		Expect(trigger).To(HavePrefix("prfeedback-5-"))
+		in := map[string]any{}
+		Expect(json.Unmarshal([]byte(c.Spec.Input), &in)).To(Succeed())
+		Expect(in).To(HaveKeyWithValue("kind", "conflict"))
+		Expect(in).To(HaveKeyWithValue("knight", "rt-operator"))
+		Expect(in).To(HaveKeyWithValue("runId", "run-1"))
+		Expect(in).To(HaveKeyWithValue("headSha", "h1"))
+		Expect(in).To(HaveKeyWithValue("url", "https://github.com/o/r/pull/5"))
+		Expect(in).NotTo(HaveKey("log"), "a conflict has no CI log")
+
+		// The run finishes without a push: the same conflict is not fed again.
+		c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+		c.Status.LastRunTrigger = trigger
+		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+		rec = prRecord(5)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(feedbackChain().Annotations[aiv1alpha1.AnnotationChainRun]).To(Equal(trigger))
+		Expect(gh.issues).To(BeEmpty(), "a conflict is never reported as a flake")
+
+		// Rebased to h2 but still conflicting: the rounds (1) are used up.
+		pr = fakePull(5, "h2")
+		pr["mergeable_state"] = "dirty"
+		gh.pulls = []map[string]any{pr}
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+		rec = prRecord(5)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackEscalated))
+		Expect(gh.labels["5"]).To(ConsistOf("needs-human"))
+		Expect(gh.comments["5"]).To(ConsistOf(ContainSubstring("Still conflicting with the base branch after 1 fix round(s)")))
+		Expect(feedbackChain().Annotations[aiv1alpha1.AnnotationChainRun]).To(Equal(trigger), "no second run")
+	})
+
+	It("leaves a clean PR alone", func() {
+		pr := fakePull(5, "h1")
+		pr["mergeable_state"] = "clean"
+		gh.pulls = []map[string]any{pr}
+		gh.checks["h1"] = []map[string]any{fakeCheck(101, "lint", "success", "2026-11-23T11:00:00Z")}
+		reconcileOnce()
+		Expect(status().LastError).To(BeEmpty())
+		Expect(status().PullRequests).To(BeEmpty())
+		Expect(feedbackChain().Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationChainRun))
+	})
+
 	It("waits while the pipeline that opened the PR is still running", func() {
 		p := &aiv1alpha1.Chain{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pipelineName, Namespace: ns}, p)).To(Succeed())

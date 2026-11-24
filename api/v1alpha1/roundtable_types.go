@@ -577,8 +577,9 @@ type PRFeedbackPullRequest struct {
 	// +optional
 	FailedChecks []string `json:"failedChecks,omitempty"`
 	// failureKind is the kind of lastFailure: merge-queue (a failed
-	// merge_group run) or ci (failed checks on the head commit).
-	// +kubebuilder:validation:Enum=merge-queue;ci
+	// merge_group run), ci (failed checks on the head commit) or conflict
+	// (the pull request has merge conflicts with its base branch).
+	// +kubebuilder:validation:Enum=merge-queue;ci;conflict
 	// +optional
 	FailureKind string `json:"failureKind,omitempty"`
 	// failureURL links the failed run or check.

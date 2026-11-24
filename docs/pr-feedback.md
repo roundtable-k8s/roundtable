@@ -1,13 +1,14 @@
 # PR feedback: red CI and merge-queue rejections go back to the author
 
-When a pull request the [PR pipeline](pr-pipeline.md) opened goes red in CI or
-is dropped from the merge queue, the operator notices and hands the failure
+When a pull request the [PR pipeline](pr-pipeline.md) opened goes red in CI,
+is dropped from the merge queue, or conflicts with its base branch (a sibling
+PR of the same split merged first), the operator notices and hands the failure
 back to the knight that wrote the PR, in the same agent session. Nobody has to
 watch the queue.
 
 ```
 operator (RoundTable spec.prFeedback, polls GitHub every 5 min)
-  detect: failed checks on the PR head | failed merge_group run
+  detect: merge conflict (mergeable_state dirty) | failed checks on the PR head | failed merge_group run
   trace:  PR URL → the chain step that opened it → knight + runId
   ├─ flaky (failed and passed on one commit) → flake issue, no fix round
   ├─ fix rounds used up → label needs-human + comment
@@ -84,16 +85,23 @@ Each poll, per repository in `repos`:
    runs are matched to PRs by their branch, `gh-readonly-queue/<base>/pr-<n>-…`;
    the newest merge commit per PR is that PR's latest queue attempt.
 3. `GET /commits/<head>/check-runs?filter=all` per PR (paginated).
+4. `GET /pulls/<n>` per PR: only the single-PR endpoint returns
+   `mergeable_state` (the REST form of GraphQL's `mergeStateStatus`).
 
 Check and job names come from the PR's author, so they are sanitized (one
 line, control, format and backtick characters removed, 100 bytes at most)
 before they go into records, task input, flake issues, comments and events.
 
-A PR has a failure when the newest attempt of a check on its head commit
-failed (`failure` or `timed_out`), or else when a workflow run of its latest
-merge group failed. Every failure has a key (`ci:<head>:<checks>` or
-`mq:<merge commit>`) that is handled once; a re-run of the same failure does
-not start another round.
+A PR has a failure when its `mergeable_state` is `dirty` (merge conflicts
+with the base branch), or else when the newest attempt of a check on its head
+commit failed (`failure` or `timed_out`), or else when a workflow run of its
+latest merge group failed. A conflict comes first: the PR cannot merge until
+it is rebased, and the rebase re-runs CI. Every failure has a key
+(`conflict:<head>`, `ci:<head>:<checks>` or `mq:<merge commit>`) that is
+handled once; a re-run of the same failure does not start another round. A
+conflict round that pushes nothing is not repeated; one that rebases and still
+conflicts has a new head and starts the next round. `unknown` (GitHub has not
+computed the state yet) counts as no conflict until a later poll.
 
 **Tracing the author.** The watcher looks through the Chains in the
 RoundTable's namespace for a step whose output names the PR (a PR URL or
@@ -124,6 +132,9 @@ sets the Chain's `spec.input` and its `ai.roundtable.io/run` annotation:
  "log": "=== job build ===\n# github.com/…/internal/controller\n##[error]internal/controller/knight_scaling.go:98:9: undefined: agentRuntimeForImage\n…"}
 ```
 
+For a `conflict` the input has `"kind": "conflict"`, no `failedChecks` and no
+`log` (no job failed); `failureUrl` is the PR.
+
 The log is trimmed per job (at most three jobs): GitHub's timestamps are
 stripped and only the 15 lines before each of the first five `##[error]`
 lines are kept (the last 40 lines when there is none), capped at 3000 bytes.
@@ -148,7 +159,11 @@ tasks carry the pipeline run's `runId` and both knights resume the sessions
 in which they wrote and reviewed the PR
 ([knight-task-contract.md](knight-task-contract.md#resumerunid)). The coder
 fixes the branch (rebasing when the base moved, the common merge-queue cause)
-or, for a failure unrelated to the change, pushes nothing. The lead compares
+or, for a failure unrelated to the change, pushes nothing. For a `conflict`
+the coder rebases onto the latest base branch, resolves the conflicts keeping
+both sides' intent, runs build, test and lint, and pushes with
+`--force-with-lease`; the lead then reviews `gh pr diff` (a compare from the
+old head would include the base's commits). The lead compares
 the head with `headSha`, re-reviews if anything beyond tests or docs changed,
 and re-queues with `gh pr merge --auto --squash` (or labels `needs-human`
 instead). It does not wait for the merge: the next poll sees the outcome.
@@ -163,7 +178,8 @@ queue decision rests on the git diff.
 
 ## Retry cap and flakes
 
-- **Cap.** Every feedback run is a fix round (`attempts`). A new failure after
+- **Cap.** Every feedback run is a fix round (`attempts`), rebase rounds
+  for conflicts included. A new failure after
   `maxAttempts` rounds labels the PR `escalationLabel` and comments the
   failure; from then on the PR is skipped. Removing the label resets the
   rounds.
@@ -200,7 +216,7 @@ status:
         issue: 214
         attempts: 1
         lastFailure: mq:9a0dd02e…
-        failureKind: merge-queue
+        failureKind: merge-queue        # ci | merge-queue | conflict
         failureHeadSHA: 342bb3f…
         failedChecks: [CI]
         message: fix round 1/3 started on pr-pipeline-feedback
@@ -213,7 +229,7 @@ PRs are dropped. Events `PRFeedbackDetected`, `PRFeedbackDispatched` and
 ## Limits
 
 - Polling, not webhooks: a failure is noticed within `pollIntervalSeconds`
-  (default 5 minutes). The GitHub cost is 2 + (watched open PRs) requests per
+  (default 5 minutes). The GitHub cost is 2 + 2 × (watched open PRs) requests per
   repository per poll, plus a few to fetch logs per feedback run.
 - All failed checks count, not only required ones (reading branch protection
   needs admin access).
@@ -231,8 +247,6 @@ PRs are dropped. Events `PRFeedbackDetected`, `PRFeedbackDispatched` and
 - The token needs only `get` on its Secret; to limit blast radius give
   `spec.prFeedback.tokenSecretRef` a token with Pull requests / Checks /
   Actions read and Issues write only, separate from the knights' token.
-- Merge conflicts that remove a PR from the queue without a failed run are
-  not detected.
 
 ## Upgrading
 
