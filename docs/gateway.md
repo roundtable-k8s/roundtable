@@ -57,7 +57,7 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
 
 Every endpoint except `/healthz` and `/readyz` requires
 `Authorization: Bearer <token>`. The token comes from a Secret
-(`gateway.auth.existingSecret`, key `gateway.auth.secretKey`):
+(`gateway.auth.existingSecret`, or one the chart generates when unset; key `gateway.auth.secretKey`):
 
 - The gateway refuses to start without a token, or if any token is shorter
   than 16 characters.

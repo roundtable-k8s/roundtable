@@ -156,7 +156,7 @@ dashboard:
 # poll). See docs/gateway.md. Runs as its own Deployment from the operator
 # image (/gateway) with read-only RBAC on Knights and RoundTables.
 gateway:
-  enabled: false
+  enabled: true
   replicas: 1
   # Image; defaults to the operator image (image.repository:image.tag).
   image:
@@ -179,8 +179,11 @@ gateway:
   # long they are kept.
   taskBucket: roundtable_gateway_tasks
   taskTTL: 168h
-  # Bearer-token auth (required). The Secret key holds the token; put two
-  # tokens on separate lines to rotate without downtime. Create it with e.g.
+  # Bearer-token auth (always on). Leave existingSecret empty and the chart
+  # generates a random token into <fullname>-gateway-token (kept across
+  # upgrades and uninstall) and wires the dashboard to it. To bring your own,
+  # set existingSecret; the key holds the token, and two tokens on separate
+  # lines rotate without downtime. Create it with e.g.
   #   kubectl create secret generic roundtable-gateway-token \
   #     --from-literal=token="$(openssl rand -hex 32)"
   auth:

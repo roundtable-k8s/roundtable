@@ -101,6 +101,15 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.gateway.enabled }}
+            - name: GATEWAY_URL
+              value: "http://{{ include "roundtable-operator.fullname" . }}-gateway.{{ .Release.Namespace }}.svc:{{ .Values.gateway.service.port | default 80 }}"
+            - name: GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "roundtable-operator.gatewayTokenSecret" . }}
+                  key: {{ .Values.gateway.auth.secretKey | default "token" }}
+            {{- end }}
             - name: VAULT_PATH
               value: "/vault"
           {{- if .Values.dashboard.vault.enabled }}

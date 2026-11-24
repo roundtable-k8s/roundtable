@@ -50,3 +50,11 @@ Service account name
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Name of the Secret holding the gateway bearer token: the user-supplied one,
+or the chart-generated <fullname>-gateway-token.
+*/}}
+{{- define "roundtable-operator.gatewayTokenSecret" -}}
+{{- default (printf "%s-gateway-token" (include "roundtable-operator.fullname" .)) .Values.gateway.auth.existingSecret }}
+{{- end }}

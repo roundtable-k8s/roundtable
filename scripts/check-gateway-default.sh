@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Renders the chart and checks the gateway is on by default with a generated,
+# kept token Secret wired into the dashboard, and that a user-supplied Secret
+# or gateway.enabled=false suppress the generated one.
+#
+# Usage: HELM=bin/helm scripts/check-gateway-default.sh
+set -euo pipefail
+
+HELM="${HELM:-helm}"
+chart="$(cd "$(dirname "$0")/.." && pwd)/charts/roundtable-operator"
+render() { "$HELM" template rt "$chart" "$@"; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
+has() { grep -q -- "$2" <<<"$1" || fail "$3"; }
+lacks() { ! grep -q -- "$2" <<<"$1" || fail "$3"; }
+
+def="$(render)"
+has "$def" 'name: rt-roundtable-operator-gateway$' "gateway not deployed by default"
+has "$def" 'name: rt-roundtable-operator-gateway-token' "generated token Secret missing"
+has "$def" 'helm.sh/resource-policy: keep' "token Secret not kept"
+has "$def" 'name: GATEWAY_TOKEN' "dashboard not given the token"
+has "$def" 'name: GATEWAY_URL' "dashboard not given the gateway URL"
+
+own="$(render --set gateway.auth.existingSecret=mine)"
+lacks "$own" 'gateway-token' "generated Secret rendered despite existingSecret"
+has "$own" 'name: mine' "existingSecret not used"
+
+off="$(render --set gateway.enabled=false)"
+lacks "$off" 'gateway' "gateway resources rendered when disabled"
+echo "gateway defaults OK"
