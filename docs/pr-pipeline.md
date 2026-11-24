@@ -76,6 +76,15 @@ draft is fixed by Sonnet (`fast`) or Opus. The chart default stays
 creates sub-issues (`Part of #n`), lists them in `issues` and sets `split` to
 true.
 
+**One PR per sub-issue (#313).** After a split, `issues` lists each sub-issue
+once and never the parent. The split step's `forEach.uniqueBy: number` drops a
+repeated entry, so every sub-issue gets exactly one implement task. That task
+works on a branch named after the sub-issue (`rt/<sub-issue>-<slug>`) and first
+looks for an open PR for it (body `Closes #<sub-issue>` or a branch starting
+`rt/<sub-issue>-`); if one exists it pushes to that branch and updates the PR
+instead of opening another. The single-PR implement step does the same for the
+input issue.
+
 **Why one step per choice.** A step's `knightRef` and `model` are static, so
 the planner cannot set them. The chart renders one implement step per coder
 × alias, one split step and one fix loop per coder, each gated by a `when`

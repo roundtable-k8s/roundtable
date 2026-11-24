@@ -214,6 +214,14 @@ spec:
                                   result is the item list; otherwise the values found form the list. When
                                   empty the document itself must be a JSON array.
                                 type: string
+                              uniqueBy:
+                                description: |-
+                                  uniqueBy names a key every item (a JSON object) must have. Items whose
+                                  value under that key repeats an earlier item's are dropped, so the list
+                                  fans out once per distinct value (e.g. "number": one task per issue).
+                                  An item that is not an object or lacks the key fails the step.
+                                pattern: ^[A-Za-z_][A-Za-z0-9_-]*$
+                                type: string
                             required:
                             - from
                             type: object

@@ -390,6 +390,14 @@ type ChainForEach struct {
 	// +kubebuilder:validation:Maximum=200
 	// +optional
 	MaxItems int32 `json:"maxItems,omitempty"`
+
+	// uniqueBy names a key every item (a JSON object) must have. Items whose
+	// value under that key repeats an earlier item's are dropped, so the list
+	// fans out once per distinct value (e.g. "number": one task per issue).
+	// An item that is not an object or lacks the key fails the step.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_-]*$`
+	// +optional
+	UniqueBy string `json:"uniqueBy,omitempty"`
 }
 
 // StepRetry configures retry behavior for an individual step.

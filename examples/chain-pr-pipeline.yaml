@@ -51,7 +51,11 @@ spec:
         4. If the issue is too large for one reviewable PR, split it: create
            sub-issues in the same repo (gh issue create, body starting
            "Part of #<issue>"), comment the list on the issue and set split to
-           true. Otherwise set split to false and list just the input issue.
+           true. "issues" then lists each sub-issue exactly once and never the
+           parent issue: every entry becomes one implement task and one PR.
+           Reuse sub-issues that already exist (gh issue list --search
+           "Part of #<issue>") instead of creating duplicates.
+           Otherwise set split to false and list just the input issue.
         5. Breaking changes: if the work changes an API type, a CRD, the task
            contract or another interface other repos or live resources depend
            on, set "breaking" to true. The implementing PR gets the `breaking`
@@ -81,7 +85,13 @@ spec:
 
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
         rt/<issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
         If the plan's "base" is set, branch from that branch instead of origin/main
         and open the PR against it. If the plan's "breaking" is true, label the PR
         `breaking` (create the label if missing) and add a "Migration" section to
@@ -101,7 +111,13 @@ spec:
 
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
         rt/<issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
         If the plan's "base" is set, branch from that branch instead of origin/main
         and open the PR against it. If the plan's "breaking" is true, label the PR
         `breaking` (create the label if missing) and add a "Migration" section to
@@ -118,16 +134,26 @@ spec:
       forEach:
         from: steps.plan
         path: .issues
+        uniqueBy: number
         maxItems: 10
       maxParallel: 2
       failurePolicy: failFast
       task: |
         Implement sub-issue #{{ .Item.number }} ({{ .Item.title }}) of {{ .Input }}.
 
+        This task owns sub-issue #{{ .Item.number }} only: do not implement
+        the parent issue or other sub-issues.
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
-        rt/<sub-issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends
-        "Closes #{{ .Item.number }}". Never merge. Reply with the PR URL on the first line.
+        named after the sub-issue, rt/{{ .Item.number }}-<short-slug> (never the
+        parent issue's number), keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per sub-issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #{{ .Item.number }} in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/{{ .Item.number }}-"). If one exists, check out its branch, push your
+        work there and update that PR instead of opening a new one. Otherwise open
+        one PR whose body ends "Closes #{{ .Item.number }}".
+        Never merge. Reply with the PR URL on the first line.
 
     - name: implement_rt_ui_deep
       knightRef:
@@ -142,7 +168,13 @@ spec:
 
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
         rt/<issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
         If the plan's "base" is set, branch from that branch instead of origin/main
         and open the PR against it. If the plan's "breaking" is true, label the PR
         `breaking` (create the label if missing) and add a "Migration" section to
@@ -162,7 +194,13 @@ spec:
 
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
         rt/<issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends "Closes #<issue>".
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
         If the plan's "base" is set, branch from that branch instead of origin/main
         and open the PR against it. If the plan's "breaking" is true, label the PR
         `breaking` (create the label if missing) and add a "Migration" section to
@@ -179,16 +217,26 @@ spec:
       forEach:
         from: steps.plan
         path: .issues
+        uniqueBy: number
         maxItems: 10
       maxParallel: 2
       failurePolicy: failFast
       task: |
         Implement sub-issue #{{ .Item.number }} ({{ .Item.title }}) of {{ .Input }}.
 
+        This task owns sub-issue #{{ .Item.number }} only: do not implement
+        the parent issue or other sub-issues.
         Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
-        rt/<sub-issue>-<short-slug>, keep the change focused, add tests and run the
-        repo's build, test and lint. Open one PR whose body ends
-        "Closes #{{ .Item.number }}". Never merge. Reply with the PR URL on the first line.
+        named after the sub-issue, rt/{{ .Item.number }}-<short-slug> (never the
+        parent issue's number), keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per sub-issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #{{ .Item.number }} in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/{{ .Item.number }}-"). If one exists, check out its branch, push your
+        work there and update that PR instead of opening a new one. Otherwise open
+        one PR whose body ends "Closes #{{ .Item.number }}".
+        Never merge. Reply with the PR URL on the first line.
 
     - name: review
       knightRef:

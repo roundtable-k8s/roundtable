@@ -192,6 +192,38 @@ func extractItems(doc any, path string) ([]any, error) {
 	return values, nil
 }
 
+// uniqueItems keeps the first item for each distinct value under key (as
+// JSON, so 7 and 7.0 match but 7 and "7" do not). An empty key keeps every item.
+func uniqueItems(items []any, key string) ([]any, error) {
+	if key == "" {
+		return items, nil
+	}
+	seen := make(map[string]bool, len(items))
+	out := make([]any, 0, len(items))
+	for i, it := range items {
+		obj, ok := it.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("item %d is a %T, not an object", i, it)
+		}
+		v, ok := obj[key]
+		if !ok {
+			return nil, fmt.Errorf("item %d has no key %q", i, key)
+		}
+		if n, ok := v.(json.Number); ok {
+			if f, err := n.Float64(); err == nil {
+				v = f
+			}
+		}
+		id, _ := json.Marshal(v)
+		if seen[string(id)] {
+			continue
+		}
+		seen[string(id)] = true
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 func hashItems(items []any) string {
 	data, _ := json.Marshal(items)
 	sum := sha256.Sum256(data)
@@ -270,6 +302,9 @@ func (r *ChainReconciler) resolveForEachItems(ctx context.Context, chain *aiv1al
 	items, err := extractItems(doc, step.ForEach.Path)
 	if err != nil {
 		return nil, fmt.Errorf("forEach path %q: %w", step.ForEach.Path, err)
+	}
+	if items, err = uniqueItems(items, step.ForEach.UniqueBy); err != nil {
+		return nil, fmt.Errorf("forEach uniqueBy %q: %w", step.ForEach.UniqueBy, err)
 	}
 	maxItems := step.ForEach.MaxItems
 	if maxItems <= 0 {
