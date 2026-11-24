@@ -59,6 +59,13 @@ const (
 	// with a cap.
 	ConditionKnightPlanCapLimited = "PlanCapLimited"
 
+	// ConditionKnightToolsImageReady reports whether the tools image for the
+	// current spec.tools is published. Only set on knights with Nix tools.
+	// Status=False means the pod rollout is held on its current template
+	// (ToolsImageBuilding) or the build failed (ToolsImageBuildFailed); fix
+	// spec.tools or the builder and the operator retries.
+	ConditionKnightToolsImageReady = "ToolsImageReady"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
@@ -132,6 +139,17 @@ const (
 	// ReasonSandboxUnavailable indicates the knight requests runtime: sandbox but
 	// the operator started without the sandbox backend.
 	ReasonSandboxUnavailable = "SandboxUnavailable"
+
+	// ReasonToolsImageBuilding indicates the tools image for the new spec is
+	// still building; the pod keeps its current template meanwhile.
+	ReasonToolsImageBuilding = "ToolsImageBuilding"
+
+	// ReasonToolsImageBuildFailed indicates the tools image build Job failed;
+	// the pod is not rolled.
+	ReasonToolsImageBuildFailed = "ToolsImageBuildFailed"
+
+	// ReasonToolsImagePublished indicates the tools image is published.
+	ReasonToolsImagePublished = "ToolsImagePublished"
 
 	// ReasonKnightScaledToZero indicates KEDA scaled an autoscaled knight to
 	// zero pods because it had no pending tasks. It wakes on the next task.

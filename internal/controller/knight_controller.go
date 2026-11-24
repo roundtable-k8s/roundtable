@@ -231,8 +231,15 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		nixRequeue = d
 	}
 
-	// 3. Runtime (Deployment or Sandbox, depending on knight.Spec.Runtime)
-	if backend != nil {
+	// 3. Runtime (Deployment or Sandbox, depending on knight.Spec.Runtime).
+	//    Held while the tools image for the current spec is unpublished, so the
+	//    pod doesn't roll onto a spec that expects tools its image lacks.
+	if hold, err := r.holdRollout(ctx, knight); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to check tools image rollout hold")
+	} else if hold {
+		log.Info("Holding pod rollout until the tools image is published", "image", knightpkg.ToolsImageRef(knight))
+	} else if backend != nil {
 		if err := backend.Reconcile(ctx, knight); err != nil {
 			reconcileErr = err
 			log.Error(err, "Failed to reconcile runtime", "backend", knight.Spec.Runtime)

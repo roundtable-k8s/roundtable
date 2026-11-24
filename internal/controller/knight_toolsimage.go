@@ -22,11 +22,14 @@ import (
 	"net/http"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -157,6 +160,7 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 	ref := knightpkg.ToolsImageRef(knight)
 	if ref == "" {
 		knight.Status.ToolsImage = "" // no Nix tools; persisted by updateStatus
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightToolsImageReady)
 		return nil
 	}
 	jobName := toolsImageJobName(knight)
@@ -164,6 +168,8 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 
 	if knight.Status.ToolsImage == ref {
 		if !r.toolsImageLost(ctx, knight, ref) {
+			r.setToolsImageCondition(knight, metav1.ConditionTrue, aiv1alpha1.ReasonToolsImagePublished,
+				fmt.Sprintf("Tools image %s is published", ref))
 			return nil // already published
 		}
 		// The registry no longer has the image (wiped volume, garbage
@@ -197,6 +203,7 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 			return fmt.Errorf("tools image Job create failed: %w", err)
 		}
 		log.Info("Created tools image Job", "job", jobName, "image", ref)
+		r.setToolsImageBuilding(knight, ref)
 		r.Recorder.Eventf(knight, corev1.EventTypeNormal, "ToolsImageBuildStarted", "Building tools image %s", ref)
 		return nil
 	} else if err != nil {
@@ -207,16 +214,68 @@ func (r *KnightReconciler) reconcileToolsImage(ctx context.Context, knight *aiv1
 	switch {
 	case job.DeletionTimestamp != nil:
 		// Being removed (see the missing-image path above); wait for it to go.
+		r.setToolsImageBuilding(knight, ref)
 	case job.Status.Succeeded > 0:
 		knight.Status.ToolsImage = ref // persisted by updateStatus
+		r.setToolsImageCondition(knight, metav1.ConditionTrue, aiv1alpha1.ReasonToolsImagePublished,
+			fmt.Sprintf("Tools image %s is published", ref))
 		r.toolsImageVerifiedAt.Store(ref, time.Now())
 		log.Info("Published tools image", "job", jobName, "image", ref)
 		r.Recorder.Eventf(knight, corev1.EventTypeNormal, "ToolsImagePublished", "Tools image %s published", ref)
 	case job.Spec.BackoffLimit != nil && job.Status.Failed > *job.Spec.BackoffLimit:
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ToolsImageBuildFailed",
 			"Tools image Job %s failed; image %s not published", jobName, ref)
+		r.setToolsImageCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonToolsImageBuildFailed,
+			fmt.Sprintf("Tools image Job %s failed; image %s not published and the pod rollout is held", jobName, ref))
+	default:
+		r.setToolsImageBuilding(knight, ref)
 	}
 	return nil
+}
+
+func (r *KnightReconciler) setToolsImageBuilding(knight *aiv1alpha1.Knight, ref string) {
+	r.setToolsImageCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonToolsImageBuilding,
+		fmt.Sprintf("Tools image %s is building; the pod keeps its current template until it is published", ref))
+}
+
+func (r *KnightReconciler) setToolsImageCondition(knight *aiv1alpha1.Knight, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightToolsImageReady,
+		Status:             status,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: knight.Generation,
+	})
+}
+
+// toolsImagePending reports whether the knight's desired tools image is not
+// published yet.
+func toolsImagePending(knight *aiv1alpha1.Knight) bool {
+	ref := knightpkg.ToolsImageRef(knight)
+	return ref != "" && knight.Status.ToolsImage != ref
+}
+
+// holdRollout reports whether the runtime workload must be left as it is
+// because the tools image for the current spec is not published. Rolling the
+// whole pod template (env, mounts, other spec changes) before the image exists
+// would run the new spec on the old tools. A knight with no workload yet is not
+// held: there is nothing to roll, and its pod waits in image pull.
+func (r *KnightReconciler) holdRollout(ctx context.Context, knight *aiv1alpha1.Knight) (bool, error) {
+	if !toolsImagePending(knight) {
+		return false, nil
+	}
+	nn := types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}
+	var obj client.Object = &appsv1.Deployment{}
+	if knight.Spec.Runtime == runtimeSandbox {
+		obj = &sandboxv1alpha1.Sandbox{}
+	}
+	if err := r.Get(ctx, nn, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // buildToolsImageJob constructs the Job that builds and pushes the knight's
