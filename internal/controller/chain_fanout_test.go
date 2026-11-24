@@ -114,6 +114,30 @@ func TestExtractItems(t *testing.T) {
 	}
 }
 
+func TestUniqueItems(t *testing.T) {
+	doc, err := parseJSONDocument(`[{"number":206,"title":"Queues page"},{"number":207,"title":"b"},{"number":206,"title":"Queues page (again)"},{"number":206.0}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := doc.([]any)
+	got, err := uniqueItems(items, "number")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(got); string(b) != `[{"number":206,"title":"Queues page"},{"number":207,"title":"b"}]` {
+		t.Fatalf("got %s", b)
+	}
+	if got, _ := uniqueItems(items, ""); len(got) != len(items) {
+		t.Fatalf("empty key dropped items: %v", got)
+	}
+	if _, err := uniqueItems(items, "id"); err == nil || !strings.Contains(err.Error(), `item 0 has no key "id"`) {
+		t.Fatalf("missing key: %v", err)
+	}
+	if _, err := uniqueItems([]any{"a"}, "number"); err == nil {
+		t.Fatal("expected an error for a non-object item")
+	}
+}
+
 func TestValidateForEach(t *testing.T) {
 	mk := func(steps ...aiv1alpha1.ChainStep) *aiv1alpha1.Chain {
 		return &aiv1alpha1.Chain{Spec: aiv1alpha1.ChainSpec{Steps: steps}}
@@ -537,6 +561,71 @@ var _ = Describe("Chain forEach fan-out", func() {
 		Expect(implStatus(c).Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
 		Expect(implStatus(c).Error).To(ContainSubstring("invalid model"))
 		Expect(tasksFor("impl")).To(HaveLen(2), "nothing dispatched with a rejected model")
+	})
+
+	It("forEach.uniqueBy fans out once per distinct value", func() {
+		start([]aiv1alpha1.ChainStep{
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do #{{ .Item.number }}", TimeoutSeconds: 120, MaxParallel: 2,
+				ForEach: &aiv1alpha1.ChainForEach{From: "input", UniqueBy: "number"}},
+		}, `[{"number":1},{"number":2},{"number":1,"title":"dup"}]`)
+		reconcileN(1)
+		Expect(implStatus(get()).FanOut.Total).To(BeEquivalentTo(2))
+		got := make([]string, 0, 2)
+		for _, t := range tasksFor("impl") {
+			got = append(got, t.Task)
+		}
+		Expect(got).To(Equal([]string{"do #1", "do #2"}))
+	})
+
+	// #313: a split must give every sub-issue exactly one implement task, on a
+	// branch named after the sub-issue, which updates an existing open PR for
+	// it instead of opening another (#209 and #210 were both opened for #206).
+	It("the PR pipeline's split runs one task per sub-issue that reuses its open PR", func() {
+		flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+		example, err := readPRPipelineExample()
+		Expect(err).NotTo(HaveOccurred())
+		var steps []aiv1alpha1.ChainStep
+		for _, s := range example.Spec.Steps {
+			if s.Name == "plan" || s.Name == "split_rt_operator" {
+				s.KnightRef.Name, s.Model = knight, "" // the fake knight has no aliases
+				if s.ForEach != nil {
+					s.Name = "impl"
+				}
+				steps = append(steps, s)
+			}
+		}
+		Expect(steps).To(HaveLen(2))
+		Expect(steps[1].ForEach.UniqueBy).To(Equal("number"))
+		start(steps, `{"repo": "roundtable-k8s/roundtable-ui", "issue": 185}`)
+
+		reconcileN(1)
+		Expect(tasksFor("plan")).To(HaveLen(1))
+		Expect(flat(tasksFor("plan")[0].Task)).To(ContainSubstring("lists each sub-issue exactly once and never the parent issue"))
+		// The planner repeats sub-issue #206 (the #209/#210 case).
+		finish(tasksFor("plan")[0], "```json\n"+`{"coder": "rt-operator", "model": "deep", "split": true, "breaking": false, "base": "",`+
+			` "issues": [{"number": 206, "title": "Queues page"}, {"number": 207, "title": "Queue metrics"},`+
+			` {"number": 206, "title": "Queues page"}], "reason": "r"}`+"\n```", "")
+		reconcileN(1)
+		Expect(implStatus(get()).FanOut.Total).To(BeEquivalentTo(2))
+		items := tasksFor("impl")
+		Expect(items).To(HaveLen(2))
+		for i, n := range []string{"206", "207"} {
+			task := flat(items[i].Task)
+			Expect(task).To(HavePrefix("Implement sub-issue #" + n + " "))
+			Expect(task).To(ContainSubstring("branch named after the sub-issue, rt/" + n + "-<short-slug>"))
+			Expect(task).To(ContainSubstring(`--search "Closes #` + n + ` in:body"`))
+			Expect(task).To(ContainSubstring(`branch starts with "rt/` + n + `-"`))
+			Expect(task).To(ContainSubstring("update that PR instead of opening a new one"))
+			Expect(task).To(ContainSubstring(`body ends "Closes #` + n + `"`))
+		}
+
+		finish(items[0], "https://github.com/roundtable-k8s/roundtable-ui/pull/209", "")
+		finish(items[1], "https://github.com/roundtable-k8s/roundtable-ui/pull/211", "")
+		reconcileN(1)
+		c := get()
+		Expect(implStatus(c).Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
+		Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
+		Expect(tasksFor("impl")).To(HaveLen(2), "no second task (and PR) for #206")
 	})
 
 	It("an empty list joins immediately as []", func() {
