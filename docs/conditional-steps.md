@@ -41,6 +41,12 @@ steps:
 - **error** (e.g. `json()` on prose, or an unknown step name at runtime): the
   step `Failed` with `error: "when: ..."`. Use `continueOnFailure` if that
   should not fail the chain.
+- **A step whose output is read as JSON** (`json(steps.<name>.output)` in a
+  later step's `when`, `until` or `resumeRunId`, or `forEach.from:
+  steps.<name>`) must reply with a JSON document. If its reply has none, it
+  is re-run once (`reason: JSONRetry`) with a reminder to reply with only the
+  JSON block; a second reply without one fails that step (#314), so the
+  error names the step that broke instead of every dependent.
 - **A skipped step satisfies `dependsOn`.** Dependents still run. Gate them
   with their own `when` (e.g. `steps.x.phase == "Succeeded"`) if they should
   not. Steps skipped because the chain already failed get

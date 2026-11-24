@@ -154,7 +154,7 @@ var pullRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls/(\d+)$`)
 
 var labelRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/labels(?:/(.+))?$`)
 
-var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(/labels|/comments|/assignees)(?:/(.+))?)?$`)
+var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(?:(/labels|/comments|/assignees)(?:/(.+))?)?)?$`)
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	f.mu.Lock()
@@ -271,6 +271,14 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	is := f.find(repo, n)
 	if is == nil {
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if m[3] == "" && req.Method == http.MethodGet { // one issue
+		out := *is
+		if out.State == "" {
+			out.State = "open"
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	var body map[string]any
@@ -741,6 +749,87 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
 			tick()
 			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+		})
+	})
+
+	// A failed run hands its issue back (#314): needs-human, not a stale
+	// in-progress label.
+	Context("failed chain", func() {
+		fail := func() string {
+			gh.add(repo, 314, "Fix", "body", "rt:ready")
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			c := &chains[0]
+			c.Status.Phase = aiv1alpha1.ChainPhaseFailed
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "plan", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "output has no parseable JSON block after one retry: invalid character '`'"},
+				{Name: "implement", Phase: aiv1alpha1.ChainStepPhaseSkipped, Reason: "ChainFailed"},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return c.Name
+		}
+		handled := func(name string) bool {
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			return c.Annotations[aiv1alpha1.AnnotationPickupVerified] == c.Status.LastRunTrigger
+		}
+
+		It("labels the issue needs-human, removes in-progress and says which step failed", func() {
+			name := fail()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("rt:in-progress"))
+			tick()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("needs-human"))
+			comments := gh.commentsOn(repo, 314)
+			Expect(comments).To(HaveLen(2)) // claim + hand-back
+			Expect(comments[1]).To(ContainSubstring("Chain `" + name + "`"))
+			Expect(comments[1]).To(ContainSubstring("`plan`: output has no parseable JSON block"))
+			Expect(comments[1]).NotTo(ContainSubstring("`implement`"))
+			Expect(handled(name)).To(BeTrue())
+
+			By("handing back once per run")
+			tick()
+			Expect(gh.commentsOn(repo, 314)).To(HaveLen(2))
+			Expect(pickupChains()).To(HaveLen(1))
+		})
+
+		It("leaves an issue a human already took over alone", func() {
+			name := fail()
+			gh.mu.Lock()
+			gh.find(repo, 314).Labels = []github.Label{{Name: "wontfix"}}
+			gh.mu.Unlock()
+			tick()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("wontfix"))
+			Expect(gh.commentsOn(repo, 314)).To(HaveLen(1))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("leaves a closed issue alone", func() {
+			name := fail()
+			gh.mu.Lock()
+			gh.find(repo, 314).State = "closed"
+			gh.mu.Unlock()
+			tick()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("rt:in-progress"))
+			Expect(gh.commentsOn(repo, 314)).To(HaveLen(1))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("retries on the next poll when GitHub fails, and keeps the chain until handled", func() {
+			name := fail()
+			rt := getRT()
+			rt.Spec.IssuePickup.TTLSecondsAfterFinished = new(int32(1))
+			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+			gh.failComments = 1
+			tick()
+			Expect(getRT().Status.IssuePickup.LastError).To(ContainSubstring("hand back failed chain"))
+			Expect(handled(name)).To(BeFalse())
+			Expect(pickupChains()).To(HaveLen(1)) // not garbage-collected yet
+			tick()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("needs-human"))
+			Expect(handled(name)).To(BeTrue())
 		})
 	})
 

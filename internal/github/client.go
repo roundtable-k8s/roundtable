@@ -42,8 +42,10 @@ type Issue struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	// HTMLURL is the issue's web URL.
-	HTMLURL string  `json:"html_url"`
-	Labels  []Label `json:"labels"`
+	HTMLURL string `json:"html_url"`
+	// State is "open" or "closed".
+	State  string  `json:"state,omitempty"`
+	Labels []Label `json:"labels"`
 	// PullRequest is set when the item is a pull request (the issues API
 	// lists both).
 	PullRequest *struct{} `json:"pull_request,omitempty"`
@@ -185,6 +187,16 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo, label string) ([]Issu
 		}
 	}
 	return issues, nil
+}
+
+// GetIssue returns one issue.
+func (c *Client) GetIssue(ctx context.Context, repo string, number int) (*Issue, error) {
+	p, err := issuePath(repo, number, "")
+	if err != nil {
+		return nil, err
+	}
+	out := &Issue{}
+	return out, c.do(ctx, http.MethodGet, p, nil, nil, out)
 }
 
 // ListOpenPullRequests returns the open pull requests carrying label (the
