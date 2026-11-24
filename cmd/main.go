@@ -314,7 +314,7 @@ func main() {
 			mgr.GetClient(),
 			mgr.GetScheme(),
 			defaultImage,
-			knightReconciler.BuildPodSpec,
+			knightReconciler.BuildDrainablePodSpec,
 		)
 	}
 
