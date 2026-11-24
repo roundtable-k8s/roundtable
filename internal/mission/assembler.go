@@ -573,8 +573,14 @@ func (a *KnightAssembler) EnsureMissionServiceAccount(ctx context.Context, missi
 	return nil
 }
 
-// ensureMissionNetworkPolicy creates a NetworkPolicy to isolate ephemeral knights if it doesn't exist.
+const defaultMissionNATSURL = "nats://nats.database.svc.cluster.local:4222"
+
+// EnsureMissionNetworkPolicy creates a NetworkPolicy to isolate ephemeral knights if it doesn't exist.
 func (a *KnightAssembler) EnsureMissionNetworkPolicy(ctx context.Context, mission *aiv1alpha1.Mission) error {
+	settings := NetPolSettingsFromEnv()
+	if !settings.Enabled {
+		return nil
+	}
 	policyName := fmt.Sprintf("mission-%s-isolation", mission.Name)
 	policy := &networkingv1.NetworkPolicy{}
 	policyKey := types.NamespacedName{Name: policyName, Namespace: mission.Namespace}
@@ -582,7 +588,13 @@ func (a *KnightAssembler) EnsureMissionNetworkPolicy(ctx context.Context, missio
 
 	if err != nil && client.IgnoreNotFound(err) == nil {
 		// Build NetworkPolicy
-		policy = a.buildMissionNetworkPolicy(mission, policyName)
+		natsURL := a.resolveMissionNATSURL(ctx, mission)
+		var natsInCluster bool
+		policy, natsInCluster = a.buildMissionNetworkPolicy(mission, policyName, natsURL, settings)
+		if !natsInCluster {
+			logf.FromContext(ctx).Info("NATS URL host is not a <svc>.<namespace>.svc name; "+
+				"mission NetworkPolicy allows the NATS port to any destination", "natsURL", natsURL)
+		}
 
 		if err := a.Client.Create(ctx, policy); err != nil {
 			return fmt.Errorf("failed to create NetworkPolicy: %w", err)
@@ -596,7 +608,10 @@ func (a *KnightAssembler) EnsureMissionNetworkPolicy(ctx context.Context, missio
 }
 
 // buildMissionNetworkPolicy constructs a NetworkPolicy that restricts ephemeral knight egress.
-func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission, policyName string) *networkingv1.NetworkPolicy {
+func (a *KnightAssembler) buildMissionNetworkPolicy(
+	mission *aiv1alpha1.Mission, policyName, natsURL string, settings NetPolSettings,
+) (*networkingv1.NetworkPolicy, bool) {
+	natsRule, natsInCluster := NATSEgressRule(natsURL, settings.NATSPodLabels)
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      policyName,
@@ -620,56 +635,8 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 				networkingv1.PolicyTypeEgress,
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
-				// Allow egress to NATS server
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "database",
-								},
-							},
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"app.kubernetes.io/name": "nats",
-								},
-							},
-						},
-					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     new(intstr.FromInt(4222)),
-						},
-					},
-				},
-				// Allow DNS resolution (UDP and TCP)
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "kube-system",
-								},
-							},
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"k8s-app": "kube-dns",
-								},
-							},
-						},
-					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: ptr.To(corev1.ProtocolUDP),
-							Port:     new(intstr.FromInt(53)),
-						},
-						{
-							Protocol: ptr.To(corev1.ProtocolTCP),
-							Port:     new(intstr.FromInt(53)),
-						},
-					},
-				},
+				natsRule,
+				DNSEgressRule(settings),
 				// Allow HTTPS egress for AI provider APIs
 				// Note: This allows egress to ANY HTTPS endpoint
 				// For stricter isolation, use an egress proxy with allowlisting
@@ -683,7 +650,25 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(mission *aiv1alpha1.Mission,
 				},
 			},
 		},
+	}, natsInCluster
+}
+
+// resolveMissionNATSURL returns the NATS URL a mission's knights will use:
+// the default, overridden by the parent RoundTable, then by the mission's
+// roundTableTemplate.
+func (a *KnightAssembler) resolveMissionNATSURL(ctx context.Context, mission *aiv1alpha1.Mission) string {
+	natsURL := defaultMissionNATSURL
+	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
+		parentRT := &aiv1alpha1.RoundTable{}
+		key := types.NamespacedName{Name: aiv1alpha1.RefName(mission.Spec.RoundTableRef), Namespace: mission.Namespace}
+		if err := a.Client.Get(ctx, key, parentRT); err == nil && parentRT.Spec.NATS.URL != "" {
+			natsURL = parentRT.Spec.NATS.URL
+		}
 	}
+	if t := mission.Spec.RoundTableTemplate; t != nil && t.NATSURL != "" {
+		natsURL = t.NATSURL
+	}
+	return natsURL
 }
 
 // BuildEphemeralRoundTable creates the spec for an ephemeral RoundTable for a mission.
@@ -696,7 +681,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	var parentDefaults *aiv1alpha1.RoundTableDefaults
 	var parentPolicies *aiv1alpha1.RoundTablePolicies
 	var parentGitHub *aiv1alpha1.GitHubConfig
-	natsURL := "nats://nats.database.svc.cluster.local:4222" // Default
+	natsURL := defaultMissionNATSURL
 
 	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 		parentRT := &aiv1alpha1.RoundTable{}

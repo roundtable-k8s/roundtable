@@ -32,6 +32,17 @@ helm install roundtable charts/roundtable-operator \
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |
 | `extraArgs` | list | `[]` | Additional args for the manager binary (e.g. `--github-api-url=https://ghe.example.com/api/v3` for [issue pickup](issue-pickup.md)) |
 
+### Mission NetworkPolicy
+
+The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. Rendered into the operator's `MISSION_NETPOL_*` env vars.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `missionNetworkPolicy.enabled` | bool | `true` | Create the policy (`MISSION_NETPOL_ENABLED`); disable on clusters without NetworkPolicy support or with their own policies |
+| `missionNetworkPolicy.nats.podLabels` | map | `{app.kubernetes.io/name: nats}` | Pod labels narrowing the NATS peer (`MISSION_NETPOL_NATS_POD_LABELS`, `k=v,k=v`); empty means the whole namespace |
+| `missionNetworkPolicy.dns.namespace` | string | `kube-system` | Namespace of cluster DNS (`MISSION_NETPOL_DNS_NAMESPACE`) |
+| `missionNetworkPolicy.dns.podLabels` | map | `{k8s-app: kube-dns}` | Pod labels of cluster DNS (`MISSION_NETPOL_DNS_POD_LABELS`) |
+
 ### Service Account
 
 | Key | Type | Default | Description |

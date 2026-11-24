@@ -111,6 +111,21 @@ toolsImage:
   # built-in pin. Changing it changes every tools image tag.
   nix2containerRev: ""
 
+# Egress NetworkPolicy the operator creates for each mission's knights. The NATS
+# rule is derived from the mission's NATS URL (namespace and port); TCP 443 is
+# allowed to anywhere. Set enabled=false on clusters without NetworkPolicy
+# support or that manage their own policies.
+missionNetworkPolicy:
+  enabled: true
+  nats:
+    # Optional pod labels narrowing the NATS peer; empty = whole namespace.
+    podLabels:
+      app.kubernetes.io/name: nats
+  dns:
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns
+
 # Dashboard (Round Table UI) — observability platform
 dashboard:
   enabled: true
