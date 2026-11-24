@@ -1151,12 +1151,13 @@ func maxQueueWait(chain *aiv1alpha1.Chain) time.Duration {
 // detectPickup records ss.PickedUpAt once the knight has picked the task up.
 //
 // Pickup signal: knights consume the tasks stream through a durable
-// "<knight>-consumer" and ack each message immediately on receipt (pi-knight
-// delivers at-most-once and processes afterwards), so the consumer's ack floor
-// reaching the task's stream sequence means the knight started it. No knight
-// runtime change is needed. A step without a recorded sequence (published by
-// an older operator) falls back to the legacy behaviour: the clock starts at
-// publish time.
+// "<Knight>-consumer" and keep each message un-acked while they work on it
+// (in-progress acks), acking only after the result is published. The ack floor
+// is therefore a completion signal; the consumer's delivered stream sequence
+// reaching the task's sequence is the pickup signal (a pull consumer on a
+// WorkQueue stream delivers in stream order). No knight runtime change is
+// needed. A step without a recorded sequence (published by an older operator)
+// falls back to the legacy behaviour: the clock starts at publish time.
 func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *aiv1alpha1.ChainStepStatus, spec *aiv1alpha1.ChainStep) {
 	if ss.PickedUpAt != nil || ss.StartedAt == nil {
 		return
@@ -1171,26 +1172,26 @@ func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *a
 	if ss.Knight != "" {
 		knight = ss.Knight
 	}
-	if r.ackFloorReached(ctx, nc, knight, ss.TaskSeq) {
+	if r.taskDelivered(ctx, nc, knight, ss.TaskSeq) {
 		now := metav1.Now()
 		ss.PickedUpAt = &now
 		logf.FromContext(ctx).Info("Knight picked up step task", "step", ss.Name, "queuedFor", now.Sub(ss.StartedAt.Time).Round(time.Second).String())
 	}
 }
 
-// ackFloorReached reports whether the knight's task consumer has acknowledged
+// taskDelivered reports whether the knight's task consumer has been delivered
 // the tasks-stream message with sequence seq (i.e. picked the task up).
-func (r *ChainReconciler) ackFloorReached(ctx context.Context, nc natsConfig, knightRef string, seq uint64) bool {
+func (r *ChainReconciler) taskDelivered(ctx context.Context, nc natsConfig, knightRef string, seq uint64) bool {
 	natsCli, err := r.natsClient()
 	if err != nil {
 		return false
 	}
-	floor, err := natsCli.ConsumerAckFloor(nc.TasksStream, natspkg.KnightTaskConsumerName(knightRef))
+	delivered, err := natsCli.ConsumerDeliveredSeq(nc.TasksStream, natspkg.KnightTaskConsumerName(knightRef))
 	if err != nil {
 		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "knight", knightRef, "error", err.Error())
 		return false
 	}
-	return floor >= seq
+	return delivered >= seq
 }
 
 // handleRunTriggers processes the run-now and retry-failed annotations. It

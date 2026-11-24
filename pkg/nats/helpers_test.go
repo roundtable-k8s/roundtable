@@ -331,3 +331,14 @@ func TestSubjectFormatConsistency(t *testing.T) {
 		}
 	})
 }
+
+func TestKnightTaskConsumerName(t *testing.T) {
+	for in, want := range map[string]string{
+		"rt-operator": "Rt-operator-consumer",
+		"Galahad":     "Galahad-consumer",
+	} {
+		if got := KnightTaskConsumerName(in); got != want {
+			t.Errorf("KnightTaskConsumerName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

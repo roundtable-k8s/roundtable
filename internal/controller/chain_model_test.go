@@ -50,7 +50,8 @@ func (f *modelFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *modelFakeNATS) ConsumerAckFloor(string, string) (uint64, error) { return f.seq, nil }
+func (f *modelFakeNATS) ConsumerAckFloor(string, string) (uint64, error)     { return f.seq, nil }
+func (f *modelFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) { return f.seq, nil }
 func (f *modelFakeNATS) PollMessage(subject string, _ time.Duration, _ ...natspkg.SubscribeOption) (*nats.Msg, error) {
 	if f.result == nil {
 		return nil, nil

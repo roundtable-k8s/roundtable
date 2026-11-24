@@ -543,7 +543,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	if bs.PickedUpAt == nil && bs.StartedAt != nil {
 		if bs.TaskSeq == 0 {
 			bs.PickedUpAt = bs.StartedAt
-		} else if r.ackFloorReached(ctx, nc, loopTaskKnight(body, bs), bs.TaskSeq) {
+		} else if r.taskDelivered(ctx, nc, loopTaskKnight(body, bs), bs.TaskSeq) {
 			now := metav1.Now()
 			bs.PickedUpAt = &now
 		}

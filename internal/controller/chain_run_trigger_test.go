@@ -39,8 +39,9 @@ import (
 // and no results.
 type pickupFakeNATS struct {
 	*fakeNATSClient
-	floor uint64
-	seq   uint64
+	floor     uint64
+	delivered uint64
+	seq       uint64
 }
 
 func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
@@ -51,6 +52,9 @@ func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	return f.seq, nil
 }
 func (f *pickupFakeNATS) ConsumerAckFloor(string, string) (uint64, error) { return f.floor, nil }
+func (f *pickupFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) {
+	return f.delivered, nil
+}
 func (f *pickupFakeNATS) PollMessage(string, time.Duration, ...natspkg.SubscribeOption) (*nats.Msg, error) {
 	return nil, nil
 }
@@ -321,13 +325,13 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		It("does not count queue time: the timeout starts at pickup", func() {
 			create(oneStep, nil) // step timeout 120s, default max queue wait 1800s
 			queued(10 * time.Minute)
-			fake.floor = 0 // knight busy, not picked up yet
+			fake.delivered = 0 // knight busy, not picked up yet
 			reconcileN(1)
 			c := get()
 			Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning), "10m queued > 120s timeout must not fail it")
 			Expect(c.Status.StepStatuses[0].PickedUpAt).To(BeNil())
 
-			fake.floor = 5 // knight acks the task: picked up now
+			fake.delivered = 5 // knight receives the task (still un-acked): picked up now
 			reconcileN(1)
 			c = get()
 			Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
@@ -342,6 +346,35 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 			c = get()
 			Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
 			Expect(c.Status.StepStatuses[0].Error).To(ContainSubstring("timed out"))
+		})
+
+		It("detects pickup from the delivered sequence while the ack floor is still below the task, then times out by timeoutSeconds", func() {
+			create(oneStep, func(s *aiv1alpha1.ChainSpec) { s.MaxQueueWaitSeconds = 60 })
+			queued(30 * time.Second)
+			fake.floor, fake.delivered = 4, 5 // delivered, not yet acked
+			reconcileN(1)
+			Expect(get().Status.StepStatuses[0].PickedUpAt).NotTo(BeNil())
+
+			// 10 minutes after publish (> maxQueueWait 60s) but only 30s after
+			// pickup (< 120s step timeout): must keep running.
+			setStatus(func(s *aiv1alpha1.ChainStatus) {
+				st := metav1.NewTime(time.Now().Add(-10 * time.Minute))
+				pu := metav1.NewTime(time.Now().Add(-30 * time.Second))
+				s.StepStatuses[0].StartedAt, s.StepStatuses[0].PickedUpAt = &st, &pu
+			})
+			reconcileN(1)
+			Expect(get().Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
+
+			// 200s after pickup the 120s step timeout fires, not "not picked up".
+			setStatus(func(s *aiv1alpha1.ChainStatus) {
+				pu := metav1.NewTime(time.Now().Add(-200 * time.Second))
+				s.StepStatuses[0].PickedUpAt = &pu
+			})
+			reconcileN(1)
+			c := get()
+			Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
+			Expect(c.Status.StepStatuses[0].Error).To(ContainSubstring("timed out"))
+			Expect(c.Status.StepStatuses[0].Error).NotTo(ContainSubstring("not picked up"))
 		})
 
 		It("fails a task the knight never picks up once maxQueueWait elapses", func() {

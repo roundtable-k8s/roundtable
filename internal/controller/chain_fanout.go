@@ -474,7 +474,7 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 		if it.PickedUpAt == nil && it.StartedAt != nil {
 			if it.TaskSeq == 0 {
 				it.PickedUpAt = it.StartedAt
-			} else if r.ackFloorReached(ctx, nc, spec.KnightRef.Name, it.TaskSeq) {
+			} else if r.taskDelivered(ctx, nc, spec.KnightRef.Name, it.TaskSeq) {
 				now := metav1.Now()
 				it.PickedUpAt = &now
 			}

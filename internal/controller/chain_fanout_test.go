@@ -259,7 +259,8 @@ func (f *fanoutFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *fanoutFakeNATS) ConsumerAckFloor(string, string) (uint64, error) { return f.seq, nil }
+func (f *fanoutFakeNATS) ConsumerAckFloor(string, string) (uint64, error)     { return f.seq, nil }
+func (f *fanoutFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) { return f.seq, nil }
 func (f *fanoutFakeNATS) PollMessage(subject string, _ time.Duration, _ ...natspkg.SubscribeOption) (*nats.Msg, error) {
 	res, ok := f.results[subject]
 	if !ok {

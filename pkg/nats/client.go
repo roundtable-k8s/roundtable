@@ -51,6 +51,10 @@ type Client interface {
 	// message has been acknowledged by the named consumer.
 	ConsumerAckFloor(stream, consumer string) (uint64, error)
 
+	// ConsumerDeliveredSeq returns the highest stream sequence the named
+	// consumer has delivered to a client.
+	ConsumerDeliveredSeq(stream, consumer string) (uint64, error)
+
 	// Subscribe creates a synchronous subscription to a subject.
 	Subscribe(subject string, opts ...SubscribeOption) (*nats.Subscription, error)
 
@@ -220,6 +224,21 @@ func (c *JetStreamClient) ConsumerAckFloor(stream, consumer string) (uint64, err
 		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
 	}
 	return info.AckFloor.Stream, nil
+}
+
+// ConsumerDeliveredSeq returns the consumer's delivered stream sequence.
+func (c *JetStreamClient) ConsumerDeliveredSeq(stream, consumer string) (uint64, error) {
+	if err := c.Connect(); err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	js := c.js
+	c.mu.Unlock()
+	info, err := js.ConsumerInfo(stream, consumer)
+	if err != nil {
+		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+	}
+	return info.Delivered.Stream, nil
 }
 
 // Subscribe creates a synchronous subscription to a subject.
