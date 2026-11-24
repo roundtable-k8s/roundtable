@@ -107,6 +107,24 @@ var _ = Describe("Knight runtimeClassName", func() {
 		Expect(d.Spec.Template.Spec.RuntimeClassName).To(HaveValue(Equal("gvisor-test")))
 	})
 
+	It("lets a knight with a missing RuntimeClass be suspended", func() {
+		Expect(k8sClient.Create(ctx, newKnight("gvisor-test"))).To(Succeed())
+		req := reconcile.Request{NamespacedName: key}
+		_, _ = reconciler.Reconcile(ctx, req)
+		_, err := reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		k := &aiv1alpha1.Knight{}
+		Expect(k8sClient.Get(ctx, key, k)).To(Succeed())
+		k.Spec.Suspend = true
+		Expect(k8sClient.Update(ctx, k)).To(Succeed())
+		_, err = reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, key, k)).To(Succeed())
+		Expect(k.Status.Phase).To(Equal(aiv1alpha1.KnightPhaseSuspended))
+	})
+
 	It("puts the RuntimeClass on both the Deployment and the Sandbox pod templates", func() {
 		k := newKnight("gvisor")
 

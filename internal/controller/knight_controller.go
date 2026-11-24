@@ -166,24 +166,13 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Inherit the table's default resources and workspace (in memory only).
+	ownRuntimeClass := knight.Spec.RuntimeClassName != nil
 	knightpkg.ApplyTableDefaults(ctx, r.Client, knight)
 
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
 	// with a clear condition and leave any existing runtime resources alone.
 	if knight.Spec.Runtime == runtimeSandbox && !r.SandboxEnabled {
 		return r.reconcileRuntimeUnavailable(ctx, knight)
-	}
-
-	// A knight naming a RuntimeClass that doesn't exist would only produce pods
-	// the API server rejects; park it with a clear condition instead.
-	if name := runtimeClassOf(knight); name != "" {
-		if err := r.Get(ctx, types.NamespacedName{Name: name}, &nodev1.RuntimeClass{}); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, err
-			}
-			return r.parkKnight(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound,
-				fmt.Sprintf("RuntimeClass %q does not exist; create it or change spec.runtimeClassName", name))
-		}
 	}
 
 	// Resolve the runtime backend for this knight
@@ -208,6 +197,23 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return r.finishSuspended(ctx, knight)
 		}
 		return r.reconcileSuspended(ctx, knight)
+	}
+
+	// (After the suspend step, so a parked knight can still be suspended.)
+	// A knight naming a RuntimeClass that doesn't exist would only produce pods
+	// the API server rejects; park it with a clear condition instead.
+	if name := runtimeClassOf(knight); name != "" {
+		if err := r.Get(ctx, types.NamespacedName{Name: name}, &nodev1.RuntimeClass{}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			field := "spec.runtimeClassName"
+			if !ownRuntimeClass {
+				field = "the RoundTable's spec.defaults.runtimeClassName (or set spec.runtimeClassName on the knight)"
+			}
+			return r.parkKnight(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound,
+				fmt.Sprintf("RuntimeClass %q does not exist; create it or change %s", name, field))
+		}
 	}
 
 	// Reconcile each owned resource
