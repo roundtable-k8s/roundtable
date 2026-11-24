@@ -31,8 +31,6 @@ rules:
   - secrets
   verbs:
   - get
-  - list
-  - watch
 - apiGroups:
   - ai.roundtable.io
   resources:

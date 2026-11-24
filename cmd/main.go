@@ -231,7 +231,9 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme:                 scheme,
+		Scheme: scheme,
+		// Secrets are read uncached (no cluster-wide Secret informer).
+		Client:                 controller.ManagerClientOptions(),
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,

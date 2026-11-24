@@ -49,7 +49,7 @@ rules:
   # Notification webhook bearer tokens (spec.notify.webhook.tokenSecretRef)
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
   # Leader election
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
