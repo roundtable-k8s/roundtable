@@ -299,3 +299,12 @@ prPipeline:
   maxQueueWaitSeconds: 3600
   # Optional initial input, e.g. '{"repo": "roundtable-k8s/roundtable", "issue": 225}'.
   input: ""
+  # Feedback Chain (#226, docs/pr-feedback.md) fed by the operator's PR
+  # feedback watcher (RoundTable spec.prFeedback): a red CI run or a
+  # merge-queue rejection of a pipeline PR goes back to its author knight
+  # (resuming the pipeline's session), then the lead re-queues the PR. Uses
+  # lead, coders and roundTableRef above. Off by default.
+  feedback:
+    enabled: false
+    name: pr-pipeline-feedback
+    timeoutSeconds: 7200

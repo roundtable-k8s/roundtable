@@ -469,6 +469,17 @@ spec:
                         Supports Go template variables: {{ .Date }} (YYYY-MM-DD), {{ .Chain }} (chain name), {{ .Step }} (step name).
                         When set, the controller dispatches a write task to the outputKnightRef knight after the step succeeds.
                       type: string
+                    resumeRunId:
+                      description: |-
+                        resumeRunId is a CEL expression, with the same variables as when, that
+                        yields the runId the step's task carries instead of the chain run's
+                        runId. Knights key their agent session by runId, so this lets a step
+                        resume the session of an earlier run, e.g. json(input).runId for a
+                        follow-up chain fed the original run's ID. An empty result keeps the
+                        chain run's runId; an evaluation error fails the step. Not valid on
+                        forEach or loop steps.
+                      maxLength: 1024
+                      type: string
                     retry:
                       description: |-
                         retry configures per-step retry behavior, overriding the chain-level retryPolicy.

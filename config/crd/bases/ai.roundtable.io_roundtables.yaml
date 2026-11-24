@@ -1316,6 +1316,134 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              prFeedback:
+                description: |-
+                  prFeedback watches knight-authored pull requests for a red CI run or a
+                  merge-queue rejection and feeds the failure back to the PR's author
+                  knight through a feedback Chain. Off unless enabled.
+                properties:
+                  authors:
+                    default:
+                    - dunce-bot[bot]
+                    description: |-
+                      authors are the GitHub logins whose pull requests are watched (REST
+                      form, e.g. "dunce-bot[bot]" for a GitHub App).
+                    items:
+                      type: string
+                    maxItems: 20
+                    type: array
+                    x-kubernetes-list-type: set
+                  chainRef:
+                    default:
+                      name: pr-pipeline-feedback
+                    description: |-
+                      chainRef names the feedback Chain (same namespace) the watcher feeds:
+                      it sets the Chain's spec.input to the failure and starts a run. The
+                      chart renders one as prPipeline.feedback.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  enabled:
+                    default: false
+                    description: enabled turns the watcher on.
+                    type: boolean
+                  escalationLabel:
+                    default: needs-human
+                    description: |-
+                      escalationLabel is added to a pull request whose fix rounds ran out.
+                      Pull requests carrying it are no longer watched.
+                    maxLength: 50
+                    type: string
+                  fallbackKnightRef:
+                    description: |-
+                      fallbackKnightRef names the knight that gets failures of pull requests
+                      the watcher cannot trace back to a chain run (in a fresh session).
+                      Unset: such pull requests are ignored.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  flakeLabel:
+                    default: flaky-test
+                    description: flakeLabel labels the issues opened for flaky checks.
+                    maxLength: 50
+                    type: string
+                  maxAttempts:
+                    default: 3
+                    description: |-
+                      maxAttempts caps the fix rounds per pull request. The next failure
+                      after the last round labels the pull request with escalationLabel
+                      instead of feeding it back again.
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                  pollIntervalSeconds:
+                    default: 300
+                    description: pollIntervalSeconds is how often GitHub is polled.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  repos:
+                    description: repos are the GitHub repositories to watch, as owner/name.
+                    items:
+                      pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                      type: string
+                    maxItems: 50
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  tokenSecretRef:
+                    description: |-
+                      tokenSecretRef selects the Secret key holding the GitHub token the
+                      operator uses. It needs read access to pull requests, checks and
+                      Actions runs (public repositories need no extra permission) and write
+                      access to issues and pull requests (labels, comments, flake issues).
+                      Defaults to the table's spec.github.tokenSecretRef. The Secret is
+                      re-read on every poll, so rotated tokens are picked up.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - repos
+                type: object
               secrets:
                 description: secrets references shared secrets available to all knights
                   in this table.
@@ -2305,6 +2433,106 @@ spec:
                 - Suspended
                 - OverBudget
                 type: string
+              prFeedback:
+                description: prFeedback is the state of the PR feedback watcher (spec.prFeedback).
+                properties:
+                  activeRun:
+                    description: |-
+                      activeRun is the run trigger the watcher put on the feedback Chain
+                      and is waiting for, as <repo>#<number>@<trigger>.
+                    type: string
+                  lastError:
+                    description: lastError is the error of the last poll, empty when
+                      it succeeded.
+                    type: string
+                  lastPollTime:
+                    description: lastPollTime is when GitHub was last polled successfully.
+                    format: date-time
+                    type: string
+                  pullRequests:
+                    description: |-
+                      pullRequests are the watched pull requests with a failure history.
+                      Merged and closed pull requests are dropped.
+                    items:
+                      description: PRFeedbackPullRequest is the watcher's record of
+                        one pull request.
+                      properties:
+                        attempts:
+                          description: attempts is the number of fix rounds started.
+                          format: int32
+                          type: integer
+                        failedChecks:
+                          description: failedChecks are the check or job names of
+                            lastFailure.
+                          items:
+                            type: string
+                          type: array
+                        failureHeadSHA:
+                          description: |-
+                            failureHeadSHA is the pull request's head commit when lastFailure was
+                            seen. A later pass on the same commit marks the failed checks flaky.
+                          type: string
+                        failureKind:
+                          description: |-
+                            failureKind is the kind of lastFailure: merge-queue (a failed
+                            merge_group run) or ci (failed checks on the head commit).
+                          enum:
+                          - merge-queue
+                          - ci
+                          type: string
+                        failureURL:
+                          description: failureURL links the failed run or check.
+                          type: string
+                        issue:
+                          description: issue is the issue the chain run worked on,
+                            if known.
+                          format: int64
+                          type: integer
+                        knight:
+                          description: knight is the author knight the failures go
+                            to.
+                          type: string
+                        lastFailure:
+                          description: |-
+                            lastFailure identifies the last failure handled (a merge-group run ID
+                            or the head SHA's failed checks), so a failure is fed back once.
+                          type: string
+                        message:
+                          description: message is a human-readable note on the last
+                            transition.
+                          type: string
+                        number:
+                          description: number is the pull request number.
+                          format: int64
+                          type: integer
+                        phase:
+                          description: phase is where the pull request stands.
+                          enum:
+                          - Watching
+                          - Queued
+                          - Fixing
+                          - Escalated
+                          type: string
+                        repo:
+                          description: repo is the repository, owner/name.
+                          type: string
+                        runId:
+                          description: |-
+                            runId is the chain run that opened the pull request; the fix task
+                            carries it so the knight resumes that session.
+                          type: string
+                        updatedAt:
+                          description: updatedAt is when this record last changed.
+                          format: date-time
+                          type: string
+                      required:
+                      - number
+                      - phase
+                      - repo
+                      type: object
+                    maxItems: 200
+                    type: array
+                type: object
               totalCost:
                 description: totalCost is the aggregate cost in USD across all knights
                   since last reset.

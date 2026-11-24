@@ -18,10 +18,12 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +103,63 @@ func TestListOpenPullRequestsFiltersByLabel(t *testing.T) {
 	}
 	if gotPath != "/repos/acme/widgets/pulls" || gotQuery != "per_page=100&state=open" {
 		t.Fatalf("path %q query %q", gotPath, gotQuery)
+	}
+}
+
+func TestListOpenPullsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		n := 100
+		if r.URL.Query().Get("page") == "2" {
+			n = 3
+		}
+		out := make([]map[string]any, n)
+		for i := range out {
+			out[i] = map[string]any{"number": i + 1}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+
+	pulls, err := NewClient(srv.URL, "tok").ListOpenPulls(context.Background(), "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulls) != 103 || len(pages) != 2 {
+		t.Fatalf("got %d pulls over pages %v", len(pulls), pages)
+	}
+}
+
+func TestCommentKeepsLiteralAngleBrackets(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	if err := NewClient(srv.URL, "tok").Comment(context.Background(), "o/r", 1, "<<<A & B>>>"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "<<<A & B>>>") {
+		t.Fatalf("body escaped: %s", body)
+	}
+}
+
+func TestJobLogReturnsRawText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "line 1\n##[error]boom\n")
+	}))
+	defer srv.Close()
+	got, err := NewClient(srv.URL, "tok").JobLog(context.Background(), "o/r", 5)
+	if err != nil || got != "line 1\n##[error]boom\n" {
+		t.Fatalf("log %q err %v", got, err)
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	if !IsNotFound(&APIError{Status: 404}) || !IsNotFound(&APIError{Status: 410}) || IsNotFound(&APIError{Status: 500}) || IsNotFound(errors.New("x")) {
+		t.Fatal("IsNotFound wrong")
 	}
 }

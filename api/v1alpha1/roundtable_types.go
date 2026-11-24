@@ -91,6 +91,12 @@ type RoundTableSpec struct {
 	// +optional
 	ModelAliases map[string]string `json:"modelAliases,omitempty"`
 
+	// prFeedback watches knight-authored pull requests for a red CI run or a
+	// merge-queue rejection and feeds the failure back to the PR's author
+	// knight through a feedback Chain. Off unless enabled.
+	// +optional
+	PRFeedback *PRFeedbackSpec `json:"prFeedback,omitempty"`
+
 	// suspend, if true, suspends all knights in this table.
 	// +kubebuilder:default=false
 	// +optional
@@ -307,6 +313,10 @@ type RoundTableStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// prFeedback is the state of the PR feedback watcher (spec.prFeedback).
+	// +optional
+	PRFeedback *PRFeedbackStatus `json:"prFeedback,omitempty"`
+
 	// conditions represent the current state of the RoundTable resource.
 	// +listType=map
 	// +listMapKey=type
@@ -407,4 +417,166 @@ type RoundTableList struct {
 
 func init() {
 	SchemeBuilder.Register(&RoundTable{}, &RoundTableList{})
+}
+
+// PRFeedbackSpec configures the PR feedback watcher: the operator polls
+// GitHub for knight-authored pull requests whose CI went red or that the
+// merge queue rejected, and feeds each failure to the PR's author knight
+// through a feedback Chain (see docs/pr-feedback.md).
+type PRFeedbackSpec struct {
+	// enabled turns the watcher on.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// repos are the GitHub repositories to watch, as owner/name.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
+	// +listType=set
+	Repos []string `json:"repos"`
+
+	// authors are the GitHub logins whose pull requests are watched (REST
+	// form, e.g. "dunce-bot[bot]" for a GitHub App).
+	// +kubebuilder:default={"dunce-bot[bot]"}
+	// +kubebuilder:validation:MaxItems=20
+	// +listType=set
+	// +optional
+	Authors []string `json:"authors,omitempty"`
+
+	// chainRef names the feedback Chain (same namespace) the watcher feeds:
+	// it sets the Chain's spec.input to the failure and starts a run. The
+	// chart renders one as prPipeline.feedback.
+	// +kubebuilder:default={name: "pr-pipeline-feedback"}
+	// +optional
+	ChainRef *corev1.LocalObjectReference `json:"chainRef,omitempty"`
+
+	// tokenSecretRef selects the Secret key holding the GitHub token the
+	// operator uses. It needs read access to pull requests, checks and
+	// Actions runs (public repositories need no extra permission) and write
+	// access to issues and pull requests (labels, comments, flake issues).
+	// Defaults to the table's spec.github.tokenSecretRef. The Secret is
+	// re-read on every poll, so rotated tokens are picked up.
+	// +optional
+	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
+
+	// maxAttempts caps the fix rounds per pull request. The next failure
+	// after the last round labels the pull request with escalationLabel
+	// instead of feeding it back again.
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	// +optional
+	MaxAttempts int32 `json:"maxAttempts,omitempty"`
+
+	// pollIntervalSeconds is how often GitHub is polled.
+	// +kubebuilder:default=300
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
+	PollIntervalSeconds int32 `json:"pollIntervalSeconds,omitempty"`
+
+	// fallbackKnightRef names the knight that gets failures of pull requests
+	// the watcher cannot trace back to a chain run (in a fresh session).
+	// Unset: such pull requests are ignored.
+	// +optional
+	FallbackKnightRef *corev1.LocalObjectReference `json:"fallbackKnightRef,omitempty"`
+
+	// escalationLabel is added to a pull request whose fix rounds ran out.
+	// Pull requests carrying it are no longer watched.
+	// +kubebuilder:default="needs-human"
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	EscalationLabel string `json:"escalationLabel,omitempty"`
+
+	// flakeLabel labels the issues opened for flaky checks.
+	// +kubebuilder:default="flaky-test"
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	FlakeLabel string `json:"flakeLabel,omitempty"`
+}
+
+// PRFeedbackPhase is where a watched pull request stands.
+// +kubebuilder:validation:Enum=Watching;Queued;Fixing;Escalated
+type PRFeedbackPhase string
+
+const (
+	// PRFeedbackWatching: no unhandled failure.
+	PRFeedbackWatching PRFeedbackPhase = "Watching"
+	// PRFeedbackQueued: a failure waits for the feedback Chain to be free.
+	PRFeedbackQueued PRFeedbackPhase = "Queued"
+	// PRFeedbackFixing: the feedback Chain is running for this pull request.
+	PRFeedbackFixing PRFeedbackPhase = "Fixing"
+	// PRFeedbackEscalated: fix rounds ran out; the pull request was labelled.
+	PRFeedbackEscalated PRFeedbackPhase = "Escalated"
+)
+
+// PRFeedbackStatus is the observed state of the PR feedback watcher.
+type PRFeedbackStatus struct {
+	// lastPollTime is when GitHub was last polled successfully.
+	// +optional
+	LastPollTime *metav1.Time `json:"lastPollTime,omitempty"`
+
+	// lastError is the error of the last poll, empty when it succeeded.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+
+	// activeRun is the run trigger the watcher put on the feedback Chain
+	// and is waiting for, as <repo>#<number>@<trigger>.
+	// +optional
+	ActiveRun string `json:"activeRun,omitempty"`
+
+	// pullRequests are the watched pull requests with a failure history.
+	// Merged and closed pull requests are dropped.
+	// +kubebuilder:validation:MaxItems=200
+	// +optional
+	PullRequests []PRFeedbackPullRequest `json:"pullRequests,omitempty"`
+}
+
+// PRFeedbackPullRequest is the watcher's record of one pull request.
+type PRFeedbackPullRequest struct {
+	// repo is the repository, owner/name.
+	Repo string `json:"repo"`
+	// number is the pull request number.
+	Number int64 `json:"number"`
+	// phase is where the pull request stands.
+	Phase PRFeedbackPhase `json:"phase"`
+	// knight is the author knight the failures go to.
+	// +optional
+	Knight string `json:"knight,omitempty"`
+	// runId is the chain run that opened the pull request; the fix task
+	// carries it so the knight resumes that session.
+	// +optional
+	RunID string `json:"runId,omitempty"`
+	// issue is the issue the chain run worked on, if known.
+	// +optional
+	Issue int64 `json:"issue,omitempty"`
+	// attempts is the number of fix rounds started.
+	// +optional
+	Attempts int32 `json:"attempts,omitempty"`
+	// lastFailure identifies the last failure handled (a merge-group run ID
+	// or the head SHA's failed checks), so a failure is fed back once.
+	// +optional
+	LastFailure string `json:"lastFailure,omitempty"`
+	// failureHeadSHA is the pull request's head commit when lastFailure was
+	// seen. A later pass on the same commit marks the failed checks flaky.
+	// +optional
+	FailureHeadSHA string `json:"failureHeadSHA,omitempty"`
+	// failedChecks are the check or job names of lastFailure.
+	// +optional
+	FailedChecks []string `json:"failedChecks,omitempty"`
+	// failureKind is the kind of lastFailure: merge-queue (a failed
+	// merge_group run) or ci (failed checks on the head commit).
+	// +kubebuilder:validation:Enum=merge-queue;ci
+	// +optional
+	FailureKind string `json:"failureKind,omitempty"`
+	// failureURL links the failed run or check.
+	// +optional
+	FailureURL string `json:"failureURL,omitempty"`
+	// message is a human-readable note on the last transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// updatedAt is when this record last changed.
+	// +optional
+	UpdatedAt *metav1.Time `json:"updatedAt,omitempty"`
 }

@@ -24,7 +24,7 @@ Published by the chain controller and the [invoke gateway](gateway.md) to
 | `taskId` | yes | Unique task ID. The result is published to `<prefix>.results.<taskId>`. |
 | `task` | yes | The rendered prompt. |
 | `chainName`, `stepName` | no | Set for chain steps and mission briefings. |
-| `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. |
+| `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. A chain step with `resumeRunId` sends an earlier run's ID instead (see below). |
 | `model` | no | Per-task model override (see below). Absent means "use your configured model" (`KNIGHT_MODEL`, from `Knight.spec.model`). |
 
 ### `model`
@@ -109,6 +109,12 @@ Consumers:
   Fields are kept next to the full output in the `chain-outputs` KV entry
   (the CRD status is unchanged); fan-out items and loop wrapper steps use the
   prose fallback.
+- **Task templates** (`task`) see `.Input` (the raw `spec.input`) and, when the
+  input is a JSON object, `.Fields` (its top-level fields, e.g.
+  `{{ .Fields.url }}`) so a step can render single trusted fields instead of
+  all of the input.
+- **PR feedback watcher**: finds the knight that opened a PR from step
+  outputs with the same `prs` extraction ([pr-feedback.md](pr-feedback.md)).
 - **Gateway**: task records (`GET /v1/tasks/<id>`, invoke responses) include
   `prs` and `verdict`.
 
@@ -177,3 +183,27 @@ On SIGTERM a knight must stop fetching new tasks, keep heartbeating in-flight
 tasks, publish their results, then exit, waiting up to the grace period rather
 than a fixed 60s. `/ready` must report `draining` (not ready) so the pod leaves
 Service endpoints.
+
+### `resumeRunId`
+
+A chain step can hand its task the `runId` of an earlier run, so the knight
+resumes that agent session instead of starting a fresh one:
+
+```yaml
+steps:
+  - name: fix
+    knightRef: {name: rt-operator}
+    resumeRunId: 'json(input).runId'
+    task: "…"
+```
+
+- It is a CEL expression with the same variables as `when`
+  ([conditional-steps.md](conditional-steps.md#expression-reference)) that
+  must yield a string. An empty string keeps the chain run's `runId`; an
+  evaluation error fails the step without dispatching it.
+- Only the payload's `runId` changes. The chain's own `status.runId`, the
+  `taskId` and the `chain-outputs` KV keys keep the chain run's identity, so
+  outputs of the two runs never mix.
+- Not valid on `forEach` (items get per-item runIds) or `loop` steps.
+- The PR feedback Chain uses it to send a CI failure to the session that
+  opened the PR ([pr-feedback.md](pr-feedback.md)).
