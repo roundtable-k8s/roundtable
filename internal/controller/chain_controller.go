@@ -351,6 +351,11 @@ func (r *ChainReconciler) validateKnightRefs(ctx context.Context, chain *aiv1alp
 		return nil
 	}
 	for _, step := range chain.Spec.Steps {
+		if step.FallbackRef.Name != "" {
+			if err := check(step.Name+" (fallback)", step.FallbackRef.Name); err != nil {
+				return err
+			}
+		}
 		if step.Loop == nil {
 			if err := check(step.Name, step.KnightRef.Name); err != nil {
 				return err
@@ -621,6 +626,35 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 						"Step %s returned empty output, treating as failure", ss.Name)
 				}
 				if resultErr != "" {
+					// #321: a plan-quota refusal is "not yet", not a failure. With a
+					// fallback knight the same step re-runs there (no model override:
+					// the aliases resolve to Claude models); otherwise the step is
+					// deferred until the plan window resets and the chain requeues.
+					// Neither path fails the chain or escalates.
+					if resetsAt, refused := quotaRefusal(result); refused {
+						if fb := stepFallbackKnight(spec, ss); fb != "" {
+							ss.Phase = aiv1alpha1.ChainStepPhasePending
+							ss.Reason = stepReasonFallbackQuota
+							ss.Error = ""
+							ss.CompletedAt = nil
+							ss.Knight = fb
+							ss.Model = ""
+							log.Info("Plan-quota refusal: re-running step on fallback knight", "step", ss.Name, "fallback", fb)
+							r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepFallbackQuota",
+								"Step %s refused for plan quota, re-running on fallback knight %s (no model override)", ss.Name, fb)
+						} else {
+							ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
+							ss.Reason = stepReasonQuotaRefused
+							ss.Error = resultErr
+							ss.CompletedAt = nil
+							until := metav1.NewTime(quotaDeferUntil(resetsAt))
+							ss.DeferUntil = &until
+							log.Info("Plan-quota refusal: deferring step until the plan window resets", "step", ss.Name, "deferUntil", ss.DeferUntil.Unix())
+							r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepQuotaRefused",
+								"Step %s refused for plan quota, deferred until %s", ss.Name, ss.DeferUntil)
+						}
+						continue
+					}
 					ss.Phase = aiv1alpha1.ChainStepPhaseFailed
 					ss.Error = resultErr
 					// Check retry (per-step policy overrides chain-level)
@@ -689,6 +723,16 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				}
 			}
 		}
+	}
+
+	// #321: a quota-deferred step parks the chain: nothing further is
+	// dispatched (so nothing fails and nothing escalates, no needs-human)
+	// until the refused plan window resets; then the deferred step(s) run
+	// again on their primary knight and the chain picks up where it left off.
+	if next := wakeDeferredSteps(chain, time.Now()); next != nil {
+		log.Info("Chain has a quota-deferred step; holding further steps", "requeueAfter", next.Time)
+		chain.Status.ObservedGeneration = chain.Generation
+		return r.updateStatus(ctx, chain, time.Until(next.Time))
 	}
 
 	// Find ready steps and publish
@@ -792,22 +836,29 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			continue
 		}
 
+		// A plan-quota refusal re-runs on the step's fallback knight with NO
+		// model override (#321): the cheap/fast/deep aliases are Claude models.
+		knightName, stepModel := step.KnightRef.Name, step.Model
+		if ss.Knight != "" && ss.Knight != step.KnightRef.Name {
+			knightName, stepModel = ss.Knight, ""
+		}
+
 		// Get knight domain
 		knight := &aiv1alpha1.Knight{}
-		if err := r.Get(ctx, types.NamespacedName{Name: step.KnightRef.Name, Namespace: chain.Namespace}, knight); err != nil {
-			log.Error(err, "Failed to get knight", "knightRef", step.KnightRef.Name)
+		if err := r.Get(ctx, types.NamespacedName{Name: knightName, Namespace: chain.Namespace}, knight); err != nil {
+			log.Error(err, "Failed to get knight", "knightRef", knightName)
 			continue
 		}
 
 		// Resolve the per-step model override. A model the knight's runtime
 		// can't run is a spec error: fail the step (no retry) rather than let
 		// the knight silently fall back to its default model.
-		model, err := knightpkg.ResolveModel(step.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+		model, err := knightpkg.ResolveModel(stepModel, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
 		if err != nil {
-			log.Info("Rejected step model", "step", step.Name, "knight", step.KnightRef.Name, "reason", err.Error())
+			log.Info("Rejected step model", "step", step.Name, "knight", knightName, "reason", err.Error())
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", step.Name, err)
 			ss.Phase = aiv1alpha1.ChainStepPhaseFailed
-			ss.Error = fmt.Sprintf("invalid model for knight %q: %v", step.KnightRef.Name, err)
+			ss.Error = fmt.Sprintf("invalid model for knight %q: %v", knightName, err)
 			ss.Model = ""
 			now := metav1.Now()
 			ss.CompletedAt = &now
@@ -852,7 +903,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Model:     model,
 		}
 
-		seq, err := r.publishTask(nc, knight.Spec.Domain, step.KnightRef.Name, payload)
+		seq, err := r.publishTask(nc, knight.Spec.Domain, knightName, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -865,8 +916,9 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		ss.TaskSeq = seq
 		ss.TaskID = taskID
 		ss.Model = model
+		ss.Knight = knightName
 		ss.Error = ""
-		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef.Name, "model", model)
+		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", knightName, "model", model)
 	}
 
 	// Check if all steps are terminal
@@ -1113,7 +1165,13 @@ func (r *ChainReconciler) detectPickup(ctx context.Context, nc natsConfig, ss *a
 		ss.PickedUpAt = ss.StartedAt
 		return
 	}
-	if r.ackFloorReached(ctx, nc, spec.KnightRef.Name, ss.TaskSeq) {
+	// The task may be re-running on the fallback knight (#321); track the
+	// knight it was actually published to.
+	knight := spec.KnightRef.Name
+	if ss.Knight != "" {
+		knight = ss.Knight
+	}
+	if r.ackFloorReached(ctx, nc, knight, ss.TaskSeq) {
 		now := metav1.Now()
 		ss.PickedUpAt = &now
 		logf.FromContext(ctx).Info("Knight picked up step task", "step", ss.Name, "queuedFor", now.Sub(ss.StartedAt.Time).Round(time.Second).String())

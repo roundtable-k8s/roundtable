@@ -11,6 +11,14 @@ Model tiers: the planner picks the implement alias (cheap/fast/deep, see
 prPipeline.implementModels); every fix round runs prPipeline.fixModel, so a
 weak first draft is fixed by a stronger model.
 
+Quota fallback (#321): prPipeline.fallbackCoder renders a fallbackRef on every
+implement, split and fixloop step. When a coder knight refuses a task for
+plan quota ("Task refused: Claude plan ... (resets ...)"), the operator re-runs
+the same step on the fallback knight with no model override (its own default
+model); with no fallback, or a refusal on the fallback too, the step is
+deferred until the plan window resets and the chain requeues then - neither
+fails nor escalates (no needs-human label).
+
 Lead steps (plan, review, merge, escalate) set no model unless prPipeline.leadModel
 is set: the aliases are single-valued per RoundTable and only valid for the coders'
 runtime, so a lead on another runtime (e.g. pi-knight) uses its own default (#244).
@@ -27,6 +35,11 @@ at dispatch time (Helm must not).
 {{- $coders := .coders }}
 {{- $models := .implementModels }}
 {{- $fixModel := .fixModel | default "deep" }}
+{{- /* fallbackCoder (#321): a plan-quota refusal re-runs the implement,
+     split or fix step on this knight with no model override (its own default:
+     the cheap/fast/deep aliases are Claude models). Unset: the step is
+     deferred until the plan window resets. */ -}}
+{{- $fallback := .fallbackCoder | default "" }}
 {{- $impl := list }}
 {{- $loops := list }}
 {{- range $coders }}
@@ -110,6 +123,10 @@ spec:
       knightRef:
         name: {{ $coder }}
       model: {{ . }}
+{{- if $fallback }}
+      fallbackRef:
+        name: {{ $fallback }}
+{{- end }}
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).model == "{{ . }}" && !json(steps.plan.output).split'
       timeoutSeconds: 3600
@@ -137,6 +154,10 @@ spec:
       knightRef:
         name: {{ $coder }}
       model: deep
+{{- if $fallback }}
+      fallbackRef:
+        name: {{ $fallback }}
+{{- end }}
       dependsOn: [plan]
       when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).split'
       timeoutSeconds: 3600
@@ -192,6 +213,10 @@ spec:
     - name: fixloop_{{ $k }}
       dependsOn: [review]
       when: 'steps.review.phase == "Succeeded" && json(steps.plan.output).coder == "{{ $coder }}"'
+{{- if $fallback }}
+      fallbackRef:
+        name: {{ $fallback }}
+{{- end }}
       loop:
         from: review
         until: 'last.output.matches("(?mi)^\\W*verdict:\\s*ship it\\W*$")'

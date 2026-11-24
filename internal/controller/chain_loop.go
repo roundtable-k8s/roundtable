@@ -463,8 +463,13 @@ func (r *ChainReconciler) reconcileLoop(ctx context.Context, nc natsConfig, chai
 	for i := range ls.Steps {
 		bs := &ls.Steps[i]
 		if bs.Phase == aiv1alpha1.ChainStepPhaseRunning && i < len(spec.Loop.Steps) {
-			r.collectBodyTask(ctx, nc, chain, spec, &spec.Loop.Steps[i], bs)
+			r.collectBodyTask(ctx, nc, chain, spec, &spec.Loop.Steps[i], bs, ss)
 		}
+	}
+	// A quota-deferred loop (#321) parks the chain: no further rounds or body
+	// tasks are dispatched until the refused plan window resets.
+	if ss.Phase == aiv1alpha1.ChainStepPhaseDeferred {
+		return
 	}
 	for _, bs := range ls.Steps {
 		if bs.Phase == aiv1alpha1.ChainStepPhaseFailed {
@@ -528,8 +533,9 @@ func (r *ChainReconciler) reconcileLoop(ctx context.Context, nc natsConfig, chai
 }
 
 // collectBodyTask polls the result of a running body task and applies
-// timeout and retry handling.
-func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, body *aiv1alpha1.ChainLoopStep, bs *aiv1alpha1.ChainLoopStepStatus) {
+// timeout, retry and plan-quota (#321) handling. ss is the loop step's own
+// status: a quota refusal without a usable fallback defers the loop.
+func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, body *aiv1alpha1.ChainLoopStep, bs *aiv1alpha1.ChainLoopStepStatus, ss *aiv1alpha1.ChainStepStatus) {
 	log := logf.FromContext(ctx).WithValues("step", spec.Name, "body", bs.Name)
 	if bs.TaskID == "" {
 		return
@@ -537,7 +543,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	if bs.PickedUpAt == nil && bs.StartedAt != nil {
 		if bs.TaskSeq == 0 {
 			bs.PickedUpAt = bs.StartedAt
-		} else if r.ackFloorReached(ctx, nc, body.KnightRef.Name, bs.TaskSeq) {
+		} else if r.ackFloorReached(ctx, nc, loopTaskKnight(body, bs), bs.TaskSeq) {
 			now := metav1.Now()
 			bs.PickedUpAt = &now
 		}
@@ -548,6 +554,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	}
 	var errMsg, output string
 	var structured natspkg.Structured
+	var res *natspkg.TaskResult
 	if msg := taskDeadlineError(chain, timing, bs.StartedAt, bs.PickedUpAt); msg != "" {
 		errMsg = msg
 	} else {
@@ -559,6 +566,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 		if result == nil {
 			return
 		}
+		res = result
 		if result.Model != "" {
 			bs.Model = result.Model
 		}
@@ -572,6 +580,37 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	bs.CompletedAt = &now
 	key := loopBodyKey(chain, spec.Name, bs.Name)
 	if errMsg != "" {
+		// #321: a plan-quota refusal re-runs the body step on the loop
+		// step's fallback knight (no model override), or defers the whole
+		// loop until the plan window resets. Neither fails the chain.
+		if resetsAt, refused := quotaRefusal(res); refused {
+			bs.Error = ""
+			bs.CompletedAt = nil
+			bs.PickedUpAt = nil
+			if fb := loopFallbackKnight(spec, bs); fb != "" {
+				bs.Knight = fb
+				bs.Model = ""
+				bs.Phase = aiv1alpha1.ChainStepPhasePending
+				log.Info("Plan-quota refusal: re-running loop body on fallback knight", "round", bs.Iteration, "fallback", fb)
+				r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepFallbackQuota",
+					"Loop %s/%s refused for plan quota, re-running on fallback knight %s (no model override)", spec.Name, bs.Name, fb)
+				return
+			}
+			if ss != nil {
+				until := metav1.NewTime(quotaDeferUntil(resetsAt))
+				ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
+				ss.Reason = stepReasonQuotaRefused
+				ss.DeferUntil = &until
+				bs.Phase = aiv1alpha1.ChainStepPhasePending
+				bs.TaskID = ""
+				bs.TaskSeq = 0
+				bs.StartedAt = nil
+				log.Info("Plan-quota refusal: deferring loop until the plan window resets", "loop", spec.Name, "deferUntil", ss.DeferUntil.Unix())
+				r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepQuotaRefused",
+					"Loop %s refused for plan quota, deferred until %s", spec.Name, ss.DeferUntil)
+			}
+			return
+		}
 		bs.Error = truncateUTF8(errMsg, itemErrorLimit)
 		if rp := stepRetryPolicy(chain, &aiv1alpha1.ChainStep{Retry: body.Retry}); rp != nil && bs.Retries < rp.MaxRetries {
 			bs.Retries++
@@ -635,16 +674,22 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		return
 	}
 
+	// A plan-quota refusal re-runs the body task on the loop step's fallback
+	// knight with NO model override (#321): the aliases are Claude models.
+	knightName, bodyModel := body.KnightRef.Name, body.Model
+	if bs.Knight != "" && bs.Knight != body.KnightRef.Name {
+		knightName, bodyModel = bs.Knight, ""
+	}
 	knight := &aiv1alpha1.Knight{}
-	if err := r.Get(ctx, types.NamespacedName{Name: body.KnightRef.Name, Namespace: chain.Namespace}, knight); err != nil {
-		log.Error(err, "Failed to get knight", "knightRef", body.KnightRef.Name)
+	if err := r.Get(ctx, types.NamespacedName{Name: knightName, Namespace: chain.Namespace}, knight); err != nil {
+		log.Error(err, "Failed to get knight", "knightRef", knightName)
 		return
 	}
-	model, err := knightpkg.ResolveModel(body.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+	model, err := knightpkg.ResolveModel(bodyModel, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s/%s: %v", spec.Name, body.Name, err)
 		bs.Model = ""
-		fail(fmt.Sprintf("invalid model for knight %q: %v", body.KnightRef.Name, err))
+		fail(fmt.Sprintf("invalid model for knight %q: %v", knightName, err))
 		return
 	}
 
@@ -659,7 +704,7 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		Task:      taskStr,
 		Model:     model,
 	}
-	seq, err := r.publishTask(nc, knight.Spec.Domain, body.KnightRef.Name, payload)
+	seq, err := r.publishTask(nc, knight.Spec.Domain, knightName, payload)
 	if err != nil {
 		log.Error(err, "Failed to publish loop body task", "body", body.Name)
 		return
@@ -672,5 +717,6 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 	bs.PickedUpAt = nil
 	bs.CompletedAt = nil
 	bs.Model = model
-	log.Info("Published loop body task", "body", body.Name, "round", ls.Iteration, "taskId", taskID, "knight", body.KnightRef.Name, "model", model)
+	bs.Knight = knightName
+	log.Info("Published loop body task", "body", body.Name, "round", ls.Iteration, "taskId", taskID, "knight", knightName, "model", model)
 }

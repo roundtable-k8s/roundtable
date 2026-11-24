@@ -293,6 +293,14 @@ prPipeline:
   # Model alias for every fix round. Keep it stronger than the cheap tier so a
   # Haiku draft is fixed by fast (Sonnet) or deep (Opus).
   fixModel: deep
+  # Fallback coder knight (#321). When a coder knight refuses a task for plan
+  # quota ("Task refused: Claude plan ... (resets ...)"), the operator re-runs
+  # the same implement/split/fix step on this knight with NO model override:
+  # the cheap/fast/deep aliases are Claude models, so the fallback runs its own
+  # default model. Use a knight on a runtime with its own quota (e.g. rt-coder,
+  # a pi-knight on GLM via OpenRouter, subject "rt-dev.tasks.coder.>").
+  # Empty: a refusal defers the step until the plan window resets.
+  fallbackCoder: ""
   # Fix → re-review rounds before escalating.
   maxIterations: 3
   timeoutSeconds: 86400

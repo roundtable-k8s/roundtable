@@ -151,6 +151,7 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `prPipeline.coders` | list | `[rt-operator]` | Coder knights the planner may pick; one implement/split step and fix loop each |
 | `prPipeline.implementModels` | list | `[deep, fast]` | Model aliases the planner may pick for the implementation (`cheap` = Haiku drafts, `fast`, `deep`) |
 | `prPipeline.fixModel` | string | `deep` | Model alias for every fix round, so a cheap draft is fixed by a stronger model |
+| `prPipeline.fallbackCoder` | string | `""` | Fallback coder knight for plan-quota refusals (#321): the refused implement/split/fix step re-runs on this knight with no model override; empty = defer until the plan window resets |
 | `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
 | `prPipeline.timeoutSeconds` | int | `86400` | Chain timeout (seconds) |
 | `prPipeline.maxQueueWaitSeconds` | int | `3600` | Max seconds a task may wait for its knight |
