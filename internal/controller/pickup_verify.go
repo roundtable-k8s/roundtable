@@ -122,6 +122,9 @@ func syncReview(ctx context.Context, gh *github.Client, ref prRef, want verdict,
 	return want, nil
 }
 
+// prStateClosed is the GitHub PR state for a closed (not merged) PR.
+const prStateClosed = "closed"
+
 type prRef struct {
 	repo   string
 	number int
@@ -206,14 +209,14 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 			return fmt.Errorf("get %s: %w", ref, err)
 		}
 		onGH := verdictNone
-		if !pr.Merged && pr.State != "closed" {
+		if !pr.Merged && pr.State != prStateClosed {
 			if onGH, err = syncReview(ctx, gh, ref, want, reviewOut); err != nil {
 				return err
 			}
 		}
 		switch {
 		case pr.Merged:
-		case pr.State == "closed":
+		case pr.State == prStateClosed:
 			problems = append(problems, fmt.Sprintf("%s is closed without being merged", ref))
 		case pr.Draft:
 			problems = append(problems, fmt.Sprintf("%s is a draft", ref))
