@@ -363,6 +363,26 @@ var _ = Describe("Chain plan-quota refusals (#321)", func() {
 		Expect(events).NotTo(ContainElement(ContainSubstring("Failed")))
 	})
 
+	It("defers a quota refusal with no reset time for the fallback window, not failing it (#361)", func() {
+		start(false, "")
+
+		finishLast(&natspkg.TaskResult{
+			Error:        "Task refused: Claude plan five_hour window 91% used",
+			Result:       "Task refused: Claude plan five_hour window 91% used",
+			UsageLimited: true,
+		})
+		reconcileN(1)
+
+		c := get()
+		ss := status(c, "implement")
+		Expect(ss.Phase).To(Equal(aiv1alpha1.ChainStepPhaseDeferred))
+		Expect(ss.Reason).To(Equal(stepReasonQuotaRefused))
+		Expect(ss.DeferUntil).NotTo(BeNil())
+		Expect(ss.DeferUntil.Time).To(BeTemporally("~", time.Now().Add(quotaDeferFallback), 2*time.Minute))
+		Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseRunning))
+		Expect(status(c, "merge").Phase).To(Equal(aiv1alpha1.ChainStepPhasePending))
+	})
+
 	It("re-runs a deferred step on its primary knight after the reset", func() {
 		start(false, "")
 
@@ -396,19 +416,28 @@ func TestQuotaRefusalDetection(t *testing.T) {
 	refused := func(msg string) *natspkg.TaskResult {
 		return &natspkg.TaskResult{Error: msg, Result: msg, UsageLimited: true}
 	}
+	prefixOnly := func(msg string) *natspkg.TaskResult {
+		return &natspkg.TaskResult{Error: msg, Result: msg}
+	}
 	cases := map[string]struct {
-		res  *natspkg.TaskResult
-		want bool
+		res       *natspkg.TaskResult
+		want      bool
+		wantReset bool // the refusal carries a parsed reset time
 	}{
 		"claude reserve refusal": {refused("Task refused: Claude plan five_hour window 91% used — at the knight reserve of 80% (resets " +
-			resets.Format(time.RFC3339Nano) + ")"), true},
+			resets.Format(time.RFC3339Nano) + ")"), true, true},
 		"claude rejected window": {refused("Task refused: Claude plan five_hour limit reached (resets " +
-			resets.Format(time.RFC3339) + ")"), true},
-		"refusal without reset time":       {refused("Task refused: Claude plan five_hour window 91% used"), false},
-		"ordinary error":                   {&natspkg.TaskResult{Error: "boom"}, false},
-		"success":                          {&natspkg.TaskResult{Output: "done"}, false},
-		"usage-limited in-run, not refuse": {&natspkg.TaskResult{Error: "ran out mid-task", UsageLimited: true}, false},
-		"nil":                              {nil, false},
+			resets.Format(time.RFC3339) + ")"), true, true},
+		// #361: the usage_limited flag makes a refusal even without a reset time.
+		"usage-limited without reset time":     {refused("Task refused: Claude plan five_hour window 91% used"), true, false},
+		"usage-limited with unparseable reset": {refused("Task refused: Claude plan five_hour limit reached (resets soon)"), true, false},
+		"usage-limited with bare flag":         {&natspkg.TaskResult{UsageLimited: true, Error: "limit reached"}, true, false},
+		// Prefix only (no flag) still needs a parseable reset time.
+		"prefix without reset time":     {prefixOnly("Task refused: Claude plan five_hour window 91% used"), false, false},
+		"prefix with unparseable reset": {prefixOnly("Task refused: Claude plan limit (resets soon)"), false, false},
+		"ordinary error":                {&natspkg.TaskResult{Error: "boom"}, false, false},
+		"success":                       {&natspkg.TaskResult{Output: "done"}, false, false},
+		"nil":                           {nil, false, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -416,12 +445,27 @@ func TestQuotaRefusalDetection(t *testing.T) {
 			if ok != tc.want {
 				t.Fatalf("quotaRefusal() = %v, want refusable=%v", ok, tc.want)
 			}
-			if tc.want && got.IsZero() {
+			if tc.wantReset && got.IsZero() {
 				t.Fatal("expected a reset time")
 			}
-			if !tc.want && !got.IsZero() {
+			if !tc.wantReset && !got.IsZero() {
 				t.Fatalf("unexpected reset time %v", got)
 			}
 		})
+	}
+}
+
+// TestQuotaDeferUntilUnknownReset: a refusal with no reset time defers the
+// step by the fallback window rather than failing it.
+func TestQuotaDeferUntilUnknownReset(t *testing.T) {
+	res := &natspkg.TaskResult{Error: "Task refused: Claude plan five_hour window 91% used", UsageLimited: true}
+	resetsAt, ok := quotaRefusal(res)
+	if !ok {
+		t.Fatal("usage-limited refusal without reset time must be deferred, not failed")
+	}
+	before := time.Now()
+	until := quotaDeferUntil(resetsAt)
+	if d := until.Sub(before); d < quotaDeferFallback-time.Minute || d > quotaDeferFallback+time.Minute {
+		t.Fatalf("deferUntil = now%+v, want about now+%v", d, quotaDeferFallback)
 	}
 }

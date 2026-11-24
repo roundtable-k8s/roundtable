@@ -64,15 +64,26 @@ const stepReasonQuotaRefused = "QuotaRefused"
 const stepReasonFallbackQuota = "FallbackQuota"
 
 // quotaRefusal reports whether a task result is a plan-quota refusal, and
-// when the plan window resets. It needs the refusal's flag or prefix and a
-// parseable reset time; anything else is treated as an ordinary error (the
-// existing retry/failure handling).
+// when the plan window resets. The usage_limited flag is the machine-readable
+// signal and always makes a result a refusal; the reset time is parsed from
+// the message when present, else the zero time (quotaDeferUntil then uses
+// quotaDeferFallback). Without the flag, the "Task refused: " prefix alone is
+// not enough: it also needs a parseable reset time. Anything else is an
+// ordinary error (the existing retry/failure handling).
 func quotaRefusal(res *natspkg.TaskResult) (resetsAt time.Time, ok bool) {
 	if res == nil {
 		return time.Time{}, false
 	}
 	msg := res.GetError()
-	if !res.UsageLimited && !strings.HasPrefix(msg, taskRefusedPrefix) {
+	if res.UsageLimited {
+		if m := quotaResetsRe.FindStringSubmatch(msg); m != nil {
+			if t, err := time.Parse(time.RFC3339, m[1]); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, true
+	}
+	if !strings.HasPrefix(msg, taskRefusedPrefix) {
 		return time.Time{}, false
 	}
 	m := quotaResetsRe.FindStringSubmatch(msg)
