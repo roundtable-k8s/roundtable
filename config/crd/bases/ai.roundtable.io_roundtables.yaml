@@ -2605,10 +2605,12 @@ spec:
                         failureKind:
                           description: |-
                             failureKind is the kind of lastFailure: merge-queue (a failed
-                            merge_group run) or ci (failed checks on the head commit).
+                            merge_group run), ci (failed checks on the head commit) or conflict
+                            (the pull request has merge conflicts with its base branch).
                           enum:
                           - merge-queue
                           - ci
+                          - conflict
                           type: string
                         failureURL:
                           description: failureURL links the failed run or check.

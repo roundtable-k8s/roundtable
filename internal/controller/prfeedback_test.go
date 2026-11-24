@@ -118,6 +118,28 @@ func TestDetectFailure(t *testing.T) {
 	}
 }
 
+func TestDetectConflict(t *testing.T) {
+	pr := &github.PullRequest{HTMLURL: "https://github.com/o/r/pull/5"}
+	pr.Head.SHA = "h1"
+	for _, state := range []string{"", "unknown", "clean", "blocked", "behind", "unstable"} {
+		pr.MergeableState = state
+		if f := detectConflict(pr); f != nil {
+			t.Errorf("%q: %+v", state, f)
+		}
+	}
+	pr.MergeableState = "dirty"
+	f := detectConflict(pr)
+	if f == nil || f.kind != failureKindConflict || f.key != "conflict:h1" || f.url != pr.HTMLURL || len(f.checks) != 0 {
+		t.Fatalf("dirty: %+v", f)
+	}
+	if got := describeFailure(failureKindConflict, nil); got != "merge conflict with the base branch" {
+		t.Errorf("describeFailure = %q", got)
+	}
+	if got := describeFailure(failureKindCI, []string{"lint", "test"}); got != "ci failure: lint, test" {
+		t.Errorf("describeFailure = %q", got)
+	}
+}
+
 func TestFailureCleared(t *testing.T) {
 	ci := &aiv1alpha1.PRFeedbackPullRequest{FailureKind: failureKindCI, FailedChecks: []string{"lint"}}
 	if failureCleared(ci, []github.CheckRun{actionsCheck(1, "lint", "failure", 1)}, nil) {
@@ -353,6 +375,9 @@ func TestPRFeedbackExample(t *testing.T) {
 		}
 		if strings.HasPrefix(s.Name, "fix_") && !s.ContinueOnFailure {
 			t.Errorf("fix step %q must continueOnFailure so escalate runs", s.Name)
+		}
+		if strings.HasPrefix(s.Name, "fix_") && (!strings.Contains(s.Task, `"conflict"`) || !strings.Contains(s.Task, "--force-with-lease")) {
+			t.Errorf("fix step %q does not tell the author how to rebase a conflict", s.Name)
 		}
 	}
 }
