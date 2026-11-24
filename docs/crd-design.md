@@ -285,6 +285,8 @@ spec:
   vault:
     claimName: obsidian-vault
     readOnly: true
+    # Writable paths are never defaulted: list every path the knight may write.
+    # Omit the list (or leave it empty) for a strictly read-only vault.
     writablePaths:
       - "Briefings/"
       - "Roundtable/"

@@ -1232,15 +1232,13 @@ spec:
                                 vault.
                               type: string
                             readOnly:
-                              default: true
                               description: readOnly mounts the base vault as read-only.
+                                Unset means true.
                               type: boolean
                             writablePaths:
-                              default:
-                              - Briefings/
-                              - Roundtable/
-                              description: writablePaths are subpaths within the vault
-                                the knight can write to.
+                              description: |-
+                                writablePaths are subpaths within the vault the knight can write to.
+                                There is no default: an absent or empty list means no writable paths.
                               items:
                                 type: string
                               type: array
@@ -2287,15 +2285,13 @@ spec:
                                 vault.
                               type: string
                             readOnly:
-                              default: true
                               description: readOnly mounts the base vault as read-only.
+                                Unset means true.
                               type: boolean
                             writablePaths:
-                              default:
-                              - Briefings/
-                              - Roundtable/
-                              description: writablePaths are subpaths within the vault
-                                the knight can write to.
+                              description: |-
+                                writablePaths are subpaths within the vault the knight can write to.
+                                There is no default: an absent or empty list means no writable paths.
                               items:
                                 type: string
                               type: array
@@ -3062,15 +3058,13 @@ spec:
                                 vault.
                               type: string
                             readOnly:
-                              default: true
                               description: readOnly mounts the base vault as read-only.
+                                Unset means true.
                               type: boolean
                             writablePaths:
-                              default:
-                              - Briefings/
-                              - Roundtable/
-                              description: writablePaths are subpaths within the vault
-                                the knight can write to.
+                              description: |-
+                                writablePaths are subpaths within the vault the knight can write to.
+                                There is no default: an absent or empty list means no writable paths.
                               items:
                                 type: string
                               type: array
@@ -4191,15 +4185,13 @@ spec:
                               vault.
                             type: string
                           readOnly:
-                            default: true
                             description: readOnly mounts the base vault as read-only.
+                              Unset means true.
                             type: boolean
                           writablePaths:
-                            default:
-                            - Briefings/
-                            - Roundtable/
-                            description: writablePaths are subpaths within the vault
-                              the knight can write to.
+                            description: |-
+                              writablePaths are subpaths within the vault the knight can write to.
+                              There is no default: an absent or empty list means no writable paths.
                             items:
                               type: string
                             type: array
