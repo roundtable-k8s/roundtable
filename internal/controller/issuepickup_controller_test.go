@@ -286,6 +286,9 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		_ = json.NewDecoder(req.Body).Decode(&body)
 	}
 	switch {
+	case m[3] == "" && req.Method == http.MethodPatch:
+		is.State, _ = body["state"].(string)
+		is.StateReason, _ = body["state_reason"].(string)
 	case m[3] == "/labels" && req.Method == http.MethodPost:
 		for _, l := range body["labels"].([]any) {
 			if !is.HasLabel(l.(string)) {
@@ -749,6 +752,91 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
 			tick()
 			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+		})
+	})
+
+	// The parent of a split run closes once every sub-issue is closed (#319).
+	Context("split parent", func() {
+		closeSub := func(n int, reason string) {
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			gh.find(repo, n).State = "closed"
+			gh.find(repo, n).StateReason = reason
+		}
+		parentState := func() string {
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			return gh.find(repo, 319).State
+		}
+		start := func() string {
+			gh.add(repo, 319, "Big", "body", "rt:ready")
+			gh.add(repo, 320, "Part one", "Part of #319")
+			gh.add(repo, 321, "Part two", "Part of #319")
+			gh.setPR(github.PullRequest{State: "open", AutoMerge: &struct{}{}})
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			c := &chains[0]
+			c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "plan", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "```json\n{\"coder\":\"x\",\"split\":true,\"issues\":[{\"number\":320,\"title\":\"a\"},{\"number\":321,\"title\":\"b\"}]}\n```"},
+				{Name: "review", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"},
+				{Name: "merge", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "queued"},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return c.Name
+		}
+
+		It("closes the parent only after both sub-issues are closed", func() {
+			name := start()
+			tick() // verifies the merge step
+			Expect(parentState()).NotTo(Equal("closed"))
+			tick()
+			Expect(parentState()).NotTo(Equal("closed"))
+
+			closeSub(320, "completed")
+			tick()
+			Expect(parentState()).NotTo(Equal("closed"))
+			Expect(gh.labels(repo, 319)).To(ContainElement("rt:in-progress"))
+
+			closeSub(321, "completed")
+			tick()
+			Expect(parentState()).To(Equal("closed"))
+			Expect(gh.labels(repo, 319)).NotTo(ContainElement("rt:in-progress"))
+			comments := gh.commentsOn(repo, 319)
+			Expect(comments[len(comments)-1]).To(ContainSubstring("acme/widgets#7"))
+
+			By("settling once per run")
+			n := len(comments)
+			tick()
+			Expect(gh.commentsOn(repo, 319)).To(HaveLen(n))
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			Expect(c.Annotations[aiv1alpha1.AnnotationPickupParentDone]).To(Equal(c.Status.LastRunTrigger))
+		})
+
+		It("labels the parent needs-human when a sub-issue needs a human", func() {
+			start()
+			closeSub(320, "completed")
+			gh.setLabels(repo, 321, "needs-human")
+			tick()
+			tick()
+			Expect(parentState()).NotTo(Equal("closed"))
+			Expect(gh.labels(repo, 319)).To(ConsistOf("needs-human"))
+			comments := gh.commentsOn(repo, 319)
+			Expect(comments[len(comments)-1]).To(ContainSubstring("#321"))
+		})
+
+		It("does not close the parent when a sub-issue was closed as not planned", func() {
+			start()
+			closeSub(320, "completed")
+			closeSub(321, "not_planned")
+			tick()
+			tick()
+			Expect(parentState()).NotTo(Equal("closed"))
+			Expect(gh.labels(repo, 319)).To(ConsistOf("needs-human"))
 		})
 	})
 

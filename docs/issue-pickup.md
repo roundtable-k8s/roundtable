@@ -193,3 +193,11 @@ succeeded). The RoundTable also gets `IssuePickedUp`, `IssueNeedsHuman` and
 - **First page only.** Each poll reads up to 100 ready issues per repo.
 - **Polling.** Event-driven pickup via a GitHub webhook into JetStream is
   #176.
+
+## Split parents (#319)
+
+When the plan split the issue, the sub-PRs close the sub-issues but not the
+parent. The operator keeps the finished Chain and, each poll, checks the plan's
+sub-issues: once all are closed as completed it closes the parent with a comment
+listing the PRs and removes `rt:in-progress`. If a sub-issue is labelled
+`needs-human` or closed as not planned, the parent gets `needs-human` instead.

@@ -44,8 +44,11 @@ type Issue struct {
 	// HTMLURL is the issue's web URL.
 	HTMLURL string `json:"html_url"`
 	// State is "open" or "closed".
-	State  string  `json:"state,omitempty"`
-	Labels []Label `json:"labels"`
+	State string `json:"state,omitempty"`
+	// StateReason is why a closed issue was closed: "completed",
+	// "not_planned" or "reopened" (empty for old or open issues).
+	StateReason string  `json:"state_reason,omitempty"`
+	Labels      []Label `json:"labels"`
 	// PullRequest is set when the item is a pull request (the issues API
 	// lists both).
 	PullRequest *struct{} `json:"pull_request,omitempty"`
@@ -261,6 +264,15 @@ func (c *Client) Comment(ctx context.Context, repo string, number int, body stri
 		return err
 	}
 	return c.do(ctx, http.MethodPost, p, nil, map[string]string{"body": body}, nil)
+}
+
+// CloseIssue closes an issue as completed.
+func (c *Client) CloseIssue(ctx context.Context, repo string, number int) error {
+	p, err := issuePath(repo, number, "")
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPatch, p, nil, map[string]string{"state": "closed", "state_reason": "completed"}, nil)
 }
 
 // maxLogBytes caps how much of a job log is read.

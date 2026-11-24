@@ -158,7 +158,7 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		if pickupChainActive(c) {
 			res.active++
 			activeByRepo[c.Annotations[aiv1alpha1.AnnotationPickupRepo]]++
-		} else if pickupChainExpired(c, spec, now) && !pickupNeedsVerify(c) && !pickupNeedsHandBack(c) {
+		} else if pickupChainExpired(c, spec, now) && !pickupNeedsVerify(c) && !pickupNeedsHandBack(c) && !pickupNeedsSplitClose(c) {
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				res.fail("delete finished chain %s: %v", c.Name, err)
 			} else {
@@ -196,6 +196,10 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		case pickupNeedsHandBack(c):
 			if err := r.handBackFailed(ctx, gh, rt, c, labels); err != nil {
 				res.fail("hand back failed chain %s: %v", c.Name, err)
+			}
+		case pickupNeedsSplitClose(c):
+			if err := r.closeSplitParent(ctx, gh, rt, c, labels); err != nil {
+				res.fail("close split parent for chain %s: %v", c.Name, err)
 			}
 		}
 	}

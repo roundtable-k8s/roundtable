@@ -41,6 +41,11 @@ const (
 	// checked on GitHub that the run's PRs are merged or queued (#301), or,
 	// for a failed run, has handed its issue back with needs-human (#314).
 	AnnotationPickupVerified = "ai.roundtable.io/pickup-verified"
+
+	// AnnotationPickupParentDone is set to the run trigger once the operator
+	// has settled the parent issue of a split run (#319): closed it after all
+	// sub-issues were completed, or handed it back with needs-human.
+	AnnotationPickupParentDone = "ai.roundtable.io/pickup-parent-done"
 )
 
 // IssuePickupSpec configures polling GitHub for issues labelled ready and
