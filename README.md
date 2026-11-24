@@ -300,6 +300,8 @@ make run
 # Run tests
 make test
 
+# Pinned toolchain via Nix: `nix develop`, or the installable
+# `nix build .#knight-tools` (tools in bin/, envtest assets in share/envtest)
 # Build the operator image
 make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
 ```
