@@ -32,6 +32,13 @@ func TestAgentRuntimeForImage(t *testing.T) {
 		{"ghcr.io/acme/my-agent:1.0", AgentRuntimeUnknown},
 		{"ghcr.io/claude-knight/agent:1.0", AgentRuntimeUnknown}, // only the repo name counts
 		{"", AgentRuntimeUnknown},
+		{"ghcr.io/roundtable-k8s/claude-knight:sha", AgentRuntimeClaude},
+		{"claude-knight-dev@sha256:abc", AgentRuntimeClaude},
+		{"pi-knight", AgentRuntimePi},
+		{"claude-knight2", AgentRuntimeUnknown},
+		{"claude-knightly", AgentRuntimeUnknown},
+		{"pi-knights", AgentRuntimeUnknown},
+		{"my-pi-knight", AgentRuntimeUnknown},
 	}
 	for _, tt := range tests {
 		if got := AgentRuntimeForImage(tt.image); got != tt.want {

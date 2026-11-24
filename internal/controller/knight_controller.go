@@ -610,13 +610,14 @@ func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: labels,
 			},
-			Spec: r.buildDrainablePodSpec(ctx, knight),
+			Spec: r.BuildDrainablePodSpec(ctx, knight),
 		},
 	}
 }
 
-// buildDrainablePodSpec is BuildPodSpec plus the drain grace period.
-func (r *KnightReconciler) buildDrainablePodSpec(ctx context.Context, knight *aiv1alpha1.Knight) corev1.PodSpec {
+// BuildDrainablePodSpec is BuildPodSpec plus the drain grace period. Exported
+// so the sandbox backend gets the same grace period as Deployment knights.
+func (r *KnightReconciler) BuildDrainablePodSpec(ctx context.Context, knight *aiv1alpha1.Knight) corev1.PodSpec {
 	spec := r.BuildPodSpec(ctx, knight)
 	spec.TerminationGracePeriodSeconds = new(knightpkg.TerminationGracePeriod(knight))
 	return spec
