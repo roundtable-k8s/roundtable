@@ -50,3 +50,38 @@ check() {
 
 check pr-pipeline.yaml chain-pr-pipeline.yaml
 check pr-feedback.yaml chain-pr-feedback.yaml
+
+# The plan prompt describes only the model tiers the implement steps can run
+# (#360): a tier it never describes is one it never picks, and the planner's
+# default is fast when allowed, else the first allowed tier.
+# assert_plan <rendered> <present|absent> <text>: the rendered chart contains text.
+assert_plan() {
+  local found=absent
+  if grep -q -F -- "$3" "$1"; then found=present; fi
+  if [[ "$found" != "$2" ]]; then
+    echo "plan prompt ($1): expected $2: $3" >&2
+    exit 1
+  fi
+}
+
+render_tiers() { # render_tiers <out> [--set ...]
+  local out="$1"; shift
+  "$HELM" template rt "$chart" -n roundtable -f "$tmp/values.yaml" "$@" \
+    --show-only templates/pr-pipeline.yaml > "$out"
+}
+
+render_tiers "$tmp/default.yaml"
+assert_plan "$tmp/default.yaml" absent '"cheap" (Haiku drafts'
+assert_plan "$tmp/default.yaml" present '"fast": the default.'
+assert_plan "$tmp/default.yaml" present '"deep": design-heavy'
+
+render_tiers "$tmp/all.yaml" --set 'prPipeline.implementModels={cheap,fast,deep}'
+assert_plan "$tmp/all.yaml" present '"cheap" (Haiku drafts): only for'
+assert_plan "$tmp/all.yaml" present '"fast": the default.'
+assert_plan "$tmp/all.yaml" present '"deep": design-heavy'
+
+render_tiers "$tmp/cheap-deep.yaml" --set 'prPipeline.implementModels={cheap,deep}'
+assert_plan "$tmp/cheap-deep.yaml" present '"cheap" (Haiku drafts, the default): only for'
+assert_plan "$tmp/cheap-deep.yaml" present '"deep": design-heavy'
+assert_plan "$tmp/cheap-deep.yaml" absent '"fast": the default.'
+echo "plan prompt describes only the allowed model tiers."

@@ -42,9 +42,6 @@ spec:
         3. Pick the model alias for the implementation (cheapest tier that fits;
            a weaker draft is fixed by the stronger "deep" model in the fix loop).
            Allowed: deep, fast.
-           - "cheap" (Haiku drafts): only for small, well-specified issues: a single
-             file or area, clear acceptance criteria, no API/CRD/contract change and
-             no `breaking` label.
            - "fast": the default.
            - "deep": design-heavy, cross-cutting or risky work.
            Record why in "reason", naming the tier and the criteria that decided it.
