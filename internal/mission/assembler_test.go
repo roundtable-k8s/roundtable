@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -185,3 +187,123 @@ func TestBuildEphemeralRoundTableInheritsParentGitHub(t *testing.T) {
 }
 
 const testGitHubTokenSecret = "roundtable-github-token"
+
+// ─── mission NetworkPolicy ──────────────────────────────────────────────────
+
+func netpolMission() *aiv1alpha1.Mission {
+	return &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "roundtable", UID: "uid-1"},
+	}
+}
+
+func buildNetpol(t *testing.T, natsURL string, s NetPolSettings) *networkingv1.NetworkPolicy {
+	t.Helper()
+	a := &KnightAssembler{}
+	p, _ := a.buildMissionNetworkPolicy(netpolMission(), "mission-m1-isolation", natsURL, s)
+	if len(p.Spec.Egress) != 3 {
+		t.Fatalf("expected 3 egress rules, got %d", len(p.Spec.Egress))
+	}
+	return p
+}
+
+func TestMissionNetworkPolicyNATSFromURL(t *testing.T) {
+	p := buildNetpol(t, "nats://nats.messaging.svc:4333", DefaultNetPolSettings())
+	r := p.Spec.Egress[0]
+	if len(r.To) != 1 || r.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "messaging" {
+		t.Fatalf("unexpected NATS peer: %+v", r.To)
+	}
+	if r.To[0].PodSelector != nil {
+		t.Errorf("default settings must not set a NATS pod selector")
+	}
+	if r.Ports[0].Port.IntValue() != 4333 {
+		t.Errorf("port = %v, want 4333", r.Ports[0].Port)
+	}
+}
+
+func TestMissionNetworkPolicyNATSPodLabelsAndClusterLocal(t *testing.T) {
+	s := DefaultNetPolSettings()
+	s.NATSPodLabels = map[string]string{"app.kubernetes.io/name": "nats"}
+	p := buildNetpol(t, "nats://nats.database.svc.cluster.local:4222", s)
+	r := p.Spec.Egress[0]
+	if r.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "database" ||
+		r.To[0].PodSelector.MatchLabels["app.kubernetes.io/name"] != "nats" ||
+		r.Ports[0].Port.IntValue() != 4222 {
+		t.Fatalf("not equivalent to previous hardcoded rule: %+v", r)
+	}
+}
+
+func TestMissionNetworkPolicyNATSNonClusterHost(t *testing.T) {
+	for _, u := range []string{"nats://nats.example.com:4223", "nats://10.0.0.5", "nats://nats:4222"} {
+		p := buildNetpol(t, u, DefaultNetPolSettings())
+		if len(p.Spec.Egress[0].To) != 0 {
+			t.Errorf("%s: expected port-only rule, got peers %+v", u, p.Spec.Egress[0].To)
+		}
+	}
+	a := &KnightAssembler{}
+	_, inCluster := a.buildMissionNetworkPolicy(netpolMission(), "x", "nats://nats.example.com:4223", DefaultNetPolSettings())
+	if inCluster {
+		t.Error("expected inCluster=false")
+	}
+	if got := buildNetpol(t, "nats://10.0.0.5", DefaultNetPolSettings()).Spec.Egress[0].Ports[0].Port.IntValue(); got != 4222 {
+		t.Errorf("default port = %d, want 4222", got)
+	}
+}
+
+func TestMissionNetworkPolicyDNSFromEnv(t *testing.T) {
+	t.Setenv(EnvNetPolDNSNamespace, "dns-system")
+	t.Setenv(EnvNetPolDNSPodLabels, "app=coredns, tier=dns")
+	t.Setenv(EnvNetPolNATSPodLabels, "a=b")
+	s := NetPolSettingsFromEnv()
+	p := buildNetpol(t, "nats://nats.database.svc:4222", s)
+	dns := p.Spec.Egress[1].To[0]
+	if dns.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "dns-system" ||
+		dns.PodSelector.MatchLabels["app"] != "coredns" || dns.PodSelector.MatchLabels["tier"] != "dns" {
+		t.Fatalf("unexpected DNS peer: %+v", dns)
+	}
+	if p.Spec.Egress[0].To[0].PodSelector.MatchLabels["a"] != "b" {
+		t.Errorf("NATS pod labels not applied")
+	}
+}
+
+func TestNetPolSettingsDefaults(t *testing.T) {
+	s := NetPolSettingsFromEnv()
+	if !s.Enabled || s.DNSNamespace != "kube-system" || s.DNSPodLabels["k8s-app"] != "kube-dns" || s.NATSPodLabels != nil {
+		t.Fatalf("unexpected defaults: %+v", s)
+	}
+}
+
+func TestEnsureMissionNetworkPolicyDisabled(t *testing.T) {
+	t.Setenv(EnvNetPolEnabled, "false")
+	scheme := k8sruntime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	a := &KnightAssembler{Client: c}
+	if err := a.EnsureMissionNetworkPolicy(context.Background(), netpolMission()); err != nil {
+		t.Fatal(err)
+	}
+	list := &networkingv1.NetworkPolicyList{}
+	if err := c.List(context.Background(), list); err != nil || len(list.Items) != 0 {
+		t.Fatalf("expected no policy, got %d (err %v)", len(list.Items), err)
+	}
+}
+
+func TestEnsureMissionNetworkPolicyUsesMissionNATSURL(t *testing.T) {
+	scheme := k8sruntime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
+	m := netpolMission()
+	m.Spec.RoundTableTemplate = &aiv1alpha1.MissionRoundTableTemplate{NATSURL: "nats://nats.messaging.svc:4333"}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	a := &KnightAssembler{Client: c}
+	if err := a.EnsureMissionNetworkPolicy(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	p := &networkingv1.NetworkPolicy{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "roundtable", Name: "mission-m1-isolation"}, p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "messaging" {
+		t.Fatalf("unexpected: %+v", p.Spec.Egress[0])
+	}
+}

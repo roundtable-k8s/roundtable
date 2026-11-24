@@ -86,6 +86,27 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- with .Values.missionNetworkPolicy }}
+            # Mission knight egress NetworkPolicy settings.
+            - name: MISSION_NETPOL_ENABLED
+              value: "{{ if kindIs "bool" .enabled }}{{ .enabled }}{{ else }}true{{ end }}"
+            {{- with .nats }}
+            {{- if .podLabels }}
+            - name: MISSION_NETPOL_NATS_POD_LABELS
+              value: "{{ $l := list }}{{ range $k, $v := .podLabels }}{{ $l = append $l (printf "%s=%s" $k $v) }}{{ end }}{{ join "," $l }}"
+            {{- end }}
+            {{- end }}
+            {{- with .dns }}
+            {{- if .namespace }}
+            - name: MISSION_NETPOL_DNS_NAMESPACE
+              value: "{{ .namespace }}"
+            {{- end }}
+            {{- if .podLabels }}
+            - name: MISSION_NETPOL_DNS_POD_LABELS
+              value: "{{ $l := list }}{{ range $k, $v := .podLabels }}{{ $l = append $l (printf "%s=%s" $k $v) }}{{ end }}{{ join "," $l }}"
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.notify.allowedURLPrefixes }}
             # SSRF allowlist for spec.notify completion webhooks; unset means
             # the operator rejects all notification URLs.
