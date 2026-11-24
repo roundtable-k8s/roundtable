@@ -784,11 +784,9 @@ func (b *PodBuilder) WithBrowser() *PodBuilder {
 			InitialDelaySeconds: 5,
 			PeriodSeconds:       10,
 		},
-		SecurityContext: &corev1.SecurityContext{
-			ReadOnlyRootFilesystem:   new(false),
-			AllowPrivilegeEscalation: new(false),
-		},
 	}
+	browserContainer.SecurityContext = RestrictedContainerSecurityContext()
+	browserContainer.SecurityContext.ReadOnlyRootFilesystem = new(false)
 
 	b.sidecars = append(b.sidecars, browserContainer)
 	return b
@@ -889,6 +887,11 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	containers := make([]corev1.Container, 0, 1+len(b.sidecars))
 	containers = append(containers, knightContainer)
 	containers = append(containers, b.sidecars...)
+	for i := range containers {
+		if containers[i].SecurityContext == nil {
+			containers[i].SecurityContext = RestrictedContainerSecurityContext()
+		}
+	}
 
 	var runtimeClass *string
 	if rc := b.knight.Spec.RuntimeClassName; rc != nil && *rc != "" {

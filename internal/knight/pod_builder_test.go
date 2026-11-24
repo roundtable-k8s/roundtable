@@ -514,3 +514,38 @@ var _ = Describe("PodBuilder", func() {
 		})
 	})
 })
+
+var _ = Describe("PodBuilder restricted security", func() {
+	It("gives every container, with all sidecars enabled, the restricted context", func() {
+		GinkgoT().Setenv("KNIGHT_TOOLS_IMAGE_REPO", "registry.example.com/knight-tools")
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: "k", Namespace: "default"},
+			Spec: aiv1alpha1.KnightSpec{
+				Model:   "m",
+				Domain:  "d",
+				Skills:  []string{"a"},
+				Arsenal: &aiv1alpha1.KnightArsenal{},
+				Tools:   &aiv1alpha1.KnightTools{Nix: []string{"kubectl"}},
+			},
+		}
+		b := NewPodBuilder(k, "img:1").WithWorkspace().WithArsenal().WithSkillFilter().WithGitSync().WithBrowser().WithNixStore()
+		spec := b.Build(context.Background())
+
+		Expect(len(spec.Containers)).To(BeNumerically(">=", 4))
+		Expect(spec.SecurityContext.SeccompProfile).NotTo(BeNil())
+		Expect(spec.SecurityContext.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault))
+		all := append(append([]corev1.Container{}, spec.InitContainers...), spec.Containers...)
+		for _, c := range all {
+			sc := c.SecurityContext
+			Expect(sc).NotTo(BeNil(), c.Name)
+			Expect(sc.AllowPrivilegeEscalation).To(HaveValue(BeFalse()), c.Name)
+			Expect(sc.RunAsNonRoot).To(HaveValue(BeTrue()), c.Name)
+			Expect(sc.Capabilities).NotTo(BeNil(), c.Name)
+			Expect(sc.Capabilities.Drop).To(ConsistOf(corev1.Capability("ALL")), c.Name)
+			Expect(sc.Capabilities.Add).To(BeEmpty(), c.Name)
+			Expect(sc.SeccompProfile).NotTo(BeNil(), c.Name)
+			Expect(sc.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault), c.Name)
+			Expect(sc.Privileged).To(BeNil(), c.Name)
+		}
+	})
+})

@@ -87,5 +87,18 @@ func (s PodSecurity) PodSecurityContext() *corev1.PodSecurityContext {
 		RunAsNonRoot:        new(runAsUser != 0),
 		FSGroup:             &fsGroup,
 		FSGroupChangePolicy: new(s.FSGroupChangePolicy),
+		SeccompProfile:      &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+}
+
+// RestrictedContainerSecurityContext returns the container security context
+// required by the Pod Security Standard "restricted" profile. Every knight
+// container gets it; there is no opt-out.
+func RestrictedContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: new(false),
+		RunAsNonRoot:             new(true),
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 }

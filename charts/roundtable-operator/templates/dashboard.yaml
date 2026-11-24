@@ -89,6 +89,12 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       serviceAccountName: {{ include "roundtable-operator.fullname" . }}-dashboard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: dashboard
           image: "{{ .Values.images.dashboard.repository }}:{{ .Values.images.dashboard.tag }}"
@@ -111,6 +117,13 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
           livenessProbe:
             httpGet:
               path: /api/health
