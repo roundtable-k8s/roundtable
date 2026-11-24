@@ -59,6 +59,22 @@ type fakeGitHub struct {
 	labelCalls int
 	// failComments makes the next n comment calls fail with 500.
 	failComments int
+	// prState: "repo#n" -> pull request returned by GET /pulls/{n}.
+	prState map[string]*github.PullRequest
+	// autoMerged: node IDs auto-merge was enabled for; failAutoMerge makes it fail.
+	autoMerged    []string
+	failAutoMerge bool
+}
+
+func (f *fakeGitHub) setPR(pr github.PullRequest) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prState == nil {
+		f.prState = map[string]*github.PullRequest{}
+	}
+	pr.Number = 7
+	pr.NodeID = "acme/widgets#7"
+	f.prState[pr.NodeID] = &pr
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -130,6 +146,8 @@ func (f *fakeGitHub) find(repo string, n int) *github.Issue {
 
 var pullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
 
+var pullRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls/(\d+)$`)
+
 var labelRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/labels(?:/(.+))?$`)
 
 var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(/labels|/comments|/assignees)(?:/(.+))?)?$`)
@@ -141,6 +159,32 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Header.Get("Authorization") != "Bearer "+f.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		return
+	}
+	if req.URL.Path == "/graphql" {
+		var body struct {
+			Variables struct{ ID string } `json:"variables"`
+		}
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		if f.failAutoMerge {
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Pull request is in clean status"}]}`))
+			return
+		}
+		f.autoMerged = append(f.autoMerged, body.Variables.ID)
+		if pr := f.prState[body.Variables.ID]; pr != nil {
+			pr.AutoMerge = &struct{}{}
+		}
+		_, _ = w.Write([]byte(`{"data":{}}`))
+		return
+	}
+	if gm := pullRoute.FindStringSubmatch(req.URL.EscapedPath()); gm != nil {
+		repo, _ := url.PathUnescape(gm[1])
+		pr := f.prState[repo+"#"+gm[2]]
+		if pr == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(pr)
 		return
 	}
 	if pm := pullsRoute.FindStringSubmatch(req.URL.EscapedPath()); pm != nil {
@@ -563,6 +607,85 @@ var _ = Describe("IssuePickup controller", func() {
 		reconcileOnce()
 		Expect(pickupChains()).To(BeEmpty())
 		Expect(getRT().Status.IssuePickup.LastError).To(ContainSubstring("401"))
+	})
+
+	// Verifies the merge step on GitHub (#301): its output is ignored.
+	Context("merge verification", func() {
+		start := func() string {
+			gh.add(repo, 301, "Fix", "body", "rt:ready")
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			name := chains[0].Name
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "review", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"},
+				{Name: "merge", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "Looks good. Verdict: ship it"},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return name
+		}
+		verified := func(name string) bool {
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			return c.Annotations[aiv1alpha1.AnnotationPickupVerified] == c.Status.LastRunTrigger
+		}
+
+		It("queues an open PR the merge step left alone", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			name := start()
+			tick()
+			Expect(gh.autoMerged).To(Equal([]string{"acme/widgets#7"}))
+			Expect(gh.labels(repo, 301)).NotTo(ContainElement("needs-human"))
+			Expect(verified(name)).To(BeTrue())
+			n := len(gh.autoMerged)
+			tick()
+			Expect(gh.autoMerged).To(HaveLen(n)) // verified once
+		})
+
+		It("accepts merged and already-queued PRs untouched", func() {
+			q := github.PullRequest{State: "open", AutoMerge: &struct{}{}}
+			gh.setPR(q)
+			name := start()
+			tick()
+			Expect(gh.autoMerged).To(BeEmpty())
+			Expect(gh.labels(repo, 301)).NotTo(ContainElement("needs-human"))
+			Expect(verified(name)).To(BeTrue())
+		})
+
+		It("labels the issue needs-human when the PR is closed unmerged", func() {
+			gh.setPR(github.PullRequest{State: "closed"})
+			name := start()
+			tick()
+			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+			Expect(gh.labels(repo, 301)).NotTo(ContainElement("rt:in-progress"))
+			Expect(gh.commentsOn(repo, 301)[len(gh.commentsOn(repo, 301))-1]).To(ContainSubstring("closed without being merged"))
+			Expect(verified(name)).To(BeTrue())
+		})
+
+		It("labels the issue needs-human when the PR cannot be queued", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			gh.failAutoMerge = true
+			start()
+			tick()
+			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+		})
+
+		It("labels the issue needs-human when no PR can be found", func() {
+			name := start()
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			c.Status.StepStatuses = c.Status.StepStatuses[1:]
+			c.Status.StepStatuses[0].Output = "The PR is in the merge queue"
+			c.Status.StepStatuses[0].Name = "merge"
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			tick()
+			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+		})
 	})
 
 	It("rejects a readyLabel equal to inProgressLabel", func() {
