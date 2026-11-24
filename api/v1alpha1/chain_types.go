@@ -567,6 +567,48 @@ type ChainLoopStatus struct {
 	// steps holds the latest state of each body step, in body order.
 	// +optional
 	Steps []ChainLoopStepStatus `json:"steps,omitempty"`
+
+	// history is a bounded, append-only record of body task executions,
+	// oldest first: one entry each time a body task finishes (a retried
+	// attempt adds one entry per attempt). Unlike steps, which only holds the
+	// latest round of each body step, history keeps earlier rounds so their
+	// outcomes stay visible. At most the last min(maxIterations, 20) rounds
+	// are kept and outputSummary is truncated to 1 KiB. Loop semantics and
+	// template data (.Loop.Steps) are unaffected.
+	// +optional
+	History []ChainLoopHistoryEntry `json:"history,omitempty"`
+}
+
+// ChainLoopHistoryEntry is one finished body task execution in a loop round.
+type ChainLoopHistoryEntry struct {
+	// round is the 1-based loop round the task ran in.
+	Round int32 `json:"round"`
+
+	// step is the body step name.
+	Step string `json:"step"`
+
+	// phase is how the execution ended: Succeeded or Failed.
+	Phase ChainStepPhase `json:"phase"`
+
+	// taskId is the NATS task identifier of the execution.
+	// +optional
+	TaskID string `json:"taskId,omitempty"`
+
+	// startedAt is when the task was published.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// finishedAt is when the task finished.
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// error is the (truncated) failure message of a failed execution.
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// outputSummary is the task output truncated to 1 KiB.
+	// +optional
+	OutputSummary string `json:"outputSummary,omitempty"`
 }
 
 // ChainLoopStepStatus is the state of a loop body step in its latest round.

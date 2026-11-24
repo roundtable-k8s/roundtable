@@ -612,6 +612,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 			return
 		}
 		bs.Error = truncateUTF8(errMsg, itemErrorLimit)
+		recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseFailed, "")
 		if rp := stepRetryPolicy(chain, &aiv1alpha1.ChainStep{Retry: body.Retry}); rp != nil && bs.Retries < rp.MaxRetries {
 			bs.Retries++
 			bs.Phase = aiv1alpha1.ChainStepPhasePending
@@ -624,8 +625,50 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	bs.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 	bs.Error = ""
 	bs.Output = truncateStatusOutput(output, key)
+	recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseSucceeded, output)
 	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef.Name, bs.StartedAt, &now, structured)
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "LoopStepCompleted", "Loop step %s: %s completed round %d", spec.Name, bs.Name, bs.Iteration)
+}
+
+const (
+	loopHistoryMaxRounds    = 20
+	loopHistorySummaryBytes = 1024
+)
+
+// recordLoopHistory appends the finished execution of body step bs to the
+// loop's bounded history. Only the last min(maxIterations, 20) rounds are
+// kept. It never touches the fields that templates and until read.
+func recordLoopHistory(ss *aiv1alpha1.ChainStepStatus, bs *aiv1alpha1.ChainLoopStepStatus, phase aiv1alpha1.ChainStepPhase, output string) {
+	if ss == nil || ss.Loop == nil {
+		return
+	}
+	ls := ss.Loop
+	e := aiv1alpha1.ChainLoopHistoryEntry{
+		Round:         bs.Iteration,
+		Step:          bs.Name,
+		Phase:         phase,
+		TaskID:        bs.TaskID,
+		StartedAt:     bs.StartedAt,
+		FinishedAt:    bs.CompletedAt,
+		Error:         bs.Error,
+		OutputSummary: truncateUTF8(output, loopHistorySummaryBytes),
+	}
+	if phase != aiv1alpha1.ChainStepPhaseFailed {
+		e.Error = ""
+	}
+	ls.History = append(ls.History, e)
+	keep := ls.MaxIterations
+	if keep <= 0 || keep > loopHistoryMaxRounds {
+		keep = loopHistoryMaxRounds
+	}
+	cutoff := bs.Iteration - keep // rounds <= cutoff are dropped
+	drop := 0
+	for drop < len(ls.History) && ls.History[drop].Round <= cutoff {
+		drop++
+	}
+	if drop > 0 {
+		ls.History = append([]aiv1alpha1.ChainLoopHistoryEntry(nil), ls.History[drop:]...)
+	}
 }
 
 // dispatchBodyTask publishes body step idx for the current round.

@@ -843,6 +843,64 @@ spec:
                     loop:
                       description: loop tracks a loop step. Unset for ordinary steps.
                       properties:
+                        history:
+                          description: |-
+                            history is a bounded, append-only record of body task executions,
+                            oldest first: one entry each time a body task finishes (a retried
+                            attempt adds one entry per attempt). Unlike steps, which only holds the
+                            latest round of each body step, history keeps earlier rounds so their
+                            outcomes stay visible. At most the last min(maxIterations, 20) rounds
+                            are kept and outputSummary is truncated to 1 KiB. Loop semantics and
+                            template data (.Loop.Steps) are unaffected.
+                          items:
+                            description: ChainLoopHistoryEntry is one finished body
+                              task execution in a loop round.
+                            properties:
+                              error:
+                                description: error is the (truncated) failure message
+                                  of a failed execution.
+                                type: string
+                              finishedAt:
+                                description: finishedAt is when the task finished.
+                                format: date-time
+                                type: string
+                              outputSummary:
+                                description: outputSummary is the task output truncated
+                                  to 1 KiB.
+                                type: string
+                              phase:
+                                description: 'phase is how the execution ended: Succeeded
+                                  or Failed.'
+                                enum:
+                                - Pending
+                                - Running
+                                - Succeeded
+                                - Failed
+                                - Skipped
+                                - Deferred
+                                type: string
+                              round:
+                                description: round is the 1-based loop round the task
+                                  ran in.
+                                format: int32
+                                type: integer
+                              startedAt:
+                                description: startedAt is when the task was published.
+                                format: date-time
+                                type: string
+                              step:
+                                description: step is the body step name.
+                                type: string
+                              taskId:
+                                description: taskId is the NATS task identifier of
+                                  the execution.
+                                type: string
+                            required:
+                            - phase
+                            - round
+                            - step
+                            type: object
+                          type: array
                         iteration:
                           description: iteration is the current (or last) round, 1-based;
                             0 before the first.
