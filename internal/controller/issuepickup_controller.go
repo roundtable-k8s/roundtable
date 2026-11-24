@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -71,6 +72,11 @@ type IssuePickupReconciler struct {
 
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
+
+	// ensuredLabels remembers which repo + label set combinations already
+	// have their labels, so polls do not call GitHub for them again. A
+	// changed label name in the spec is a new key and is ensured once.
+	ensuredLabels sync.Map
 }
 
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
@@ -183,6 +189,7 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 	labels := pickupLabels(spec)
 	maxActive, maxPerRepo := max(spec.MaxActive, 1), max(spec.MaxActivePerRepo, 1)
 	for _, repo := range spec.Repos {
+		r.ensureLabels(ctx, gh, repo, labels, &res)
 		if res.active >= maxActive {
 			break
 		}
@@ -268,6 +275,37 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		}
 	}
 	return res
+}
+
+// pickupLabelDefs are the color and description new pickup labels get.
+func pickupLabelDefs(l pickupLabelSet) []struct{ name, color, description string } {
+	return []struct{ name, color, description string }{
+		{l.ready, "0e8a16", "Round Table: ready to be picked up"},
+		{l.inProgress, "fbca04", "Round Table: a chain is working on this"},
+		{l.needsHuman, "d93f0b", "Round Table: needs a human"},
+	}
+}
+
+// ensureLabels creates the pickup labels the repo lacks. Existing labels are
+// left alone. Success is cached per repo + label set, so it only calls GitHub
+// the first time a repo or label name is seen (and again after a restart);
+// failures are reported and retried on the next poll.
+func (r *IssuePickupReconciler) ensureLabels(ctx context.Context, gh *github.Client, repo string, labels pickupLabelSet, res *pickupResult) {
+	key := repo + "\x00" + labels.ready + "\x00" + labels.inProgress + "\x00" + labels.needsHuman
+	if _, ok := r.ensuredLabels.Load(key); ok {
+		return
+	}
+	for _, d := range pickupLabelDefs(labels) {
+		created, err := gh.EnsureLabel(ctx, repo, d.name, d.color, d.description)
+		if err != nil {
+			res.fail("%s: ensure label %s: %v", repo, d.name, err)
+			return
+		}
+		if created {
+			logf.FromContext(ctx).Info("Created label", "repo", repo, "label", d.name)
+		}
+	}
+	r.ensuredLabels.Store(key, struct{}{})
 }
 
 // startChain creates the issue's Chain from the template, or re-runs a

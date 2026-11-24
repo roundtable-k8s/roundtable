@@ -53,12 +53,16 @@ type fakeGitHub struct {
 	assigned map[string][]string
 	requests int
 	token    string
+	// repoLabels: repo -> label name -> description; labelCalls counts
+	// label-endpoint requests.
+	repoLabels map[string]map[string]string
+	labelCalls int
 	// failComments makes the next n comment calls fail with 500.
 	failComments int
 }
 
 func newFakeGitHub() *fakeGitHub {
-	return &fakeGitHub{issues: map[string][]*github.Issue{}, pulls: map[string][]github.PullRequest{}, comments: map[string][]string{}, assigned: map[string][]string{}}
+	return &fakeGitHub{issues: map[string][]*github.Issue{}, pulls: map[string][]github.PullRequest{}, comments: map[string][]string{}, assigned: map[string][]string{}, repoLabels: map[string]map[string]string{}}
 }
 
 func (f *fakeGitHub) add(repo string, n int, title, body string, labels ...string) {
@@ -126,6 +130,8 @@ func (f *fakeGitHub) find(repo string, n int) *github.Issue {
 
 var pullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
 
+var labelRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/labels(?:/(.+))?$`)
+
 var issueRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)(/labels|/comments|/assignees)(?:/(.+))?)?$`)
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -148,6 +154,32 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			out = []github.PullRequest{}
 		}
 		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
+	if lm := labelRoute.FindStringSubmatch(req.URL.EscapedPath()); lm != nil {
+		f.labelCalls++
+		repo, _ := url.PathUnescape(lm[1])
+		if f.repoLabels[repo] == nil {
+			f.repoLabels[repo] = map[string]string{}
+		}
+		if req.Method == http.MethodGet {
+			name, _ := url.PathUnescape(lm[2])
+			if _, ok := f.repoLabels[repo][name]; !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		if _, ok := f.repoLabels[repo][body["name"]]; ok {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
+		}
+		f.repoLabels[repo][body["name"]] = body["description"] + "|" + body["color"]
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
 		return
 	}
 	m := issueRoute.FindStringSubmatch(req.URL.EscapedPath())
@@ -427,6 +459,29 @@ var _ = Describe("IssuePickup controller", func() {
 			names = append(names, ch.Name)
 		}
 		Expect(names).To(ConsistOf(c.Name), "#8 finished 8 days ago; #7 is running again")
+	})
+
+	It("creates missing pickup labels once, never touching existing ones", func() {
+		gh.repoLabels[repo] = map[string]string{"needs-human": "custom|123456"}
+
+		reconcileOnce()
+		Expect(gh.repoLabels[repo]).To(HaveKeyWithValue("rt:ready", "Round Table: ready to be picked up|0e8a16"))
+		Expect(gh.repoLabels[repo]).To(HaveKeyWithValue("rt:in-progress", "Round Table: a chain is working on this|fbca04"))
+		Expect(gh.repoLabels[repo]).To(HaveKeyWithValue("needs-human", "custom|123456"))
+		calls := gh.labelCalls
+		Expect(calls).To(Equal(5)) // 3 GETs + 2 POSTs
+
+		// Later polls use the cache.
+		tick()
+		Expect(gh.labelCalls).To(Equal(calls))
+
+		// A changed label name is a new label set and is ensured once.
+		rt := getRT()
+		rt.Spec.IssuePickup.ReadyLabel = "rt:go"
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		tick()
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:go"))
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:ready"))
 	})
 
 	It("hands issues that need a human back instead of starting a Chain", func() {
