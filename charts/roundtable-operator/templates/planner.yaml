@@ -28,6 +28,9 @@ spec:
   arsenals:
     {{- toYaml .Values.planner.arsenals | nindent 4 }}
   {{- end }}
+  {{- if .Values.planner.runtimeClassName }}
+  runtimeClassName: {{ .Values.planner.runtimeClassName | quote }}
+  {{- end }}
   {{- with .Values.planner.github }}
   github:
     {{- toYaml . | nindent 4 }}

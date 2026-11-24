@@ -108,6 +108,15 @@ type KnightSpec struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
+	// pod runs under (for example "gvisor"). It applies to both runtime:
+	// deployment and runtime: sandbox. When unset the table default applies,
+	// and when that is unset too the cluster's default runtime is used. If the
+	// RuntimeClass does not exist the knight reports RuntimeAvailable=False
+	// with reason RuntimeClassNotFound.
+	// +optional
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
 	// concurrency is the maximum number of concurrent tasks the knight can process.
 	// +kubebuilder:default=2
 	// +kubebuilder:validation:Minimum=1

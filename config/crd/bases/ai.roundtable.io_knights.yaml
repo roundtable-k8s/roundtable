@@ -652,6 +652,15 @@ spec:
                 - deployment
                 - sandbox
                 type: string
+              runtimeClassName:
+                description: |-
+                  runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
+                  pod runs under (for example "gvisor"). It applies to both runtime:
+                  deployment and runtime: sandbox. When unset the table default applies,
+                  and when that is unset too the cluster's default runtime is used. If the
+                  RuntimeClass does not exist the knight reports RuntimeAvailable=False
+                  with reason RuntimeClassNotFound.
+                type: string
               serviceAccountName:
                 description: |-
                   serviceAccountName is the name of the ServiceAccount to use for the knight pod.

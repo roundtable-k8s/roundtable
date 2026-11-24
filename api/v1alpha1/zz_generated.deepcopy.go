@@ -756,6 +756,11 @@ func (in *KnightSpec) DeepCopyInto(out *KnightSpec) {
 		*out = new(v1.ResourceRequirements)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.RuntimeClassName != nil {
+		in, out := &in.RuntimeClassName, &out.RuntimeClassName
+		*out = new(string)
+		**out = **in
+	}
 	if in.Replicas != nil {
 		in, out := &in.Replicas, &out.Replicas
 		*out = new(int32)
@@ -1502,6 +1507,11 @@ func (in *RoundTableDefaults) DeepCopyInto(out *RoundTableDefaults) {
 		in, out := &in.Resources, &out.Resources
 		*out = new(v1.ResourceRequirements)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.RuntimeClassName != nil {
+		in, out := &in.RuntimeClassName, &out.RuntimeClassName
+		*out = new(string)
+		**out = **in
 	}
 	if in.Workspace != nil {
 		in, out := &in.Workspace, &out.Workspace

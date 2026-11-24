@@ -346,17 +346,18 @@ func findTable(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight, accep
 	return nil
 }
 
-// ApplyTableDefaults fills k.Spec.Resources and k.Spec.Workspace in memory
+// ApplyTableDefaults fills k.Spec.Resources, k.Spec.Workspace and
+// k.Spec.RuntimeClassName in memory
 // from the knight's RoundTable spec.defaults (found via findTable) when the
 // knight leaves them unset. Call it on the reconciler's working copy only; it
 // is never persisted. A table's workspace existingClaim is not inherited.
 func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) {
-	if k.Spec.Resources != nil && k.Spec.Workspace != nil {
+	if k.Spec.Resources != nil && k.Spec.Workspace != nil && k.Spec.RuntimeClassName != nil {
 		return
 	}
 	rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
 		d := rt.Spec.Defaults
-		return d != nil && (d.Resources != nil || d.Workspace != nil)
+		return d != nil && (d.Resources != nil || d.Workspace != nil || d.RuntimeClassName != nil)
 	})
 	if rt == nil {
 		return
@@ -364,6 +365,10 @@ func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knig
 	d := rt.Spec.Defaults
 	if k.Spec.Resources == nil && d.Resources != nil {
 		k.Spec.Resources = d.Resources.DeepCopy()
+	}
+	if k.Spec.RuntimeClassName == nil && d.RuntimeClassName != nil {
+		k.Spec.RuntimeClassName = new(string)
+		*k.Spec.RuntimeClassName = *d.RuntimeClassName
 	}
 	if k.Spec.Workspace == nil && d.Workspace != nil {
 		ws := d.Workspace.DeepCopy()
@@ -805,7 +810,14 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	containers = append(containers, knightContainer)
 	containers = append(containers, b.sidecars...)
 
+	var runtimeClass *string
+	if rc := b.knight.Spec.RuntimeClassName; rc != nil && *rc != "" {
+		runtimeClass = new(string)
+		*runtimeClass = *rc
+	}
+
 	return corev1.PodSpec{
+		RuntimeClassName:             runtimeClass,
 		Containers:                   containers,
 		Volumes:                      b.volumes,
 		EnableServiceLinks:           new(false),

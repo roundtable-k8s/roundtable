@@ -76,6 +76,9 @@ spec:
   resources:
     {{- toYaml $resources | nindent 4 }}
   {{- end }}
+  {{- if $spec.runtimeClassName }}
+  runtimeClassName: {{ $spec.runtimeClassName | quote }}
+  {{- end }}
   {{- if $spec.suspend }}
   suspend: {{ $spec.suspend }}
   {{- end }}
