@@ -475,3 +475,31 @@ func (c *Client) CreateIssue(ctx context.Context, repo, title, body string, labe
 	err = c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues", owner, name), nil, map[string]any{"title": title, "body": body, "labels": labels}, out)
 	return out, err
 }
+
+// EnsureLabel creates the repo label name with the given color (hex, no #)
+// and description if the repo does not have it, and reports whether it did.
+// An existing label is never modified.
+func (c *Client) EnsureLabel(ctx context.Context, repo, name, color, description string) (bool, error) {
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		return false, err
+	}
+	base := fmt.Sprintf("/repos/%s/%s/labels", owner, repoName)
+	err = c.do(ctx, http.MethodGet, base+"/"+url.PathEscape(name), nil, nil, nil)
+	var apiErr *APIError
+	if err == nil {
+		return false, nil
+	}
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
+		return false, err
+	}
+	err = c.do(ctx, http.MethodPost, base, nil,
+		map[string]string{"name": name, "color": color, "description": description}, nil)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &apiErr) && apiErr.Status == http.StatusUnprocessableEntity:
+		return false, nil // created concurrently (already_exists)
+	}
+	return false, err
+}
