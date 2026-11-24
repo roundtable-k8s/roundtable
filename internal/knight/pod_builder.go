@@ -715,6 +715,13 @@ func (b *PodBuilder) WithBrowser() *PodBuilder {
 	return b
 }
 
+// downwardEnv returns an env var sourced from a pod field via the downward API.
+func downwardEnv(name, fieldPath string) corev1.EnvVar {
+	return corev1.EnvVar{Name: name, ValueFrom: &corev1.EnvVarSource{
+		FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: fieldPath},
+	}}
+}
+
 // Build assembles the complete PodSpec with all configured components.
 func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	image := EffectiveImage(b.knight, b.defaultImg)
@@ -724,6 +731,10 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	env := []corev1.EnvVar{
 		{Name: "KNIGHT_NAME", Value: util.Capitalize(b.knight.Name)},
 		{Name: "KNIGHT_MODEL", Value: b.knight.Spec.Model},
+		// Pod identity via the downward API (task activity events, #249).
+		downwardEnv("POD_NAME", "metadata.name"),
+		downwardEnv("POD_NAMESPACE", "metadata.namespace"),
+		downwardEnv("NODE_NAME", "spec.nodeName"),
 		{Name: "NATS_URL", Value: b.knight.Spec.NATS.URL},
 		{Name: "NATS_TASKS_STREAM", Value: b.knight.Spec.NATS.Stream},
 		{Name: "NATS_RESULTS_STREAM", Value: b.knight.Spec.NATS.ResultsStream},
