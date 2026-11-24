@@ -22,7 +22,7 @@ lacks "$def" 'name: GATEWAY_TOKEN$' "token passed as env var"
 has "$def" 'name: GATEWAY_URL' "dashboard not given the gateway URL"
 
 own="$(render --set gateway.auth.existingSecret=mine)"
-lacks "$own" 'gateway-token' "generated Secret rendered despite existingSecret"
+lacks "$own" 'rt-roundtable-operator-gateway-token' "generated Secret rendered despite existingSecret"
 [ "$(grep -c 'secretName: mine' <<<"$own")" = 2 ] || fail "gateway and dashboard must both mount existingSecret"
 
 dash="$(render --set dashboard.gateway.tokenSecret=dash --set dashboard.gateway.tokenKey=k)"
