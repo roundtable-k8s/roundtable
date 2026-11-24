@@ -64,6 +64,8 @@ type fakeGitHub struct {
 	// autoMerged: node IDs auto-merge was enabled for; failAutoMerge makes it fail.
 	autoMerged    []string
 	failAutoMerge bool
+	// reviews: "repo#n" -> review bodies on the PR (oldest first).
+	reviews map[string][]string
 }
 
 func (f *fakeGitHub) setPR(pr github.PullRequest) {
@@ -146,6 +148,8 @@ func (f *fakeGitHub) find(repo string, n int) *github.Issue {
 
 var pullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
 
+var reviewsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls/(\d+)/reviews$`)
+
 var pullRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls/(\d+)$`)
 
 var labelRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/labels(?:/(.+))?$`)
@@ -175,6 +179,26 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			pr.AutoMerge = &struct{}{}
 		}
 		_, _ = w.Write([]byte(`{"data":{}}`))
+		return
+	}
+	if rm := reviewsRoute.FindStringSubmatch(req.URL.EscapedPath()); rm != nil {
+		repo, _ := url.PathUnescape(rm[1])
+		key := repo + "#" + rm[2]
+		if req.Method == http.MethodPost {
+			var body map[string]string
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			if f.reviews == nil {
+				f.reviews = map[string][]string{}
+			}
+			f.reviews[key] = append(f.reviews[key], body["body"])
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		out := []github.Review{}
+		for i, b := range f.reviews[key] {
+			out = append(out, github.Review{ID: int64(i + 1), State: "COMMENTED", Body: b})
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	if gm := pullRoute.FindStringSubmatch(req.URL.EscapedPath()); gm != nil {
@@ -645,6 +669,38 @@ var _ = Describe("IssuePickup controller", func() {
 			n := len(gh.autoMerged)
 			tick()
 			Expect(gh.autoMerged).To(HaveLen(n)) // verified once
+		})
+
+		It("posts the missing review, then queues the PR", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			start()
+			tick()
+			Expect(gh.reviews["acme/widgets#7"]).To(HaveLen(1))
+			Expect(gh.reviews["acme/widgets#7"][0]).To(ContainSubstring("Verdict: ship it"))
+			Expect(gh.autoMerged).To(Equal([]string{"acme/widgets#7"}))
+		})
+
+		It("does not repost when the newest review already matches", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			gh.reviews = map[string][]string{"acme/widgets#7": {"Verdict: needs changes", "Verdict: ship it"}}
+			start()
+			tick()
+			Expect(gh.reviews["acme/widgets#7"]).To(HaveLen(2))
+			Expect(gh.autoMerged).To(Equal([]string{"acme/widgets#7"}))
+		})
+
+		It("posts a needs-changes review and does not queue the PR", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			name := start()
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			c.Status.StepStatuses[0].Output = "PRs: https://github.com/acme/widgets/pull/7\nVerdict: needs changes"
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			tick()
+			Expect(gh.reviews["acme/widgets#7"]).To(HaveLen(1))
+			Expect(gh.reviews["acme/widgets#7"][0]).To(ContainSubstring("Verdict: needs changes"))
+			Expect(gh.autoMerged).To(BeEmpty())
+			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
 		})
 
 		It("accepts merged and already-queued PRs untouched", func() {

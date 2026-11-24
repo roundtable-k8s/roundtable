@@ -42,6 +42,9 @@ const mergeStepName = "merge"
 var (
 	prURLRe   = regexp.MustCompile(`https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)`)
 	prsLineRe = regexp.MustCompile(`(?mi)^\W*PRs:\s*(.*)$`)
+	// verdictRe matches a "Verdict:" line; the review contract is that its
+	// newest occurrence is the verdict.
+	verdictRe = regexp.MustCompile(`(?mi)^\W*Verdict:\s*(.*)$`)
 )
 
 // pickupNeedsVerify reports whether a finished pickup Chain still has to have
@@ -61,9 +64,77 @@ func pickupNeedsVerify(c *aiv1alpha1.Chain) bool {
 	return false
 }
 
+type verdict int
+
+const (
+	verdictNone verdict = iota
+	verdictShipIt
+	verdictNeedsChanges
+)
+
+// lastVerdict classifies the last "Verdict:" line of text. Anything that is
+// not clearly a ship-it counts as needs-changes.
+func lastVerdict(text string) verdict {
+	all := verdictRe.FindAllStringSubmatch(text, -1)
+	if len(all) == 0 {
+		return verdictNone
+	}
+	v := strings.ToLower(all[len(all)-1][1])
+	if strings.Contains(v, "ship") && !strings.Contains(v, "not ship") && !strings.Contains(v, "don't ship") {
+		return verdictShipIt
+	}
+	return verdictNeedsChanges
+}
+
+// stepVerdict returns the final review verdict of the run (the last fixloop_*
+// step with one, else the review step) and the step output carrying it.
+func stepVerdict(c *aiv1alpha1.Chain) (verdict, string) {
+	var out string
+	for _, s := range c.Status.StepStatuses {
+		if (s.Name == "review" || strings.HasPrefix(s.Name, "fixloop_")) && lastVerdict(s.Output) != verdictNone {
+			out = s.Output
+		}
+	}
+	return lastVerdict(out), out
+}
+
+// syncReview makes sure the newest "Verdict:" on the PR's reviews matches the
+// step's final verdict, posting the step output as a COMMENT review when it
+// does not (the knight may never have called rt-review). It returns the
+// verdict now on GitHub.
+func syncReview(ctx context.Context, gh *github.Client, ref prRef, want verdict, output string) (verdict, error) {
+	reviews, err := gh.ListReviews(ctx, ref.repo, ref.number)
+	if err != nil {
+		return verdictNone, fmt.Errorf("list reviews of %s: %w", ref, err)
+	}
+	have := verdictNone
+	for _, rv := range reviews {
+		if v := lastVerdict(rv.Body); v != verdictNone {
+			have = v
+		}
+	}
+	if want == verdictNone || have == want {
+		return have, nil
+	}
+	if err := gh.CreateReview(ctx, ref.repo, ref.number, strings.TrimSpace(output)); err != nil {
+		return have, fmt.Errorf("post review on %s: %w", ref, err)
+	}
+	return want, nil
+}
+
 type prRef struct {
 	repo   string
 	number int
+}
+
+func (v verdict) String() string {
+	switch v {
+	case verdictShipIt:
+		return "ship it"
+	case verdictNeedsChanges:
+		return "needs changes"
+	}
+	return "none"
 }
 
 func (p prRef) String() string { return fmt.Sprintf("%s#%d", p.repo, p.number) }
@@ -125,6 +196,7 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 	}
 	prs := chainPRs(c)
 	var problems, queued []string
+	want, reviewOut := stepVerdict(c)
 	if len(prs) == 0 {
 		problems = append(problems, "no PR URL found in the review or merge output")
 	}
@@ -132,6 +204,12 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 		pr, err := gh.GetPull(ctx, ref.repo, ref.number)
 		if err != nil {
 			return fmt.Errorf("get %s: %w", ref, err)
+		}
+		onGH := verdictNone
+		if !pr.Merged && pr.State != "closed" {
+			if onGH, err = syncReview(ctx, gh, ref, want, reviewOut); err != nil {
+				return err
+			}
 		}
 		switch {
 		case pr.Merged:
@@ -141,6 +219,8 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 			problems = append(problems, fmt.Sprintf("%s is a draft", ref))
 		case pr.HasLabel(labels.needsHuman):
 			problems = append(problems, fmt.Sprintf("%s is labelled `%s`", ref, labels.needsHuman))
+		case onGH != verdictShipIt:
+			problems = append(problems, fmt.Sprintf("%s has no ship-it verdict (newest verdict: %s); not queued", ref, onGH))
 		case pr.AutoMerge != nil:
 		default:
 			if err := gh.EnableAutoMerge(ctx, pr.NodeID); err != nil {

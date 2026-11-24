@@ -347,6 +347,37 @@ func (c *Client) GetPull(ctx context.Context, repo string, number int) (*PullReq
 	return out, err
 }
 
+// Review is one review on a pull request.
+type Review struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"`
+	Body  string `json:"body"`
+	User  User   `json:"user"`
+}
+
+// ListReviews returns the reviews of a pull request, oldest first.
+func (c *Client) ListReviews(ctx context.Context, repo string, number int) ([]Review, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	var out []Review
+	err = pages(ctx, c, fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, name, number), url.Values{},
+		func(page []Review) int { out = append(out, page...); return len(page) })
+	return out, err
+}
+
+// CreateReview posts a review with the COMMENT event (never approves or
+// requests changes: the verdict lives in the body).
+func (c *Client) CreateReview(ctx context.Context, repo string, number int, body string) error {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, name, number), nil,
+		map[string]string{"body": body, "event": "COMMENT"}, nil)
+}
+
 // EnableAutoMerge turns on squash auto-merge for a pull request (GraphQL: the
 // REST API has no endpoint for it). The pull request's merge-queue and
 // required-check rules still gate the merge.
