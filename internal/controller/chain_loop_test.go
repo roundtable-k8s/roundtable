@@ -368,13 +368,89 @@ var _ = Describe("Chain when conditions and loops", func() {
 			{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "b", TimeoutSeconds: 120, DependsOn: []string{"a"}, When: `json(steps.a.output).ok`},
 		})
 		reconcileN(1)
-		finishLast("a", "not json")
+		finishLast("a", `{"other": true}`) // valid JSON, but no "ok" key
 		reconcileN(1)
 		c := get()
 		Expect(status(c, "b").Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
 		Expect(status(c, "b").Error).To(HavePrefix("when: "))
 		Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseFailed))
 		Expect(tasksFor("b")).To(BeEmpty())
+	})
+
+	// #314: a plan whose output later steps parse as JSON is re-run once with
+	// a reminder when its reply has no parseable JSON block.
+	planSteps := func() []aiv1alpha1.ChainStep {
+		return []aiv1alpha1.ChainStep{
+			{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "plan {{ .Input }}", TimeoutSeconds: 120},
+			{Name: "implement", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "implement {{ .Steps.plan.Output }}", TimeoutSeconds: 120,
+				DependsOn: []string{"plan"}, When: `!json(steps.plan.output).split`},
+			{Name: "split", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "sub-issue {{ .Item.number }}", TimeoutSeconds: 120,
+				DependsOn: []string{"plan"}, When: `json(steps["plan"].output).split`,
+				ForEach: &aiv1alpha1.ChainForEach{From: "steps.plan", Path: ".issues"}},
+		}
+	}
+
+	It("retries a plan with no parseable JSON once, with a reminder, then continues", func() {
+		start(planSteps())
+		reconcileN(1)
+		Expect(tasksFor("plan")).To(HaveLen(1))
+		finishLast("plan", "Here is the plan:\n```json\n`{\"split\": false}`\n```")
+		reconcileN(1)
+
+		c := get()
+		Expect(status(c, "plan").Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
+		Expect(status(c, "plan").Reason).To(Equal("JSONRetry"))
+		Expect(status(c, "plan").Retries).To(BeZero()) // not charged to the retry policy
+		Expect(tasksFor("implement")).To(BeEmpty())
+		plans := tasksFor("plan")
+		Expect(plans).To(HaveLen(2))
+		Expect(plans[1].Task).To(HavePrefix(plans[0].Task))
+		Expect(plans[1].Task).To(ContainSubstring("no parseable JSON block (not valid JSON"))
+		Expect(plans[1].Task).To(ContainSubstring("reply with ONLY the JSON block"))
+
+		finishLast("plan", "```json\n{\"split\": false, \"issues\": [{\"number\": 1}]}\n```")
+		reconcileN(1)
+		c = get()
+		Expect(status(c, "plan").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
+		Expect(status(c, "plan").Reason).To(BeEmpty())
+		Expect(status(c, "implement").Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
+		Expect(status(c, "split").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSkipped))
+		finishLast("implement", "https://github.com/acme/widgets/pull/1")
+		reconcileN(1)
+		Expect(get().Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
+	})
+
+	It("fails the plan, not every branch, when the retry still has no JSON", func() {
+		start(planSteps())
+		reconcileN(1)
+		finishLast("plan", "I could not decide.")
+		reconcileN(1)
+		Expect(tasksFor("plan")).To(HaveLen(2))
+		finishLast("plan", "Still prose.")
+		reconcileN(1)
+
+		c := get()
+		Expect(tasksFor("plan")).To(HaveLen(2)) // only one retry
+		Expect(status(c, "plan").Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
+		Expect(status(c, "plan").Error).To(HavePrefix("output has no parseable JSON block after one retry: "))
+		Expect(status(c, "implement").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSkipped))
+		Expect(status(c, "split").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSkipped))
+		Expect(tasksFor("implement")).To(BeEmpty())
+		Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseFailed))
+	})
+
+	It("does not retry a step whose output no later step reads as JSON", func() {
+		start([]aiv1alpha1.ChainStep{
+			{Name: "a", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "a", TimeoutSeconds: 120},
+			{Name: "b", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "b {{ .Steps.a.Output }}", TimeoutSeconds: 120,
+				DependsOn: []string{"a"}, When: `steps.a.output.contains("go")`},
+		})
+		reconcileN(1)
+		finishLast("a", "go, not json")
+		reconcileN(1)
+		Expect(tasksFor("a")).To(HaveLen(1))
+		Expect(status(get(), "a").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
+		Expect(tasksFor("b")).To(HaveLen(1))
 	})
 
 	It("runs the review/fix loop in the coder's session until the review passes, then merges", func() {

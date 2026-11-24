@@ -158,7 +158,7 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		if pickupChainActive(c) {
 			res.active++
 			activeByRepo[c.Annotations[aiv1alpha1.AnnotationPickupRepo]]++
-		} else if pickupChainExpired(c, spec, now) && !pickupNeedsVerify(c) {
+		} else if pickupChainExpired(c, spec, now) && !pickupNeedsVerify(c) && !pickupNeedsHandBack(c) {
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				res.fail("delete finished chain %s: %v", c.Name, err)
 			} else {
@@ -188,11 +188,15 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 
 	labels := pickupLabels(spec)
 	for _, c := range byName {
-		if !pickupNeedsVerify(c) {
-			continue
-		}
-		if err := r.verifyMerge(ctx, gh, rt, c, labels); err != nil {
-			res.fail("verify merge for chain %s: %v", c.Name, err)
+		switch {
+		case pickupNeedsVerify(c):
+			if err := r.verifyMerge(ctx, gh, rt, c, labels); err != nil {
+				res.fail("verify merge for chain %s: %v", c.Name, err)
+			}
+		case pickupNeedsHandBack(c):
+			if err := r.handBackFailed(ctx, gh, rt, c, labels); err != nil {
+				res.fail("hand back failed chain %s: %v", c.Name, err)
+			}
 		}
 	}
 	maxActive, maxPerRepo := max(spec.MaxActive, 1), max(spec.MaxActivePerRepo, 1)

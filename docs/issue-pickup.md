@@ -64,6 +64,15 @@ Claiming is idempotent:
   twice.
 - Only the operator's leader runs the controller.
 
+### Failed runs
+
+When a picked-up Chain ends `Failed`, the next poll hands the issue back
+(#314): it adds `needsHumanLabel`, comments the failed steps and their errors,
+and removes `inProgressLabel`. An issue that is closed or no longer carries
+`inProgressLabel` (a human or the escalate step already took it over) is left
+alone. `ai.roundtable.io/pickup-verified` on the Chain records that the run was
+handled, and a failed Chain is not garbage-collected before that.
+
 ### Breaking changes
 
 Breaking-change protocol (#260, see

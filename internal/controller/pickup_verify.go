@@ -261,3 +261,85 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 	c.Annotations[aiv1alpha1.AnnotationPickupVerified] = c.Status.LastRunTrigger
 	return r.Patch(ctx, c, client.MergeFrom(orig))
 }
+
+// pickupNeedsHandBack reports whether a failed pickup Chain still has to give
+// its issue back to a human (#314): needs-human instead of a stale
+// in-progress label.
+func pickupNeedsHandBack(c *aiv1alpha1.Chain) bool {
+	return !pickupChainActive(c) && c.Status.Phase == aiv1alpha1.ChainPhaseFailed &&
+		c.Annotations[aiv1alpha1.AnnotationPickupRepo] != "" &&
+		c.Annotations[aiv1alpha1.AnnotationPickupVerified] != c.Status.LastRunTrigger
+}
+
+// chainFailureSummary lists the failed steps of a run and their errors.
+func chainFailureSummary(c *aiv1alpha1.Chain) string {
+	var lines []string
+	for _, s := range c.Status.StepStatuses {
+		if s.Phase == aiv1alpha1.ChainStepPhaseFailed {
+			lines = append(lines, fmt.Sprintf("`%s`: %s", s.Name, truncate(strings.TrimSpace(s.Error), 300)))
+		}
+	}
+	if len(lines) == 0 {
+		for _, cond := range c.Status.Conditions {
+			if cond.Type == aiv1alpha1.ConditionChainComplete && cond.Message != "" {
+				lines = append(lines, cond.Message)
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return "the chain failed"
+	}
+	return strings.Join(lines, "\n- ")
+}
+
+// handBackFailed gives the issue of a failed pickup Chain back to a human
+// (needs-human, comment, in-progress removed) and records it on the Chain. A
+// returned error is retried on the next poll.
+func (r *IssuePickupReconciler) handBackFailed(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable,
+	c *aiv1alpha1.Chain, labels pickupLabelSet) error {
+	repo := c.Annotations[aiv1alpha1.AnnotationPickupRepo]
+	issue, err := strconv.Atoi(c.Annotations[aiv1alpha1.AnnotationPickupIssue])
+	if err != nil {
+		return fmt.Errorf("bad %s annotation: %w", aiv1alpha1.AnnotationPickupIssue, err)
+	}
+	// Only an issue the run still holds is handed back: one a human (or the
+	// escalate step) already dealt with, or that was closed, is left alone.
+	gi, err := gh.GetIssue(ctx, repo, issue)
+	if err != nil {
+		return fmt.Errorf("get %s#%d: %w", repo, issue, err)
+	}
+	if gi.State == "open" && gi.HasLabel(labels.inProgress) {
+		if err := r.labelFailedIssue(ctx, gh, rt, c, repo, issue, labels); err != nil {
+			return err
+		}
+	}
+
+	orig := c.DeepCopy()
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[aiv1alpha1.AnnotationPickupVerified] = c.Status.LastRunTrigger
+	return r.Patch(ctx, c, client.MergeFrom(orig))
+}
+
+// labelFailedIssue adds needs-human, comments the failed steps and removes
+// the in-progress label (last, so a failed comment is retried).
+func (r *IssuePickupReconciler) labelFailedIssue(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable,
+	c *aiv1alpha1.Chain, repo string, issue int, labels pickupLabelSet) error {
+	summary := chainFailureSummary(c)
+	body := fmt.Sprintf("Chain `%s` (run `%s`) failed:\n\n- %s\n\nLabelled `%s` for a human. "+
+		"Fix the cause and add `%s` again to re-run it.",
+		c.Name, c.Status.LastRunTrigger, summary, labels.needsHuman, labels.ready)
+	if err := gh.AddLabels(ctx, repo, issue, labels.needsHuman); err != nil {
+		return err
+	}
+	if err := gh.Comment(ctx, repo, issue, body); err != nil {
+		return err
+	}
+	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
+		return err
+	}
+	logf.FromContext(ctx).Info("Handed failed chain's issue back to a human", "chain", c.Name, "repo", repo, "issue", issue)
+	r.Recorder.Eventf(rt, corev1.EventTypeWarning, "ChainFailedNeedsHuman", "%s#%d: chain %s failed", repo, issue, c.Name)
+	return nil
+}

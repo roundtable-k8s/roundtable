@@ -638,9 +638,28 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 						ss.Error = ""
 						log.Info("Retrying step", "step", ss.Name, "retry", ss.Retries, "maxRetries", retryPolicy.MaxRetries)
 					}
+				} else if jsonRetry, failMsg := checkJSONOutput(chain, ss, resultOutput); jsonRetry {
+					// Later steps parse this output as JSON: re-run once with a reminder.
+					_, perr := parseJSONDocument(resultOutput)
+					ss.Phase = aiv1alpha1.ChainStepPhasePending
+					ss.Reason = stepReasonJSONRetry
+					ss.Error = perr.Error()
+					ss.CompletedAt = nil
+					log.Info("Retrying step: output has no parseable JSON", "step", ss.Name, "error", perr.Error())
+					r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepJSONRetry",
+						"Step %s output has no parseable JSON block, retrying once: %v", ss.Name, perr)
+				} else if failMsg != "" {
+					ss.Phase = aiv1alpha1.ChainStepPhaseFailed
+					ss.Error = failMsg
+					ss.Output = truncateStatusOutput(resultOutput, chain.Name+"."+ss.Name)
+					if spec != nil {
+						r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, "", failMsg, spec.KnightRef.Name, ss.StartedAt, &now)
+					}
+					r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepInvalidJSON", "Step %s: %s", ss.Name, failMsg)
 				} else {
 					ss.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 					ss.Output = resultOutput
+					ss.Reason = ""
 
 					r.Recorder.Eventf(chain, corev1.EventTypeNormal, "StepCompleted", "Step %s completed", ss.Name)
 
@@ -820,6 +839,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			}
 		}
 
+		if ss.Reason == stepReasonJSONRetry {
+			taskStr = jsonRetryTask(taskStr, ss.Error)
+		}
+
 		payload := natspkg.TaskPayload{
 			TaskID:    taskID,
 			ChainName: chain.Name,
@@ -842,6 +865,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		ss.TaskSeq = seq
 		ss.TaskID = taskID
 		ss.Model = model
+		ss.Error = ""
 		log.Info("Published step task", "step", step.Name, "taskId", taskID, "knight", step.KnightRef.Name, "model", model)
 	}
 
