@@ -51,7 +51,8 @@ type Resolver struct {
 	Client client.Reader
 }
 
-// Knight returns the named Knight.
+// Knight returns the named Knight with its RoundTable's defaults applied
+// (knightpkg.ApplyTableDefaults), so model and image are the effective ones.
 func (r *Resolver) Knight(ctx context.Context, namespace, name string) (*aiv1alpha1.Knight, error) {
 	k := &aiv1alpha1.Knight{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, k); err != nil {
@@ -60,14 +61,19 @@ func (r *Resolver) Knight(ctx context.Context, namespace, name string) (*aiv1alp
 		}
 		return nil, fmt.Errorf("get knight %s/%s: %w", namespace, name, err)
 	}
+	knightpkg.ApplyTableDefaults(ctx, r.Client, k)
 	return k, nil
 }
 
-// Knights lists the Knights in a namespace.
+// Knights lists the Knights in a namespace, with their RoundTables' defaults
+// applied like Knight.
 func (r *Resolver) Knights(ctx context.Context, namespace string) ([]aiv1alpha1.Knight, error) {
 	var list aiv1alpha1.KnightList
 	if err := r.Client.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 		return nil, fmt.Errorf("list knights in %s: %w", namespace, err)
+	}
+	for i := range list.Items {
+		knightpkg.ApplyTableDefaults(ctx, r.Client, &list.Items[i])
 	}
 	return list.Items, nil
 }

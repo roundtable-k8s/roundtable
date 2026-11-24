@@ -63,12 +63,15 @@ type KnightSpec struct {
 	Domain string `json:"domain"`
 
 	// model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
-	// +kubebuilder:default="openrouter/deepseek/deepseek-v3.2"
+	// When unset the knight's RoundTable spec.defaults.model applies, and when
+	// that is unset too "openrouter/deepseek/deepseek-v3.2". The model the
+	// knight runs is reported in status.model.
 	// +optional
 	Model string `json:"model,omitempty"`
 
 	// image is the container image for the knight runtime.
-	// If empty, the operator uses DEFAULT_KNIGHT_IMAGE env var.
+	// If empty, the knight's RoundTable spec.defaults.image applies, and when
+	// that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
 	// +optional
 	Image string `json:"image,omitempty"`
 
@@ -90,7 +93,9 @@ type KnightSpec struct {
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
-	// vault configures the shared Obsidian vault mount.
+	// vault configures the shared Obsidian vault mount. When unset the
+	// knight's RoundTable spec.vault applies; a knight's own vault is never
+	// merged with the table's.
 	// +optional
 	Vault *KnightVault `json:"vault,omitempty"`
 
@@ -118,7 +123,8 @@ type KnightSpec struct {
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 
 	// concurrency is the maximum number of concurrent tasks the knight can process.
-	// +kubebuilder:default=2
+	// When unset the knight's RoundTable spec.defaults.concurrency applies, and
+	// when that is unset too 2.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10
 	// +optional
@@ -155,8 +161,9 @@ type KnightSpec struct {
 	PlanBacked *bool `json:"planBacked,omitempty"`
 
 	// taskTimeoutSeconds is the default task timeout, in seconds, for tasks
-	// that don't carry their own (chain steps send theirs).
-	// +kubebuilder:default=120
+	// that don't carry their own (chain steps send theirs). When unset the
+	// knight's RoundTable spec.defaults.taskTimeoutSeconds applies, and when
+	// that is unset too 120.
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
@@ -501,6 +508,11 @@ type KnightStatus struct {
 	// +optional
 	TotalCost string `json:"totalCost,omitempty"`
 
+	// model is the effective model the knight runs: spec.model, else the
+	// RoundTable's spec.defaults.model, else the operator default.
+	// +optional
+	Model string `json:"model,omitempty"`
+
 	// natsConsumer is the name of the reconciled NATS durable consumer.
 	// +optional
 	NATSConsumer string `json:"natsConsumer,omitempty"`
@@ -540,7 +552,7 @@ type KnightStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=kn,categories=roundtable
 // +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.domain`
-// +kubebuilder:printcolumn:name="Model",type=string,JSONPath=`.spec.model`
+// +kubebuilder:printcolumn:name="Model",type=string,JSONPath=`.status.model`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.readyReplicas`,priority=1

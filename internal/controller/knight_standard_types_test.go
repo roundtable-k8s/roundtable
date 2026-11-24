@@ -71,10 +71,10 @@ var _ = Describe("Knight standard types", func() {
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		DeferCleanup(cleanup, k)
 
-		By("defaulting the duration fields")
+		By("leaving taskTimeoutSeconds unset in the API (the operator defaults it, #372)")
 		stored := &aiv1alpha1.Knight{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), stored)).To(Succeed())
-		Expect(stored.Spec.TaskTimeoutSeconds).To(Equal(int32(120)))
+		Expect(stored.Spec.TaskTimeoutSeconds).To(BeZero())
 
 		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: k.Name, Namespace: k.Namespace}}

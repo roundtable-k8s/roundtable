@@ -61,7 +61,9 @@ type RoundTableSpec struct {
 	// +optional
 	IssuePickup *IssuePickupSpec `json:"issuePickup,omitempty"`
 
-	// vault configures the shared Obsidian vault for all knights in this table.
+	// vault configures the shared Obsidian vault for the table's standing
+	// knights (those labelled ai.roundtable.io/round-table). A knight that sets
+	// its own spec.vault keeps it; the two are not merged.
 	// +optional
 	Vault *KnightVault `json:"vault,omitempty"`
 
@@ -161,23 +163,32 @@ type RoundTableNATS struct {
 
 // RoundTableDefaults defines default configuration inherited by knights in this table.
 type RoundTableDefaults struct {
-	// model is the default AI model for knights in this table.
+	// model is the default AI model for the table's standing knights (those
+	// labelled ai.roundtable.io/round-table). A knight that sets its own
+	// spec.model keeps it; with neither set the operator default
+	// ("openrouter/deepseek/deepseek-v3.2") applies.
 	// +optional
 	Model string `json:"model,omitempty"`
 
-	// image is the default container image for knights.
+	// image is the default container image for the table's standing knights.
+	// A knight that sets its own spec.image keeps it; with neither set the
+	// operator's DEFAULT_KNIGHT_IMAGE applies.
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// taskTimeoutSeconds is the default task timeout in seconds.
-	// +kubebuilder:default=120
+	// taskTimeoutSeconds is the default task timeout in seconds for the table's
+	// standing knights. A knight that sets its own spec.taskTimeoutSeconds
+	// keeps it; with neither set 120 applies.
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
 	TaskTimeoutSeconds int32 `json:"taskTimeoutSeconds,omitempty"`
 
-	// concurrency is the default max concurrent tasks per knight.
-	// +kubebuilder:default=2
+	// concurrency is the default max concurrent tasks per pod for the table's
+	// standing knights. A knight that sets its own spec.concurrency keeps it;
+	// with neither set 2 applies.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
 	// +optional
 	Concurrency int32 `json:"concurrency,omitempty"`
 

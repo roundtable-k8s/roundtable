@@ -166,7 +166,12 @@ func (r *KnightReconciler) resolveScaling(ctx context.Context, k *aiv1alpha1.Kni
 		for j := range knights.Items {
 			sib := &knights.Items[j]
 			if sib.Name == k.Name || sib.Spec.Suspend || sib.DeletionTimestamp != nil ||
-				!r.isPlanBacked(sib) || !roundTableIncludes(rt, sib) {
+				!roundTableIncludes(rt, sib) {
+				continue
+			}
+			// The sibling's image and concurrency may come from its table.
+			sib = knightpkg.WithTableDefaults(ctx, r.Client, sib)
+			if !r.isPlanBacked(sib) {
 				continue
 			}
 			demands = append(demands, knightpkg.PlanDemand{
@@ -462,12 +467,20 @@ func (r *KnightReconciler) planSiblingRequests(ctx context.Context, obj client.O
 }
 
 // roundTableKnightRequests maps a RoundTable change to the plan-backed knights
-// in its namespace, whose cap may have changed.
+// in its namespace, whose cap may have changed, and to the knights labelled
+// with the table, which inherit its defaults and vault (so a default change
+// rolls them).
 func (r *KnightReconciler) roundTableKnightRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	return r.planKnightRequests(ctx, obj.GetNamespace(), "")
+	return r.knightRequests(ctx, obj.GetNamespace(), "", obj.GetName())
 }
 
 func (r *KnightReconciler) planKnightRequests(ctx context.Context, namespace, skip string) []reconcile.Request {
+	return r.knightRequests(ctx, namespace, skip, "")
+}
+
+// knightRequests lists the knights in namespace (except skip) that are
+// plan-backed or, when table is set, labelled as members of that table.
+func (r *KnightReconciler) knightRequests(ctx context.Context, namespace, skip, table string) []reconcile.Request {
 	knights := &aiv1alpha1.KnightList{}
 	if err := r.List(ctx, knights, client.InNamespace(namespace)); err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list knights for plan-cap requeue")
@@ -476,7 +489,11 @@ func (r *KnightReconciler) planKnightRequests(ctx context.Context, namespace, sk
 	var reqs []reconcile.Request
 	for i := range knights.Items {
 		k := &knights.Items[i]
-		if k.Name == skip || !r.isPlanBacked(k) {
+		if k.Name == skip {
+			continue
+		}
+		member := table != "" && (k.Labels[aiv1alpha1.LabelRoundTable] == table || k.Labels[knightpkg.LegacyTableLabel] == table)
+		if !member && !r.isPlanBacked(knightpkg.WithTableDefaults(ctx, r.Client, k)) {
 			continue
 		}
 		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})

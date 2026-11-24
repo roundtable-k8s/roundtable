@@ -131,7 +131,20 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
 
 1. **NATS Setup** — If `createStreams=true`, ensure JetStream streams exist with correct subjects and retention policy.
 2. **Knight Discovery** — List Knights matching `knightSelector`. Update status with knight summaries.
-3. **Defaults Propagation** — For Knights that don't specify certain fields, the controller does NOT mutate Knight specs. Instead, the Knight controller checks for a parent RoundTable and inherits defaults at reconcile time.
+3. **Defaults Propagation** — For Knights that don't specify certain fields, the controller does NOT mutate Knight specs. Instead, the Knight controller finds the knight's RoundTable (the `ai.roundtable.io/round-table` label, then the legacy `ai.roundtable.io/table` label) and inherits defaults at reconcile time (#372). Precedence, per field, is **knight > table > operator default**; values are never merged:
+
+   | Knight field | Table field | Operator default |
+   |---|---|---|
+   | `spec.model` | `spec.defaults.model` | `openrouter/deepseek/deepseek-v3.2` |
+   | `spec.image` | `spec.defaults.image` | `DEFAULT_KNIGHT_IMAGE` |
+   | `spec.taskTimeoutSeconds` | `spec.defaults.taskTimeoutSeconds` | `120` |
+   | `spec.concurrency` | `spec.defaults.concurrency` | `2` |
+   | `spec.resources` | `spec.defaults.resources` | none |
+   | `spec.workspace` | `spec.defaults.workspace` (never `existingClaim`) | PVC |
+   | `spec.runtimeClassName` | `spec.defaults.runtimeClassName` | cluster default |
+   | `spec.vault` | `spec.vault` | no vault |
+
+   The Knight CRD has no schema defaults for these fields, so "unset" means unset. `status.model` (the `Model` column of `kubectl get knight`) shows the effective model. A change to a table's defaults or vault re-reconciles the knights labelled with it, and their pods roll when the rendered pod template changes. Chains and the gateway read knights with the same defaults applied (effective image, concurrency and model).
 4. **Policy Enforcement:**
    - Count total concurrent tasks across knights. If exceeding `maxConcurrentTasks`, pause NATS consumers on lowest-priority knights.
    - Aggregate costs. If exceeding `costBudgetUSD`, suspend all knights (set annotation `roundtable.ai.roundtable.io/budget-suspended=true`).

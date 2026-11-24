@@ -731,7 +731,7 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		log.Error(err, "Failed to get knight", "knightRef", knightName)
 		return
 	}
-	model, err := knightpkg.ResolveModel(bodyModel, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+	model, err := knightpkg.ResolveModel(bodyModel, nc.ModelAliases, knightpkg.EffectiveImage(knightpkg.WithTableDefaults(ctx, r.Client, knight), r.DefaultKnightImage))
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s/%s: %v", spec.Name, body.Name, err)
 		bs.Model = ""
