@@ -259,6 +259,12 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonKEDAUnavailable))
+			Expect(got.Status.Scaling).NotTo(BeNil())
+			Expect(got.Status.Scaling.Autoscaled).To(BeFalse())
+			Expect(got.Status.Scaling.MinReplicas).To(Equal(int32(2)))
+			Expect(got.Status.Scaling.MaxReplicas).To(Equal(int32(2)))
+			Expect(got.Status.Scaling.DesiredReplicas).To(HaveValue(Equal(int32(2))))
+			Expect(got.Status.Scaling.LastScaleTime).To(BeNil())
 
 			// Back to one pod: the PDB goes away.
 			got.Spec.Replicas = new(int32(1))
@@ -298,6 +304,15 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			so.SetGroupVersionKind(rtruntime.ScaledObjectGVK)
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: k.Name, Namespace: k.Namespace}, so)).To(Succeed())
 			Expect(metav1.IsControlledBy(so, getKnight(k))).To(BeTrue())
+
+			// status.scaling carries the bounds without the ScaledObject; the
+			// HPA KEDA would create doesn't exist here, so desired falls back
+			// to the Deployment's replicas.
+			sc := getKnight(k).Status.Scaling
+			Expect(sc).NotTo(BeNil())
+			Expect(sc.Autoscaled).To(BeTrue())
+			Expect(sc.MaxReplicas).To(Equal(int32(3)))
+			Expect(sc.DesiredReplicas).To(HaveValue(Equal(*getKnightDeployment(k).Spec.Replicas)))
 			Expect(nestedString(so, "spec", "scaleTargetRef", "name")).To(Equal(k.Name))
 			Expect(nestedInt64(so, "spec", "minReplicaCount")).To(Equal(int64(0)))
 			Expect(nestedInt64(so, "spec", "maxReplicaCount")).To(Equal(int64(3)))

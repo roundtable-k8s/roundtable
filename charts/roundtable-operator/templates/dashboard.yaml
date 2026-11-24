@@ -21,6 +21,26 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  # Read-only: replicas, scaling state and events of a knight
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  {{- if .Capabilities.APIVersions.Has "keda.sh/v1alpha1" }}
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if .Capabilities.APIVersions.Has "metrics.k8s.io/v1beta1" }}
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- end }}
   - apiGroups: ["ai.roundtable.io"]
     resources: ["knights", "chains", "roundtables"]
     verbs: ["get", "list", "watch"]

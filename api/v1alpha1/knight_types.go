@@ -445,6 +445,28 @@ const (
 	KnightPhaseSuspended    KnightPhase = "Suspended"
 )
 
+// KnightScalingStatus is the knight's replica bounds and scaling state.
+type KnightScalingStatus struct {
+	// autoscaled is true when a KEDA ScaledObject owns the replica count.
+	Autoscaled bool `json:"autoscaled"`
+
+	// minReplicas is the fixed replica count, or the KEDA minReplicaCount.
+	MinReplicas int32 `json:"minReplicas"`
+
+	// maxReplicas is the KEDA maxReplicaCount (after the plan-task cap); equal
+	// to minReplicas when not autoscaled.
+	MaxReplicas int32 `json:"maxReplicas"`
+
+	// desiredReplicas is the replica count the autoscaler (or the Deployment
+	// spec when not autoscaled) is asking for.
+	// +optional
+	DesiredReplicas *int32 `json:"desiredReplicas,omitempty"`
+
+	// lastScaleTime is when the autoscaler last changed the replica count.
+	// +optional
+	LastScaleTime *metav1.Time `json:"lastScaleTime,omitempty"`
+}
+
 // KnightStatus defines the observed state of Knight.
 type KnightStatus struct {
 	// phase is the current lifecycle phase of the knight.
@@ -489,6 +511,11 @@ type KnightStatus struct {
 	// readyReplicas is the number of knight pods that are ready.
 	// +optional
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+
+	// scaling reports the knight's replica bounds and current scaling state,
+	// so clients need not read KEDA objects.
+	// +optional
+	Scaling *KnightScalingStatus `json:"scaling,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
