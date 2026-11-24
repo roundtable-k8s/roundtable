@@ -226,3 +226,11 @@ inherits it from `spec.roundTableRef`.
 | `nodeSelector` | object | `{}` | Node selector for operator pod |
 | `tolerations` | list | `[]` | Tolerations for operator pod |
 | `affinity` | object | `{}` | Affinity rules for operator pod |
+
+## Operator metrics
+
+The operator exposes Prometheus metrics on its metrics endpoint, including:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `roundtable_knight_wake_seconds` | histogram | `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. |

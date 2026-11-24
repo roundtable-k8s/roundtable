@@ -320,6 +320,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, nil
 }
 
+// nowFunc is the clock used for wake-latency measurement; tests override it.
+var nowFunc = time.Now
+
 // wakingRequeue is how often a waking knight is re-checked.
 const wakingRequeue = 5 * time.Second
 
@@ -777,6 +780,14 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		waking = r.hasPendingTasks(ctx, knight)
 	}
 
+	// Remember when the knight entered Waking so the Waking -> Ready
+	// transition can be observed as wake latency.
+	var wakingSince time.Time
+	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil &&
+		c.Reason == aiv1alpha1.ReasonKnightWaking {
+		wakingSince = c.LastTransitionTime.Time
+	}
+
 	if reconcileErr != nil {
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ReconcileFailed", "Reconciliation failed: %v", reconcileErr)
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
@@ -807,6 +818,10 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			ObservedGeneration: knight.Generation,
 		})
 	} else if isReady {
+		if !wakingSince.IsZero() {
+			rtmetrics.KnightWakeSeconds.WithLabelValues(knight.Name, knight.Namespace).
+				Observe(nowFunc().Sub(wakingSince).Seconds())
+		}
 		// Record event when transitioning to Ready (avoid duplicate events)
 		if knight.Status.Phase != aiv1alpha1.KnightPhaseReady {
 			r.Recorder.Event(knight, corev1.EventTypeNormal, "Ready", "Knight is ready and accepting tasks")
