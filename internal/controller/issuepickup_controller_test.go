@@ -127,10 +127,14 @@ func (f *fakeGitHub) commentsOn(repo string, n int) []string {
 	return slices.Clone(f.comments[repo+"#"+strconv.Itoa(n)])
 }
 
-func (f *fakeGitHub) setLabels(repo string, n int, labels ...string) {
+// pickupTestRepo is the repository the IssuePickup tests operate on.
+const pickupTestRepo = "acme/widgets"
+
+// setLabels replaces the labels of issue n in pickupTestRepo.
+func (f *fakeGitHub) setLabels(n int, labels ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	is := f.find(repo, n)
+	is := f.find(pickupTestRepo, n)
 	is.Labels = nil
 	for _, l := range labels {
 		is.Labels = append(is.Labels, github.Label{Name: l})
@@ -325,7 +329,7 @@ var _ = Describe("IssuePickup controller", func() {
 		ns       = "default"
 		rtName   = "pickup-table"
 		tmplName = "pickup-pipeline"
-		repo     = "acme/widgets"
+		repo     = pickupTestRepo
 		token    = "ghs_test"
 	)
 	ctx := context.Background()
@@ -505,7 +509,7 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(res.RequeueAfter).To(BeNumerically("~", 300*time.Second, time.Second))
 
 		By("a ready label re-added mid-run is dropped without a second chain or comment")
-		gh.setLabels(repo, 7, "rt:in-progress", "rt:ready")
+		gh.setLabels(7, "rt:in-progress", "rt:ready")
 		tick()
 		Expect(pickupChains()).To(HaveLen(1))
 		Expect(gh.labels(repo, 7)).To(ConsistOf("rt:in-progress"))
@@ -520,7 +524,7 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(getRT().Status.IssuePickup.PickedTotal).To(Equal(int64(2)))
 
 		By("re-running a finished Chain when the ready label comes back")
-		gh.setLabels(repo, 7, "rt:ready")
+		gh.setLabels(7, "rt:ready")
 		finish(tmplName + "-widgets-8")
 		tick()
 		again := &aiv1alpha1.Chain{}
@@ -591,7 +595,7 @@ var _ = Describe("IssuePickup controller", func() {
 
 		// The ready label was already removed; put it back as if the
 		// removal had failed too, so the poll sees the issue again.
-		gh.setLabels(repo, 5, "rt:ready", "rt:in-progress")
+		gh.setLabels(5, "rt:ready", "rt:in-progress")
 		tick()
 		chains := pickupChains()
 		Expect(chains).To(HaveLen(1))
@@ -820,7 +824,7 @@ var _ = Describe("IssuePickup controller", func() {
 		It("labels the parent needs-human when a sub-issue needs a human", func() {
 			start()
 			closeSub(320, "completed")
-			gh.setLabels(repo, 321, "needs-human")
+			gh.setLabels(321, "needs-human")
 			tick()
 			tick()
 			Expect(parentState()).NotTo(Equal("closed"))

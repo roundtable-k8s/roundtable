@@ -124,8 +124,8 @@ func (r *IssuePickupReconciler) closeSplitParent(ctx context.Context, gh *github
 				return fmt.Errorf("get %s#%d: %w", repo, n, err)
 			}
 			switch {
-			case si.State == "closed" && si.StateReason != stateReasonNotPlanned:
-			case si.State == "closed":
+			case si.State == prStateClosed && si.StateReason != stateReasonNotPlanned:
+			case si.State == prStateClosed:
 				stuck = append(stuck, fmt.Sprintf("#%d was closed as not planned", n))
 			case si.HasLabel(labels.needsHuman):
 				stuck = append(stuck, fmt.Sprintf("#%d is labelled `%s`", n, labels.needsHuman))
@@ -159,8 +159,9 @@ func (r *IssuePickupReconciler) closeSplitParent(ctx context.Context, gh *github
 // removes the in-progress label (last, so a failed step is retried).
 func (r *IssuePickupReconciler) closeParent(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable,
 	c *aiv1alpha1.Chain, repo string, parent int, labels pickupLabelSet) error {
-	var prs []string
-	for _, ref := range chainPRs(c) {
+	refs := chainPRs(c)
+	prs := make([]string, 0, len(refs))
+	for _, ref := range refs {
 		prs = append(prs, "- "+ref.String())
 	}
 	body := fmt.Sprintf("All sub-issues of this issue are closed (Chain `%s`, run `%s`).", c.Name, c.Status.LastRunTrigger)
