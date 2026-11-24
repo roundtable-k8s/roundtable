@@ -18,17 +18,23 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -363,5 +369,152 @@ var _ = Describe("Knight tools image", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: toolsImageJobName(k), Namespace: "default"}, job)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(ctx, job) }()
 		Expect(job.Labels["roundtable.io/purpose"]).To(Equal("tools-image-build"))
+	})
+})
+
+var _ = Describe("Knight tools image rollout hold", func() {
+	const ns = "default"
+
+	BeforeEach(func() {
+		GinkgoT().Setenv("KNIGHT_TOOLS_IMAGE_REPO", "registry.example.com/knight-tools")
+		GinkgoT().Setenv("KNIGHT_TOOLS_IMAGE_PUSH_REPO", "registry.rt.svc:5000/knight-tools")
+	})
+
+	finishJob := func(k *aiv1alpha1.Knight, succeeded bool) {
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: toolsImageJobName(k), Namespace: ns}, job)).To(Succeed())
+		now := metav1.Now()
+		job.Status.StartTime = &now
+		if succeeded {
+			job.Status.Succeeded = 1
+			job.Status.CompletionTime = &now
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+		} else {
+			job.Status.Failed = *job.Spec.BackoffLimit + 1
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+		}
+		Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+	}
+
+	It("keeps the Deployment on the old template until the new tools image is published", func() {
+		name := "tools-hold"
+		nn := types.NamespacedName{Name: name, Namespace: ns}
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain: "security",
+				Model:  "claude-sonnet-4-20250514",
+				Skills: []string{"security", "shared"},
+				NATS: aiv1alpha1.KnightNATS{
+					URL: "nats://nats.test:4222", Subjects: []string{"test.tasks.security.>"},
+					Stream: "test_tasks", ResultsStream: "test_results", MaxDeliver: 1,
+				},
+				Tools: &aiv1alpha1.KnightTools{Nix: []string{"curl"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer func() {
+			cur := &aiv1alpha1.Knight{}
+			if err := k8sClient.Get(ctx, nn, cur); err == nil {
+				cur.Finalizers = nil
+				_ = k8sClient.Update(ctx, cur)
+				_ = k8sClient.Delete(ctx, cur)
+			}
+		}()
+
+		r := &KnightReconciler{
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100),
+			ToolsImageMissing: func(context.Context, string) bool { return false },
+		}
+		reconcileOnce := func() *aiv1alpha1.Knight {
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+			cur := &aiv1alpha1.Knight{}
+			Expect(k8sClient.Get(ctx, nn, cur)).To(Succeed())
+			return cur
+		}
+		getDeploy := func() *appsv1.Deployment {
+			d := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, nn, d)).To(Succeed())
+			return d
+		}
+		cond := func(k *aiv1alpha1.Knight) *metav1.Condition {
+			return meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightToolsImageReady)
+		}
+		setSpec := func(mut func(*aiv1alpha1.Knight)) {
+			cur := &aiv1alpha1.Knight{}
+			Expect(k8sClient.Get(ctx, nn, cur)).To(Succeed())
+			mut(cur)
+			Expect(k8sClient.Update(ctx, cur)).To(Succeed())
+		}
+		cleanupJobs := func() {
+			jobs := &batchv1.JobList{}
+			Expect(k8sClient.List(ctx, jobs, client.InNamespace(ns))).To(Succeed())
+			for i := range jobs.Items {
+				if strings.HasPrefix(jobs.Items[i].Name, name+"-toolsimg-") {
+					_ = k8sClient.Delete(ctx, &jobs.Items[i], client.PropagationPolicy(metav1.DeletePropagationBackground))
+				}
+			}
+		}
+		defer cleanupJobs()
+		defer func() {
+			_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}})
+		}()
+
+		// Initial build: no workload yet, so the Deployment is created and the Job starts.
+		cur := reconcileOnce()
+		Expect(cond(cur)).NotTo(BeNil())
+		Expect(cond(cur).Reason).To(Equal(aiv1alpha1.ReasonToolsImageBuilding))
+		finishJob(cur, true)
+		cur = reconcileOnce()
+		Expect(cur.Status.ToolsImage).To(Equal(knightpkg.ToolsImageRef(cur)))
+		Expect(cond(cur).Status).To(Equal(metav1.ConditionTrue))
+		reconcileOnce() // settle the Deployment on the published image
+		oldTemplate, err := json.Marshal(getDeploy().Spec.Template)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Spec change that needs a new image, plus an unrelated pod-affecting change.
+		setSpec(func(k *aiv1alpha1.Knight) {
+			k.Spec.Tools.Nix = []string{"curl", "nmap"}
+			k.Spec.Model = "claude-opus-4-20250514"
+		})
+		cur = reconcileOnce()
+		newJob := toolsImageJobName(cur)
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: newJob, Namespace: ns}, &batchv1.Job{})).To(Succeed())
+		Expect(cond(cur).Reason).To(Equal(aiv1alpha1.ReasonToolsImageBuilding))
+		held, err := json.Marshal(getDeploy().Spec.Template)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(held)).To(Equal(string(oldTemplate)), "pod template must not change while the build runs")
+
+		// Failed build: still no rollout, and the condition says so.
+		finishJob(cur, false)
+		cur = reconcileOnce()
+		Expect(cond(cur).Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond(cur).Reason).To(Equal(aiv1alpha1.ReasonToolsImageBuildFailed))
+		held, err = json.Marshal(getDeploy().Spec.Template)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(held)).To(Equal(string(oldTemplate)), "a failed build must not roll the pod")
+
+		// Build recovers (Job replaced and succeeds): one rollout with the new spec and image.
+		Expect(k8sClient.Delete(ctx, &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: newJob, Namespace: ns}},
+			client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
+		Eventually(func() bool {
+			return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: newJob, Namespace: ns}, &batchv1.Job{}))
+		}).Should(BeTrue())
+		cur = reconcileOnce() // recreates the Job
+		finishJob(cur, true)
+		cur = reconcileOnce()
+		Expect(cur.Status.ToolsImage).To(Equal(knightpkg.ToolsImageRef(cur)))
+		Expect(cond(cur).Status).To(Equal(metav1.ConditionTrue))
+		rolled, err := json.Marshal(getDeploy().Spec.Template)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(rolled)).NotTo(Equal(string(oldTemplate)))
+		Expect(string(rolled)).To(ContainSubstring(knightpkg.ToolsImageRef(cur)))
 	})
 })
