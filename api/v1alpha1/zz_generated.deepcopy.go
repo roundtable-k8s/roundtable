@@ -363,6 +363,7 @@ func (in *ChainStep) DeepCopyInto(out *ChainStep) {
 		*out = new(StepRetry)
 		**out = **in
 	}
+	out.FallbackRef = in.FallbackRef
 	if in.ForEach != nil {
 		in, out := &in.ForEach, &out.ForEach
 		*out = new(ChainForEach)
@@ -398,6 +399,10 @@ func (in *ChainStepStatus) DeepCopyInto(out *ChainStepStatus) {
 	}
 	if in.CompletedAt != nil {
 		in, out := &in.CompletedAt, &out.CompletedAt
+		*out = (*in).DeepCopy()
+	}
+	if in.DeferUntil != nil {
+		in, out := &in.DeferUntil, &out.DeferUntil
 		*out = (*in).DeepCopy()
 	}
 	if in.FanOut != nil {

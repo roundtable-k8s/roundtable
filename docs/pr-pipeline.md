@@ -44,6 +44,32 @@ It is built only from existing Chain features: `when` and `loop`
 | `merge` | lead | lead default (or `leadModel`) | a fix loop `Converged` |
 | `escalate` | lead | lead default (or `leadModel`) | a fix loop is `Exhausted`, or no implementation ran |
 
+**Quota refusals (#321).** A claude-knight coder refuses a task before
+running it once a Claude plan window passes the knight reserve:
+
+```json
+{"success": false, "usage_limited": true,
+ "result": "Task refused: Claude plan five_hour window 91% used — at the knight reserve of 80% (resets 2026-11-24T18:00:00.000Z)"}
+```
+
+That is not a failure, it is "not yet". With `prPipeline.fallbackCoder` set
+(e.g. `rt-coder`, a pi-knight on GLM via OpenRouter), the chart renders a
+`fallbackRef` on every implement, split and fixloop step: the operator re-runs
+the refused step on the fallback knight with **no** model override (the
+`cheap`/`fast`/`deep` aliases are Claude models, so the fallback uses its own
+default model). Without a fallback — or when the fallback refuses the same
+way — the step turns `Deferred` with `deferUntil` = the window's reset time
+plus jitter, and the chain requeues then: no further step runs meanwhile, so
+nothing fails and nothing escalates, and the issue keeps `rt:in-progress`
+instead of `needs-human`. Issue pickup counts a quota-deferred chain as
+active, so it holds its slot and no new chain starts for it until after the
+reset.
+
+One refusal shape still escalates: a refusal message that carries no reset
+time (e.g. `"Task refused: Claude plan five_hour limit reached"` with no
+`(resets ...)` suffix — the SDK normally supplies the reset time, so this is
+rare) is not recognized as a quota refusal and the step fails as before.
+
 Lead steps set no `model`, so the lead runs its own default model whatever its
 runtime. Model aliases are single-valued per RoundTable and validated against
 the runtime of the knight running the step, so one alias cannot suit both a

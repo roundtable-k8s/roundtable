@@ -247,6 +247,29 @@ spec:
                       - failFast
                       - continue
                       type: string
+                    fallbackRef:
+                      description: |-
+                        fallbackRef names the Knight (same namespace) that re-runs this step
+                        when the primary knight refuses the task for plan quota (#321: a
+                        claude-knight plan-reserve refusal, "Task refused: Claude plan ...
+                        (resets ...)"). The re-run uses NO model override - the
+                        cheap/fast/deep aliases resolve to Claude models, so the fallback runs
+                        its own default model. For a loop step it applies to the loop's body
+                        steps. Unset - or a refusal on the fallback too - the step is deferred
+                        until the plan window resets and the chain requeues then (it neither
+                        fails nor escalates).
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
                     forEach:
                       description: |-
                         forEach fans this step out: it runs once per element of a JSON list taken
@@ -690,6 +713,11 @@ spec:
                       description: completedAt is when the step finished execution.
                       format: date-time
                       type: string
+                    deferUntil:
+                      description: deferUntil is when a Deferred step (a plan-quota
+                        refusal) runs again.
+                      format: date-time
+                      type: string
                     error:
                       description: error contains the error message if the step failed.
                       type: string
@@ -737,6 +765,7 @@ spec:
                                 - Succeeded
                                 - Failed
                                 - Skipped
+                                - Deferred
                                 type: string
                               pickedUpAt:
                                 description: pickedUpAt is when the knight picked
@@ -805,6 +834,12 @@ spec:
                       required:
                       - total
                       type: object
+                    knight:
+                      description: |-
+                        knight is the Knight running the step's current task: the spec's
+                        knightRef, or the fallbackRef while a plan-quota refusal is re-run on
+                        the fallback knight. Empty before the step's first dispatch.
+                      type: string
                     loop:
                       description: loop tracks a loop step. Unset for ordinary steps.
                       properties:
@@ -843,6 +878,12 @@ spec:
                                   to.
                                 format: int32
                                 type: integer
+                              knight:
+                                description: |-
+                                  knight is the Knight running the task: the body step's knightRef, or
+                                  the loop step's fallbackRef while a plan-quota refusal is re-run on
+                                  the fallback knight.
+                                type: string
                               model:
                                 description: model is the model requested for (or
                                   reported by) the task.
@@ -864,6 +905,7 @@ spec:
                                 - Succeeded
                                 - Failed
                                 - Skipped
+                                - Deferred
                                 type: string
                               pickedUpAt:
                                 description: pickedUpAt is when the knight picked
@@ -914,6 +956,7 @@ spec:
                       - Succeeded
                       - Failed
                       - Skipped
+                      - Deferred
                       type: string
                     pickedUpAt:
                       description: |-

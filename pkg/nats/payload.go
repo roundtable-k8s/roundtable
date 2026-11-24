@@ -71,6 +71,12 @@ type TaskResult struct {
 	// Verdict is a review verdict: "ship_it", "needs_changes" or null/absent
 	// (optional). Use Structured() to read it with a prose fallback.
 	Verdict string `json:"verdict,omitempty"`
+
+	// UsageLimited marks a plan-quota refusal: the knight refused the task
+	// before running it because a plan window (claude-knight: "Task refused:
+	// Claude plan ... (resets ...)") is at the knight reserve. Not a failure:
+	// the caller should re-run or defer, not escalate (#321).
+	UsageLimited bool `json:"usage_limited,omitempty"`
 }
 
 // GetTaskID returns the task ID from whichever field was populated.

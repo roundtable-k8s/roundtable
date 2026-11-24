@@ -179,6 +179,29 @@ spec:
                             - failFast
                             - continue
                             type: string
+                          fallbackRef:
+                            description: |-
+                              fallbackRef names the Knight (same namespace) that re-runs this step
+                              when the primary knight refuses the task for plan quota (#321: a
+                              claude-knight plan-reserve refusal, "Task refused: Claude plan ...
+                              (resets ...)"). The re-run uses NO model override - the
+                              cheap/fast/deep aliases resolve to Claude models, so the fallback runs
+                              its own default model. For a loop step it applies to the loop's body
+                              steps. Unset - or a refusal on the fallback too - the step is deferred
+                              until the plan window resets and the chain requeues then (it neither
+                              fails nor escalates).
+                            properties:
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                            type: object
+                            x-kubernetes-map-type: atomic
                           forEach:
                             description: |-
                               forEach fans this step out: it runs once per element of a JSON list taken

@@ -175,6 +175,18 @@ type ChainStep struct {
 	// +optional
 	Model string `json:"model,omitempty"`
 
+	// fallbackRef names the Knight (same namespace) that re-runs this step
+	// when the primary knight refuses the task for plan quota (#321: a
+	// claude-knight plan-reserve refusal, "Task refused: Claude plan ...
+	// (resets ...)"). The re-run uses NO model override - the
+	// cheap/fast/deep aliases resolve to Claude models, so the fallback runs
+	// its own default model. For a loop step it applies to the loop's body
+	// steps. Unset - or a refusal on the fallback too - the step is deferred
+	// until the plan window resets and the chain requeues then (it neither
+	// fails nor escalates).
+	// +optional
+	FallbackRef corev1.LocalObjectReference `json:"fallbackRef,omitzero"`
+
 	// forEach fans this step out: it runs once per element of a JSON list taken
 	// from the chain input or a prior step's output. The task template gets the
 	// element as {{ .Item }} (alias {{ .item }}), its compact JSON as
@@ -445,7 +457,7 @@ const (
 )
 
 // ChainStepPhase represents the status of an individual step.
-// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Skipped
+// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Skipped;Deferred
 type ChainStepPhase string
 
 const (
@@ -454,6 +466,10 @@ const (
 	ChainStepPhaseSucceeded ChainStepPhase = "Succeeded"
 	ChainStepPhaseFailed    ChainStepPhase = "Failed"
 	ChainStepPhaseSkipped   ChainStepPhase = "Skipped"
+	// Deferred parks a step the knight refused for plan quota (#321): the
+	// chain requeues until the plan window resets (deferUntil), then the
+	// step runs again. It is neither a failure nor an escalation.
+	ChainStepPhaseDeferred ChainStepPhase = "Deferred"
 )
 
 // ChainStepStatus tracks the execution status of an individual step.
@@ -505,6 +521,16 @@ type ChainStepStatus struct {
 	// model the knight reports having used, when the knight reports one.
 	// +optional
 	Model string `json:"model,omitempty"`
+
+	// knight is the Knight running the step's current task: the spec's
+	// knightRef, or the fallbackRef while a plan-quota refusal is re-run on
+	// the fallback knight. Empty before the step's first dispatch.
+	// +optional
+	Knight string `json:"knight,omitempty"`
+
+	// deferUntil is when a Deferred step (a plan-quota refusal) runs again.
+	// +optional
+	DeferUntil *metav1.Time `json:"deferUntil,omitempty"`
 
 	// fanOut tracks the items of a forEach step. Unset for ordinary steps.
 	// +optional
@@ -592,6 +618,12 @@ type ChainLoopStepStatus struct {
 	// model is the model requested for (or reported by) the task.
 	// +optional
 	Model string `json:"model,omitempty"`
+
+	// knight is the Knight running the task: the body step's knightRef, or
+	// the loop step's fallbackRef while a plan-quota refusal is re-run on
+	// the fallback knight.
+	// +optional
+	Knight string `json:"knight,omitempty"`
 }
 
 // ChainFanOutStatus is the bounded per-item state of a forEach step.
