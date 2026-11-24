@@ -43,6 +43,45 @@ The egress NetworkPolicy the operator creates for each mission's knights. The NA
 | `missionNetworkPolicy.dns.namespace` | string | `kube-system` | Namespace of cluster DNS (`MISSION_NETPOL_DNS_NAMESPACE`) |
 | `missionNetworkPolicy.dns.podLabels` | map | `{k8s-app: kube-dns}` | Pod labels of cluster DNS (`MISSION_NETPOL_DNS_POD_LABELS`) |
 
+### Ingress NetworkPolicy
+
+Opt-in ingress NetworkPolicies for the operator, the dashboard and knight pods. Off by default: the defaults render no extra policy and the pods accept any ingress, as before. Each policy selects its pods in the release namespace and sets `policyTypes: [Ingress]`, so egress is not restricted. A policy whose peer list is empty allows no ingress at all.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `networkPolicy.enabled` | bool | `false` | Render the operator, dashboard and knight policies |
+| `networkPolicy.metricsFrom` | list | monitoring namespace | NetworkPolicyPeers allowed to scrape metrics: the operator's metrics port and knights' `:3000/metrics`. The dashboard also accepts these peers. Empty denies all scraping |
+| `networkPolicy.dashboardFrom` | list | `[]` | NetworkPolicyPeers allowed to reach the dashboard's `http` port, in addition to `metricsFrom`. Empty means only `metricsFrom` |
+| `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint; must match `--metrics-bind-address` in `extraArgs` (metrics are off by default) |
+
+What each policy allows:
+
+- **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and `operatorMetricsPort`, from `metricsFrom`.
+- **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
+- **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).
+
+Limits and caveats:
+
+- Policies only cover pods in the release namespace. Knights in other namespaces are not covered; write their policies yourself.
+- Kubelet probes come from the node, not from a pod. With Cilium they are allowed by default. Other CNIs may need an `ipBlock` for the node CIDRs in the operator's policy; the chart does not guess node CIDRs.
+- Egress is not restricted here (see #168) and NATS-level authorization is not covered (see #234).
+- The gateway has its own NetworkPolicy (`gateway.networkPolicy`), separate from this one.
+
+Example, scraping from a Prometheus namespace and exposing the dashboard to an ingress controller:
+
+```yaml
+networkPolicy:
+  enabled: true
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  dashboardFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+```
+
 ### Service Account
 
 | Key | Type | Default | Description |
