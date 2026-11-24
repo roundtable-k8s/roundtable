@@ -673,6 +673,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		knight.Status.Replicas = deploy.Status.Replicas
 		knight.Status.ReadyReplicas = deploy.Status.ReadyReplicas
 	}
+	knight.Status.Scaling = r.scalingStatus(ctx, knight, scaling, deploy, deployFound)
 	// KEDA scaled an idle knight to zero: report it as suspended, not as
 	// stuck provisioning. It wakes when a task is pending on its consumer.
 	scaledToZero := scaling.Autoscaled && deployFound && !isReady &&

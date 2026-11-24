@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +46,7 @@ import (
 )
 
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
 
@@ -479,4 +482,36 @@ func (r *KnightReconciler) planKnightRequests(ctx context.Context, namespace, sk
 		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
 	}
 	return reqs
+}
+
+// scalingStatus builds status.scaling. For an autoscaled knight, desired
+// replicas and the last scale time come from the HPA KEDA generates
+// (keda-hpa-<name>); when it isn't readable, desired falls back to the
+// Deployment's spec.replicas.
+func (r *KnightReconciler) scalingStatus(ctx context.Context, k *aiv1alpha1.Knight, s knightpkg.Scaling,
+	deploy *appsv1.Deployment, deployFound bool) *aiv1alpha1.KnightScalingStatus {
+	if runtimeName(k) != runtimeDeployment {
+		return nil
+	}
+	st := &aiv1alpha1.KnightScalingStatus{
+		Autoscaled:  s.Autoscaled,
+		MinReplicas: s.MinReplicas,
+		MaxReplicas: s.MaxReplicas,
+	}
+	if deployFound && deploy.Spec.Replicas != nil {
+		d := *deploy.Spec.Replicas
+		st.DesiredReplicas = &d
+	}
+	if s.Autoscaled {
+		hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+		key := types.NamespacedName{Name: "keda-hpa-" + k.Name, Namespace: k.Namespace}
+		if err := r.Get(ctx, key, hpa); err == nil {
+			d := hpa.Status.DesiredReplicas
+			st.DesiredReplicas = &d
+			st.LastScaleTime = hpa.Status.LastScaleTime
+		} else if !apierrors.IsNotFound(err) {
+			logf.FromContext(ctx).V(1).Info("Could not read the KEDA HPA for status.scaling", "error", err.Error())
+		}
+	}
+	return st
 }
