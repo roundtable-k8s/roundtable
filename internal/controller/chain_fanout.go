@@ -390,8 +390,8 @@ func skipPendingItems(fo *aiv1alpha1.ChainFanOutStatus) {
 	summariseFanOut(fo)
 }
 
-// resetFailedItems re-queues failed and skipped items for retry-failed, keeping
-// finished items so a resumed fan-out never redoes them.
+// resetFailedItems re-queues failed, skipped and stale running items for
+// retry-failed, keeping succeeded items so a resumed fan-out never redoes them.
 func resetFailedItems(fo *aiv1alpha1.ChainFanOutStatus) int {
 	b := []byte(fo.ItemPhases)
 	n := 0

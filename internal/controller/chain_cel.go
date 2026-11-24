@@ -19,6 +19,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -129,12 +130,14 @@ func evalCondition(expr string, vars map[string]any) (bool, error) {
 		"input": "", "steps": map[string]any{}, "last": map[string]any{},
 		"iteration": int64(0), "maxIterations": int64(0), "body": map[string]any{},
 	}
+	merged := make(map[string]any, len(vars)+len(defaults))
+	maps.Copy(merged, vars) // never write defaults into the caller's map
 	for k, v := range defaults {
-		if _, ok := vars[k]; !ok {
-			vars[k] = v
+		if _, ok := merged[k]; !ok {
+			merged[k] = v
 		}
 	}
-	out, _, err := prg.Eval(vars)
+	out, _, err := prg.Eval(merged)
 	if err != nil {
 		return false, err
 	}
@@ -173,12 +176,14 @@ func evalString(expr string, vars map[string]any) (string, error) {
 		"input": "", "steps": map[string]any{}, "last": map[string]any{},
 		"iteration": int64(0), "maxIterations": int64(0), "body": map[string]any{},
 	}
+	merged := make(map[string]any, len(vars)+len(defaults))
+	maps.Copy(merged, vars) // never write defaults into the caller's map
 	for k, v := range defaults {
-		if _, ok := vars[k]; !ok {
-			vars[k] = v
+		if _, ok := merged[k]; !ok {
+			merged[k] = v
 		}
 	}
-	out, _, err := prg.Eval(vars)
+	out, _, err := prg.Eval(merged)
 	if err != nil {
 		return "", err
 	}

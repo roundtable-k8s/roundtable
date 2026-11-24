@@ -306,10 +306,29 @@ func loopInFlight(ls *aiv1alpha1.ChainLoopStatus) bool {
 	return false
 }
 
-// nextBodyIndex returns the first body step not yet succeeded in the current
-// round, or -1 when the round is complete.
-func nextBodyIndex(ls *aiv1alpha1.ChainLoopStatus) int {
+// loopBodySpec returns the spec body step called name, or nil when the loop
+// body no longer has one (e.g. it was edited mid-run).
+func loopBodySpec(spec *aiv1alpha1.ChainStep, name string) *aiv1alpha1.ChainLoopStep {
+	if spec == nil || spec.Loop == nil {
+		return nil
+	}
+	for i := range spec.Loop.Steps {
+		if spec.Loop.Steps[i].Name == name {
+			return &spec.Loop.Steps[i]
+		}
+	}
+	return nil
+}
+
+// nextBodyIndex returns the index (into the loop status) of the first body
+// step not yet succeeded in the current round, or -1 when the round is
+// complete. Status entries are paired with spec steps by name; entries with no
+// matching spec step are skipped.
+func nextBodyIndex(ls *aiv1alpha1.ChainLoopStatus, spec *aiv1alpha1.ChainStep) int {
 	for i, bs := range ls.Steps {
+		if loopBodySpec(spec, bs.Name) == nil {
+			continue // status entry whose spec step was removed: never dispatched
+		}
 		if bs.Iteration != ls.Iteration || bs.Phase != aiv1alpha1.ChainStepPhaseSucceeded {
 			return i
 		}
@@ -398,7 +417,7 @@ func (r *ChainReconciler) finishLoop(ctx context.Context, chain *aiv1alpha1.Chai
 	ls.Outcome = outcome
 	now := metav1.Now()
 	ss.CompletedAt = &now
-	last := r.loopLast(ctx, chain, spec, ls, nextOrEnd(ls))
+	last := r.loopLast(ctx, chain, spec, ls, nextOrEnd(ls, spec))
 	full := last["output"]
 	ss.Output = truncateStatusOutput(full, chain.Name+"."+ss.Name)
 
@@ -431,11 +450,11 @@ func (r *ChainReconciler) finishLoop(ctx context.Context, chain *aiv1alpha1.Chai
 
 // nextOrEnd is the flow position whose predecessor is the loop's latest
 // finished step: the next body step of the round, or the end of the round.
-func nextOrEnd(ls *aiv1alpha1.ChainLoopStatus) int {
+func nextOrEnd(ls *aiv1alpha1.ChainLoopStatus, spec *aiv1alpha1.ChainStep) int {
 	if ls.Iteration == 0 {
 		return 0
 	}
-	if i := nextBodyIndex(ls); i >= 0 {
+	if i := nextBodyIndex(ls, spec); i >= 0 {
 		return i
 	}
 	return len(ls.Steps)
@@ -462,8 +481,11 @@ func (r *ChainReconciler) reconcileLoop(ctx context.Context, nc natsConfig, chai
 	// 1. Collect the in-flight body task.
 	for i := range ls.Steps {
 		bs := &ls.Steps[i]
-		if bs.Phase == aiv1alpha1.ChainStepPhaseRunning && i < len(spec.Loop.Steps) {
-			r.collectBodyTask(ctx, nc, chain, spec, &spec.Loop.Steps[i], bs, ss)
+		if bs.Phase != aiv1alpha1.ChainStepPhaseRunning {
+			continue
+		}
+		if body := loopBodySpec(spec, bs.Name); body != nil {
+			r.collectBodyTask(ctx, nc, chain, spec, body, bs, ss)
 		}
 	}
 	// A quota-deferred loop (#321) parks the chain: no further rounds or body
@@ -499,7 +521,7 @@ func (r *ChainReconciler) reconcileLoop(ctx context.Context, nc natsConfig, chai
 			ls.Iteration = 1
 			continue
 		}
-		idx := nextBodyIndex(ls)
+		idx := nextBodyIndex(ls, spec)
 		if idx < 0 {
 			done, err := r.evalUntil(ctx, chain, spec, ls, len(ls.Steps))
 			if err != nil {
@@ -675,8 +697,11 @@ func recordLoopHistory(ss *aiv1alpha1.ChainStepStatus, bs *aiv1alpha1.ChainLoopS
 func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, ss *aiv1alpha1.ChainStepStatus, idx int) {
 	log := logf.FromContext(ctx).WithValues("step", spec.Name)
 	ls := ss.Loop
-	body := &spec.Loop.Steps[idx]
 	bs := &ls.Steps[idx]
+	body := loopBodySpec(spec, bs.Name)
+	if body == nil {
+		return // no spec step by this name: leave the status entry as is
+	}
 
 	if bs.Iteration != ls.Iteration {
 		// First attempt in this round: back to the primary knight (a fallback

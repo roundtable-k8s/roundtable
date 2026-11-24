@@ -189,7 +189,8 @@ func TestValidateConditionsAndLoops(t *testing.T) {
 }
 
 func TestResetLoopForRetry(t *testing.T) {
-	spec := &aiv1alpha1.ChainStep{Name: "l", Loop: &aiv1alpha1.ChainLoop{MaxIterations: 2}}
+	spec := &aiv1alpha1.ChainStep{Name: "l", Loop: &aiv1alpha1.ChainLoop{MaxIterations: 2,
+		Steps: []aiv1alpha1.ChainLoopStep{{Name: "a"}, {Name: "b"}}}}
 	exhausted := &aiv1alpha1.ChainLoopStatus{Iteration: 2, MaxIterations: 2, Outcome: aiv1alpha1.ChainLoopExhausted,
 		Steps: []aiv1alpha1.ChainLoopStepStatus{{Name: "a", Iteration: 2, Phase: aiv1alpha1.ChainStepPhaseSucceeded}}}
 	got := resetLoopForRetry(exhausted, spec)
@@ -202,11 +203,41 @@ func TestResetLoopForRetry(t *testing.T) {
 			{Name: "b", Iteration: 1, Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "x", Retries: 2},
 		}}
 	got = resetLoopForRetry(failed, spec)
-	if got.MaxIterations != 2 || got.Steps[1].Phase != aiv1alpha1.ChainStepPhasePending || got.Steps[1].Retries != 0 || nextBodyIndex(got) != 1 {
+	if got.MaxIterations != 2 || got.Steps[1].Phase != aiv1alpha1.ChainStepPhasePending || got.Steps[1].Retries != 0 || nextBodyIndex(got, spec) != 1 {
 		t.Fatalf("failed loop not resumed at the failed body step: %+v", got)
 	}
 	if resetLoopForRetry(&aiv1alpha1.ChainLoopStatus{}, spec) != nil {
 		t.Fatal("a loop that never started should restart from scratch")
+	}
+}
+
+func TestNextBodyIndexPairsByName(t *testing.T) {
+	// Spec body was reordered (and "gone" removed) after status was recorded.
+	spec := &aiv1alpha1.ChainStep{Name: "l", Loop: &aiv1alpha1.ChainLoop{
+		Steps: []aiv1alpha1.ChainLoopStep{{Name: "b"}, {Name: "a"}}}}
+	ls := &aiv1alpha1.ChainLoopStatus{Iteration: 1, Steps: []aiv1alpha1.ChainLoopStepStatus{
+		{Name: "gone", Iteration: 1, Phase: aiv1alpha1.ChainStepPhasePending},
+		{Name: "a", Iteration: 1, Phase: aiv1alpha1.ChainStepPhaseSucceeded},
+		{Name: "b", Iteration: 1, Phase: aiv1alpha1.ChainStepPhasePending},
+	}}
+	if got := nextBodyIndex(ls, spec); got != 2 {
+		t.Fatalf("want status index 2 (b), got %d", got)
+	}
+	if b := loopBodySpec(spec, ls.Steps[2].Name); b == nil || b.Name != "b" {
+		t.Fatalf("status b must pair with spec b, got %+v", b)
+	}
+	if loopBodySpec(spec, "gone") != nil {
+		t.Fatal("removed step must have no spec")
+	}
+}
+
+func TestEvalConditionDoesNotMutateVars(t *testing.T) {
+	vars := map[string]any{"input": "x"}
+	if _, err := evalCondition("input == 'x'", vars); err != nil {
+		t.Fatal(err)
+	}
+	if len(vars) != 1 || vars["input"] != "x" {
+		t.Fatalf("caller's vars mutated: %v", vars)
 	}
 }
 

@@ -486,6 +486,27 @@ var _ = Describe("Chain forEach fan-out", func() {
 		Expect(joined[1]["output"]).To(Equal("ok b"))
 	})
 
+	It("failFast lets an in-flight item finish and records it Succeeded", func() {
+		start([]aiv1alpha1.ChainStep{
+			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, MaxParallel: 2,
+				ForEach: &aiv1alpha1.ChainForEach{From: "input"}},
+		}, `["a","b","c"]`)
+
+		reconcileN(1)
+		items := tasksFor("impl")
+		Expect(items).To(HaveLen(2))
+		finish(items[1], "", "boom")
+		reconcileN(1)
+		Expect(implStatus(get()).FanOut.ItemPhases).To(HavePrefix("R"), "a is still running")
+
+		finish(items[0], "ok a", "")
+		reconcileN(1)
+		impl := implStatus(get())
+		Expect(impl.FanOut.ItemPhases).To(Equal("SFK"))
+		Expect(impl.FanOut.Succeeded).To(BeEquivalentTo(1))
+		Expect(tasksFor("impl")).To(HaveLen(2), "item c never dispatched")
+	})
+
 	It("continue runs every item and ends the chain PartiallySucceeded", func() {
 		start([]aiv1alpha1.ChainStep{
 			{Name: "impl", KnightRef: corev1.LocalObjectReference{Name: knight}, Task: "do {{ .ItemJSON }}", TimeoutSeconds: 120, MaxParallel: 3,
