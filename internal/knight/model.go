@@ -33,7 +33,8 @@ const (
 
 // AgentRuntimeForImage infers the agent runtime from a container image
 // reference by its repository name: ".../claude-knight[-*][:tag][@digest]"
-// is claude-knight, ".../pi-knight..." is pi-knight, anything else is unknown.
+// is claude-knight, ".../pi-knight[-*]..." is pi-knight, anything else
+// (including look-alikes such as claude-knightly) is unknown.
 func AgentRuntimeForImage(image string) AgentRuntime {
 	ref := image
 	if i := strings.Index(ref, "@"); i >= 0 {
@@ -45,14 +46,12 @@ func AgentRuntimeForImage(image string) AgentRuntime {
 	if i := strings.Index(ref, ":"); i >= 0 {
 		ref = ref[:i]
 	}
-	switch {
-	case strings.HasPrefix(ref, string(AgentRuntimeClaude)):
-		return AgentRuntimeClaude
-	case strings.HasPrefix(ref, string(AgentRuntimePi)):
-		return AgentRuntimePi
-	default:
-		return AgentRuntimeUnknown
+	for _, rt := range []AgentRuntime{AgentRuntimeClaude, AgentRuntimePi} {
+		if ref == string(rt) || strings.HasPrefix(ref, string(rt)+"-") {
+			return rt
+		}
 	}
+	return AgentRuntimeUnknown
 }
 
 // claudeModelAliases are the short model names the Claude Code CLI accepts
