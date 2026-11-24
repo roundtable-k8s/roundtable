@@ -33,6 +33,8 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
+**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything. See [docs/principles.md](docs/principles.md).
+
 ## Features
 
 🗡️ **4 Custom Resources** — Knight, RoundTable, Chain, Mission — declare your entire agent fleet in YAML
