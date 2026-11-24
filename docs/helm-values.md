@@ -76,12 +76,18 @@ The egress NetworkPolicy the operator creates for each mission's knights. The NA
 
 ### Invoke gateway
 
+`dashboard.gateway.tokenSecret` / `tokenKey` (default empty = the gateway's Secret and key) give the dashboard its own token.
+
 Synchronous HTTP API + MCP endpoint for knights (see [gateway.md](gateway.md)).
-Off by default; enabling it requires a bearer-token Secret.
+On by default. With no `gateway.auth.existingSecret` the chart generates a token Secret
+(`<fullname>-gateway-token`, annotated `helm.sh/resource-policy: keep`, reused on upgrade via `lookup`)
+and gives the dashboard `GATEWAY_URL` and `GATEWAY_TOKEN_FILE` (the token Secret mounted read-only, so rotation needs no restart).
+Upgrade note: installs that never set `gateway.enabled` start a gateway on upgrade. Set `gateway.enabled=false` to turn it off.
+Note: `helm template` has no cluster to `lookup`, so it renders a fresh random token each time.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `gateway.enabled` | bool | `false` | Deploy the invoke gateway |
+| `gateway.enabled` | bool | `true` | Deploy the invoke gateway |
 | `gateway.replicas` | int | `1` | Gateway replicas (stateless; task records live in NATS KV) |
 | `gateway.image.repository` / `.tag` | string | `""` | Image; defaults to the operator image (`/gateway` binary) |
 | `gateway.natsURL` | string | `nats://nats.database.svc:4222` | NATS server URL |
@@ -92,7 +98,7 @@ Off by default; enabling it requires a bearer-token Secret.
 | `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
 | `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records |
 | `gateway.taskTTL` | duration | `168h` | How long task records are kept |
-| `gateway.auth.existingSecret` | string | `""` | **Required.** Secret holding the bearer token(s) |
+| `gateway.auth.existingSecret` | string | `""` | Secret holding the bearer token(s); empty = chart generates one |
 | `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation) |
 | `gateway.service.type` / `.port` | string / int | `ClusterIP` / `80` | Service |
 | `gateway.networkPolicy.enabled` | bool | `true` | Restrict ingress to the gateway |

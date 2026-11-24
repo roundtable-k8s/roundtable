@@ -101,13 +101,26 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.gateway.enabled }}
+            - name: GATEWAY_URL
+              value: "http://{{ include "roundtable-operator.fullname" . }}-gateway.{{ .Release.Namespace }}.svc:{{ .Values.gateway.service.port | default 80 }}"
+            - name: GATEWAY_TOKEN_FILE
+              value: /var/run/secrets/roundtable/gateway/token
+            {{- end }}
             - name: VAULT_PATH
               value: "/vault"
-          {{- if .Values.dashboard.vault.enabled }}
+          {{- if or .Values.dashboard.vault.enabled .Values.gateway.enabled }}
           volumeMounts:
+            {{- if .Values.dashboard.vault.enabled }}
             - name: vault
               mountPath: /vault
               readOnly: true
+            {{- end }}
+            {{- if .Values.gateway.enabled }}
+            - name: gateway-token
+              mountPath: /var/run/secrets/roundtable/gateway
+              readOnly: true
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
@@ -121,11 +134,23 @@ spec:
               path: /api/health
               port: http
             initialDelaySeconds: 3
-      {{- if .Values.dashboard.vault.enabled }}
+      {{- if or .Values.dashboard.vault.enabled .Values.gateway.enabled }}
       volumes:
+        {{- if .Values.dashboard.vault.enabled }}
         - name: vault
           persistentVolumeClaim:
             claimName: {{ .Values.dashboard.vault.claimName }}
+        {{- end }}
+        {{- if .Values.gateway.enabled }}
+        # Mounted as a file (not an env var) so a rotated token reaches the
+        # dashboard without a restart.
+        - name: gateway-token
+          secret:
+            secretName: {{ .Values.dashboard.gateway.tokenSecret | default (include "roundtable-operator.gatewayTokenSecret" .) }}
+            items:
+              - key: {{ .Values.dashboard.gateway.tokenKey | default .Values.gateway.auth.secretKey | default "token" }}
+                path: token
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1
