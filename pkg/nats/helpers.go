@@ -18,6 +18,8 @@ package nats
 
 import (
 	"fmt"
+
+	"github.com/roundtable-k8s/roundtable/internal/util"
 )
 
 // TaskSubject constructs a NATS subject for publishing tasks to a knight.
@@ -57,10 +59,13 @@ func KnightConsumerName(knightName string) string {
 }
 
 // KnightTaskConsumerName is the durable JetStream consumer a knight runtime
-// creates on the tasks stream. Format: {knight}-consumer.
-// Knights acknowledge a task message as soon as they receive it, so this
-// consumer's ack floor passing a task's stream sequence is the "picked up"
-// signal for chain step timeouts.
+// creates on the tasks stream. Format: {Knight}-consumer. The runtimes build it
+// from KNIGHT_NAME, which the operator sets to the capitalised Knight name, so
+// the name is capitalised here too. This is the single source of truth for the
+// consumer name (internal/knight.TaskConsumerName delegates to it).
+//
+// Knights ack a task only after its result is published, so the consumer's ack
+// floor is a completion signal; its delivered sequence is the pickup signal.
 func KnightTaskConsumerName(knightName string) string {
-	return fmt.Sprintf("%s-consumer", knightName)
+	return util.Capitalize(knightName) + "-consumer"
 }

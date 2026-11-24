@@ -258,4 +258,5 @@ func (f *fakeNATSClient) PublishJSONSeq(subject string, v any) (uint64, error) {
 	}
 	return uint64(len(f.subjects())), nil
 }
-func (f *fakeNATSClient) ConsumerAckFloor(string, string) (uint64, error) { return 0, nil }
+func (f *fakeNATSClient) ConsumerAckFloor(string, string) (uint64, error)     { return 0, nil }
+func (f *fakeNATSClient) ConsumerDeliveredSeq(string, string) (uint64, error) { return 0, nil }

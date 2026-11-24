@@ -142,8 +142,10 @@ Do not set `status.phase=Running` by hand: it resumes the previous run.
 
 A step's `timeout` starts when the knight picks the task up, not when it is published, so
 time spent queued behind a busy knight does not count. Pickup is detected from the knight's
-durable `<knight>-consumer` on the tasks stream: knights ack each task as they receive it, so
-the consumer's ack floor passing the task's stream sequence (`status.stepStatuses[].taskSeq`)
+durable `<Knight>-consumer` on the tasks stream (the capitalised Knight name, e.g.
+`Rt-operator-consumer`). Knights keep a task un-acked while they work on it and ack only after the
+result is published, so the ack floor is a completion signal, not a pickup signal. Instead the
+consumer's delivered stream sequence reaching the task's sequence (`status.stepStatuses[].taskSeq`)
 sets `pickedUpAt`. `spec.maxQueueWaitSeconds` (default 1800s) fails a step whose task is never
 picked up. The overall chain `timeout` still counts from the start of the run.
 

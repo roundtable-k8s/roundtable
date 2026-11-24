@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/internal/util"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // SuspendPolicyAuto is the lifecycle.suspendPolicy value that scales a knight
@@ -196,7 +196,7 @@ func AllotPlanReplicas(capTasks int32, demands []PlanDemand) map[string]int32 {
 // tasks stream: "${KNIGHT_NAME}-consumer", where KNIGHT_NAME is the
 // capitalised knight name the operator sets (see PodBuilder.Build).
 func TaskConsumerName(k *aiv1alpha1.Knight) string {
-	return util.Capitalize(k.Name) + "-consumer"
+	return natspkg.KnightTaskConsumerName(k.Name)
 }
 
 // DrainGraceBufferSeconds is added to taskTimeoutSeconds to form the pod's
