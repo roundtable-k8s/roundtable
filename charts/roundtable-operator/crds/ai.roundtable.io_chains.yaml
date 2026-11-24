@@ -25,6 +25,12 @@ spec:
     - jsonPath: .spec.schedule
       name: Schedule
       type: string
+    - jsonPath: .spec.timeZone
+      name: TimeZone
+      type: string
+    - jsonPath: .status.nextScheduledAt
+      name: Next
+      type: date
     - jsonPath: .status.runsCompleted
       name: Runs
       type: integer
@@ -575,6 +581,15 @@ spec:
                 description: suspend, if true, prevents scheduled runs and disallows
                   new executions.
                 type: boolean
+              timeZone:
+                description: |-
+                  timeZone is the IANA time zone name (e.g. "America/New_York") the
+                  schedule is evaluated in, so "0 7 * * *" fires at 07:00 local time on
+                  both sides of a daylight-saving change. Defaults to UTC when unset.
+                  "Local" is not accepted.
+                maxLength: 64
+                pattern: ^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$
+                type: string
               timeoutSeconds:
                 default: 600
                 description: |-
@@ -667,6 +682,12 @@ spec:
               lastScheduledAt:
                 description: lastScheduledAt is when the chain was last triggered
                   by its cron schedule.
+                format: date-time
+                type: string
+              nextScheduledAt:
+                description: |-
+                  nextScheduledAt is the next time the cron schedule will fire, evaluated
+                  in spec.timeZone. Unset when the chain has no schedule or is suspended.
                 format: date-time
                 type: string
               observedGeneration:

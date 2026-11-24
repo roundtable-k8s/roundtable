@@ -213,6 +213,9 @@ const (
 	// ReasonCyclicDependency indicates the chain has cyclic step dependencies.
 	ReasonCyclicDependency = "CyclicDependency"
 
+	// ReasonInvalidSchedule indicates the schedule or timeZone is invalid.
+	ReasonInvalidSchedule = "InvalidSchedule"
+
 	// ReasonInvalidTemplate indicates a step's Go template failed to parse.
 	ReasonInvalidTemplate = "InvalidTemplate"
 

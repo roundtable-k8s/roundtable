@@ -360,6 +360,10 @@ func (in *ChainStatus) DeepCopyInto(out *ChainStatus) {
 		in, out := &in.LastScheduledAt, &out.LastScheduledAt
 		*out = (*in).DeepCopy()
 	}
+	if in.NextScheduledAt != nil {
+		in, out := &in.NextScheduledAt, &out.NextScheduledAt
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

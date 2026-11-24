@@ -366,6 +366,12 @@ knight's runtime. See [knight-task-contract.md](knight-task-contract.md#model) a
 
 ### Chain with Schedule
 
+`spec.schedule` is a standard cron expression evaluated in `spec.timeZone`
+(an IANA name such as `America/New_York`; default `UTC`). The schedule follows
+local wall-clock time across daylight-saving changes. An invalid zone sets the
+`ChainValid` condition to false with reason `InvalidSchedule`. The next fire time
+is reported in `status.nextScheduledAt` and shown by `kubectl get chains`.
+
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain
@@ -376,6 +382,7 @@ spec:
   description: "Generate daily briefing from all knight activity"
   roundTableRef: {name: fleet-a}
   schedule: "0 8 * * *"
+  timeZone: America/New_York   # optional IANA zone; defaults to UTC
   timeoutSeconds: 300
   steps:
     - name: gather
