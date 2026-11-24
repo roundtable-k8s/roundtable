@@ -187,7 +187,6 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo, label string) ([]Issu
 	return issues, nil
 }
 
-
 // ListOpenPullRequests returns the open pull requests carrying label (the
 // first 100 open PRs, newest first; needs the pull requests read permission).
 func (c *Client) ListOpenPullRequests(ctx context.Context, repo, label string) ([]PullRequest, error) {
