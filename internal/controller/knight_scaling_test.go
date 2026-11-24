@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
 
@@ -214,7 +215,8 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			d := getKnightDeployment(k)
 			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
 			Expect(d.Spec.Strategy.RollingUpdate).To(BeNil())
-			Expect(*d.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(k.Spec.TaskTimeoutSeconds) + 60))
+			// taskTimeoutSeconds is unset: the operator default (120s) applies.
+			Expect(*d.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(knightpkg.DefaultTaskTimeoutSeconds) + 60))
 		})
 	})
 
@@ -443,7 +445,9 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: table.Name, Namespace: ns}, table)).To(Succeed())
 			table.Spec.Policies.MaxConcurrentPlanTasks = 10
 			Expect(k8sClient.Update(ctx, table)).To(Succeed())
-			Expect(r.roundTableKnightRequests(ctx, table)).To(HaveLen(2))
+			// All three are table members (they inherit its defaults); two
+			// would be requeued for the cap alone.
+			Expect(r.roundTableKnightRequests(ctx, table)).To(HaveLen(3))
 			for _, k := range knights {
 				reconcileKnight(r, k)
 			}

@@ -300,6 +300,10 @@ const (
 	legacyTableLabel = "ai.roundtable.io/table"
 )
 
+// LegacyTableLabel is the older knight-to-table label, read alongside
+// aiv1alpha1.LabelRoundTable when finding a knight's table.
+const LegacyTableLabel = legacyTableLabel
+
 // ResolveGitHubTokenSecretRef returns the GitHub token Secret for a knight:
 // the knight's own spec.github.tokenSecretRef, else the one on its RoundTable
 // (found via the ai.roundtable.io/round-table label, then the legacy
@@ -347,23 +351,80 @@ func findTable(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight, accep
 	return nil
 }
 
-// ApplyTableDefaults fills k.Spec.Resources, k.Spec.Workspace and
-// k.Spec.RuntimeClassName in memory
-// from the knight's RoundTable spec.defaults (found via findTable) when the
-// knight leaves them unset. Call it on the reconciler's working copy only; it
-// is never persisted. A table's workspace existingClaim is not inherited.
-func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) {
-	if k.Spec.Resources != nil && k.Spec.Workspace != nil && k.Spec.RuntimeClassName != nil {
-		return
-	}
-	rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
-		d := rt.Spec.Defaults
-		return d != nil && (d.Resources != nil || d.Workspace != nil || d.RuntimeClassName != nil)
-	})
-	if rt == nil {
-		return
+// Operator defaults for knight fields that are unset on both the knight and
+// its RoundTable. They used to be CRD defaults on the Knight, which made an
+// unset field indistinguishable from an explicit one (#372).
+const (
+	DefaultModel                    = "openrouter/deepseek/deepseek-v3.2"
+	DefaultConcurrency        int32 = 2
+	DefaultTaskTimeoutSeconds int32 = 120
+)
+
+// tableHasDefaults reports whether a RoundTable has anything a knight can
+// inherit through ApplyTableDefaults.
+func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
+	if rt.Spec.Vault != nil {
+		return true
 	}
 	d := rt.Spec.Defaults
+	return d != nil && (d.Resources != nil || d.Workspace != nil || d.RuntimeClassName != nil ||
+		d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
+}
+
+// knightInheritsNothing reports whether the knight sets every field a table can
+// default, so no table lookup is needed.
+func knightInheritsNothing(k *aiv1alpha1.Knight) bool {
+	s := &k.Spec
+	return s.Resources != nil && s.Workspace != nil && s.RuntimeClassName != nil &&
+		s.Model != "" && s.Image != "" && s.TaskTimeoutSeconds > 0 && s.Concurrency > 0 &&
+		s.Vault != nil
+}
+
+// ApplyTableDefaults fills the knight's unset spec fields in memory from its
+// RoundTable (found via findTable): resources, workspace, runtimeClassName,
+// model, image, taskTimeoutSeconds and concurrency from spec.defaults, and
+// vault from spec.vault. A value on the knight always wins; nothing is merged.
+// A table's workspace existingClaim is not inherited. Afterwards model,
+// concurrency and taskTimeoutSeconds still unset get the operator defaults
+// (DefaultModel, DefaultConcurrency, DefaultTaskTimeoutSeconds); image keeps
+// falling back to the operator's default image in EffectiveImage.
+//
+// Call it on the reconciler's working copy (or a copy, see WithTableDefaults)
+// only; it is never persisted.
+func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) {
+	if !knightInheritsNothing(k) {
+		if rt := findTable(ctx, r, k, tableHasDefaults); rt != nil {
+			inheritTable(k, rt)
+		}
+	}
+	if k.Spec.Model == "" {
+		k.Spec.Model = DefaultModel
+	}
+	if k.Spec.Concurrency <= 0 {
+		k.Spec.Concurrency = DefaultConcurrency
+	}
+	if k.Spec.TaskTimeoutSeconds <= 0 {
+		k.Spec.TaskTimeoutSeconds = DefaultTaskTimeoutSeconds
+	}
+}
+
+// WithTableDefaults returns a copy of the knight with ApplyTableDefaults
+// applied, for code that reads a knight from the API (chains, the gateway,
+// plan-cap siblings) and needs its effective model, image or concurrency.
+func WithTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *aiv1alpha1.Knight {
+	out := k.DeepCopy()
+	ApplyTableDefaults(ctx, r, out)
+	return out
+}
+
+func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
+	if k.Spec.Vault == nil && rt.Spec.Vault != nil {
+		k.Spec.Vault = rt.Spec.Vault.DeepCopy()
+	}
+	d := rt.Spec.Defaults
+	if d == nil {
+		return
+	}
 	if k.Spec.Resources == nil && d.Resources != nil {
 		k.Spec.Resources = d.Resources.DeepCopy()
 	}
@@ -375,6 +436,18 @@ func ApplyTableDefaults(ctx context.Context, r client.Reader, k *aiv1alpha1.Knig
 		ws := d.Workspace.DeepCopy()
 		ws.ExistingClaim = ""
 		k.Spec.Workspace = ws
+	}
+	if k.Spec.Model == "" {
+		k.Spec.Model = d.Model
+	}
+	if k.Spec.Image == "" {
+		k.Spec.Image = d.Image
+	}
+	if k.Spec.TaskTimeoutSeconds <= 0 {
+		k.Spec.TaskTimeoutSeconds = d.TaskTimeoutSeconds
+	}
+	if k.Spec.Concurrency <= 0 {
+		k.Spec.Concurrency = d.Concurrency
 	}
 }
 
@@ -733,10 +806,16 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	image := EffectiveImage(b.knight, b.defaultImg)
 
 	// Build environment variables
-	taskTimeoutMs := int64(b.knight.Spec.TaskTimeoutSeconds) * 1000
+	// The reconciler applies ApplyTableDefaults first; the fallbacks here only
+	// cover callers that build a pod for a knight straight from the API.
+	taskTimeoutMs := (TerminationGracePeriod(b.knight) - DrainGraceBufferSeconds) * 1000
+	model := b.knight.Spec.Model
+	if model == "" {
+		model = DefaultModel
+	}
 	env := []corev1.EnvVar{
 		{Name: "KNIGHT_NAME", Value: util.Capitalize(b.knight.Name)},
-		{Name: "KNIGHT_MODEL", Value: b.knight.Spec.Model},
+		{Name: "KNIGHT_MODEL", Value: model},
 		// Pod identity via the downward API (task activity events, #249).
 		downwardEnv("POD_NAME", "metadata.name"),
 		downwardEnv("POD_NAMESPACE", "metadata.namespace"),
@@ -746,7 +825,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		{Name: "NATS_RESULTS_STREAM", Value: b.knight.Spec.NATS.ResultsStream},
 		{Name: "NATS_RESULTS_PREFIX", Value: DeriveResultsPrefix(b.knight.Spec.NATS.Subjects)},
 		{Name: "SUBSCRIBE_TOPICS", Value: strings.Join(b.knight.Spec.NATS.Subjects, ",")},
-		{Name: "MAX_CONCURRENT_TASKS", Value: fmt.Sprintf("%d", b.knight.Spec.Concurrency)},
+		{Name: "MAX_CONCURRENT_TASKS", Value: fmt.Sprintf("%d", Concurrency(b.knight))},
 		{Name: "TASK_TIMEOUT_MS", Value: fmt.Sprintf("%d", taskTimeoutMs)},
 		{Name: "METRICS_PORT", Value: "3000"},
 		{Name: "LOG_LEVEL", Value: "info"},

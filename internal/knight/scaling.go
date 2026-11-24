@@ -143,12 +143,14 @@ func ScaleDownStabilizationSeconds(k *aiv1alpha1.Knight) int64 {
 	return DefaultScaleDownStabilizationSeconds
 }
 
-// Concurrency returns spec.concurrency, defaulting to 1 when unset.
+// Concurrency returns spec.concurrency, defaulting to DefaultConcurrency when
+// unset. Pass a knight with table defaults applied (see WithTableDefaults) to
+// honour the RoundTable's defaults.concurrency.
 func Concurrency(k *aiv1alpha1.Knight) int32 {
 	if k.Spec.Concurrency > 0 {
 		return k.Spec.Concurrency
 	}
-	return 1
+	return DefaultConcurrency
 }
 
 // PlanDemand is one plan-backed knight's request for capacity.
@@ -204,11 +206,11 @@ func TaskConsumerName(k *aiv1alpha1.Knight) string {
 const DrainGraceBufferSeconds int64 = 60
 
 // TerminationGracePeriod returns taskTimeoutSeconds + 60 so a terminating pod
-// can finish its in-flight task. The API default (120s) applies when unset.
+// can finish its in-flight task. DefaultTaskTimeoutSeconds applies when unset.
 func TerminationGracePeriod(k *aiv1alpha1.Knight) int64 {
 	t := int64(k.Spec.TaskTimeoutSeconds)
 	if t <= 0 {
-		t = 120
+		t = int64(DefaultTaskTimeoutSeconds)
 	}
 	return t + DrainGraceBufferSeconds
 }

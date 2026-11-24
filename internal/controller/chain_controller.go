@@ -853,7 +853,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// Resolve the per-step model override. A model the knight's runtime
 		// can't run is a spec error: fail the step (no retry) rather than let
 		// the knight silently fall back to its default model.
-		model, err := knightpkg.ResolveModel(stepModel, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+		model, err := knightpkg.ResolveModel(stepModel, nc.ModelAliases, knightpkg.EffectiveImage(knightpkg.WithTableDefaults(ctx, r.Client, knight), r.DefaultKnightImage))
 		if err != nil {
 			log.Info("Rejected step model", "step", step.Name, "knight", knightName, "reason", err.Error())
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", step.Name, err)

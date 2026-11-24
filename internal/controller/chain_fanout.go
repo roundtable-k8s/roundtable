@@ -552,7 +552,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 	}
 	// Every item runs on the step's model override (#217); a model the
 	// knight's runtime can't run fails the whole step before any dispatch.
-	model, err := knightpkg.ResolveModel(spec.Model, nc.ModelAliases, knightpkg.EffectiveImage(knight, r.DefaultKnightImage))
+	model, err := knightpkg.ResolveModel(spec.Model, nc.ModelAliases, knightpkg.EffectiveImage(knightpkg.WithTableDefaults(ctx, r.Client, knight), r.DefaultKnightImage))
 	if err != nil {
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "InvalidStepModel", "Step %s: %v", spec.Name, err)
 		ss.Model = ""
@@ -563,7 +563,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 
 	limit := int(spec.MaxParallel)
 	if limit <= 0 {
-		limit = int(max(knight.Spec.Concurrency, 1))
+		limit = int(knightpkg.Concurrency(knightpkg.WithTableDefaults(ctx, r.Client, knight)))
 	}
 	slots := limit - int(fo.Running)
 	if slots <= 0 {

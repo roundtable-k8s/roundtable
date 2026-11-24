@@ -167,9 +167,11 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	// Inherit the table's default resources and workspace (in memory only).
+	// Inherit the table's defaults and vault, then the operator defaults (in
+	// memory only). Every status update below reports the effective model.
 	ownRuntimeClass := knight.Spec.RuntimeClassName != nil
 	knightpkg.ApplyTableDefaults(ctx, r.Client, knight)
+	knight.Status.Model = knight.Spec.Model
 
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
 	// with a clear condition and leave any existing runtime resources alone.

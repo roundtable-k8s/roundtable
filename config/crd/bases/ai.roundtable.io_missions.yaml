@@ -620,9 +620,10 @@ spec:
                               type: boolean
                           type: object
                         concurrency:
-                          default: 2
-                          description: concurrency is the maximum number of concurrent
-                            tasks the knight can process.
+                          description: |-
+                            concurrency is the maximum number of concurrent tasks the knight can process.
+                            When unset the knight's RoundTable spec.defaults.concurrency applies, and
+                            when that is unset too 2.
                           format: int32
                           maximum: 10
                           minimum: 1
@@ -904,7 +905,8 @@ spec:
                         image:
                           description: |-
                             image is the container image for the knight runtime.
-                            If empty, the operator uses DEFAULT_KNIGHT_IMAGE env var.
+                            If empty, the knight's RoundTable spec.defaults.image applies, and when
+                            that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                           type: string
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
@@ -957,9 +959,11 @@ spec:
                           minimum: 1
                           type: integer
                         model:
-                          default: openrouter/deepseek/deepseek-v3.2
-                          description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
-                            "claude-sonnet-4-20250514").
+                          description: |-
+                            model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
+                            When unset the knight's RoundTable spec.defaults.model applies, and when
+                            that is unset too "openrouter/deepseek/deepseek-v3.2". The model the
+                            knight runs is reported in status.model.
                           type: string
                         nats:
                           description: nats configures the knight's NATS JetStream
@@ -1152,10 +1156,11 @@ spec:
                           description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
                         taskTimeoutSeconds:
-                          default: 120
                           description: |-
                             taskTimeoutSeconds is the default task timeout, in seconds, for tasks
-                            that don't carry their own (chain steps send theirs).
+                            that don't carry their own (chain steps send theirs). When unset the
+                            knight's RoundTable spec.defaults.taskTimeoutSeconds applies, and when
+                            that is unset too 120.
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -1223,8 +1228,10 @@ spec:
                               type: array
                           type: object
                         vault:
-                          description: vault configures the shared Obsidian vault
-                            mount.
+                          description: |-
+                            vault configures the shared Obsidian vault mount. When unset the
+                            knight's RoundTable spec.vault applies; a knight's own vault is never
+                            merged with the table's.
                           properties:
                             claimName:
                               default: obsidian-vault
@@ -1673,9 +1680,10 @@ spec:
                               type: boolean
                           type: object
                         concurrency:
-                          default: 2
-                          description: concurrency is the maximum number of concurrent
-                            tasks the knight can process.
+                          description: |-
+                            concurrency is the maximum number of concurrent tasks the knight can process.
+                            When unset the knight's RoundTable spec.defaults.concurrency applies, and
+                            when that is unset too 2.
                           format: int32
                           maximum: 10
                           minimum: 1
@@ -1957,7 +1965,8 @@ spec:
                         image:
                           description: |-
                             image is the container image for the knight runtime.
-                            If empty, the operator uses DEFAULT_KNIGHT_IMAGE env var.
+                            If empty, the knight's RoundTable spec.defaults.image applies, and when
+                            that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                           type: string
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
@@ -2010,9 +2019,11 @@ spec:
                           minimum: 1
                           type: integer
                         model:
-                          default: openrouter/deepseek/deepseek-v3.2
-                          description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
-                            "claude-sonnet-4-20250514").
+                          description: |-
+                            model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
+                            When unset the knight's RoundTable spec.defaults.model applies, and when
+                            that is unset too "openrouter/deepseek/deepseek-v3.2". The model the
+                            knight runs is reported in status.model.
                           type: string
                         nats:
                           description: nats configures the knight's NATS JetStream
@@ -2205,10 +2216,11 @@ spec:
                           description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
                         taskTimeoutSeconds:
-                          default: 120
                           description: |-
                             taskTimeoutSeconds is the default task timeout, in seconds, for tasks
-                            that don't carry their own (chain steps send theirs).
+                            that don't carry their own (chain steps send theirs). When unset the
+                            knight's RoundTable spec.defaults.taskTimeoutSeconds applies, and when
+                            that is unset too 120.
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -2276,8 +2288,10 @@ spec:
                               type: array
                           type: object
                         vault:
-                          description: vault configures the shared Obsidian vault
-                            mount.
+                          description: |-
+                            vault configures the shared Obsidian vault mount. When unset the
+                            knight's RoundTable spec.vault applies; a knight's own vault is never
+                            merged with the table's.
                           properties:
                             claimName:
                               default: obsidian-vault
@@ -2446,9 +2460,10 @@ spec:
                               type: boolean
                           type: object
                         concurrency:
-                          default: 2
-                          description: concurrency is the maximum number of concurrent
-                            tasks the knight can process.
+                          description: |-
+                            concurrency is the maximum number of concurrent tasks the knight can process.
+                            When unset the knight's RoundTable spec.defaults.concurrency applies, and
+                            when that is unset too 2.
                           format: int32
                           maximum: 10
                           minimum: 1
@@ -2730,7 +2745,8 @@ spec:
                         image:
                           description: |-
                             image is the container image for the knight runtime.
-                            If empty, the operator uses DEFAULT_KNIGHT_IMAGE env var.
+                            If empty, the knight's RoundTable spec.defaults.image applies, and when
+                            that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                           type: string
                         lifecycle:
                           description: lifecycle controls suspend/resume behavior.
@@ -2783,9 +2799,11 @@ spec:
                           minimum: 1
                           type: integer
                         model:
-                          default: openrouter/deepseek/deepseek-v3.2
-                          description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
-                            "claude-sonnet-4-20250514").
+                          description: |-
+                            model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
+                            When unset the knight's RoundTable spec.defaults.model applies, and when
+                            that is unset too "openrouter/deepseek/deepseek-v3.2". The model the
+                            knight runs is reported in status.model.
                           type: string
                         nats:
                           description: nats configures the knight's NATS JetStream
@@ -2978,10 +2996,11 @@ spec:
                           description: suspend, if true, scales the knight to 0 replicas.
                           type: boolean
                         taskTimeoutSeconds:
-                          default: 120
                           description: |-
                             taskTimeoutSeconds is the default task timeout, in seconds, for tasks
-                            that don't carry their own (chain steps send theirs).
+                            that don't carry their own (chain steps send theirs). When unset the
+                            knight's RoundTable spec.defaults.taskTimeoutSeconds applies, and when
+                            that is unset too 120.
                           format: int32
                           maximum: 3600
                           minimum: 30
@@ -3049,8 +3068,10 @@ spec:
                               type: array
                           type: object
                         vault:
-                          description: vault configures the shared Obsidian vault
-                            mount.
+                          description: |-
+                            vault configures the shared Obsidian vault mount. When unset the
+                            knight's RoundTable spec.vault applies; a knight's own vault is never
+                            merged with the table's.
                           properties:
                             claimName:
                               default: obsidian-vault
@@ -3575,9 +3596,10 @@ spec:
                             type: boolean
                         type: object
                       concurrency:
-                        default: 2
-                        description: concurrency is the maximum number of concurrent
-                          tasks the knight can process.
+                        description: |-
+                          concurrency is the maximum number of concurrent tasks the knight can process.
+                          When unset the knight's RoundTable spec.defaults.concurrency applies, and
+                          when that is unset too 2.
                         format: int32
                         maximum: 10
                         minimum: 1
@@ -3859,7 +3881,8 @@ spec:
                       image:
                         description: |-
                           image is the container image for the knight runtime.
-                          If empty, the operator uses DEFAULT_KNIGHT_IMAGE env var.
+                          If empty, the knight's RoundTable spec.defaults.image applies, and when
+                          that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                         type: string
                       lifecycle:
                         description: lifecycle controls suspend/resume behavior.
@@ -3912,9 +3935,11 @@ spec:
                         minimum: 1
                         type: integer
                       model:
-                        default: openrouter/deepseek/deepseek-v3.2
-                        description: model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2",
-                          "claude-sonnet-4-20250514").
+                        description: |-
+                          model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
+                          When unset the knight's RoundTable spec.defaults.model applies, and when
+                          that is unset too "openrouter/deepseek/deepseek-v3.2". The model the
+                          knight runs is reported in status.model.
                         type: string
                       nats:
                         description: nats configures the knight's NATS JetStream consumer
@@ -4106,10 +4131,11 @@ spec:
                         description: suspend, if true, scales the knight to 0 replicas.
                         type: boolean
                       taskTimeoutSeconds:
-                        default: 120
                         description: |-
                           taskTimeoutSeconds is the default task timeout, in seconds, for tasks
-                          that don't carry their own (chain steps send theirs).
+                          that don't carry their own (chain steps send theirs). When unset the
+                          knight's RoundTable spec.defaults.taskTimeoutSeconds applies, and when
+                          that is unset too 120.
                         format: int32
                         maximum: 3600
                         minimum: 30
@@ -4177,7 +4203,10 @@ spec:
                             type: array
                         type: object
                       vault:
-                        description: vault configures the shared Obsidian vault mount.
+                        description: |-
+                          vault configures the shared Obsidian vault mount. When unset the
+                          knight's RoundTable spec.vault applies; a knight's own vault is never
+                          merged with the table's.
                         properties:
                           claimName:
                             default: obsidian-vault
@@ -4356,17 +4385,26 @@ spec:
                             type: string
                         type: object
                       concurrency:
-                        default: 2
-                        description: concurrency is the default max concurrent tasks
-                          per knight.
+                        description: |-
+                          concurrency is the default max concurrent tasks per pod for the table's
+                          standing knights. A knight that sets its own spec.concurrency keeps it;
+                          with neither set 2 applies.
                         format: int32
+                        maximum: 10
+                        minimum: 1
                         type: integer
                       image:
-                        description: image is the default container image for knights.
+                        description: |-
+                          image is the default container image for the table's standing knights.
+                          A knight that sets its own spec.image keeps it; with neither set the
+                          operator's DEFAULT_KNIGHT_IMAGE applies.
                         type: string
                       model:
-                        description: model is the default AI model for knights in
-                          this table.
+                        description: |-
+                          model is the default AI model for the table's standing knights (those
+                          labelled ai.roundtable.io/round-table). A knight that sets its own
+                          spec.model keeps it; with neither set the operator default
+                          ("openrouter/deepseek/deepseek-v3.2") applies.
                         type: string
                       resources:
                         description: |-
@@ -4438,9 +4476,10 @@ spec:
                           spec.runtimeClassName keeps it.
                         type: string
                       taskTimeoutSeconds:
-                        default: 120
-                        description: taskTimeoutSeconds is the default task timeout
-                          in seconds.
+                        description: |-
+                          taskTimeoutSeconds is the default task timeout in seconds for the table's
+                          standing knights. A knight that sets its own spec.taskTimeoutSeconds
+                          keeps it; with neither set 120 applies.
                         format: int32
                         maximum: 3600
                         minimum: 30
