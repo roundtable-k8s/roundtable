@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -120,6 +121,7 @@ const runtimeDeployment = "deployment"
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=node.k8s.io,resources=runtimeclasses,verbs=get;list;watch
 
 func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -164,6 +166,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Inherit the table's default resources and workspace (in memory only).
+	ownRuntimeClass := knight.Spec.RuntimeClassName != nil
 	knightpkg.ApplyTableDefaults(ctx, r.Client, knight)
 
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
@@ -194,6 +197,23 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return r.finishSuspended(ctx, knight)
 		}
 		return r.reconcileSuspended(ctx, knight)
+	}
+
+	// (After the suspend step, so a parked knight can still be suspended.)
+	// A knight naming a RuntimeClass that doesn't exist would only produce pods
+	// the API server rejects; park it with a clear condition instead.
+	if name := runtimeClassOf(knight); name != "" {
+		if err := r.Get(ctx, types.NamespacedName{Name: name}, &nodev1.RuntimeClass{}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			field := "spec.runtimeClassName"
+			if !ownRuntimeClass {
+				field = "the RoundTable's spec.defaults.runtimeClassName (or set spec.runtimeClassName on the knight)"
+			}
+			return r.parkKnight(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound,
+				fmt.Sprintf("RuntimeClass %q does not exist; create it or change %s", name, field))
+		}
 	}
 
 	// Reconcile each owned resource
@@ -317,23 +337,38 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 // enabled (runtime: sandbox without the agent-sandbox v1alpha1 API) and
 // requeues slowly. The status is only written when it changes.
 func (r *KnightReconciler) reconcileRuntimeUnavailable(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
 	msg := fmt.Sprintf("Knight requests runtime %q, but the operator started without the sandbox backend: "+
 		"%s Sandbox is not served by the API server (or --enable-sandbox-backend=false). "+
 		"Install agent-sandbox with the v1alpha1 CRDs and restart the operator, or set spec.runtime to \"deployment\".",
 		knight.Spec.Runtime, sandboxv1alpha1.GroupVersion)
 
+	return r.parkKnight(ctx, knight, aiv1alpha1.ReasonSandboxUnavailable, msg)
+}
+
+// runtimeClassOf returns the knight's effective RuntimeClass name ("" if none).
+func runtimeClassOf(knight *aiv1alpha1.Knight) string {
+	if knight.Spec.RuntimeClassName == nil {
+		return ""
+	}
+	return *knight.Spec.RuntimeClassName
+}
+
+// parkKnight marks a knight RuntimeAvailable=False / Available=False with the
+// given reason, leaves its runtime resources alone and requeues slowly. The
+// status is only written when it changes.
+func (r *KnightReconciler) parkKnight(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 	changed := meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
 		Status:             metav1.ConditionFalse,
-		Reason:             aiv1alpha1.ReasonSandboxUnavailable,
+		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: knight.Generation,
 	})
 	if meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,
-		Reason:             aiv1alpha1.ReasonSandboxUnavailable,
+		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: knight.Generation,
 	}) {
@@ -345,8 +380,8 @@ func (r *KnightReconciler) reconcileRuntimeUnavailable(ctx context.Context, knig
 	}
 
 	if changed {
-		log.Info("Sandbox runtime unavailable; knight parked", "knight", knight.Name)
-		r.Recorder.Event(knight, corev1.EventTypeWarning, aiv1alpha1.ReasonSandboxUnavailable, msg)
+		log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
+		r.Recorder.Event(knight, corev1.EventTypeWarning, reason, msg)
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
 		knight.Status.Ready = false
 		knight.Status.ObservedGeneration = knight.Generation

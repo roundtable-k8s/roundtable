@@ -652,6 +652,15 @@ spec:
                 - deployment
                 - sandbox
                 type: string
+              runtimeClassName:
+                description: |-
+                  runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
+                  pod runs under (for example "gvisor"). It applies to both runtime:
+                  deployment and runtime: sandbox. When unset the table default applies,
+                  and when that is unset too the cluster's default runtime is used. If the
+                  RuntimeClass does not exist the knight reports RuntimeAvailable=False
+                  with reason RuntimeClassNotFound.
+                type: string
               serviceAccountName:
                 description: |-
                   serviceAccountName is the name of the ServiceAccount to use for the knight pod.
@@ -918,6 +927,42 @@ spec:
                   currently has.
                 format: int32
                 type: integer
+              scaling:
+                description: |-
+                  scaling reports the knight's replica bounds and current scaling state,
+                  so clients need not read KEDA objects.
+                properties:
+                  autoscaled:
+                    description: autoscaled is true when a KEDA ScaledObject owns
+                      the replica count.
+                    type: boolean
+                  desiredReplicas:
+                    description: |-
+                      desiredReplicas is the replica count the autoscaler (or the Deployment
+                      spec when not autoscaled) is asking for.
+                    format: int32
+                    type: integer
+                  lastScaleTime:
+                    description: lastScaleTime is when the autoscaler last changed
+                      the replica count.
+                    format: date-time
+                    type: string
+                  maxReplicas:
+                    description: |-
+                      maxReplicas is the KEDA maxReplicaCount (after the plan-task cap); equal
+                      to minReplicas when not autoscaled.
+                    format: int32
+                    type: integer
+                  minReplicas:
+                    description: minReplicas is the fixed replica count, or the KEDA
+                      minReplicaCount.
+                    format: int32
+                    type: integer
+                required:
+                - autoscaled
+                - maxReplicas
+                - minReplicas
+                type: object
               tasksCompleted:
                 description: tasksCompleted is the total number of tasks completed
                   since creation.

@@ -188,6 +188,12 @@ type RoundTableDefaults struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// runtimeClassName is the default RuntimeClass (for example "gvisor") for
+	// the table's standing knights. A knight that sets its own
+	// spec.runtimeClassName keeps it.
+	// +optional
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
 	// workspace is the default workspace storage (mode and size) for the
 	// table's standing knights. A knight that sets its own spec.workspace
 	// keeps it. existingClaim is never inherited: a claim is per knight.

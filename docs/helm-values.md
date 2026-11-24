@@ -110,6 +110,12 @@ These match the chart's `values.yaml` defaults. The default applies as a whole
 block: if a knight sets its own `resources` (or `workspace`), that block is used
 as written and no fields are merged in from the default.
 
+Set `knights.<name>.runtimeClassName` (and `planner.runtimeClassName`; both
+default to empty, meaning the cluster's default runtime) to run a knight under a
+RuntimeClass such as `gvisor`. Knights in a RoundTable also inherit
+`RoundTable.spec.defaults.runtimeClassName` when unset. See
+[runtime-isolation.md](runtime-isolation.md).
+
 Define knights inline in values to deploy them with the operator:
 
 ```yaml

@@ -180,6 +180,12 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  runtimeClassName:
+                    description: |-
+                      runtimeClassName is the default RuntimeClass (for example "gvisor") for
+                      the table's standing knights. A knight that sets its own
+                      spec.runtimeClassName keeps it.
+                    type: string
                   taskTimeoutSeconds:
                     default: 120
                     description: taskTimeoutSeconds is the default task timeout in
@@ -1046,6 +1052,15 @@ spec:
                       enum:
                       - deployment
                       - sandbox
+                      type: string
+                    runtimeClassName:
+                      description: |-
+                        runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
+                        pod runs under (for example "gvisor"). It applies to both runtime:
+                        deployment and runtime: sandbox. When unset the table default applies,
+                        and when that is unset too the cluster's default runtime is used. If the
+                        RuntimeClass does not exist the knight reports RuntimeAvailable=False
+                        with reason RuntimeClassNotFound.
                       type: string
                     serviceAccountName:
                       description: |-
@@ -2152,6 +2167,15 @@ spec:
                         enum:
                         - deployment
                         - sandbox
+                        type: string
+                      runtimeClassName:
+                        description: |-
+                          runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
+                          pod runs under (for example "gvisor"). It applies to both runtime:
+                          deployment and runtime: sandbox. When unset the table default applies,
+                          and when that is unset too the cluster's default runtime is used. If the
+                          RuntimeClass does not exist the knight reports RuntimeAvailable=False
+                          with reason RuntimeClassNotFound.
                         type: string
                       serviceAccountName:
                         description: |-

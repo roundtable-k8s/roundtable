@@ -50,6 +50,10 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims", "configmaps", "serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only: knights naming spec.runtimeClassName are parked when it is missing
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list", "watch"]
   # Notification webhook bearer tokens (spec.notify.webhook.tokenSecretRef)
   - apiGroups: [""]
     resources: ["secrets"]

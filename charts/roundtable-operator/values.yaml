@@ -241,6 +241,8 @@ planner:
     - shared
   concurrency: 1
   taskTimeoutSeconds: 600
+  # RuntimeClass for the planner pod (for example gvisor). Empty = cluster default.
+  runtimeClassName: ""
   arsenal:
     repo: https://github.com/roundtable-k8s/arsenal.git
     ref: main

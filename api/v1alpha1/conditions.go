@@ -140,6 +140,10 @@ const (
 	// the operator started without the sandbox backend.
 	ReasonSandboxUnavailable = "SandboxUnavailable"
 
+	// ReasonRuntimeClassNotFound indicates the RuntimeClass named by the
+	// knight's spec.runtimeClassName (or the table default) does not exist.
+	ReasonRuntimeClassNotFound = "RuntimeClassNotFound"
+
 	// ReasonToolsImageBuilding indicates the tools image for the new spec is
 	// still building; the pod keeps its current template meanwhile.
 	ReasonToolsImageBuilding = "ToolsImageBuilding"
