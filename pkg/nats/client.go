@@ -241,6 +241,22 @@ func (c *JetStreamClient) ConsumerDeliveredSeq(stream, consumer string) (uint64,
 	return info.Delivered.Stream, nil
 }
 
+// ConsumerPending returns num_pending + num_ack_pending for the consumer:
+// tasks queued plus tasks delivered but not yet acknowledged.
+func (c *JetStreamClient) ConsumerPending(stream, consumer string) (uint64, error) {
+	if err := c.Connect(); err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	js := c.js
+	c.mu.Unlock()
+	info, err := js.ConsumerInfo(stream, consumer)
+	if err != nil {
+		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+	}
+	return info.NumPending + uint64(info.NumAckPending), nil
+}
+
 // Subscribe creates a synchronous subscription to a subject.
 func (c *JetStreamClient) Subscribe(subject string, opts ...SubscribeOption) (*nats.Subscription, error) {
 	if err := c.Connect(); err != nil {

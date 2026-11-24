@@ -46,6 +46,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
@@ -67,6 +68,14 @@ type KnightReconciler struct {
 	// Deployments and Nix build Jobs. Chart-driven (KNIGHT_* env vars); zero
 	// value falls back to DefaultPodSecurity.
 	KnightSecurity knightpkg.PodSecurity
+
+	// NATS is the shared NATS provider used to read task consumer backlog for
+	// the Waking status. Optional; without it scaled-to-zero knights report
+	// ScaledToZero only.
+	NATS *natspkg.Provider
+
+	// PendingSource overrides the consumer backlog lookup (tests).
+	PendingSource ConsumerPendingSource
 
 	// RuntimeBackend abstracts the lifecycle of Knight runtime resources.
 	// When set, the controller delegates Deployment reconciliation and
@@ -296,11 +305,49 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{RequeueAfter: RequeueSlow}, reconcileErr
 	}
 
+	// Waking: poll so the transition to Ready is visible without a pod event.
+	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil &&
+		c.Reason == aiv1alpha1.ReasonKnightWaking {
+		if nixRequeue == 0 || wakingRequeue < nixRequeue {
+			nixRequeue = wakingRequeue
+		}
+	}
+
 	if nixRequeue > 0 {
 		return ctrl.Result{RequeueAfter: nixRequeue}, nil
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// wakingRequeue is how often a waking knight is re-checked.
+const wakingRequeue = 5 * time.Second
+
+// ConsumerPendingSource reports how many tasks are queued or in flight on a
+// JetStream consumer (num_pending + num_ack_pending).
+type ConsumerPendingSource interface {
+	ConsumerPending(stream, consumer string) (uint64, error)
+}
+
+// hasPendingTasks reports whether the knight's task consumer has queued or
+// in-flight tasks. Lookup failures count as "none" (the knight then reports
+// plain ScaledToZero).
+func (r *KnightReconciler) hasPendingTasks(ctx context.Context, knight *aiv1alpha1.Knight) bool {
+	src := r.PendingSource
+	if src == nil && r.NATS != nil {
+		if cli, err := r.NATS.Client(); err == nil {
+			src, _ = cli.(ConsumerPendingSource)
+		}
+	}
+	if src == nil || knight.Spec.NATS.Stream == "" {
+		return false
+	}
+	n, err := src.ConsumerPending(knight.Spec.NATS.Stream, knightpkg.TaskConsumerName(knight))
+	if err != nil {
+		logf.FromContext(ctx).V(1).Info("Could not read knight consumer pending count", "knight", knight.Name, "error", err.Error())
+		return false
+	}
+	return n > 0
 }
 
 // cleanupStaleRuntime removes runtime resources from a previous runtime type.
@@ -716,8 +763,19 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	knight.Status.Scaling = r.scalingStatus(ctx, knight, scaling, deploy, deployFound)
 	// KEDA scaled an idle knight to zero: report it as suspended, not as
 	// stuck provisioning. It wakes when a task is pending on its consumer.
-	scaledToZero := scaling.Autoscaled && deployFound && !isReady &&
+	atZero := scaling.Autoscaled && deployFound && !isReady &&
 		deploy.Spec.Replicas != nil && *deploy.Spec.Replicas == 0
+	// Waking: work is queued for a knight that is at zero, or whose pod is
+	// still starting after being at zero. Phase stays Suspended; the
+	// Available condition reason distinguishes it from idle ScaledToZero.
+	wasAsleep := knight.Status.Phase == aiv1alpha1.KnightPhaseSuspended
+	scaledToZero := atZero
+	waking := false
+	if scaling.Autoscaled && deployFound && !isReady && reconcileErr == nil &&
+		(atZero || (wasAsleep && deploy.Status.ReadyReplicas == 0)) {
+		scaledToZero = true
+		waking = r.hasPendingTasks(ctx, knight)
+	}
 
 	if reconcileErr != nil {
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ReconcileFailed", "Reconciliation failed: %v", reconcileErr)
@@ -733,12 +791,19 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	} else if scaledToZero {
 		knight.Status.Phase = aiv1alpha1.KnightPhaseSuspended
 		knight.Status.Ready = false
+		reason := aiv1alpha1.ReasonKnightScaledToZero
+		msg := fmt.Sprintf("KEDA scaled the knight to zero; it wakes when tasks are pending on consumer %s",
+			knightpkg.TaskConsumerName(knight))
+		if waking {
+			reason = aiv1alpha1.ReasonKnightWaking
+			msg = fmt.Sprintf("Tasks are queued on consumer %s; waiting for the knight pod to start",
+				knightpkg.TaskConsumerName(knight))
+		}
 		meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
-			Type:   aiv1alpha1.ConditionKnightAvailable,
-			Status: metav1.ConditionFalse,
-			Reason: aiv1alpha1.ReasonKnightScaledToZero,
-			Message: fmt.Sprintf("KEDA scaled the knight to zero; it wakes when tasks are pending on consumer %s",
-				knightpkg.TaskConsumerName(knight)),
+			Type:               aiv1alpha1.ConditionKnightAvailable,
+			Status:             metav1.ConditionFalse,
+			Reason:             reason,
+			Message:            msg,
 			ObservedGeneration: knight.Generation,
 		})
 	} else if isReady {
