@@ -97,13 +97,6 @@ type RoundTableSpec struct {
 	// +optional
 	PRFeedback *PRFeedbackSpec `json:"prFeedback,omitempty"`
 
-	// smoke configures the post-deploy smoke watcher: when the operator or
-	// a knight image changes, it runs a smoke Chain, records passing versions
-	// as known-good and holds image automation when the smoke fails. Off
-	// unless enabled.
-	// +optional
-	Smoke *SmokeSpec `json:"smoke,omitempty"`
-
 	// suspend, if true, suspends all knights in this table.
 	// +kubebuilder:default=false
 	// +optional
@@ -323,10 +316,6 @@ type RoundTableStatus struct {
 	// prFeedback is the state of the PR feedback watcher (spec.prFeedback).
 	// +optional
 	PRFeedback *PRFeedbackStatus `json:"prFeedback,omitempty"`
-
-	// smoke is the state of the post-deploy smoke watcher (spec.smoke).
-	// +optional
-	Smoke *SmokeStatus `json:"smoke,omitempty"`
 
 	// conditions represent the current state of the RoundTable resource.
 	// +listType=map
@@ -603,157 +592,4 @@ type PRFeedbackPullRequest struct {
 	// updatedAt is when this record last changed.
 	// +optional
 	UpdatedAt *metav1.Time `json:"updatedAt,omitempty"`
-}
-
-// SmokeSpec configures the post-deploy smoke watcher (#228, see
-// docs/post-deploy-smoke.md). The operator fingerprints what is deployed
-// (its own image, OPERATOR_IMAGE, and every knight's image), and once a new
-// fingerprint has settled (all knights Ready) it runs the smoke Chain. A pass
-// is recorded as known-good; a failure opens an issue with the step outputs
-// and holds image automation by labelling its pull request.
-type SmokeSpec struct {
-	// enabled turns the watcher on.
-	// +kubebuilder:default=false
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
-	// chainRef names the smoke Chain (same namespace). The watcher sets its
-	// spec.input to the version under test and starts a run. The chart
-	// renders one as smoke.
-	// +kubebuilder:default={name: "rollout-smoke"}
-	// +optional
-	ChainRef *corev1.LocalObjectReference `json:"chainRef,omitempty"`
-
-	// issueRepo is the repository (owner/name) where a failed smoke opens an
-	// issue labelled needsHumanLabel.
-	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
-	// +optional
-	IssueRepo string `json:"issueRepo,omitempty"`
-
-	// needsHumanLabel labels the failure issue.
-	// +kubebuilder:default="needs-human"
-	// +kubebuilder:validation:MaxLength=50
-	// +optional
-	NeedsHumanLabel string `json:"needsHumanLabel,omitempty"`
-
-	// tokenSecretRef selects the Secret key holding the GitHub token used to
-	// open the failure issue. Defaults to the table's spec.github.tokenSecretRef.
-	// The Secret is re-read on every poll.
-	// +optional
-	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
-
-	// hold labels the pull request of the image automation when a smoke
-	// fails, so the automation stops. Unset: a failed smoke only opens the
-	// issue and sets status.smoke.held; wire the hold up yourself.
-	// +optional
-	Hold *SmokeHold `json:"hold,omitempty"`
-
-	// pollIntervalSeconds is how often the deployed versions are checked.
-	// +kubebuilder:default=60
-	// +kubebuilder:validation:Minimum=10
-	// +kubebuilder:validation:Maximum=3600
-	// +optional
-	PollIntervalSeconds int32 `json:"pollIntervalSeconds,omitempty"`
-}
-
-// SmokeHold names the pull request the smoke watcher labels to hold image
-// automation. For dapper-cluster's Round Table Autodeploy workflow that is the
-// open pull request from branch autodeploy/roundtable, label hold: the
-// workflow skips while that pull request carries the label.
-type SmokeHold struct {
-	// repo is the repository of the automation's pull request, owner/name.
-	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
-	Repo string `json:"repo"`
-
-	// branch is the head branch of the automation's pull request.
-	// +kubebuilder:default="autodeploy/roundtable"
-	// +kubebuilder:validation:MaxLength=200
-	// +optional
-	Branch string `json:"branch,omitempty"`
-
-	// label is the label that makes the automation skip.
-	// +kubebuilder:default="hold"
-	// +kubebuilder:validation:MaxLength=50
-	// +optional
-	Label string `json:"label,omitempty"`
-
-	// tokenSecretRef selects the Secret key holding a GitHub token with
-	// pull request write access to repo. Defaults to the smoke token. The
-	// knights' token usually cannot reach this repository.
-	// +optional
-	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
-}
-
-// SmokeResult is the outcome of a smoke run.
-// +kubebuilder:validation:Enum=Passed;Failed
-type SmokeResult string
-
-const (
-	SmokePassed SmokeResult = "Passed"
-	SmokeFailed SmokeResult = "Failed"
-)
-
-// SmokeStatus is the observed state of the smoke watcher.
-type SmokeStatus struct {
-	// observedVersion is the fingerprint seen on the last poll. A version
-	// is only tested after two polls saw it.
-	// +optional
-	ObservedVersion string `json:"observedVersion,omitempty"`
-
-	// components are the images behind observedVersion, name=image.
-	// +kubebuilder:validation:MaxItems=100
-	// +optional
-	Components []string `json:"components,omitempty"`
-
-	// activeRun is the smoke run in flight, as <version>@<trigger>.
-	// +optional
-	ActiveRun string `json:"activeRun,omitempty"`
-
-	// lastTestedVersion is the last version a smoke ran for, whatever the
-	// result; it is not tested again.
-	// +optional
-	LastTestedVersion string `json:"lastTestedVersion,omitempty"`
-
-	// lastResult is the result of the last smoke run.
-	// +optional
-	LastResult SmokeResult `json:"lastResult,omitempty"`
-
-	// lastRunTime is when the last smoke run finished.
-	// +optional
-	LastRunTime *metav1.Time `json:"lastRunTime,omitempty"`
-
-	// knownGoodVersion is the last version whose smoke passed. It is also
-	// written to the ConfigMap <roundtable>-smoke.
-	// +optional
-	KnownGoodVersion string `json:"knownGoodVersion,omitempty"`
-
-	// knownGoodComponents are the images of knownGoodVersion.
-	// +kubebuilder:validation:MaxItems=100
-	// +optional
-	KnownGoodComponents []string `json:"knownGoodComponents,omitempty"`
-
-	// held is true while a failed smoke holds image automation. It clears
-	// when a later smoke passes (the label stays until a human removes it).
-	// +optional
-	Held bool `json:"held,omitempty"`
-
-	// holdPullRequest is the URL of the pull request the watcher labelled.
-	// +optional
-	HoldPullRequest string `json:"holdPullRequest,omitempty"`
-
-	// issueURL is the issue opened for the last failure.
-	// +optional
-	IssueURL string `json:"issueURL,omitempty"`
-
-	// lastPollTime is when the versions were last checked.
-	// +optional
-	LastPollTime *metav1.Time `json:"lastPollTime,omitempty"`
-
-	// lastError is the error of the last poll, empty when it succeeded.
-	// +optional
-	LastError string `json:"lastError,omitempty"`
-
-	// message is a human-readable note on the last transition.
-	// +optional
-	Message string `json:"message,omitempty"`
 }

@@ -48,8 +48,6 @@ spec:
             - {{ . }}
             {{- end }}
           env:
-            - name: OPERATOR_IMAGE
-              value: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
             - name: DEFAULT_KNIGHT_IMAGE
               value: "{{ .Values.images.piKnight.repository }}:{{ .Values.images.piKnight.tag }}"
             # Pod security context applied to knight pods.
