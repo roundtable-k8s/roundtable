@@ -490,19 +490,30 @@ type WorkflowRun struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// ListMergeGroupRuns returns the newest merge_group workflow runs of repo
-// (at most 100), newest first.
+// ListMergeGroupRuns returns the merge_group workflow runs of repo, newest
+// first, following up to maxPages pages (500 runs) so a busy merge queue
+// cannot hide an older failed run on page 2+. The cap also bounds how long a
+// huge history can stall a reconcile; runs beyond it are not seen.
 func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]WorkflowRun, error) {
 	owner, name, err := splitRepo(repo)
 	if err != nil {
 		return nil, err
 	}
-	var out struct {
-		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+	var all []WorkflowRun
+	for p := 1; p <= maxPages; p++ {
+		var out struct {
+			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+		}
+		q := url.Values{"event": {"merge_group"}, "per_page": {"100"}, "page": {fmt.Sprint(p)}}
+		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/runs", owner, name), q, nil, &out); err != nil {
+			return all, err
+		}
+		all = append(all, out.WorkflowRuns...)
+		if len(out.WorkflowRuns) < 100 {
+			break
+		}
 	}
-	q := url.Values{"event": {"merge_group"}, "per_page": {"100"}}
-	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/runs", owner, name), q, nil, &out)
-	return out.WorkflowRuns, err
+	return all, nil
 }
 
 // Job is one job of a workflow run.

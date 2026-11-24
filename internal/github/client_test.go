@@ -131,6 +131,56 @@ func TestListOpenPullsFollowsPages(t *testing.T) {
 	}
 }
 
+func TestListMergeGroupRunsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/actions/runs" || r.URL.Query().Get("event") != "merge_group" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		p := r.URL.Query().Get("page")
+		pages = append(pages, p)
+		n, base := 100, 0
+		if p == "2" {
+			n, base = 3, 100
+		}
+		runs := make([]map[string]any, n)
+		for i := range runs {
+			runs[i] = map[string]any{"id": base + i + 1}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
+	}))
+	defer srv.Close()
+
+	runs, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 103 || len(pages) != 2 || runs[0].ID != 1 || runs[102].ID != 103 {
+		t.Fatalf("got %d runs over pages %v", len(runs), pages)
+	}
+}
+
+func TestListMergeGroupRunsStopsAtMaxPages(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		runs := make([]map[string]any, 100)
+		for i := range runs {
+			runs[i] = map[string]any{"id": i}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
+	}))
+	defer srv.Close()
+
+	runs, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != maxPages || len(runs) != maxPages*100 {
+		t.Fatalf("calls=%d runs=%d", calls, len(runs))
+	}
+}
+
 func TestCommentKeepsLiteralAngleBrackets(t *testing.T) {
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

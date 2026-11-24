@@ -57,6 +57,8 @@ type fakeGitHub struct {
 	// label-endpoint requests.
 	repoLabels map[string]map[string]string
 	labelCalls int
+	// failLabel: label names whose creation fails with 500.
+	failLabel map[string]bool
 	// failComments makes the next n comment calls fail with 500.
 	failComments int
 	// prState: "repo#n" -> pull request returned by GET /pulls/{n}.
@@ -245,6 +247,10 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		var body map[string]string
 		_ = json.NewDecoder(req.Body).Decode(&body)
+		if f.failLabel[body["name"]] {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if _, ok := f.repoLabels[repo][body["name"]]; ok {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			return
@@ -565,6 +571,26 @@ var _ = Describe("IssuePickup controller", func() {
 		tick()
 		Expect(gh.repoLabels[repo]).To(HaveKey("rt:go"))
 		Expect(gh.repoLabels[repo]).To(HaveKey("rt:ready"))
+	})
+
+	It("creates the other pickup labels when one fails, and retries only the failed one", func() {
+		gh.failLabel = map[string]bool{"rt:ready": true}
+
+		reconcileOnce()
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:in-progress"))
+		Expect(gh.repoLabels[repo]).To(HaveKey("needs-human"))
+		Expect(gh.repoLabels[repo]).NotTo(HaveKey("rt:ready"))
+		lastErr := getRT().Status.IssuePickup.LastError
+		Expect(lastErr).To(ContainSubstring("ensure labels"))
+		Expect(lastErr).To(ContainSubstring("rt:ready"))
+		Expect(strings.Count(lastErr, "ensure labels")).To(Equal(1))
+
+		gh.failLabel = nil
+		calls := gh.labelCalls
+		tick()
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:ready"))
+		Expect(gh.labelCalls).To(Equal(calls+2), "only the failed label is retried (GET + POST)")
+		Expect(getRT().Status.IssuePickup.LastError).To(BeEmpty())
 	})
 
 	It("hands issues that need a human back instead of starting a Chain", func() {
