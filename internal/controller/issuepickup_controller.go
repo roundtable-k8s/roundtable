@@ -35,11 +35,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/github"
 )
 
@@ -341,45 +341,20 @@ func (r *IssuePickupReconciler) startChain(ctx context.Context, rt *aiv1alpha1.R
 	if err != nil {
 		return nil, err
 	}
-	spec := tmpl.Spec.DeepCopy()
-	spec.Input = string(input)
-	spec.Schedule = ""
-	spec.StartingDeadlineSeconds = nil
-	spec.Suspend = false
-
-	if existing != nil {
-		orig := existing.DeepCopy()
-		existing.Spec = *spec
-		if existing.Annotations == nil {
-			existing.Annotations = map[string]string{}
-		}
-		existing.Annotations[aiv1alpha1.AnnotationChainRun] = trigger
-		if err := r.Patch(ctx, existing, client.MergeFrom(orig)); err != nil {
-			return nil, err
-		}
-		return existing, nil
-	}
-
-	chain := &aiv1alpha1.Chain{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: rt.Namespace,
-			Labels:    map[string]string{aiv1alpha1.LabelPickupRoundTable: rt.Name},
-			Annotations: map[string]string{
-				aiv1alpha1.AnnotationPickupRepo:  repo,
-				aiv1alpha1.AnnotationPickupIssue: strconv.Itoa(issue),
-				aiv1alpha1.AnnotationChainRun:    trigger,
-			},
+	return chainrun.Start(ctx, r.Client, r.Scheme, tmpl, chainrun.StartOptions{
+		Name:      name,
+		Namespace: rt.Namespace,
+		Input:     string(input),
+		Trigger:   trigger,
+		Source:    chainrun.SourcePickup,
+		Labels:    map[string]string{aiv1alpha1.LabelPickupRoundTable: rt.Name},
+		Annotations: map[string]string{
+			aiv1alpha1.AnnotationPickupRepo:  repo,
+			aiv1alpha1.AnnotationPickupIssue: strconv.Itoa(issue),
 		},
-		Spec: *spec,
-	}
-	if err := controllerutil.SetControllerReference(rt, chain, r.Scheme); err != nil {
-		return nil, err
-	}
-	if err := r.Create(ctx, chain); err != nil {
-		return nil, err
-	}
-	return chain, nil
+		Owner:    rt,
+		Existing: existing,
+	})
 }
 
 // claim marks the issue as taken on GitHub (in-progress label, assignees,
@@ -505,21 +480,13 @@ func pickupInterval(spec *aiv1alpha1.IssuePickupSpec) time.Duration {
 }
 
 // pickupChainActive reports whether a Chain is running or has a run pending.
-func pickupChainActive(c *aiv1alpha1.Chain) bool {
-	return c.Status.Phase == aiv1alpha1.ChainPhaseRunning ||
-		c.Annotations[aiv1alpha1.AnnotationChainRun] != c.Status.LastRunTrigger
-}
+func pickupChainActive(c *aiv1alpha1.Chain) bool { return chainrun.Active(c) }
 
 // pickupChainExpired reports whether a finished Chain is past
 // ttlSecondsAfterFinished.
 func pickupChainExpired(c *aiv1alpha1.Chain, spec *aiv1alpha1.IssuePickupSpec, now time.Time) bool {
-	if spec.TTLSecondsAfterFinished == nil || *spec.TTLSecondsAfterFinished <= 0 || c.Status.CompletedAt == nil {
-		return false
-	}
-	return now.Sub(c.Status.CompletedAt.Time) >= time.Duration(*spec.TTLSecondsAfterFinished)*time.Second
+	return chainrun.Expired(c, spec.TTLSecondsAfterFinished, now)
 }
-
-var nonDNSChars = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // pickupChainName is "<template>-<repo name>-<issue>", e.g.
 // pr-pipeline-roundtable-224. The owner is left out to keep names short; two
@@ -527,13 +494,7 @@ var nonDNSChars = regexp.MustCompile(`[^a-z0-9-]+`)
 // collision via AnnotationPickupRepo.
 func pickupChainName(template, repo string, issue int) string {
 	_, name, _ := strings.Cut(repo, "/")
-	name = strings.Trim(nonDNSChars.ReplaceAllString(strings.ToLower(name), "-"), "-")
-	suffix := "-" + strconv.Itoa(issue)
-	prefix := template + "-" + name
-	if limit := 253 - len(suffix); len(prefix) > limit {
-		prefix = strings.TrimRight(prefix[:limit], "-")
-	}
-	return prefix + suffix
+	return chainrun.Name(template, name, strconv.Itoa(issue))
 }
 
 func compileHumanPatterns(patterns []string) ([]*regexp.Regexp, error) {
