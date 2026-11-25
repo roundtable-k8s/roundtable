@@ -179,12 +179,8 @@ var _ = Describe("Trigger controller", func() {
 			}
 		}
 
-		It("rejects reserved, missing and multiple sources", func() {
-			t := base("v-github")
-			t.Spec.Source.GitHub = &aiv1alpha1.TriggerReservedSource{}
-			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("source.github is not implemented yet")))
-
-			t = base("v-none")
+		It("rejects missing and multiple sources", func() {
+			t := base("v-none")
 			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("set exactly one of")))
 
 			t = base("v-two")

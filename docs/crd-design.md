@@ -34,7 +34,7 @@
 - **Mission** → references Knights (existing or ephemeral) and Chains
 - **Mission** → creates ephemeral Knights and temporary NATS subjects
 - **Chain** can optionally reference a **RoundTable** for NATS config
-- **Trigger** → starts copies of a **Chain** (owned by the Trigger) from a NATS event on the RoundTable's events stream, a webhook delivered through the gateway, or a cron schedule
+- **Trigger** → starts copies of a **Chain** (owned by the Trigger) from a NATS event on the RoundTable's events stream, a webhook delivered through the gateway, a cron schedule, or a GitHub issue or pull request matching a label query
 
 ### Ownership Hierarchy
 
@@ -233,6 +233,9 @@ consumer (`trigger-<namespace>_<name>`) on the table's events stream
 (`<subjectPrefix>.events.>`, created with `createStreams`); each message is
 acked only after the run is created or deliberately skipped. A `schedule`
 source fires on a cron with the same catch-up rule as `Chain.spec.schedule`.
+A `github` source runs one poll loop per Trigger that publishes matching issues
+or pull requests to the Trigger's own subject on the events stream, read like a
+`nats` source; its `claim` labels an item only after its run was created.
 `dedupeKey` names the run, so a repeated key starts nothing; `concurrency`
 (`Allow` with `maxActive`, `Forbid`, `Replace`) bounds active runs. Firings are
 recorded in `status.recentFirings`. See [triggers.md](triggers.md).

@@ -294,3 +294,60 @@ func TestIsNotFound(t *testing.T) {
 		t.Fatal("IsNotFound wrong")
 	}
 }
+
+func TestListIssuesByQuery(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "4321")
+		w.Header().Set("X-RateLimit-Reset", "1900000000")
+		_, _ = io.WriteString(w, `[
+			{"number": 1, "title": "an issue", "html_url": "u1", "user": {"login": "alice"}, "labels": [{"name": "ready"}]},
+			{"number": 2, "title": "a pull", "pull_request": {"url": "x"}, "user": {"login": "bob"}}
+		]`)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "tok")
+
+	issues, rate, err := c.ListIssuesByQuery(context.Background(), "acme/widgets", IssueQuery{Labels: []string{"ready", "bug"}, State: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Number != 1 || issues[0].User.Login != "alice" || !issues[0].HasLabel("ready") {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if !strings.Contains(query, "labels=ready%2Cbug") || !strings.Contains(query, "state=all") {
+		t.Errorf("query = %q", query)
+	}
+	if rate.Limit != 5000 || rate.Remaining != 4321 || rate.Reset.Unix() != 1900000000 {
+		t.Errorf("rate = %+v", rate)
+	}
+
+	pulls, _, err := c.ListIssuesByQuery(context.Background(), "acme/widgets", IssueQuery{Labels: []string{"ready"}, PullRequests: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pulls) != 1 || pulls[0].Number != 2 || !strings.Contains(query, "state=open") {
+		t.Fatalf("pulls = %+v, query = %q", pulls, query)
+	}
+}
+
+func TestRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1900000000")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"message": "API rate limit exceeded"}`)
+	}))
+	defer srv.Close()
+	_, _, err := NewClient(srv.URL, "tok").ListIssuesByQuery(context.Background(), "acme/widgets", IssueQuery{Labels: []string{"x"}})
+	reset, ok := RateLimited(err)
+	if !ok || reset.Unix() != 1900000000 {
+		t.Fatalf("RateLimited(%v) = %v, %v", err, reset, ok)
+	}
+	if _, ok := RateLimited(errors.New("boom")); ok {
+		t.Error("plain error reported as rate limited")
+	}
+}

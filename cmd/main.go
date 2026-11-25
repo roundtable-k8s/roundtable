@@ -127,7 +127,7 @@ func main() {
 		"NATS HTTP monitoring endpoint (host:port) for KEDA's JetStream scaler. "+
 			"Empty derives it from each knight's spec.nats.url host on port 8222.")
 	flag.StringVar(&githubAPIURL, "github-api-url", "https://api.github.com",
-		"GitHub REST API URL used by RoundTable spec.issuePickup.")
+		"GitHub REST API URL used by RoundTable spec.issuePickup and github-source Triggers.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -409,17 +409,19 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
 	}
-	// Triggers (#402) start Chain runs from NATS events and cron schedules.
+	githubFactory := github.NewClientFactory(githubAPIURL)
+	// Triggers (#402) start Chain runs from NATS events, webhooks, cron
+	// schedules and GitHub polls.
 	if err := (&controller.TriggerReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("trigger-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
+		GitHub:   githubFactory,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Trigger")
 		os.Exit(1)
 	}
-	githubFactory := github.NewClientFactory(githubAPIURL)
 	// Issue pickup (#224) only acts on RoundTables that set spec.issuePickup.
 	if err := (&controller.IssuePickupReconciler{
 		Client:   mgr.GetClient(),
