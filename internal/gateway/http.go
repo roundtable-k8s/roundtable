@@ -54,6 +54,12 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		api.HandleFunc("GET /v1/missions/{namespace}/{name}", svc.handleGetMission)
 		api.HandleFunc("DELETE /v1/missions/{namespace}/{name}", svc.handleDeleteMission)
 	}
+	if svc.RunsEnabled() {
+		api.HandleFunc("GET /v1/chains", svc.handleListChains)
+		api.HandleFunc("POST /v1/chains/{name}/runs", svc.handleRunChain)
+		api.HandleFunc("GET /v1/runs", svc.handleListRuns)
+		api.HandleFunc("GET /v1/runs/{namespace}/{run}", svc.handleGetRun)
+	}
 	api.Handle("/mcp", MCPHandler(svc))
 
 	mux := http.NewServeMux()
@@ -189,6 +195,79 @@ func (s *Service) handleDeleteMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": ns + "/" + name})
+}
+
+func (s *Service) handleListChains(w http.ResponseWriter, r *http.Request) {
+	chains, err := s.ListChains(r.Context(), r.URL.Query().Get("namespace"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chains": chains})
+}
+
+func (s *Service) handleRunChain(w http.ResponseWriter, r *http.Request) {
+	var req RunChainRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+		return
+	}
+	if dec.More() {
+		writeError(w, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid))
+		return
+	}
+	rec, err := s.RunChain(r.Context(), r.PathValue("name"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeRun(w, rec)
+}
+
+func (s *Service) handleGetRun(w http.ResponseWriter, r *http.Request) {
+	wait, err := queryInt(r, "waitSeconds")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	rec, err := s.GetRun(r.Context(), r.PathValue("namespace"), r.PathValue("run"), wait)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeRun(w, rec)
+}
+
+// writeRun answers 200 with a finished run and 202 with a Location to poll
+// otherwise.
+func writeRun(w http.ResponseWriter, rec *RunRecord) {
+	code := http.StatusOK
+	if !rec.Done {
+		code = http.StatusAccepted
+		w.Header().Set("Location", "/v1/runs/"+rec.Namespace+"/"+rec.Run)
+	}
+	writeJSON(w, code, rec)
+}
+
+func (s *Service) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := RunFilter{Namespace: q.Get("namespace"), Chain: q.Get("chain"), Phase: q.Get("phase")}
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if limit != nil {
+		f.Limit = *limit
+	}
+	runs, err := s.ListRuns(r.Context(), f)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
 // queryInt parses an optional integer query parameter.

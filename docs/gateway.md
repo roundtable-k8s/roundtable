@@ -20,8 +20,9 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
     Secrets, Jobs, cluster-wide). The gateway is the only network-facing,
     caller-driven component, so it runs under its own ServiceAccount with
     read-only `get`/`list` on Knights, RoundTables and Chains. The only
-    objects it writes are Missions, and only in the namespaces callers may
-    target (see [Missions](#missions)).
+    objects it writes are Missions and run copies of opted-in Chains, and
+    only in the namespaces callers may target (see [Missions](#missions) and
+    [Chain runs](#chain-runs)).
   - **Separate failure and scaling.** Invoke requests stay open for up to
     `maxTimeout`. Load spikes and restarts of the gateway don't touch the
     reconcilers. The operator's leader election would also either leave
@@ -342,6 +343,157 @@ done
 jq -r '.phase, .result, .totalCost' /tmp/mission.json
 ```
 
+## Chain runs
+
+A caller can run a Chain by name with its own input and either wait for the
+final output or get a run to poll. These endpoints are served when
+`gateway.runs.enabled` is true (the default).
+
+- **Only opted-in Chains.** A Chain must carry the label
+  `ai.roundtable.io/invokable: "true"`. Anything else (the dev factory's
+  pipeline, mission-scoped chains, run copies made by issue pickup or by the
+  gateway itself) is a **403**. Opt a Chain in with
+  `kubectl label chain <name> ai.roundtable.io/invokable=true`.
+- **A run is a copy.** A Chain has one run at a time, so every gateway run is
+  a new Chain copied from the named one (the same `internal/chainrun` helper
+  issue pickup uses). The copy has the template's steps, no schedule, and only
+  `spec.input` set from the request: callers can never send steps. Copies are
+  named `<chain>-gw-<8 hex>` and carry the labels
+  `ai.roundtable.io/run-source: gateway` and
+  `ai.roundtable.io/created-by: gateway`, and the annotation
+  `ai.roundtable.io/run-of: <chain>`.
+- **Copies are cleaned up.** The gateway deletes its own copies
+  `gateway.runTTL` (default 24h) after they finish. That is why it has
+  `create` and `delete` on Chains, granted per namespace like Missions (a
+  ClusterRole if `allowedNamespaces` holds `"*"`).
+
+### `GET /v1/chains?namespace=`
+
+`{"chains": [{name, namespace, description, steps, timeoutSeconds}]}`: the
+opted-in Chains a caller can run.
+
+### `POST /v1/chains/{name}/runs`
+
+```json
+{"input": {"topic": "NATS KV"}, "namespace": "", "waitSeconds": 1500}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `input` | Optional. The run's `spec.input`: a JSON string is used as is, any other JSON value as its (compact) JSON text. At most 256 KiB. Omitted or `null` keeps the Chain's own input. |
+| `namespace` | Optional. The Chain's namespace: the gateway's own or one of `allowedNamespaces`, else **400**. |
+| `waitSeconds` | Optional. Wait this long for the run to finish (default 0, capped at `gateway.maxTimeout`). Waits count against `maxInFlight`. |
+
+Unknown fields are a **400**, an unknown Chain a **404**, a Chain without the
+label a **403** and a suspended Chain a **503**. The answer is the run record:
+**200** when the run has finished, otherwise **202** with
+`Location: /v1/runs/{namespace}/{run}`.
+
+```json
+{
+  "run": "blog-drafter-gw-1a2b3c4d",
+  "chain": "blog-drafter",
+  "namespace": "roundtable",
+  "runId": "2b9c…",
+  "phase": "Succeeded",
+  "done": true,
+  "createdAt": "2026-11-24T07:00:00Z",
+  "startedAt": "2026-11-24T07:00:01Z",
+  "completedAt": "2026-11-24T07:24:12Z",
+  "steps": [
+    {"name": "research", "phase": "Succeeded", "output": "…"},
+    {"name": "draft", "phase": "Succeeded", "output": "…"}
+  ],
+  "output": "…"
+}
+```
+
+`phase` is the Chain's phase (`Pending` until the chain controller starts the
+run, then `Running`, `Succeeded`, `PartiallySucceeded` or `Failed`). Each
+step's `output` is cut at 64 KiB (`outputTruncated: true`). `output` is the
+output of the final step: the one step no other step depends on. If several
+steps have no dependents, `output` is omitted; read `steps`.
+
+### `GET /v1/runs/{namespace}/{run}?waitSeconds=`
+
+Returns a run the gateway started (any other Chain is a **404**), with the
+same 200/202 convention. `waitSeconds` long-polls (capped at
+`gateway.maxTimeout`), so a caller whose connection dropped resumes waiting
+where it left off.
+
+### `GET /v1/runs?namespace=&chain=&phase=&limit=`
+
+`{"runs": [...]}`: gateway-started runs, newest first, without `steps` and
+`output` (get one run for those). `limit` defaults to 20, at most 200.
+
+### Waits longer than 10 minutes
+
+`gateway.maxTimeout` (`--max-timeout`) defaults to 30 minutes, so a CronJob
+can wait for a 25-minute chain in one request. The gateway sets no read or
+write timeout on its HTTP server: `ReadHeaderTimeout` (10s) only bounds
+reading the request headers and `IdleTimeout` (2m) only the gap between
+requests on a kept-alive connection, so neither cuts a long response.
+**Anything between the caller and the gateway needs its own timeout raised**:
+`curl --max-time`, an ingress or proxy read timeout (e.g.
+`nginx.ingress.kubernetes.io/proxy-read-timeout: "1900"`), a service mesh
+route timeout, an MCP client's tool-call timeout. If one of them can't wait
+that long, use run-then-poll: start with a short `waitSeconds` and long-poll
+`GET /v1/runs/{namespace}/{run}?waitSeconds=` in slices below that limit.
+
+### Example: a CronJob that runs a chain and waits 1500 s
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: blog-drafter
+  namespace: roundtable
+spec:
+  schedule: "0 7 * * 1"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: run
+              image: curlimages/curl:8.11.0
+              env:
+                - name: TOKEN
+                  valueFrom:
+                    secretKeyRef: {name: roundtable-gateway-token, key: token}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  code=$(curl -sS --max-time 1560 -o /tmp/run.json -w '%{http_code}' \
+                    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+                    http://roundtable-roundtable-operator-gateway.roundtable.svc/v1/chains/blog-drafter/runs \
+                    -d '{"input": {"week": "'"$(date +%G-W%V)"'"}, "waitSeconds": 1500}')
+                  cat /tmp/run.json
+                  # 200 = finished; 202 = still running after 1500 s.
+                  [ "$code" = 200 ] && grep -q '"phase":"Succeeded"' /tmp/run.json
+```
+
+### Example: run, then poll
+
+```bash
+GW=http://roundtable-roundtable-operator-gateway.roundtable.svc
+AUTH="Authorization: Bearer $TOKEN"
+
+LOC=$(curl -s -D - -o /dev/null -H "$AUTH" -H 'Content-Type: application/json' \
+  "$GW/v1/chains/opencti-feed-sync/runs" -d '{"input": "since=24h"}' \
+  | awk 'tolower($1)=="location:" {print $2}' | tr -d '\r')
+
+# Long-poll in 5-minute slices until the run is done.
+until curl -s -H "$AUTH" "$GW$LOC?waitSeconds=300" | tee /tmp/run.json | jq -e .done >/dev/null; do
+  jq -c '{phase, steps: [.steps[]? | {name, phase}]}' /tmp/run.json
+done
+jq -r '.phase, .output' /tmp/run.json
+```
+
 ## MCP endpoint
 
 The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
@@ -357,8 +509,13 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `start_mission` | The `POST /v1/missions` body | Text content is the result once done, else a note to call `get_mission`. Structured content is the mission projection. A failed or expired mission is a tool error. Unknown arguments fail the input schema. |
 | `get_mission` | `name`, `namespace?`, `waitSeconds?` | The mission projection (same text/error conventions) |
 | `list_missions` | `namespace?`, `phase?`, `limit?` | `{missions: [...]}` |
+| `list_chains` | `namespace?` | `{chains: [...]}`: the opted-in Chains with their description |
+| `run_chain` | `chain`, `input?` (a string or any JSON value), `waitSeconds?`, `namespace?` | Text content is the final step's output once done, else a note to call `get_run`. Structured content is the run record. A failed run is a tool error. |
+| `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
+| `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
 
-The mission tools are only listed when `gateway.missions.enabled` is true.
+The mission tools are only listed when `gateway.missions.enabled` is true, the
+chain-run tools when `gateway.runs.enabled` is true.
 
 To register the endpoint with Claude Code:
 
@@ -369,7 +526,8 @@ claude mcp add --transport http roundtable \
 ```
 
 Some MCP clients cut tool calls off after a fixed time. If yours does, pass a
-`timeoutSeconds` below that limit and poll `get_task`.
+`timeoutSeconds` (or `waitSeconds`) below that limit and poll `get_task` (or
+`get_run` with `waitSeconds`).
 
 ## Limits and notes
 
@@ -383,6 +541,9 @@ Some MCP clients cut tool calls off after a fixed time. If yours does, pass a
   while a synchronous invoke is waiting, the caller's connection drops but the
   task keeps running. Find it with `list_tasks` or `GET /v1/tasks?knight=…`,
   then fetch it with `get_task`. The result is read from the results stream.
+  The same holds for chain runs and missions: the run keeps going, and
+  `GET /v1/runs/{namespace}/{run}?waitSeconds=` (or `get_run`) resumes the
+  wait.
 - **Follow-up turns depend on the knight runtime.** A runtime that keys
   sessions on `runId` continues the conversation. One that doesn't treats every
   task as fresh.

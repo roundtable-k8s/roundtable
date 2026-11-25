@@ -70,6 +70,9 @@ type Options struct {
 	// Missions configures the mission endpoints (served when
 	// Service.Missions is set).
 	Missions MissionOptions
+	// Runs configures the chain-run endpoints (served when Service.Runs is
+	// set).
+	Runs RunOptions
 }
 
 // Service implements the gateway operations shared by the HTTP API and MCP.
@@ -81,6 +84,9 @@ type Service struct {
 	// Missions creates, reads and deletes Missions. nil disables the
 	// mission endpoints.
 	Missions client.Client
+	// Runs creates, reads and deletes run copies of opted-in Chains. nil
+	// disables the chain-run endpoints.
+	Runs client.Client
 
 	now      func() time.Time
 	inflight chan struct{}
@@ -95,6 +101,7 @@ func NewService(resolver *Resolver, bus Bus, opts Options, log logr.Logger) *Ser
 		opts.MaxTimeout = opts.DefaultTimeout
 	}
 	opts.Missions.defaults()
+	opts.Runs.defaults()
 	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now}
 	if opts.MaxInFlight > 0 {
 		s.inflight = make(chan struct{}, opts.MaxInFlight)
