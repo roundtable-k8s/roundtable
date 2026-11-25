@@ -149,16 +149,16 @@ isolation:
       - openrouter.ai
       - api.anthropic.com
 
+# NATS URL given to mission knights when neither the parent RoundTable nor the
+# mission's roundTableTemplate sets one (MISSION_DEFAULT_NATS_URL).
+missionDefaultNatsURL: nats://nats.database.svc.cluster.local:4222
+
 # Egress NetworkPolicy the operator creates for each mission's knights. The NATS
 # rule is derived from the mission's NATS URL (namespace and port); TCP 443 is
 # allowed to anywhere. Not created when isolation.egress.mode is "deny": each
 # mission knight then gets its own default-deny policy. Set enabled=false on clusters without NetworkPolicy
 # support or that manage their own policies. The nats and dns peers below also
 # apply to the egress policy of knights with spec.egress (enabled does not).
-# NATS URL given to mission knights when neither the parent RoundTable nor the
-# mission's roundTableTemplate sets one (MISSION_DEFAULT_NATS_URL).
-missionDefaultNatsURL: nats://nats.database.svc.cluster.local:4222
-
 missionNetworkPolicy:
   enabled: true
   nats:
