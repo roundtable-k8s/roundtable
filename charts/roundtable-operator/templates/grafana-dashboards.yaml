@@ -1,0 +1,44 @@
+{{- if .Values.dashboards.enabled }}
+{{- /* Grafana dashboards (#333): one object per file in dashboards/. Sidecar
+ConfigMaps by default; GrafanaDashboard CRs when dashboards.grafanaOperator is
+enabled and the grafana-operator CRD is installed. */}}
+{{- $operator := and .Values.dashboards.grafanaOperator.enabled (.Capabilities.APIVersions.Has "grafana.integreatly.org/v1beta1") }}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $name := trimSuffix ".json" (base $path) }}
+---
+{{- if $operator }}
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: {{ include "roundtable-operator.fullname" $ }}-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+spec:
+  instanceSelector:
+    matchLabels:
+      {{- toYaml $.Values.dashboards.grafanaOperator.instanceSelector | nindent 6 }}
+  {{- with $.Values.dashboards.folder }}
+  folder: {{ . | quote }}
+  {{- end }}
+  json: |-
+    {{- $.Files.Get $path | nindent 4 }}
+{{- else }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "roundtable-operator.fullname" $ }}-dashboard-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    {{ $.Values.dashboards.label }}: {{ $.Values.dashboards.labelValue | quote }}
+  {{- with $.Values.dashboards.folder }}
+  annotations:
+    {{ $.Values.dashboards.folderAnnotation }}: {{ . | quote }}
+  {{- end }}
+data:
+  {{ $name }}.json: |-
+    {{- $.Files.Get $path | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}
