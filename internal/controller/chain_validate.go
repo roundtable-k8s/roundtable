@@ -26,7 +26,10 @@ import (
 
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -164,4 +167,70 @@ func (r *ChainReconciler) validateDAG(chain *aiv1alpha1.Chain) error {
 		}
 	}
 	return util.ValidateDAG(nodes)
+}
+
+// validateSpec runs every spec check in order and returns the first failure as
+// a ChainValid condition reason and message, plus the error the reconcile
+// returns. A valid spec returns a nil error.
+func (r *ChainReconciler) validateSpec(ctx context.Context, chain *aiv1alpha1.Chain) (reason, message string, err error) {
+	if aiv1alpha1.RefName(chain.Spec.RoundTableRef) == "" && aiv1alpha1.RefName(chain.Spec.MissionRef) == "" {
+		return aiv1alpha1.ReasonMissingRoundTableRef,
+			"Chain must have either roundTableRef or missionRef configured",
+			fmt.Errorf("chain %s/%s missing roundTableRef or missionRef", chain.Namespace, chain.Name)
+	}
+	if err := r.validateKnightRefs(ctx, chain); err != nil {
+		return aiv1alpha1.ReasonInvalidKnightRef, err.Error(), err
+	}
+	if err := r.validateDAG(chain); err != nil {
+		return aiv1alpha1.ReasonCyclicDependency, err.Error(), err
+	}
+	if err := validateForEach(chain); err != nil {
+		return aiv1alpha1.ReasonInvalidForEach, err.Error(), err
+	}
+	if reason, err := validateConditionsAndLoops(chain); err != nil {
+		return reason, err.Error(), err
+	}
+	if _, err := parseSchedule(chain); err != nil {
+		return aiv1alpha1.ReasonInvalidSchedule, err.Error(), err
+	}
+	if err := r.validateTemplates(chain); err != nil {
+		return aiv1alpha1.ReasonInvalidTemplate, err.Error(), err
+	}
+	return "", "", nil
+}
+
+// rejectSpec records a failed validateSpec on the chain status and returns
+// the error the reconcile returns. A knight that is missing because the
+// owning mission already cleaned it up stops the reconcile quietly instead.
+func (r *ChainReconciler) rejectSpec(ctx context.Context, chain *aiv1alpha1.Chain, reason, message string, err error) error {
+	log := logf.FromContext(ctx)
+	// A knight that disappears after the owning mission started cleanup
+	// (or is gone / terminal) was deleted BY that cleanup — mission-scoped
+	// ephemeral knights are removed before the chain itself is
+	// garbage-collected. Reporting InvalidKnightRef then is post-cleanup
+	// noise that looks like the dispatch failure cause, so stop
+	// reconciling quietly instead of setting conditions and requeuing.
+	if reason == aiv1alpha1.ReasonInvalidKnightRef && apierrors.IsNotFound(err) && r.owningMissionInactive(ctx, chain) {
+		log.V(1).Info("Knight missing after owning mission cleanup, stopping reconcile",
+			"mission", chain.Labels[aiv1alpha1.LabelMission])
+		return nil
+	}
+	meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionChainValid,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: chain.Generation,
+	})
+	switch reason {
+	case aiv1alpha1.ReasonMissingRoundTableRef:
+		chain.Status.Phase = aiv1alpha1.ChainPhaseFailed
+	case aiv1alpha1.ReasonInvalidSchedule:
+		chain.Status.NextScheduledAt = nil
+	}
+	chain.Status.ObservedGeneration = chain.Generation
+	if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
+		log.Error(statusErr, "Failed to update status during validation error")
+	}
+	return err
 }
