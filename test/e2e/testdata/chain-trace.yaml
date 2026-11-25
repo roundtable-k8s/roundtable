@@ -1,0 +1,65 @@
+# A table, one stub knight (test/e2e/stubknight, no LLM) and a two-step Chain
+# for the e2e Chain trace test. The first step's prompt carries a fake GitHub
+# token, which must only ever be exported redacted.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: e2e-table
+  namespace: roundtable-e2e
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: e2e
+    tasksStream: e2e_tasks
+    resultsStream: e2e_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-e2e
+  labels:
+    ai.roundtable.io/round-table: e2e-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: e2e_tasks
+    resultsStream: e2e_results
+    subjects:
+      - "e2e.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 64Mi
+  concurrency: 1
+  taskTimeoutSeconds: 60
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: trace-e2e
+  namespace: roundtable-e2e
+spec:
+  roundTableRef: {name: e2e-table}
+  timeoutSeconds: 600
+  steps:
+    - name: gather
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Gather facts. Use the token FAKE_CREDENTIAL to read the repo.
+    - name: report
+      dependsOn: [gather]
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Write a report from: {{ .Steps.gather.Output }}

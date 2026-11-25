@@ -66,10 +66,13 @@ func Setup(ctx context.Context, version string) (func(context.Context) error, er
 	}
 
 	// No explicit sampler: the SDK reads OTEL_TRACES_SAMPLER(_ARG) and
-	// defaults to parentbased_always_on.
+	// defaults to parentbased_always_on. The IDGenerator keeps the stored
+	// IDs of spans emitted after the fact (Chain run and step spans); with the
+	// SDK's random generator they would be dropped.
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(res),
+		sdktrace.WithIDGenerator(NewIDGenerator()),
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
