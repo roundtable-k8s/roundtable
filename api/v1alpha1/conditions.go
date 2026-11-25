@@ -83,6 +83,15 @@ const (
 	// that supports ReadWriteMany.
 	ConditionKnightMemoryShared = "MemoryShared"
 
+	// ConditionKnightDeprecatedFieldsUsed is True when the Knight sets a
+	// deprecated, ignored spec field (currently spec.nats.maxDeliver above 1).
+	// The condition is absent otherwise.
+	ConditionKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
+
+	// ReasonKnightDeprecatedFieldsUsed is the reason (and event reason base)
+	// for ConditionKnightDeprecatedFieldsUsed.
+	ReasonKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.

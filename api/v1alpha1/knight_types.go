@@ -536,6 +536,9 @@ type KnightNATS struct {
 	ConsumerName string `json:"consumerName,omitempty"`
 
 	// maxDeliver is the maximum number of delivery attempts per message.
+	//
+	// Deprecated: ignored. Knights always run a task at most once; lost and
+	// failed tasks go to the dead-letter stream and are retried by hand.
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
 	// +optional

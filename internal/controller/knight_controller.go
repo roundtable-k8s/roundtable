@@ -918,6 +918,8 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		ObservedGeneration: knight.Generation,
 	})
 
+	r.setDeprecatedFieldsCondition(knight)
+
 	// Set NATS consumer name in status
 	consumerName := knight.Spec.NATS.ConsumerName
 	if consumerName == "" {
@@ -934,6 +936,31 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			Observe(r.now().Sub(wakingSince).Seconds())
 	}
 	return nil
+}
+
+// setDeprecatedFieldsCondition reports deprecated, ignored spec fields. A
+// spec.nats.maxDeliver above 1 does nothing (tasks run at most once), so it
+// sets DeprecatedFieldsUsed=True and records a MaxDeliverIgnored warning once
+// per generation. The condition is removed when no such field is set.
+func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knight) {
+	maxDeliver := knight.Spec.NATS.MaxDeliver //nolint:staticcheck // reading the deprecated field to report it
+	if maxDeliver <= 1 {
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		return
+	}
+	prev := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+	msg := fmt.Sprintf("spec.nats.maxDeliver=%d is deprecated and ignored: knights always run a task at most once; lost and failed tasks go to the dead-letter stream and are retried by hand",
+		maxDeliver)
+	if prev == nil || prev.ObservedGeneration != knight.Generation {
+		r.Recorder.Event(knight, corev1.EventTypeWarning, "MaxDeliverIgnored", msg)
+	}
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightDeprecatedFieldsUsed,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonKnightDeprecatedFieldsUsed,
+		Message:            msg,
+		ObservedGeneration: knight.Generation,
+	})
 }
 
 // runtimeBackendFor returns the appropriate RuntimeBackend for a Knight.

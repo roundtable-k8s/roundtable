@@ -18,14 +18,17 @@ package controller
 
 import (
 	"context"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -421,5 +424,78 @@ var _ = Describe("Knight Controller", func() {
 			Expect(errors.IsNotFound(err)).To(BeTrue(),
 				"per-knight Nix PVC must not be created after the shared-store cutover")
 		})
+	})
+})
+
+var _ = Describe("Knight deprecated maxDeliver", func() {
+	ctx := context.Background()
+
+	run := func(name string, maxDeliver int32) (*aiv1alpha1.Knight, *record.FakeRecorder) {
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       aiv1alpha1.KnightSpec{Domain: "security", Skills: []string{"shared"}},
+		}
+		k.Spec.NATS.Subjects = []string{"roundtable.tasks.security.>"}
+		k.Spec.NATS.MaxDeliver = maxDeliver //nolint:staticcheck // exercising the deprecated field
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		DeferCleanup(func() {
+			cur := &aiv1alpha1.Knight{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(k), cur); err == nil {
+				cur.Finalizers = nil
+				_ = k8sClient.Update(ctx, cur)
+				_ = k8sClient.Delete(ctx, cur)
+			}
+		})
+		rec := record.NewFakeRecorder(100)
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		for range 3 {
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+		}
+		got := &aiv1alpha1.Knight{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), got)).To(Succeed())
+		return got, rec
+	}
+
+	drain := func(rec *record.FakeRecorder) []string {
+		var out []string
+		for {
+			select {
+			case e := <-rec.Events:
+				out = append(out, e)
+			default:
+				return out
+			}
+		}
+	}
+
+	It("warns once and sets the condition when maxDeliver is above 1", func() {
+		got, rec := run("maxdeliver-three", 3)
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(ContainSubstring("spec.nats.maxDeliver"))
+		n := 0
+		for _, e := range drain(rec) {
+			if strings.Contains(e, "MaxDeliverIgnored") {
+				n++
+			}
+		}
+		Expect(n).To(Equal(1), "event once per generation despite repeated reconciles")
+	})
+
+	It("is silent when maxDeliver is 1", func() {
+		got, rec := run("maxdeliver-one", 1)
+		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
+		for _, e := range drain(rec) {
+			Expect(e).NotTo(ContainSubstring("MaxDeliverIgnored"))
+		}
+	})
+
+	It("is silent when maxDeliver is unset", func() {
+		got, rec := run("maxdeliver-unset", 0)
+		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
+		for _, e := range drain(rec) {
+			Expect(e).NotTo(ContainSubstring("MaxDeliverIgnored"))
+		}
 	})
 })

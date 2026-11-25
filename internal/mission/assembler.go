@@ -487,7 +487,6 @@ func (a *KnightAssembler) buildEphemeralKnight(
 			natspkg.TaskSubject(natsPrefix, spec.Domain, knightName),
 		},
 		ConsumerName: fmt.Sprintf("msn-%s-%s", mission.Name, mk.Name),
-		MaxDeliver:   1, // Exactly-once delivery for mission tasks
 	}
 
 	// Inject RoundTable-shared secrets, then mission-specific ones. Warm
