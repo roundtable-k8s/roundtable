@@ -432,6 +432,15 @@ func main() {
 		},
 		Cleaner:     &mission.Cleaner{Client: mgr.GetClient(), NATS: natsProvider},
 		CostTracker: &mission.CostTracker{Client: mgr.GetClient()},
+		Briefer: &mission.Briefer{
+			Client:   mgr.GetClient(),
+			Recorder: mgr.GetEventRecorderFor("mission-controller"), //nolint:staticcheck // SA1019: see note above
+			NATS:     natsProvider,
+		},
+		Chains: &mission.ChainManager{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Mission")
 		os.Exit(1)

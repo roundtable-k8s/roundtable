@@ -167,6 +167,8 @@ var _ = Describe("Mission Integration Tests", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Phase 1: Pending (validation)
@@ -320,6 +322,8 @@ var _ = Describe("Mission Integration Tests", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Progress through phases until Active
@@ -477,6 +481,8 @@ var _ = Describe("Mission Integration Tests", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Progress through phases
@@ -642,6 +648,8 @@ var _ = Describe("Mission Integration Tests", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Progress to Active phase
@@ -784,6 +792,8 @@ var _ = Describe("Mission Integration Tests", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Progress to Active phase
