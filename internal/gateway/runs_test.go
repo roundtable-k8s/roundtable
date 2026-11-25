@@ -531,6 +531,8 @@ func TestRunChainIdempotencyKey(t *testing.T) {
 	}
 	if r, _ := e.doKey(t, path, strings.Repeat("a", 256), map[string]any{}); r.StatusCode != http.StatusBadRequest {
 		t.Fatalf("long key: %d", r.StatusCode)
+	}
+}
 
 // playCancel plays the chain controller for a cancelled run: once the cancel
 // annotation shows up it fails the run, with its steps carrying the reason.
@@ -605,5 +607,47 @@ func TestCancelRunDisabledAndBadBody(t *testing.T) {
 	e = newRunEnv(t, Options{}, true)
 	if resp, _ := e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/x/cancel", testToken, map[string]any{"bogus": 1}); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("bad body: %d", resp.StatusCode)
+	}
+}
+
+func TestMCPCancelRun(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	cs, err := c.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:   e.server.URL + "/mcp",
+		HTTPClient: &http.Client{Transport: bearer{http.DefaultTransport}},
+		MaxRetries: -1,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	text := func(r *mcp.CallToolResult) string {
+		if tc, _ := r.Content[0].(*mcp.TextContent); tc != nil {
+			return tc.Text
+		}
+		return ""
+	}
+
+	r, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "run_chain", Arguments: map[string]any{"chain": "digest"}})
+	if err != nil || r.IsError {
+		t.Fatalf("run_chain: %v %v", err, r)
+	}
+	run := e.runs(t)[0].Name
+
+	go e.playCancel(t)
+	r, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "cancel_run", Arguments: map[string]any{"run": run, "reason": "not needed"}})
+	if err != nil || r.IsError || !strings.Contains(text(r), "cancelled: not needed") {
+		t.Fatalf("cancel_run: %v %v %s", err, r.IsError, text(r))
+	}
+
+	// A finished run and an unknown run are tool errors.
+	for _, name := range []string{run, "nope"} {
+		r, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "cancel_run", Arguments: map[string]any{"run": name}})
+		if err != nil || !r.IsError {
+			t.Errorf("cancel_run %s: %v %v", name, err, r)
+		}
 	}
 }

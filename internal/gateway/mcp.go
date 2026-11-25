@@ -281,7 +281,7 @@ func addRunTools(s *mcp.Server, svc *Service) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return runResult(rec), rec, nil
+		return cancelResult(rec), rec, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_runs",
@@ -317,6 +317,23 @@ func runResult(rec *RunRecord) *mcp.CallToolResult {
 	text := rec.Output
 	if text == "" {
 		text = "Run " + id + " of chain " + rec.Chain + " finished: " + rec.Phase + ". See steps for each step's output."
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+}
+
+// cancelResult reports a cancel_run outcome. A cancelled run ends Failed, so
+// unlike runResult it is a normal result, not a tool error; a run that wasn't
+// ended yet, or that finished some other way first, is described as usual.
+func cancelResult(rec *RunRecord) *mcp.CallToolResult {
+	if !rec.Done || rec.Phase != string(aiv1alpha1.ChainPhaseFailed) {
+		return runResult(rec)
+	}
+	text := "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled."
+	for _, st := range rec.Steps {
+		if r, ok := strings.CutPrefix(st.Error, "cancelled: "); ok && r != "" {
+			text = "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled: " + r
+			break
+		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }

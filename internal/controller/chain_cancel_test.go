@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -123,5 +124,75 @@ func TestCancelStopsLoopAndFanOut(t *testing.T) {
 	}
 	if c := stepStatus(t, got, "c"); c.Phase != aiv1alpha1.ChainStepPhaseSucceeded {
 		t.Errorf("finished step touched: %+v", c)
+	}
+}
+
+func TestCancelBeforeRunStarts(t *testing.T) {
+	r, nc, chain := cancelFixture(t, map[string]string{
+		aiv1alpha1.AnnotationChainRun:    "trigger-1",
+		aiv1alpha1.AnnotationChainCancel: "changed my mind",
+	})
+	key := types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}
+	if err := r.Get(context.Background(), key, chain); err != nil {
+		t.Fatal(err)
+	}
+	chain.Status = aiv1alpha1.ChainStatus{Phase: aiv1alpha1.ChainPhaseIdle}
+	if err := r.Status().Update(context.Background(), chain); err != nil {
+		t.Fatal(err)
+	}
+
+	got := reconcileChain(t, r, chain)
+	if got.Status.Phase != aiv1alpha1.ChainPhaseFailed || got.Status.LastRunTrigger != "trigger-1" || got.Status.RunID == "" {
+		t.Fatalf("status: %+v", got.Status)
+	}
+	if len(got.Status.StepStatuses) != 3 {
+		t.Fatalf("steps: %+v", got.Status.StepStatuses)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if ss := stepStatus(t, got, name); ss.Phase != aiv1alpha1.ChainStepPhaseFailed || ss.Error != "cancelled: changed my mind" {
+			t.Errorf("step %s: %+v", name, ss)
+		}
+	}
+	if c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionChainCancelled); c == nil || c.Status != metav1.ConditionTrue {
+		t.Errorf("Cancelled condition: %+v", c)
+	}
+	if _, ok := got.Annotations[aiv1alpha1.AnnotationChainCancel]; ok {
+		t.Error("cancel annotation not removed")
+	}
+	if len(nc.tasks) != 0 {
+		t.Errorf("published after cancel: %v", publishedSteps(nc))
+	}
+}
+
+func TestNewRunClearsCancelledCondition(t *testing.T) {
+	r, _, chain := cancelFixture(t, map[string]string{aiv1alpha1.AnnotationChainRun: "trigger-2"})
+	key := types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}
+	if err := r.Get(context.Background(), key, chain); err != nil {
+		t.Fatal(err)
+	}
+	chain.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: "table"}
+	if err := r.Create(context.Background(), &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: phasesKnight, Namespace: phasesNS},
+		Spec:       aiv1alpha1.KnightSpec{Domain: "ops", Model: "claude-sonnet-4"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(context.Background(), chain); err != nil {
+		t.Fatal(err)
+	}
+	chain.Status.Phase = aiv1alpha1.ChainPhaseFailed
+	chain.Status.LastRunTrigger = "trigger-1"
+	meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
+		Type: aiv1alpha1.ConditionChainCancelled, Status: metav1.ConditionTrue, Reason: aiv1alpha1.ReasonChainCancelled})
+	if err := r.Status().Update(context.Background(), chain); err != nil {
+		t.Fatal(err)
+	}
+
+	got := reconcileChain(t, r, chain)
+	if got.Status.LastRunTrigger != "trigger-2" || got.Status.Phase == aiv1alpha1.ChainPhaseFailed {
+		t.Fatalf("new run not started: %+v", got.Status)
+	}
+	if c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionChainCancelled); c != nil {
+		t.Errorf("Cancelled condition kept: %+v", c)
 	}
 }

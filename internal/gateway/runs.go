@@ -350,6 +350,13 @@ const cancelWait = 10 * time.Second
 // gateway started can be cancelled, and a finished run is a conflict. Tasks
 // already published to a knight are not recalled.
 func (s *Service) CancelRun(ctx context.Context, namespace, name, reason string) (*RunRecord, error) {
+	return s.cancelRun(ctx, namespace, name, reason, cancelRetries)
+}
+
+// cancelRetries bounds how often a cancel re-reads the run after a write conflict.
+const cancelRetries = 5
+
+func (s *Service) cancelRun(ctx context.Context, namespace, name, reason string, retries int) (*RunRecord, error) {
 	if !s.RunsEnabled() {
 		return nil, errRunsDisabled
 	}
@@ -371,9 +378,9 @@ func (s *Service) CancelRun(ctx context.Context, namespace, name, reason string)
 	}
 	c.Annotations[aiv1alpha1.AnnotationChainCancel] = reason
 	if err := s.Runs.Patch(ctx, c, patch); err != nil {
-		if apierrors.IsConflict(err) {
+		if apierrors.IsConflict(err) && retries > 0 {
 			// The run moved under us (it may have just finished): re-check.
-			return s.CancelRun(ctx, ns, name, reason)
+			return s.cancelRun(ctx, ns, name, reason, retries-1)
 		}
 		return nil, k8sError("cancel chain run", err)
 	}
