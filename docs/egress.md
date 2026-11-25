@@ -46,6 +46,7 @@ Every knight's policy allows, even with an empty allowlist:
 | --- | --- | --- |
 | Cluster DNS | name resolution, and Cilium's DNS proxy for `toFQDNs` | `toEndpoints` on 53 with a DNS rule |
 | The knight's NATS server(s) | tasks and results | `toEndpoints` (in-cluster) or the port to any destination |
+| The telemetry collector (the OTLP endpoint, `OTEL_EXPORTER_OTLP_ENDPOINT` or the table's `telemetry.otlpEndpoint`; only when telemetry is on) | trace and metric export | `toEndpoints` on the collector's namespace (in-cluster Service), or `toFQDNs` / `toCIDR` (external); the port from the URL, else 4317 and 4318 |
 | The Kubernetes API | knights use it on purpose (`automountServiceAccountToken: true`) | `toEntities: [kube-apiserver]` |
 | `isolation.egress.baseHosts` (`KNIGHT_EGRESS_BASE_HOSTS`, default `openrouter.ai`, `api.anthropic.com`) | the model providers | `toFQDNs` on 443 |
 | The hosts of the knight's arsenal repos (`spec.arsenals[].repo`; the default platform arsenal when empty) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
@@ -216,7 +217,7 @@ spec:
 | Cluster | Result | `EgressRestricted` condition |
 | --- | --- | --- |
 | `cilium.io/v2` `CiliumNetworkPolicy` is served | Hostname allowlist enforced with `toFQDNs` | `True`, reason `FQDNPolicyApplied` (`ServiceNotFound` when an allowed Service is missing or has no selector) |
-| Not served | A plain `NetworkPolicy` allows DNS, NATS and, to **any** destination, the Kubernetes API ports (443, 6443), the baseline hosts' ports and the allowed **ports**; hostnames cannot be enforced. Allowed Services are enforced by namespace and pod selector on their ports | `False`, reason `FQDNPolicyUnavailable` |
+| Not served | A plain `NetworkPolicy` allows DNS, NATS, an in-cluster collector's namespace and, to **any** destination, the Kubernetes API ports (443, 6443), an external collector's port, the baseline hosts' ports and the allowed **ports**; hostnames cannot be enforced. Allowed Services are enforced by namespace and pod selector on their ports | `False`, reason `FQDNPolicyUnavailable` |
 | Applying the policy failed | See the condition message | `False`, reason `EgressPolicyFailed` |
 
 Do not treat a fallback cluster as isolated: check `EgressRestricted` before
