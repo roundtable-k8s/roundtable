@@ -675,15 +675,16 @@ Start using Mission CRDs for incident response and exploratory tasks that curren
 
 CLI-first (#179): prefer a CLI in the tools image; use MCP only for services
 with no CLI. `spec.mcpServers` declares remote MCP servers (`name`, `url`,
-`transport` = `streamable-http` (default) or `sse`, `toolFilter.exclude`).
+`transport` = `streamable-http` (default) or `sse`). A server's tools are
+all available to the knight; narrowing them is the server's or an MCP
+gateway's job.
 For a claude-knight image the operator renders them into `MCP_SERVERS_JSON`
-(`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`) and every
-`toolFilter.exclude` entry into `CLAUDE_DISALLOWED_TOOLS` as
-`mcp__<name>__<tool>`. If `spec.env` already sets either variable, the user's
-entries are kept and the operator's are added (on a server-name clash the
+(`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`) and the
+deprecated `toolFilter.exclude` entries (see [section 8](#8-deprecated-fields))
+into `CLAUDE_DISALLOWED_TOOLS` as `mcp__<name>__<tool>`. If `spec.env` already
+sets either variable, the user's entries are kept and the operator's are added (on a server-name clash the
 user's server wins). On any other runtime nothing is rendered and the Knight
-gets `Degraded=True` with reason `MCPServersUnsupported`. No
-`toolFilter.include`.
+gets `Degraded=True` with reason `MCPServersUnsupported`.
 
 Under default-deny egress the operator allows each server's URL itself (an
 in-cluster Service URL as an `allowedServices` entry, any other host as an
@@ -754,4 +755,5 @@ and will be removed one release later:
 |---|---|---|
 | `spec.tools.apt` | `spec.tools.nix`, `spec.tools.flakes` | Knight containers run as non-root, so apt installs cannot succeed. |
 | `spec.tools.mise` | `spec.tools.nix`, `spec.tools.flakes` | Tools are written as `latest`, never pinned, and downloaded at every cold start. |
+| `spec.mcpServers[].toolFilter` | none (use the MCP server's own filtering or a gateway) | Round Table does not manage which tools a knight has; excluded tools are still denied until removal. |
 | `spec.nats.maxDeliver` | none | Ignored; tasks run at most once. |

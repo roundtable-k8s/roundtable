@@ -23,7 +23,7 @@ func mcpKnight(env ...corev1.EnvVar) *aiv1alpha1.Knight {
 		Spec: aiv1alpha1.KnightSpec{
 			Domain: "d", Env: env,
 			MCPServers: []aiv1alpha1.KnightMCPServer{
-				{Name: "vault", URL: "http://vault/mcp", ToolFilter: &aiv1alpha1.KnightMCPToolFilter{Exclude: []string{"delete", "write"}}},
+				{Name: "vault", URL: "http://vault/mcp", ToolFilter: &aiv1alpha1.KnightMCPToolFilter{Exclude: []string{"delete", "write"}}}, //nolint:staticcheck // exercising the deprecated field,
 				{Name: "feeds", URL: "http://feeds/sse", Transport: "sse"},
 			},
 		},
