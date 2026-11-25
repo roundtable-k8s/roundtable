@@ -1073,6 +1073,28 @@ spec:
                   - name
                   type: object
                 type: array
+              traceContext:
+                description: |-
+                  traceContext is the W3C trace context of the current (or most recent)
+                  run's root span. Every reconcile of the run parents its spans from it,
+                  so the run is one trace. Unset when tracing is off. A new run (or a
+                  retry-failed resume) replaces it.
+                properties:
+                  traceparent:
+                    description: |-
+                      traceparent is the W3C traceparent value, e.g.
+                      00-<32 hex trace id>-<16 hex span id>-<2 hex flags>.
+                    type: string
+                  tracestate:
+                    description: tracestate is the W3C tracestate value (vendor-specific
+                      trace data).
+                    type: string
+                type: object
+              traceID:
+                description: |-
+                  traceID is the trace ID of the run's trace (32 hex characters), for
+                  linking to a trace backend. Unset when tracing is off.
+                type: string
             type: object
         required:
         - spec

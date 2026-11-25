@@ -83,6 +83,9 @@ The same key is used for both where the value is stable for the process.
 | `roundtable.knight.runtime` | `pi` or `claude`. | (metric label `runtime`) |
 | `roundtable.chain` | Chain name. | `chainName` |
 | `roundtable.chain.step` | Step name. | `stepName` |
+| `roundtable.chain.step.type` | `task`, `forEach` or `loop`. | n/a |
+| `roundtable.chain.item.index` | 0-based fan-out item index. | n/a |
+| `roundtable.chain.loop.iteration` | 1-based loop round. | n/a |
 | `roundtable.mission` | Mission name. | n/a |
 | `roundtable.run.id` | Chain or mission run id. | `runId` |
 | `roundtable.task.id` | Task id. | `taskId` |
@@ -99,7 +102,9 @@ is normative.
 
 ```
 chain <chain>                          (operator, root)
-└─ step <step>
+└─ step <step>                         (one per attempt; forEach and loop steps
+   │                                    add `item <step>[<i>]` / `iteration <step> <n>`
+   │                                    children, and their tasks hang off those)
    └─ publish <subject>                (producer, messaging.*)
       └─ invoke_agent <knight>         (knight; gen_ai.operation.name=invoke_agent, gen_ai.agent.name)
          ├─ chat <model>               (one per LLM turn)
@@ -130,7 +135,12 @@ Reconciles are async and re-entrant, so the run's root span context is created
   on Chain and Mission).
 - `status.traceID`: the trace id alone, for the dashboard to link to.
 
-Later reconciles parent their spans from `status.traceContext`. Where a
+Later reconciles parent their spans from `status.traceContext`. The operator
+derives the IDs of step, item and iteration spans from the trace ID and a key
+in the status (task ID, step start, round), and emits each span once, when it
+ends, with explicit start and end times; this needs the operator's tracer
+provider to use `telemetry.IDGenerator`, which honours the preset IDs. A
+`retry-failed` resume starts a new trace. Where a
 parent/child relationship does not fit (for example a redelivered result), use a
 span link instead of a parent.
 
