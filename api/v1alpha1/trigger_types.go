@@ -749,7 +749,7 @@ type TriggerFiring struct {
 	// phase is the final phase of the Mission the firing created (mission
 	// target), once it finished.
 	// +optional
-	Phase string `json:"phase,omitempty"`
+	Phase MissionPhase `json:"phase,omitempty"`
 
 	// skipReason says why the firing started nothing.
 	// +optional

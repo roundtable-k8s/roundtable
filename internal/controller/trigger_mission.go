@@ -35,6 +35,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
+	"github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
@@ -119,11 +120,14 @@ func (r *TriggerReconciler) listMissions(ctx context.Context, trg *aiv1alpha1.Tr
 
 // missionUnfinished reports whether a Mission still counts as an active run.
 func missionUnfinished(m *aiv1alpha1.Mission) bool {
-	return !missionFinished(m.Status.Phase)
+	return !missionFinished(m)
 }
 
-func missionFinished(p aiv1alpha1.MissionPhase) bool {
-	switch p {
+// missionFinished reports whether the Mission reached a final phase. CleaningUp
+// is a passing phase that follows Succeeded, Failed and Expired, so it counts
+// as finished; the real final phase is read by missionOutcome.
+func missionFinished(m *aiv1alpha1.Mission) bool {
+	switch m.Status.Phase {
 	case aiv1alpha1.MissionPhaseSucceeded, aiv1alpha1.MissionPhaseFailed,
 		aiv1alpha1.MissionPhaseExpired, aiv1alpha1.MissionPhaseCleaningUp:
 		return true
@@ -131,15 +135,18 @@ func missionFinished(p aiv1alpha1.MissionPhase) bool {
 	return false
 }
 
-// missionOutcome maps a finished Mission's phase to a firing outcome.
-func missionOutcome(p aiv1alpha1.MissionPhase) aiv1alpha1.TriggerFiringOutcome {
-	switch p {
+// missionOutcome maps a finished Mission to its final phase (taken from the
+// Complete condition via mission.TerminalOutcome, since the phase itself is
+// overwritten by CleaningUp) and the firing outcome.
+func missionOutcome(m *aiv1alpha1.Mission) (aiv1alpha1.TriggerFiringOutcome, aiv1alpha1.MissionPhase) {
+	phase := mission.TerminalOutcome(m)
+	switch phase {
 	case aiv1alpha1.MissionPhaseSucceeded:
-		return aiv1alpha1.TriggerFiringSucceeded
+		return aiv1alpha1.TriggerFiringSucceeded, phase
 	case aiv1alpha1.MissionPhaseFailed:
-		return aiv1alpha1.TriggerFiringFailed
+		return aiv1alpha1.TriggerFiringFailed, phase
 	}
-	return aiv1alpha1.TriggerFiringLost
+	return aiv1alpha1.TriggerFiringLost, phase
 }
 
 // tableMissionsAtLimit reports whether the Trigger's RoundTable is at its
@@ -306,9 +313,8 @@ func (r *TriggerReconciler) collectMissions(ctx context.Context, trg *aiv1alpha1
 		case !ok:
 			// Cleaned up (ttlSeconds) before its outcome was read.
 			f.Outcome = aiv1alpha1.TriggerFiringLost
-		case missionFinished(m.Status.Phase):
-			f.Outcome = missionOutcome(m.Status.Phase)
-			f.Phase = string(m.Status.Phase)
+		case missionFinished(m):
+			f.Outcome, f.Phase = missionOutcome(m)
 		}
 	}
 	if len(active) == 0 {

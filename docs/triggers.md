@@ -636,7 +636,9 @@ Secret, pod or knight spec.
 - Dedupe: a Mission already named for the key means it fired; this holds until
   the Mission is cleaned up.
 - A firing while the RoundTable is at `policies.maxMissions` is recorded as
-  skipped with the reason, not left queued in `Pending`.
+  skipped with the reason, not left queued in `Pending`. The `maxMissions`
+  check counts every Mission in the namespace that holds or waits for a slot,
+  including queued (`Pending`) ones.
 - `spec.input` is not used (put the text in `target.mission.objective`), and a
   github source needs a Chain target.
 

@@ -931,7 +931,13 @@ var _ = Describe("Trigger controller", func() {
 
 			// Finished: the firing gets its outcome and phase, and the
 			// next time creates a new Mission.
-			setPhase(&m, aiv1alpha1.MissionPhaseSucceeded)
+			// The mission controller moves a finished Mission on to CleaningUp;
+			// the final phase lives in the Complete condition.
+			meta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+				Type: aiv1alpha1.ConditionMissionComplete, Status: metav1.ConditionTrue,
+				Reason: aiv1alpha1.ReasonMissionSucceeded,
+			})
+			setPhase(&m, aiv1alpha1.MissionPhaseCleaningUp)
 			clock = due.Add(10*time.Minute + time.Second)
 			reconcileTrigger("mt-cron")
 			st = getTrigger("mt-cron").Status
@@ -939,7 +945,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
 				HaveField("Run", m.Name),
 				HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded),
-				HaveField("Phase", "Succeeded"))))
+				HaveField("Phase", aiv1alpha1.MissionPhaseSucceeded))))
 			Expect(missionsOf("mt-cron")).To(HaveLen(2))
 		})
 

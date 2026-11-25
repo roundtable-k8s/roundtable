@@ -915,6 +915,17 @@ spec:
                       description: |-
                         phase is the final phase of the Mission the firing created (mission
                         target), once it finished.
+                      enum:
+                      - Pending
+                      - Provisioning
+                      - Planning
+                      - Assembling
+                      - Briefing
+                      - Active
+                      - Succeeded
+                      - Failed
+                      - Expired
+                      - CleaningUp
                       type: string
                     run:
                       description: |-
