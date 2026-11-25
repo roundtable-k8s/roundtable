@@ -54,6 +54,19 @@ var (
 		[]string{"knight", "domain"},
 	)
 
+	// KnightWakeSeconds tracks wake latency: the time from a scaled-to-zero
+	// knight entering Waking (tasks queued) until it becomes Ready.
+	// Labels: knight (knight name), namespace
+	// Buckets: 1s, 2s, 4s, ... 512s (covers 1s to 5m and beyond)
+	KnightWakeSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "roundtable_knight_wake_seconds",
+			Help:    "Time from a scaled-to-zero knight entering Waking until it is Ready, in seconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 10),
+		},
+		[]string{"knight", "namespace"},
+	)
+
 	// ChainRunsTotal tracks total chain runs by status.
 	// Labels: chain (chain name), status (succeeded, failed)
 	ChainRunsTotal = prometheus.NewCounterVec(
@@ -123,6 +136,7 @@ func init() {
 		KnightsTotal,
 		TasksCompletedTotal,
 		TaskDurationSeconds,
+		KnightWakeSeconds,
 		ChainRunsTotal,
 		ChainNoOpRunsTotal,
 		MissionsTotal,

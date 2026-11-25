@@ -4,17 +4,22 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 type fakePending struct {
@@ -98,5 +103,100 @@ func TestKnightWakingReadsCapitalisedConsumer(t *testing.T) {
 	wakingStatus(t, 0, 0, "", src)
 	if src.stream != "rt_tasks" || src.consumer != "Waker-consumer" {
 		t.Errorf("looked up %s/%s, want rt_tasks/Waker-consumer", src.stream, src.consumer)
+	}
+}
+
+func TestKnightWakeSecondsObserved(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	var clock time.Time
+
+	s := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(s)
+	_ = aiv1alpha1.AddToScheme(s)
+	one, zero := int32(1), int32(0)
+	k := &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: "wake-metric", Namespace: "wake-ns"},
+		Spec:       aiv1alpha1.KnightSpec{NATS: aiv1alpha1.KnightNATS{Stream: "rt_tasks"}},
+	}
+	d := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "wake-metric", Namespace: "wake-ns"},
+		Spec:       appsv1.DeploymentSpec{Replicas: &zero},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k, d).WithStatusSubresource(k, d).Build()
+	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10), PendingSource: &fakePending{n: 0}, Now: func() time.Time { return clock }}
+	scaling := knightpkg.Scaling{Autoscaled: true}
+	update := func(now time.Time) {
+		t.Helper()
+		clock = now
+		if err := r.updateStatus(context.Background(), k, scaling, nil); err != nil {
+			t.Fatalf("updateStatus: %v", err)
+		}
+	}
+	count := func() uint64 {
+		m := &dto.Metric{}
+		if err := rtmetrics.KnightWakeSeconds.WithLabelValues("wake-metric", "wake-ns").(prometheus.Metric).Write(m); err != nil {
+			t.Fatal(err)
+		}
+		return m.GetHistogram().GetSampleCount()
+	}
+	sum := func() float64 {
+		m := &dto.Metric{}
+		_ = rtmetrics.KnightWakeSeconds.WithLabelValues("wake-metric", "wake-ns").(prometheus.Metric).Write(m)
+		return m.GetHistogram().GetSampleSum()
+	}
+
+	pending := r.PendingSource.(*fakePending)
+
+	// T0: idle at zero -> ScaledToZero.
+	update(base)
+	if availReason(k) != aiv1alpha1.ReasonKnightScaledToZero {
+		t.Fatalf("reason = %q, want ScaledToZero", availReason(k))
+	}
+
+	// T0+60s: tasks queued -> Waking. The wake clock starts now, not at T0.
+	pending.n = 2
+	update(base.Add(60 * time.Second))
+	if availReason(k) != aiv1alpha1.ReasonKnightWaking {
+		t.Fatalf("reason = %q, want Waking", availReason(k))
+	}
+	if got := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAvailable).LastTransitionTime.Time; !got.Equal(base.Add(60 * time.Second)) {
+		t.Fatalf("Waking started at %v, want %v", got, base.Add(60*time.Second))
+	}
+	if count() != 0 {
+		t.Fatalf("observation before Ready")
+	}
+
+	// Still waking: no observation and the start time is unchanged.
+	update(base.Add(65 * time.Second))
+	if count() != 0 {
+		t.Fatalf("observation while still Waking")
+	}
+
+	// Pod becomes ready 12s after entering Waking (T0+72s).
+	dep := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "wake-metric", Namespace: "wake-ns"}, dep); err != nil {
+		t.Fatal(err)
+	}
+	dep.Spec.Replicas = &one
+	dep.Status = appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1}
+	if err := c.Update(context.Background(), dep); err != nil {
+		t.Fatal(err)
+	}
+	dep.Status = appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1}
+	if err := c.Status().Update(context.Background(), dep); err != nil {
+		t.Fatal(err)
+	}
+	update(base.Add(72 * time.Second))
+	if availReason(k) != aiv1alpha1.ReasonKnightReady {
+		t.Fatalf("reason = %q, want Ready", availReason(k))
+	}
+	if count() != 1 || sum() != 12 {
+		t.Errorf("count=%d sum=%v, want 1 observation of 12s", count(), sum())
+	}
+
+	// Further Ready reconciles do not observe again.
+	update(base.Add(80 * time.Second))
+	if count() != 1 {
+		t.Errorf("count=%d after steady Ready, want 1", count())
 	}
 }

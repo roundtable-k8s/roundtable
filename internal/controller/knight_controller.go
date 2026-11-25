@@ -80,6 +80,9 @@ type KnightReconciler struct {
 	// PendingSource overrides the consumer backlog lookup (tests).
 	PendingSource ConsumerPendingSource
 
+	// Now overrides the clock used for wake-latency measurement (tests).
+	Now func() time.Time
+
 	// RuntimeBackend abstracts the lifecycle of Knight runtime resources.
 	// When set, the controller delegates Deployment reconciliation and
 	// suspend/resume to this backend. When nil, falls back to the
@@ -339,6 +342,14 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// now returns the reconciler clock (Now if set, else time.Now).
+func (r *KnightReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // wakingRequeue is how often a waking knight is re-checked.
@@ -798,6 +809,17 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		waking = r.hasPendingTasks(ctx, knight)
 	}
 
+	// Remember when the knight entered Waking so the Waking -> Ready
+	// transition can be observed as wake latency. The observation is
+	// recorded only after the status update succeeds, so a conflict retry
+	// (which still sees Waking) cannot record it twice.
+	var wakingSince time.Time
+	var observeWake bool
+	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil &&
+		c.Reason == aiv1alpha1.ReasonKnightWaking {
+		wakingSince = c.LastTransitionTime.Time
+	}
+
 	if reconcileErr != nil {
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ReconcileFailed", "Reconciliation failed: %v", reconcileErr)
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
@@ -820,6 +842,8 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			msg = fmt.Sprintf("Tasks are queued on consumer %s; waiting for the knight pod to start",
 				knightpkg.TaskConsumerName(knight))
 		}
+		prev := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+		enteringWaking := waking && (prev == nil || prev.Reason != aiv1alpha1.ReasonKnightWaking)
 		meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionKnightAvailable,
 			Status:             metav1.ConditionFalse,
@@ -827,7 +851,14 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			Message:            msg,
 			ObservedGeneration: knight.Generation,
 		})
+		if enteringWaking {
+			// SetStatusCondition keeps LastTransitionTime when only the
+			// reason changes (ScaledToZero -> Waking), so stamp it here.
+			meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable).
+				LastTransitionTime = metav1.NewTime(r.now())
+		}
 	} else if isReady {
+		observeWake = !wakingSince.IsZero()
 		// Record event when transitioning to Ready (avoid duplicate events)
 		if knight.Status.Phase != aiv1alpha1.KnightPhaseReady {
 			r.Recorder.Event(knight, corev1.EventTypeNormal, "Ready", "Knight is ready and accepting tasks")
@@ -879,7 +910,14 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	// or the RoundTable controller should reset/recompute totals.
 	rtmetrics.KnightsTotal.WithLabelValues(string(knight.Status.Phase), tableName).Set(1)
 
-	return r.Status().Update(ctx, knight)
+	if err := r.Status().Update(ctx, knight); err != nil {
+		return err
+	}
+	if observeWake {
+		rtmetrics.KnightWakeSeconds.WithLabelValues(knight.Name, knight.Namespace).
+			Observe(r.now().Sub(wakingSince).Seconds())
+	}
+	return nil
 }
 
 // runtimeBackendFor returns the appropriate RuntimeBackend for a Knight.
