@@ -153,6 +153,40 @@ spec:
 
 See [`examples/egress/in-cluster-services.yaml`](../examples/egress/in-cluster-services.yaml).
 
+## MCP servers: listing the server is enough
+
+A knight's `spec.mcpServers[].url` is reachable without repeating the
+destination under `spec.egress`. The operator adds a rule for each URL:
+
+- `http(s)://<service>.<namespace>.svc[.cluster.local][:port]/…` is treated as
+  an `allowedServices` entry for that Service and port (default 80 for `http`,
+  443 for `https`).
+- Any other host is treated as an `allowedHosts` entry on that port.
+
+```yaml
+spec:
+  mcpServers:
+    - name: miniflux
+      url: http://miniflux-mcp.selfhosted.svc:8080/mcp   # Service rule, port 8080
+    - name: web-fetch
+      url: https://fetch.example.com/mcp                 # host rule, port 443
+  # no egress block needed for either
+```
+
+- A destination already covered by the knight's own `egress` (same Service and
+  port, or a host listed or wildcarded on that port) is not added twice.
+- Nothing is derived for a knight with `isolation.egress: unrestricted` (it has
+  no policy), or when the install's egress mode is `off` and the knight has no
+  `egress`.
+- The derived entries are shown in `status.derivedEgress`
+  (`allowedServices`, `allowedHosts`) so they can be told apart from the listed
+  ones.
+- A URL that is not `http(s)` or has no valid host sets `EgressRestricted=False`
+  with reason `EgressPolicyFailed`, naming the server and URL. The policy is
+  still rendered from the valid entries (fail closed).
+- Mission knights are Knights, so the same derivation applies to the
+  `mcpServers` of their template or inline spec.
+
 ## Cilium vs fallback
 
 | Cluster | Result | `EgressRestricted` condition |

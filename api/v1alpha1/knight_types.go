@@ -788,6 +788,20 @@ type EgressService struct {
 	Ports []int32 `json:"ports"`
 }
 
+// KnightDerivedEgress is the egress allowance derived from the knight's MCP
+// server URLs: in-cluster Service URLs become Services, any other host a host
+// with its port. Destinations already listed in spec.egress are not repeated.
+type KnightDerivedEgress struct {
+	// allowedServices are in-cluster Services reached by an MCP server URL.
+	// +optional
+	AllowedServices []EgressService `json:"allowedServices,omitempty"`
+
+	// allowedHosts are external hosts reached by an MCP server URL, each on
+	// the URL's port.
+	// +optional
+	AllowedHosts []EgressHost `json:"allowedHosts,omitempty"`
+}
+
 // KnightTools defines system-level tools the knight needs installed.
 type KnightTools struct {
 	// nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -1002,6 +1016,12 @@ type KnightStatus struct {
 	// workspace reports workspace snapshots.
 	// +optional
 	Workspace *KnightWorkspaceStatus `json:"workspace,omitempty"`
+
+	// derivedEgress lists the egress destinations the operator derived from
+	// spec.mcpServers[].url and added to the knight's egress policy, beyond
+	// what spec.egress lists itself. Unset when nothing was derived.
+	// +optional
+	DerivedEgress *KnightDerivedEgress `json:"derivedEgress,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
