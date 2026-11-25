@@ -1,0 +1,24 @@
+# Quickstart chain: two sequential steps on the quickstart knight. Run it with
+# the ai.roundtable.io/run annotation, see docs/getting-started.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: hello-chain
+  namespace: roundtable
+spec:
+  description: "Research a topic, then summarize it"
+  roundTableRef: {name: quickstart}
+  timeoutSeconds: 900
+  input: "Kubernetes operators"
+  steps:
+    - name: research
+      knightRef: {name: arthur}
+      task: |
+        Write a short paragraph about this topic: {{ .Input }}
+    - name: summarize
+      dependsOn: [research]
+      knightRef: {name: arthur}
+      task: |
+        Summarize this in 3 bullet points:
+
+        {{ .Steps.research.Output }}

@@ -1,0 +1,23 @@
+# Quickstart knight. The Secret llm-api-keys (ANTHROPIC_API_KEY) is created by
+# hand, see docs/getting-started.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: arthur
+  namespace: roundtable
+spec:
+  domain: general
+  model: claude-sonnet-4-20250514
+  skills:
+    - general
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    stream: quickstart_tasks
+    resultsStream: quickstart_results
+    subjects:
+      - "quickstart.tasks.general.>"
+  envFrom:
+    - secretRef:
+        name: llm-api-keys
+  concurrency: 1
+  taskTimeoutSeconds: 300

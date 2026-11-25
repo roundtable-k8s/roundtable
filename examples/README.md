@@ -4,6 +4,7 @@ Real-world examples of Round Table resources.
 
 | File | Description |
 |------|-------------|
+| [`quickstart/`](quickstart/) | Minimal RoundTable, Knight and two-step Chain for the [kind quickstart](../docs/getting-started.md) |
 | [`knight-basic.yaml`](knight-basic.yaml) | A single knight — security domain with NATS config |
 | [`knight-scaled.yaml`](knight-scaled.yaml) | A horizontally scaled knight — ephemeral workspace, KEDA 0..N on pending tasks |
 | [`knight-mcp-headers.yaml`](knight-mcp-headers.yaml) | A claude-knight using a remote MCP server with an `Authorization` header from a Secret (`spec.mcpServers[].headersFrom`, [docs](../docs/crd-design.md#7-knight-specmcpservers-claude-knight-only)) |
