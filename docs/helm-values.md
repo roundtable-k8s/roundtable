@@ -45,6 +45,18 @@ Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com
 | `metrics.serviceMonitor.enabled` | bool | `false` | ServiceMonitors for the operator and, if `dashboard.enabled`, the dashboard |
 | `metrics.podMonitor.enabled` | bool | `false` | PodMonitor for knights (`podIP:3000/metrics`, container `app`); fills in `table` from the `ai.roundtable.io/round-table` pod label without overriding a `table` label the knight sets |
 
+### OpenTelemetry tracing
+
+The operator sets up an OTel tracer provider from the standard `OTEL_*` environment variables. With no endpoint (or `OTEL_SDK_DISABLED=true`) tracing is off: no exporter, no overhead. The chart has no first-class values for these yet (they arrive with #156); until then set them on the operator Deployment's container env.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | unset | OTLP/gRPC endpoint; tracing is enabled only when one is set (headers/insecure/etc. are read by the exporter) |
+| `OTEL_SDK_DISABLED` | `false` | `true` disables tracing even when an endpoint is set |
+| `OTEL_SERVICE_NAME` | `roundtable-operator` | `service.name` resource attribute |
+| `OTEL_RESOURCE_ATTRIBUTES` | unset | Extra resource attributes (`k=v,k2=v2`) |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` | Sampler |
+
 ### Mission NetworkPolicy
 
 The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. Rendered into the operator's `MISSION_NETPOL_*` env vars.

@@ -17,10 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -30,6 +32,8 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+
+	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 
 	// Register custom Prometheus metrics
 	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
@@ -55,6 +59,9 @@ import (
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 	// +kubebuilder:scaffold:imports
 )
+
+// version is the operator version reported as service.version; set with -ldflags "-X main.version=...".
+var version = "dev"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -125,6 +132,17 @@ func main() {
 	if len(otel.GetTextMapPropagator().Fields()) == 0 {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
+	}
+
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), version)
+	if err != nil {
+		setupLog.Error(err, "Failed to set up OpenTelemetry; continuing without tracing")
+		shutdownTelemetry = func(context.Context) error { return nil }
+	}
+	if telemetry.Enabled() {
+		setupLog.Info("OpenTelemetry tracing enabled", "endpoint", telemetry.Endpoint())
+	} else {
+		setupLog.Info("OpenTelemetry tracing disabled (no OTLP endpoint configured or OTEL_SDK_DISABLED=true)")
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -431,5 +449,11 @@ func main() {
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shutdownTelemetry(shutdownCtx); err != nil {
+		setupLog.Error(err, "Failed to flush OpenTelemetry spans")
 	}
 }
