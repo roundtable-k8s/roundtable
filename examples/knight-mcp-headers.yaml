@@ -34,8 +34,6 @@ spec:
   mcpServers:
     - name: vault
       url: https://vault-mcp.example.com/mcp
-      toolFilter:
-        exclude: ["delete_note"]
       headersFrom:
         - name: Authorization
           valueFrom:

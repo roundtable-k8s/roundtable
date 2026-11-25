@@ -1130,6 +1130,11 @@ type KnightMCPServer struct {
 	Transport string `json:"transport,omitempty"`
 
 	// toolFilter restricts the tools the knight may call.
+	//
+	// Deprecated: tool selection belongs to the MCP server or to an MCP
+	// gateway in front of it; listing a server gives the knight that server's
+	// tools. The field will be removed in a future release (excluded tools
+	// are still denied until then).
 	// +optional
 	ToolFilter *KnightMCPToolFilter `json:"toolFilter,omitempty"`
 
@@ -1189,6 +1194,9 @@ type KnightSecretKeyRef struct {
 }
 
 // KnightMCPToolFilter restricts a server's tools.
+//
+// Deprecated: tool selection belongs to the MCP server or to an MCP gateway
+// in front of it. The type will be removed in a future release.
 type KnightMCPToolFilter struct {
 	// exclude lists tool names denied for this server (a deny list, because
 	// the Claude Code harness exposes a bound server whole).

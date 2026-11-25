@@ -105,8 +105,8 @@ func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (str
 			entry["headers"] = headers
 		}
 		m[s.Name] = entry
-		if s.ToolFilter != nil {
-			for _, t := range s.ToolFilter.Exclude {
+		if s.ToolFilter != nil { //nolint:staticcheck // deprecated field still honoured until removal
+			for _, t := range s.ToolFilter.Exclude { //nolint:staticcheck // deprecated field still honoured until removal
 				denied = append(denied, fmt.Sprintf("mcp__%s__%s", s.Name, t))
 			}
 		}

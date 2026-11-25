@@ -432,7 +432,7 @@ var _ = Describe("Knight Controller", func() {
 var _ = Describe("Knight deprecated maxDeliver", func() {
 	ctx := context.Background()
 
-	runTools := func(name string, maxDeliver int32, tools aiv1alpha1.KnightTools) (*aiv1alpha1.Knight, *record.FakeRecorder) {
+	runTools := func(name string, maxDeliver int32, tools aiv1alpha1.KnightTools, mods ...func(*aiv1alpha1.Knight)) (*aiv1alpha1.Knight, *record.FakeRecorder) {
 		k := &aiv1alpha1.Knight{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec:       aiv1alpha1.KnightSpec{Domain: "security", Skills: []string{"shared"}},
@@ -440,6 +440,9 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 		k.Spec.NATS.Subjects = []string{"roundtable.tasks.security.>"}
 		k.Spec.NATS.MaxDeliver = maxDeliver //nolint:staticcheck // exercising the deprecated field
 		k.Spec.Tools = &tools
+		for _, m := range mods {
+			m(k)
+		}
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		DeferCleanup(func() {
 			cur := &aiv1alpha1.Knight{}
@@ -531,6 +534,32 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 				}
 			}
 			Expect(n).To(Equal(1), reason)
+		}
+	})
+
+	It("reports spec.mcpServers[].toolFilter naming the server", func() {
+		got, rec := runTools("tools-mcpfilter", 0, aiv1alpha1.KnightTools{}, func(k *aiv1alpha1.Knight) {
+			k.Spec.MCPServers = []aiv1alpha1.KnightMCPServer{
+				{Name: "plain", URL: "http://plain/mcp"},
+				{Name: "vault", URL: "http://vault/mcp", ToolFilter: &aiv1alpha1.KnightMCPToolFilter{Exclude: []string{"x"}}}, //nolint:staticcheck // exercising the deprecated field
+			}
+		})
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(ContainSubstring("spec.mcpServers[].toolFilter"))
+		Expect(c.Message).To(ContainSubstring("vault"))
+		Expect(c.Message).NotTo(ContainSubstring("plain"))
+		Expect(countEvents(rec, "MCPToolFilterDeprecated")).To(Equal(1))
+	})
+
+	It("is silent for mcpServers without a toolFilter", func() {
+		got, rec := runTools("tools-mcpnofilter", 0, aiv1alpha1.KnightTools{}, func(k *aiv1alpha1.Knight) {
+			k.Spec.MCPServers = []aiv1alpha1.KnightMCPServer{{Name: "plain", URL: "http://plain/mcp"}}
+		})
+		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
+		for _, e := range drainEvents(rec) {
+			Expect(e).NotTo(ContainSubstring("MCPToolFilterDeprecated"))
 		}
 	})
 

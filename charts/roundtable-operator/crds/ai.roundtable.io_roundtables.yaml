@@ -3495,8 +3495,13 @@ spec:
                             pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                             type: string
                           toolFilter:
-                            description: toolFilter restricts the tools the knight
-                              may call.
+                            description: |-
+                              toolFilter restricts the tools the knight may call.
+
+                              Deprecated: tool selection belongs to the MCP server or to an MCP
+                              gateway in front of it; listing a server gives the knight that server's
+                              tools. The field will be removed in a future release (excluded tools
+                              are still denied until then).
                             properties:
                               exclude:
                                 description: |-
