@@ -1,0 +1,90 @@
+{{- /*
+Opt-in ingress NetworkPolicies (networkPolicy.enabled). Each policy selects its
+pods in the release namespace and sets policyTypes to Ingress only, so egress is
+unaffected. A rule is rendered only when it has at least one peer: an ingress
+rule with no `from` allows every source, so an empty peer list must drop the
+rule instead, leaving the pods reachable from no one.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $metricsFrom := $np.metricsFrom | default list }}
+---
+# Operator: metrics and health endpoints, scraped from metricsFrom only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "roundtable-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  {{- with $metricsFrom }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 8081
+          protocol: TCP
+        - port: {{ $np.operatorMetricsPort }}
+          protocol: TCP
+  {{- end }}
+{{- if .Values.dashboard.enabled }}
+{{- $dashboardPeers := concat ($np.dashboardFrom | default list) $metricsFrom }}
+---
+# Dashboard: the http port, reached from dashboardFrom and metricsFrom.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: roundtable-dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  {{- with $dashboardPeers }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: http
+          protocol: TCP
+  {{- end }}
+{{- end }}
+---
+# Knights (pods labelled app.kubernetes.io/name: knight in this namespace): the
+# metrics port (METRICS_PORT=3000), scraped from metricsFrom only. Knights in
+# other namespaces are not covered by this release's policies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}-knights
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: knight
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: knight
+  policyTypes:
+    - Ingress
+  {{- with $metricsFrom }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 3000
+          protocol: TCP
+  {{- end }}
+{{- end }}

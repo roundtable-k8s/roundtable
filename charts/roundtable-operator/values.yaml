@@ -126,6 +126,25 @@ missionNetworkPolicy:
     podLabels:
       k8s-app: kube-dns
 
+# Ingress NetworkPolicies for the operator, the dashboard and knight pods. Off
+# by default: nothing extra is rendered. When enabled, each policy selects its
+# pods in the release namespace and allows only the ports listed below; a
+# policy with no allowed peers allows nothing. See docs/helm-values.md.
+networkPolicy:
+  enabled: false
+  # NetworkPolicyPeers allowed to scrape metrics (operator and knights) and,
+  # for the dashboard, to reach it too. Default: the monitoring namespace.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  # NetworkPolicyPeers allowed to reach the dashboard's http port, in addition
+  # to metricsFrom. Empty means only metricsFrom can reach it.
+  dashboardFrom: []
+  # Port of the operator's metrics endpoint; must match --metrics-bind-address
+  # in extraArgs (metrics are off by default).
+  operatorMetricsPort: 8443
+
 # Dashboard (Round Table UI) — observability platform
 dashboard:
   enabled: true
