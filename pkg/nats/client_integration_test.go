@@ -66,8 +66,8 @@ func TestStreamAndConsumerLifecycle(t *testing.T) {
 		t.Fatalf("unexpected stream config: %+v", got)
 	}
 
-	if err := c.EnsureConsumer(ctx, "rt_tasks", "knight-a", ConsumerConfig{
-		FilterSubject: "rt.tasks.a.>", AckPolicy: AckExplicit,
+	if _, err := c.EnsureConsumer(ctx, "rt_tasks", jetstream.ConsumerConfig{
+		Durable: "knight-a", FilterSubject: "rt.tasks.a.>", AckPolicy: jetstream.AckExplicitPolicy,
 	}); err != nil {
 		t.Fatal(err)
 	}

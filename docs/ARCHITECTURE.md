@@ -61,7 +61,7 @@
 
 Each CRD has a dedicated reconciler following the standard Kubernetes controller pattern:
 
-**KnightReconciler**: ConfigMap → PVC → Runtime (Deployment or Sandbox) → Status
+**KnightReconciler**: Task consumer → ConfigMap → PVC → Runtime (Deployment or Sandbox) → Status
 **RoundTableReconciler**: Knight discovery → Health aggregation → NATS streams → Warm pool → Cost check
 **ChainReconciler**: Step ordering → Task dispatch → Output collection → Template rendering → Next step
 **MissionReconciler**: State machine (Pending → Provisioning → Planning → Assembling → Briefing → Active → Cleanup)
@@ -97,10 +97,54 @@ Selected per-knight via `spec.runtime: deployment|sandbox`. Why two backends, ho
 
 ### Consumer Model
 
-Each knight creates a **durable JetStream consumer** with:
-- Filter subject matching its domain
-- Explicit ack policy, `max_deliver: 1` (at most once; no automatic redelivery)
+Each knight reads its tasks from a **durable JetStream pull consumer**
+`<Knight>-consumer` (the Knight name capitalised) on `spec.nats.stream`:
+
+- Filter subjects: `spec.nats.subjects`
+- Explicit ack, deliver all, `max_deliver: 1` (at most once; no automatic redelivery), 30 s `ack_wait` (a heartbeat window; running tasks send in-progress acks)
 - Lost and failed tasks go to the dead-letter stream and are retried by hand (see [knight-task-contract.md](knight-task-contract.md#delivery-and-failure))
+
+KEDA scales the knight on this consumer's lag, so its name and config do not
+change. The values live in one place, `natspkg.KnightTaskConsumerConfig`
+(`pkg/nats/consumer.go`), copied from the runtimes' `subscribe()` in
+roundtable-k8s/knights `packages/core/src/nats/index.ts`.
+
+### JetStream topology: who owns what
+
+| Object | Owner | Lifecycle |
+|--------|-------|-----------|
+| Tasks, results, dead-letter and advisories streams | RoundTable controller (when `spec.nats.createStreams` is true) | Created with the table |
+| Knight task consumer `<Knight>-consumer` | **Knight controller** | Created when the Knight is reconciled, so it exists while the knight is scaled to zero or suspended; deleted by the Knight's finalizer |
+| Dead-letter consumer `roundtable-dead-letter` | RoundTable controller (dead-letter manager) | With the dead-letter stream |
+| Result poll consumers (`chain-poll-*`, mission planners) | Chain and Mission controllers | Ephemeral: deleted after the result is read |
+| Agent cards KV bucket | RoundTable controller (entries also dropped by the Knight finalizer) | Per knight entry |
+
+The Knight controller reconciles the task consumer on every reconcile:
+
+- **Missing**: created.
+- **Matches** (for example one a runtime created first): adopted as it is, never
+  rewritten, so tasks in flight and the delivery state are kept.
+- **Filters, `ack_wait` or `max_deliver` differ**: updated in place.
+- **A field NATS cannot update differs** (deliver, ack or replay policy, start
+  sequence or time, push instead of pull): deleted and recreated, with a
+  `ConsumerRecreated` Warning event. Only then is the consumer's state lost.
+
+The `ConsumerReady` condition on the Knight and the gauge
+`roundtable_knight_consumer_ready{table,knight}` (1 or 0) report the result;
+`ConsumerReady=False` carries `NATSUnavailable`, `StreamNotFound` or
+`ConsumerFailed` and is retried every 30 s. It does not fail the rest of the
+reconcile. Without a NATS connection configured the operator leaves consumers
+alone.
+
+When a Knight is deleted, its finalizer deletes the consumer. If NATS is
+unreachable it retries every 10 s for up to 5 minutes, then gives up with a
+`ConsumerDeleteAbandoned` Warning event naming the consumer to delete by hand
+(`nats consumer rm <stream> <Knight>-consumer`), so an outage never blocks the
+deletion.
+
+The runtimes still create the consumer at start-up with the same config until
+they only bind to it (roundtable-k8s/knights follow-up). Because both sides
+produce the same config, neither rewrites the other's consumer.
 
 ### Message Flow
 
@@ -174,6 +218,7 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_table_cost_usd` | gauge | `table` |
 | `roundtable_warm_pool_knights` | gauge | `table`, `state` |
 | `roundtable_knight_isolated` | gauge | `table`, `knight`, `reason` (1 for the current `Isolated` condition reason) |
+| `roundtable_knight_consumer_ready` | gauge | `table`, `knight` (1 when the knight's task consumer exists with the expected config, else 0) |
 | `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` (`succeeded`, `partially_succeeded`, `failed`) |
 | `roundtable_chain_noop_runs_total` | counter | `table`, `chain` |
 | `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` |
