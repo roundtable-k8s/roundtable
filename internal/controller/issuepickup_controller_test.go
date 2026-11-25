@@ -945,6 +945,63 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(handled(name)).To(BeTrue())
 		})
 
+		// #591: a merge step that timed out with its PR queued is done.
+		mergeTimeout := func(n int) string {
+			gh.add(repo, n, "Fix", "body", "rt:ready")
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			c := &chains[0]
+			c.Status.Phase = aiv1alpha1.ChainPhaseFailed
+			c.Status.RunsFailed = 1
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "review", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"},
+				{Name: "merge", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "step timed out after 3600s", TaskID: "merge-task"},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return c.Name
+		}
+		getChain := func(name string) *aiv1alpha1.Chain {
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			return c
+		}
+
+		It("records a merge step that timed out with its PR queued as succeeded, then verifies it", func() {
+			gh.setPR(github.PullRequest{State: "open", AutoMerge: &struct{}{}})
+			gh.reviews = map[string][]string{"acme/widgets#7": {"Verdict: ship it"}}
+			name := mergeTimeout(591)
+			tick()
+			c := getChain(name)
+			Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
+			Expect(c.Status.RunsFailed).To(BeZero())
+			Expect(c.Status.StepStatuses[1].Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
+			Expect(c.Status.StepStatuses[1].Reason).To(Equal(stepReasonQueuedAtTimeout))
+			Expect(c.Status.StepStatuses[1].Output).To(ContainSubstring("https://github.com/acme/widgets/pull/7 queued"))
+			Expect(gh.labels(repo, 591)).To(ConsistOf("rt:in-progress"))
+			Expect(gh.commentsOn(repo, 591)).To(HaveLen(1)) // the claim only
+
+			By("verifying the recovered run like any succeeded one")
+			tick()
+			Expect(handled(name)).To(BeTrue())
+			Expect(gh.autoMerged).To(BeEmpty())
+			Expect(gh.labels(repo, 591)).NotTo(ContainElement("needs-human"))
+		})
+
+		It("hands back a merge step that timed out with its PR not queued", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			name := mergeTimeout(592)
+			tick()
+			c := getChain(name)
+			Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseFailed))
+			Expect(c.Status.StepStatuses[1].Phase).To(Equal(aiv1alpha1.ChainStepPhaseFailed))
+			Expect(gh.labels(repo, 592)).To(ConsistOf("needs-human"))
+			Expect(gh.commentsOn(repo, 592)[1]).To(ContainSubstring("`merge`: step timed out"))
+			Expect(handled(name)).To(BeTrue())
+		})
+
 		It("retries on the next poll when GitHub fails, and keeps the chain until handled", func() {
 			name := fail()
 			rt := getRT()
@@ -1044,6 +1101,24 @@ var _ = Describe("IssuePickup controller", func() {
 			By("releasing once per run")
 			tick()
 			Expect(gh.commentsOn(repo, 538)).To(HaveLen(2))
+		})
+
+		It("records a merge timeout the verify step passed as succeeded and leaves the issue to the queue (#591)", func() {
+			gh.setPR(github.PullRequest{State: "closed", Merged: true})
+			name := run(593, aiv1alpha1.ChainPhasePartiallySucceeded,
+				ok("review", "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"),
+				aiv1alpha1.ChainStepStatus{Name: "merge", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "step timed out after 3600s"},
+				ok("verify", "rt-verify: ok"),
+				aiv1alpha1.ChainStepStatus{Name: "handback", Phase: aiv1alpha1.ChainStepPhaseSkipped, Reason: stepReasonWhenFalse})
+			tick()
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
+			Expect(c.Status.StepStatuses[1].Reason).To(Equal(stepReasonQueuedAtTimeout))
+			Expect(c.Status.StepStatuses[1].Output).To(ContainSubstring("https://github.com/acme/widgets/pull/7 merged"))
+			Expect(gh.labels(repo, 593)).To(ConsistOf("rt:in-progress"))
+			Expect(gh.commentsOn(repo, 593)).To(HaveLen(1))
+			Expect(handled(name)).To(BeTrue())
 		})
 
 		It("only removes in-progress when a step already handed the issue back", func() {

@@ -73,7 +73,9 @@ func pickupNeedsRelease(c *aiv1alpha1.Chain) bool {
 //     included): needs-human, a comment naming the failed steps, and the
 //     in-progress label removed;
 //   - the run succeeded: left alone, the chain's steps own it (a queued PR
-//     closes it on merge, the split branch closes a parent).
+//     closes it on merge, the split branch closes a parent). A run whose
+//     only failure is a merge step timeout with every PR merged or queued
+//     is first recorded as succeeded (#591).
 //
 // The run is then marked handled. A returned error is retried on the next poll.
 func (r *IssuePickupReconciler) releaseIssue(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable,
@@ -82,6 +84,11 @@ func (r *IssuePickupReconciler) releaseIssue(ctx context.Context, gh *github.Cli
 	issue, err := strconv.Atoi(c.Annotations[aiv1alpha1.AnnotationPickupIssue])
 	if err != nil {
 		return fmt.Errorf("bad %s annotation: %w", aiv1alpha1.AnnotationPickupIssue, err)
+	}
+	// #591: a merge step that timed out with its PRs queued is done; the
+	// recovered run is succeeded and leaves the issue to the merge queue.
+	if _, err := r.recoverQueuedMerge(ctx, gh, rt, c); err != nil {
+		return err
 	}
 	gi, err := gh.GetIssue(ctx, repo, issue)
 	if err != nil {
