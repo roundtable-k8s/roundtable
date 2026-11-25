@@ -23,6 +23,7 @@ Real-world examples of Round Table resources.
 | [`egress/`](egress/) | Starter egress allowlists (GitHub read, package docs, model providers, research, feeds); see [docs](../docs/egress.md) |
 | [`mission-ephemeral.yaml`](mission-ephemeral.yaml) | Mission using existing fleet knights |
 | [`mission-meta.yaml`](mission-meta.yaml) | Meta-mission — planner auto-generates chains and knights |
+| [`mission-archive-results.yaml`](mission-archive-results.yaml) | Mission whose final chain step has kay write a dated summary to `Briefings/` through `outputPath` (see [Keeping mission output](../docs/keeping-mission-output.md)) |
 
 ## Scheduled briefing
 
