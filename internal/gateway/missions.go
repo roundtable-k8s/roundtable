@@ -410,7 +410,7 @@ func (s *Service) defaultPlanner(ctx context.Context, ns string, rt *aiv1alpha1.
 	}
 	names := make([]string, 0, len(list.Items))
 	for _, k := range list.Items {
-		if kt := k.Labels[aiv1alpha1.LabelRoundTable]; k.Labels[aiv1alpha1.LabelEphemeral] == "true" || (kt != "" && kt != rt.Name) {
+		if kt := k.Labels[aiv1alpha1.LabelRoundTable]; k.Labels[aiv1alpha1.LabelEphemeral] == labelTrue || (kt != "" && kt != rt.Name) {
 			continue
 		}
 		names = append(names, k.Name)
