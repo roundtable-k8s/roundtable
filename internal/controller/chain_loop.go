@@ -32,6 +32,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -686,6 +687,12 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 			}
 			return
 		}
+		// #486: a transient provider failure defers the loop for a retry.
+		deferred, msg := r.deferLoopForProvider(ctx, chain, spec, bs, ss, res, errMsg)
+		if deferred {
+			return
+		}
+		errMsg = msg
 		bs.Error = truncateUTF8(errMsg, itemErrorLimit)
 		recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseFailed, "")
 		if rp := stepRetryPolicy(chain, &aiv1alpha1.ChainStep{Retry: body.Retry}); rp != nil && bs.Retries < rp.MaxRetries {
@@ -697,12 +704,62 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 		bs.Phase = aiv1alpha1.ChainStepPhaseFailed
 		return
 	}
+	if ss != nil {
+		ss.ProviderRetries = 0
+		ss.TransientReason = ""
+	}
 	bs.Phase = aiv1alpha1.ChainStepPhaseSucceeded
 	bs.Error = ""
 	bs.Output = truncateStatusOutput(output, key)
 	recordLoopHistory(ss, bs, aiv1alpha1.ChainStepPhaseSucceeded, output)
 	r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, spec.Name+"."+bs.Name, output, "", body.KnightRef.Name, bs.StartedAt, &now, structured)
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "LoopStepCompleted", "Loop step %s: %s completed round %d", spec.Name, bs.Name, bs.Iteration)
+}
+
+// deferLoopForProvider handles a body task that failed with a transient model
+// provider error (#486, HTTP 529 Overloaded...): the loop is deferred with the
+// 1/2/4/8 min backoff and the body task re-runs after the wake, on the loop's
+// fallback knight from the second retry on. Retries are counted on the loop
+// step (ss.ProviderRetries) and reset when a body task succeeds. It returns
+// true when the loop was deferred; otherwise the (possibly annotated, once
+// retries are exhausted) error message to fail with.
+func (r *ChainReconciler) deferLoopForProvider(ctx context.Context, chain *aiv1alpha1.Chain, spec *aiv1alpha1.ChainStep, bs *aiv1alpha1.ChainLoopStepStatus, ss *aiv1alpha1.ChainStepStatus, res *natspkg.TaskResult, errMsg string) (bool, string) {
+	reason, transient := transientProviderReason(res)
+	if !transient || ss == nil {
+		return false, errMsg
+	}
+	if int(ss.ProviderRetries) >= r.ProviderMaxRetries {
+		if ss.ProviderRetries > 0 {
+			errMsg = fmt.Sprintf("%s (provider error; retried %d times)", errMsg, ss.ProviderRetries)
+		}
+		return false, errMsg
+	}
+	log := logf.FromContext(ctx).WithValues("step", spec.Name, "body", bs.Name)
+	ss.ProviderRetries++
+	metrics.ChainProviderRetriesTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, spec.Name, reason).Inc()
+	wait := providerBackoff(ss.ProviderRetries)
+	until := metav1.NewTime(time.Now().Add(wait))
+	ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
+	ss.Reason = stepReasonProviderOverloaded
+	ss.TransientReason = reason
+	ss.DeferUntil = &until
+	bs.Error = ""
+	bs.CompletedAt = nil
+	bs.PickedUpAt = nil
+	bs.Phase = aiv1alpha1.ChainStepPhasePending
+	bs.TaskID = ""
+	bs.TaskSeq = 0
+	bs.StartedAt = nil
+	if ss.ProviderRetries >= providerFallbackAfter {
+		if fb := loopFallbackKnight(spec, bs); fb != "" {
+			bs.Knight = fb
+			bs.Model = ""
+		}
+	}
+	log.Info("Model provider overloaded: retrying loop body after backoff", "round", bs.Iteration, "retry", ss.ProviderRetries, "wait", wait.String())
+	r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepProviderOverloaded",
+		"Loop %s/%s hit a transient provider error (%s; retry %d/%d in %s): %s", spec.Name, bs.Name, reason, ss.ProviderRetries, r.ProviderMaxRetries, wait, truncateUTF8(errMsg, 200))
+	return true, errMsg
 }
 
 const (
