@@ -249,6 +249,10 @@ telemetry:
 dashboard:
   enabled: true
   replicas: 1
+  # Pod scheduling for the dashboard Deployment (empty = unset).
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
   resources:
     requests:
       cpu: 50m
@@ -433,6 +437,13 @@ planner:
   # RuntimeClass for the planner pod. Empty = the operator default
   # (isolation.runtimeClassName).
   runtimeClassName: ""
+  # Pod scheduling for the planner knight, passed verbatim to the Knight spec
+  # (empty = unset).
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  topologySpreadConstraints: []
+  priorityClassName: ""
   # Ordered skill sources merged into /skills (first = base, later entries
   # override per skill). One git-sync-<name> sidecar per git entry.
   arsenals:

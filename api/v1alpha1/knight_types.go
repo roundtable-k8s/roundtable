@@ -134,6 +134,31 @@ type KnightSpec struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// nodeSelector is a map of node labels the knight's pod must match,
+	// applied verbatim to the pod spec.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// affinity is the pod's scheduling affinity (node, pod and anti-affinity),
+	// applied verbatim to the pod spec.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// tolerations are the pod's tolerations, applied verbatim to the pod spec.
+	// +listType=atomic
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// topologySpreadConstraints are the pod's topology spread constraints,
+	// applied verbatim to the pod spec.
+	// +listType=atomic
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+
+	// priorityClassName is the name of the PriorityClass of the knight's pod.
+	// +optional
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+
 	// runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
 	// pod runs under (for example "gvisor"). It applies to both runtime:
 	// deployment and runtime: sandbox. When unset the table default applies,

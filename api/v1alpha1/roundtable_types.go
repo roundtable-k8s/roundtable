@@ -271,6 +271,36 @@ type RoundTableDefaults struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// nodeSelector is the default node selector for the table's standing
+	// knights. A knight that sets its own spec.nodeSelector keeps it; maps are
+	// not merged.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// affinity is the default scheduling affinity for the table's standing
+	// knights. A knight that sets its own spec.affinity keeps it.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// tolerations are the default tolerations for the table's standing knights.
+	// A knight that sets its own spec.tolerations keeps them; lists are not
+	// merged.
+	// +listType=atomic
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// topologySpreadConstraints are the default topology spread constraints for
+	// the table's standing knights. A knight that sets its own
+	// spec.topologySpreadConstraints keeps them.
+	// +listType=atomic
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+
+	// priorityClassName is the default PriorityClass for the table's standing
+	// knights. A knight that sets its own spec.priorityClassName keeps it.
+	// +optional
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+
 	// egress is the default egress allowlist (allowedHosts, allowedPorts and
 	// allowedServices) for the table's standing knights. A knight that sets
 	// its own spec.egress keeps it; allowlists are not merged. There is no table-level opt-out: opting out is explicit on the

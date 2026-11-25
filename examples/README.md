@@ -7,6 +7,7 @@ Real-world examples of Round Table resources.
 | [`quickstart/`](quickstart/) | Minimal RoundTable, Knight and two-step Chain for the [kind quickstart](../docs/getting-started.md) |
 | [`knight-basic.yaml`](knight-basic.yaml) | A single knight — security domain with NATS config |
 | [`knight-scaled.yaml`](knight-scaled.yaml) | A horizontally scaled knight — ephemeral workspace, KEDA 0..N on pending tasks |
+| [`knight-scheduling.yaml`](knight-scheduling.yaml) | A coder knight pinned to large nodes with `nodeSelector` and a toleration |
 | [`knight-mcp-headers.yaml`](knight-mcp-headers.yaml) | A claude-knight using a remote MCP server with an `Authorization` header from a Secret (`spec.mcpServers[].headersFrom`, [docs](../docs/crd-design.md#7-knight-specmcpservers-claude-knight-only)) |
 | [`knight-persona-jobs.yaml`](knight-persona-jobs.yaml) | A tool-less persona Knight and two job Chains on it, run through the gateway ([migrating from kagent](../docs/migrating-from-kagent.md)) |
 | [`roundtable-fleet.yaml`](roundtable-fleet.yaml) | Full fleet config with a sandbox mission-knight template, policies, and NATS streams |

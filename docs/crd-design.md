@@ -196,6 +196,11 @@ the operator does not commit results to git.
    | `spec.memory` | `spec.defaults.memory` (including `existingClaim`) | no memory volume |
    | `spec.arsenals` | `spec.defaults.arsenals` (when the knight sets none) | one `platform` arsenal (`roundtable-k8s/arsenal`) |
    | `spec.runtimeClassName` | `spec.defaults.runtimeClassName` | cluster default |
+   | `spec.nodeSelector` | `spec.defaults.nodeSelector` | none |
+   | `spec.affinity` | `spec.defaults.affinity` | none |
+   | `spec.tolerations` | `spec.defaults.tolerations` | none |
+   | `spec.topologySpreadConstraints` | `spec.defaults.topologySpreadConstraints` | none |
+   | `spec.priorityClassName` | `spec.defaults.priorityClassName` | none |
    | `spec.vault` | `spec.vault` | no vault |
 
    The Knight CRD has no schema defaults for these fields, so "unset" means unset. `status.model` (the `Model` column of `kubectl get knight`) shows the effective model. A change to a table's defaults or vault re-reconciles the knights labelled with it, and their pods roll when the rendered pod template changes. Chains and the gateway read knights with the same defaults applied (effective image, concurrency and model).

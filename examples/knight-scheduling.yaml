@@ -1,0 +1,31 @@
+# A coder knight pinned to large nodes. nodeSelector, affinity, tolerations,
+# topologySpreadConstraints and priorityClassName are upstream corev1 types,
+# copied verbatim onto the knight pod. A RoundTable's spec.defaults takes the
+# same five fields for knights that leave them unset.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: coder
+  namespace: roundtable
+spec:
+  domain: coding
+  model: claude-sonnet-4-20250514
+  skills:
+    - coding
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.coding.>"
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+  nodeSelector:
+    node-size: large
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: coders
+      effect: NoSchedule
