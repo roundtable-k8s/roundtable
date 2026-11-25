@@ -2,6 +2,7 @@
 {{- $gw := .Values.gateway }}
 {{- $name := printf "%s-gateway" (include "roundtable-operator.fullname" .) }}
 {{- $missions := $gw.missions | default dict }}
+{{- $runs := $gw.runs | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -37,7 +38,8 @@ metadata:
     app.kubernetes.io/component: gateway
 ---
 # Read-only: the gateway looks up Knights, their RoundTables and Chains.
-# Tasks go over NATS. The only objects it writes are Missions (below).
+# Tasks go over NATS. The only objects it writes are Missions and run copies
+# of opted-in Chains (below).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -65,58 +67,62 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
-{{- if $missions.enabled }}
+{{- /* Objects the gateway writes: Missions, and run copies of opted-in Chains. */}}
+{{- $writes := list }}
+{{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions") }}{{ end }}
+{{- if $runs.enabled }}{{ $writes = append $writes (dict "suffix" "runs" "resource" "chains" "what" "Run copies of Chains labelled ai.roundtable.io/invokable=true (delete cleans up expired copies)") }}{{ end }}
+{{- range $w := $writes }}
 {{- if has "*" ($gw.allowedNamespaces | default list) }}
 ---
-# Missions in any namespace (allowedNamespaces holds "*").
+# {{ $w.what }} in any namespace (allowedNamespaces holds "*").
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
   labels:
-    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
     app.kubernetes.io/component: gateway
 rules:
   - apiGroups: ["ai.roundtable.io"]
-    resources: ["missions"]
+    resources: [{{ $w.resource | quote }}]
     verbs: ["get", "list", "watch", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
   labels:
-    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
     app.kubernetes.io/component: gateway
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
 subjects:
   - kind: ServiceAccount
     name: {{ $name }}
-    namespace: {{ .Release.Namespace }}
+    namespace: {{ $.Release.Namespace }}
 {{- else }}
 {{- range $ns := uniq (prepend ($gw.allowedNamespaces | default list) ($gw.namespace | default $.Release.Namespace)) }}
 ---
-# Missions only in the namespaces callers may target.
+# {{ $w.what }} only in the namespaces callers may target.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
   namespace: {{ $ns }}
   labels:
     {{- include "roundtable-operator.labels" $ | nindent 4 }}
     app.kubernetes.io/component: gateway
 rules:
   - apiGroups: ["ai.roundtable.io"]
-    resources: ["missions"]
+    resources: [{{ $w.resource | quote }}]
     verbs: ["get", "list", "watch", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
   namespace: {{ $ns }}
   labels:
     {{- include "roundtable-operator.labels" $ | nindent 4 }}
@@ -124,7 +130,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ $name }}-missions
+  name: {{ $name }}-{{ $w.suffix }}
 subjects:
   - kind: ServiceAccount
     name: {{ $name }}
@@ -193,6 +199,10 @@ spec:
             - --mission-max-ttl-seconds={{ int ($missions.maxTTLSeconds | default 86400) }}
             - --mission-max-timeout-seconds={{ int ($missions.maxTimeoutSeconds | default 21600) }}
             - --mission-allow-skill-generation={{ $missions.allowSkillGeneration | default false }}
+            {{- end }}
+            - --runs={{ $runs.enabled | default false }}
+            {{- if $runs.enabled }}
+            - --run-ttl={{ $gw.runTTL | default "24h" }}
             {{- end }}
             {{- range $gw.extraArgs }}
             - {{ . }}

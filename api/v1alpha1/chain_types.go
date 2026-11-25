@@ -29,6 +29,10 @@ const (
 	// AnnotationChainRetryFailed resumes the current run from its failed
 	// step(s) only, whenever its value differs from status.lastRetryTrigger.
 	AnnotationChainRetryFailed = "ai.roundtable.io/retry-failed"
+
+	// LabelInvokable set to "true" opts a Chain in to runs started through
+	// the invoke gateway (POST /v1/chains/{name}/runs, the run_chain tool).
+	LabelInvokable = "ai.roundtable.io/invokable"
 )
 
 // ChainSpec defines the desired state of a Chain — a declarative multi-knight task pipeline.

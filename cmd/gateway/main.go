@@ -51,9 +51,9 @@ func envOr(key, def string) string {
 func main() {
 	var (
 		listen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
-		defaultTimeout, maxTimeout, taskTTL                                  time.Duration
+		defaultTimeout, maxTimeout, taskTTL, runTTL                          time.Duration
 		maxInFlight                                                          int
-		missionsEnabled, allowSkillGeneration                                bool
+		missionsEnabled, allowSkillGeneration, runsEnabled                   bool
 		maxBudgetUSD                                                         float64
 		maxMissionTTL, maxMissionTimeout                                     int
 	)
@@ -68,7 +68,7 @@ func main() {
 	flag.DurationVar(&taskTTL, "task-ttl", 7*24*time.Hour, "How long task records are kept.")
 	flag.DurationVar(&defaultTimeout, "default-timeout", 60*time.Second,
 		"How long invoke waits when the caller doesn't say.")
-	flag.DurationVar(&maxTimeout, "max-timeout", 10*time.Minute, "Upper bound on the wait a caller may request.")
+	flag.DurationVar(&maxTimeout, "max-timeout", 30*time.Minute, "Upper bound on the wait a caller may request.")
 	flag.IntVar(&maxInFlight, "max-in-flight", 64, "Maximum concurrently waiting invocations (0 = unlimited).")
 	flag.StringVar(&defaultImage, "default-knight-image", os.Getenv("DEFAULT_KNIGHT_IMAGE"),
 		"The operator's DEFAULT_KNIGHT_IMAGE, used to infer knight runtimes for model validation.")
@@ -79,6 +79,9 @@ func main() {
 	flag.IntVar(&maxMissionTimeout, "mission-max-timeout-seconds", 21600, "Upper bound on a mission's timeoutSeconds.")
 	flag.BoolVar(&allowSkillGeneration, "mission-allow-skill-generation", false,
 		"Let callers set planner.allowSkillGeneration on missions.")
+	flag.BoolVar(&runsEnabled, "runs", true,
+		"Serve the chain-run endpoints (needs RBAC to create, read and delete Chains).")
+	flag.DurationVar(&runTTL, "run-ttl", 24*time.Hour, "How long a finished chain run started by the gateway is kept.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -142,9 +145,13 @@ func main() {
 			MaxTimeoutSeconds:    int32(max(min(maxMissionTimeout, math.MaxInt32), 0)),
 			AllowSkillGeneration: allowSkillGeneration,
 		},
+		Runs: gateway.RunOptions{TTL: runTTL},
 	}, log)
 	if missionsEnabled {
 		svc.Missions = k8s
+	}
+	if runsEnabled {
+		svc.Runs = k8s
 	}
 
 	mux := http.NewServeMux()
@@ -160,12 +167,19 @@ func main() {
 		Addr:              listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		// No WriteTimeout: invoke and MCP calls legitimately stay open for
-		// up to --max-timeout.
+		// No ReadTimeout or WriteTimeout: invoke, run and MCP calls
+		// legitimately stay open for up to --max-timeout. ReadHeaderTimeout
+		// only bounds reading the request headers and IdleTimeout only the
+		// gap between requests on a kept-alive connection, so neither cuts a
+		// long response.
 		IdleTimeout: 2 * time.Minute,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if runsEnabled {
+		// Delete the gateway's finished run copies once they are past --run-ttl.
+		go svc.RunJanitor(ctx, min(max(runTTL/4, time.Minute), 10*time.Minute))
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -173,7 +187,8 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "namespace", namespace, "nats", natsURL)
+	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled,
+		"namespace", namespace, "nats", natsURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "Gateway server failed")
 		os.Exit(1)

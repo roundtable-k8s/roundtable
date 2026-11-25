@@ -204,9 +204,12 @@ gateway:
   # match: the gateway gets a ClusterRole, so it can read Knights anywhere.
   allowedNamespaces: []
   # How long invoke waits when the caller doesn't pass timeoutSeconds, and
-  # the most a caller may ask for. Longer waits return 202 {taskId}.
+  # the most a caller may ask for (invoke timeoutSeconds, and waitSeconds of
+  # chain runs and missions). Longer waits return 202 to poll. A proxy or
+  # client between the caller and the gateway needs its own timeout raised
+  # to match (see docs/gateway.md).
   defaultTimeout: 60s
-  maxTimeout: 10m
+  maxTimeout: 30m
   # Concurrently waiting invocations per replica; beyond it callers get 429.
   maxInFlight: 64
   # NATS KV bucket holding task records (taskId -> status/result) and how
@@ -255,6 +258,16 @@ gateway:
     maxTimeoutSeconds: 21600
     # Let callers set planner.allowSkillGeneration.
     allowSkillGeneration: false
+  # Chain runs (POST /v1/chains/{name}/runs, GET /v1/runs and the
+  # list_chains, run_chain, get_run and list_runs MCP tools). Only Chains
+  # labelled ai.roundtable.io/invokable: "true" can be run; each run is a copy
+  # of the Chain with the caller's input (never the caller's steps). When
+  # enabled, the gateway gets create/delete on Chains in its namespace and
+  # allowedNamespaces (a ClusterRole if allowedNamespaces holds "*").
+  runs:
+    enabled: true
+  # How long a finished run copy is kept before the gateway deletes it.
+  runTTL: 24h
 
 # Knights to create alongside the operator
 # Example:

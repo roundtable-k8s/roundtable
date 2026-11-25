@@ -18,8 +18,10 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -70,6 +72,38 @@ type GetMissionInput struct {
 // ListMissionsOutput is the output of the list_missions tool.
 type ListMissionsOutput struct {
 	Missions []*MissionView `json:"missions"`
+}
+
+// ListChainsInput is the input of the list_chains tool.
+type ListChainsInput struct {
+	Namespace string `json:"namespace,omitempty" jsonschema:"namespace to list; omit for the default"`
+}
+
+// ListChainsOutput is the output of the list_chains tool.
+type ListChainsOutput struct {
+	Chains []ChainInfo `json:"chains"`
+}
+
+// RunChainInput is the input of the run_chain tool.
+type RunChainInput struct {
+	Chain string `json:"chain" jsonschema:"name of the chain to run (see list_chains)"`
+	// Input is any JSON value: a string is passed as is, anything else as
+	// its JSON text.
+	Input       any    `json:"input,omitempty" jsonschema:"input for this run (a string or any JSON value); omit to use the chain's own input"`
+	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the run to finish before returning (default 0 = return at once)"`
+	Namespace   string `json:"namespace,omitempty" jsonschema:"namespace of the chain; omit for the default"`
+}
+
+// GetRunInput is the input of the get_run tool.
+type GetRunInput struct {
+	Run         string `json:"run" jsonschema:"name of the run (returned by run_chain)"`
+	Namespace   string `json:"namespace,omitempty" jsonschema:"namespace of the run; omit for the default"`
+	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the run to finish before returning (default 0)"`
+}
+
+// ListRunsOutput is the output of the list_runs tool.
+type ListRunsOutput struct {
+	Runs []*RunRecord `json:"runs"`
 }
 
 // NewMCPServer builds the MCP server exposing the gateway's operations.
@@ -147,6 +181,9 @@ func NewMCPServer(svc *Service) *mcp.Server {
 	if svc.MissionsEnabled() {
 		addMissionTools(s, svc)
 	}
+	if svc.RunsEnabled() {
+		addRunTools(s, svc)
+	}
 	return s
 }
 
@@ -183,6 +220,84 @@ func addMissionTools(s *mcp.Server, svc *Service) {
 		missions, err := svc.ListMissions(ctx, in)
 		return nil, ListMissionsOutput{Missions: missions}, err
 	})
+}
+
+func addRunTools(s *mcp.Server, svc *Service) {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_chains",
+		Description: "List the chains (multi-knight pipelines) that can be run with run_chain, with their description.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListChainsInput) (*mcp.CallToolResult, ListChainsOutput, error) {
+		chains, err := svc.ListChains(ctx, in.Namespace)
+		return nil, ListChainsOutput{Chains: chains}, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "run_chain",
+		Description: "Run a chain with your input and wait for its final output. If it isn't finished within " +
+			"waitSeconds, the run is returned unfinished: call get_run with its name (waitSeconds lets get_run wait too).",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RunChainInput) (*mcp.CallToolResult, *RunRecord, error) {
+		req := RunChainRequest{Namespace: in.Namespace, WaitSeconds: in.WaitSeconds}
+		if in.Input != nil {
+			raw, err := json.Marshal(in.Input)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: input: %v", ErrInvalid, err)
+			}
+			req.Input = raw
+		}
+		rec, err := svc.RunChain(ctx, in.Chain, req)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runResult(rec), rec, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_run",
+		Description: "Get a chain run started by run_chain: its phase, steps and, once finished, the final output.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetRunInput) (*mcp.CallToolResult, *RunRecord, error) {
+		rec, err := svc.GetRun(ctx, in.Namespace, in.Run, in.WaitSeconds)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runResult(rec), rec, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_runs",
+		Description: "List chain runs started through this gateway, newest first.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RunFilter) (*mcp.CallToolResult, ListRunsOutput, error) {
+		runs, err := svc.ListRuns(ctx, in)
+		return nil, ListRunsOutput{Runs: runs}, err
+	})
+}
+
+// runResult puts a finished run's output first in the text content and marks
+// failed runs as tool errors.
+func runResult(rec *RunRecord) *mcp.CallToolResult {
+	id := rec.Namespace + "/" + rec.Run
+	if !rec.Done {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Run " + id + " of chain " + rec.Chain + " is " + rec.Phase + ". Call get_run with run " + rec.Run + " later."}}}
+	}
+	if rec.Phase == string(aiv1alpha1.ChainPhaseFailed) {
+		var errs []string
+		for _, st := range rec.Steps {
+			if st.Error != "" {
+				errs = append(errs, st.Name+": "+st.Error)
+			}
+		}
+		text := "Run " + id + " of chain " + rec.Chain + " failed"
+		if len(errs) > 0 {
+			text += ": " + strings.Join(errs, "; ")
+		}
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+	}
+	text := rec.Output
+	if text == "" {
+		text = "Run " + id + " of chain " + rec.Chain + " finished: " + rec.Phase + ". See steps for each step's output."
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }
 
 // missionResult puts a finished mission's result first in the text content
