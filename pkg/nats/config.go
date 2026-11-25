@@ -19,7 +19,7 @@ package nats
 import (
 	"time"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // Config holds NATS connection configuration.
@@ -86,17 +86,17 @@ const (
 	RetentionInterest RetentionPolicy = "Interest"
 )
 
-// ToNATS converts RetentionPolicy to nats.RetentionPolicy.
-func (r RetentionPolicy) ToNATS() nats.RetentionPolicy {
+// ToNATS converts RetentionPolicy to jetstream.RetentionPolicy.
+func (r RetentionPolicy) ToNATS() jetstream.RetentionPolicy {
 	switch r {
 	case RetentionLimits:
-		return nats.LimitsPolicy
+		return jetstream.LimitsPolicy
 	case RetentionWorkQueue:
-		return nats.WorkQueuePolicy
+		return jetstream.WorkQueuePolicy
 	case RetentionInterest:
-		return nats.InterestPolicy
+		return jetstream.InterestPolicy
 	default:
-		return nats.WorkQueuePolicy
+		return jetstream.WorkQueuePolicy
 	}
 }
 
@@ -111,13 +111,13 @@ const (
 	StorageMemory StorageType = "Memory"
 )
 
-// ToNATS converts StorageType to nats.StorageType.
-func (s StorageType) ToNATS() nats.StorageType {
+// ToNATS converts StorageType to jetstream.StorageType.
+func (s StorageType) ToNATS() jetstream.StorageType {
 	switch s {
 	case StorageMemory:
-		return nats.MemoryStorage
+		return jetstream.MemoryStorage
 	default:
-		return nats.FileStorage
+		return jetstream.FileStorage
 	}
 }
 
@@ -132,13 +132,13 @@ const (
 	DiscardNew DiscardPolicy = "New"
 )
 
-// ToNATS converts DiscardPolicy to nats.DiscardPolicy.
-func (d DiscardPolicy) ToNATS() nats.DiscardPolicy {
+// ToNATS converts DiscardPolicy to jetstream.DiscardPolicy.
+func (d DiscardPolicy) ToNATS() jetstream.DiscardPolicy {
 	switch d {
 	case DiscardNew:
-		return nats.DiscardNew
+		return jetstream.DiscardNew
 	default:
-		return nats.DiscardOld
+		return jetstream.DiscardOld
 	}
 }
 

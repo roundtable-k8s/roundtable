@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -50,9 +50,16 @@ func (f *modelFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *modelFakeNATS) ConsumerAckFloor(string, string) (uint64, error)     { return f.seq, nil }
-func (f *modelFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) { return f.seq, nil }
-func (f *modelFakeNATS) PollMessage(subject string, _ time.Duration, _ ...natspkg.SubscribeOption) (*nats.Msg, error) {
+func (f *modelFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
+	return f.seq, nil
+}
+func (f *modelFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
+	return f.seq, nil
+}
+func (f *modelFakeNATS) FetchOne(
+	_ context.Context, _ string, cfg jetstream.ConsumerConfig, _ time.Duration,
+) (jetstream.Msg, error) {
+	subject := cfg.FilterSubject
 	if f.result == nil {
 		return nil, nil
 	}
@@ -60,7 +67,7 @@ func (f *modelFakeNATS) PollMessage(subject string, _ time.Duration, _ ...natspk
 	if err != nil {
 		return nil, err
 	}
-	return &nats.Msg{Subject: subject, Data: data}, nil
+	return &fakeMsg{subject: subject, data: data}, nil
 }
 
 // payloads decodes every published task payload.

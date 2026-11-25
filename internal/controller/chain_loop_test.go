@@ -250,14 +250,14 @@ type loopFakeNATS struct {
 	kv   map[string][]byte
 }
 
-func (f *loopFakeNATS) KVPut(_ string, key string, data []byte) error {
+func (f *loopFakeNATS) KVPut(_ context.Context, _ string, key string, data []byte) error {
 	f.kvMu.Lock()
 	defer f.kvMu.Unlock()
 	f.kv[key] = data
 	return nil
 }
 
-func (f *loopFakeNATS) KVGet(_ string, key string) ([]byte, error) {
+func (f *loopFakeNATS) KVGet(_ context.Context, _ string, key string) ([]byte, error) {
 	f.kvMu.Lock()
 	defer f.kvMu.Unlock()
 	if d, ok := f.kv[key]; ok {
@@ -699,7 +699,7 @@ var _ = Describe("Chain when conditions and loops", func() {
 func TestStructuredVarsProseFallbackInConditions(t *testing.T) {
 	r := &ChainReconciler{}
 	chain := &aiv1alpha1.Chain{}
-	prs, verdict := r.structuredVars(chain, "c.review", "PR #245 reviewed.\nVerdict: ship_it", true)
+	prs, verdict := r.structuredVars(context.Background(), chain, "c.review", "PR #245 reviewed.\nVerdict: ship_it", true)
 	vars := map[string]any{"input": "", "steps": map[string]any{
 		"review": map[string]any{"phase": "Succeeded", "prs": prs, "verdict": verdict},
 		"idle":   map[string]any{"phase": "Pending", "prs": []any{}, "verdict": ""},
@@ -715,7 +715,7 @@ func TestStructuredVarsProseFallbackInConditions(t *testing.T) {
 		}
 	}
 	// Not loaded (step not mentioned/succeeded): empty, no prose parsing.
-	if prs, v := r.structuredVars(chain, "c.x", "Verdict: ship_it", false); v != "" || len(prs) != 0 {
+	if prs, v := r.structuredVars(context.Background(), chain, "c.x", "Verdict: ship_it", false); v != "" || len(prs) != 0 {
 		t.Fatalf("unloaded step leaked %v %q", prs, v)
 	}
 }

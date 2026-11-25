@@ -28,6 +28,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus"
 
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
@@ -104,22 +105,22 @@ func NewManager(log logr.Logger) *Manager {
 // the KV bucket and the advisory consumer, and starts the table's watcher if
 // it is not running on nc with the same configuration. key identifies the
 // RoundTable (namespace/name).
-func (m *Manager) Ensure(nc *nats.Conn, key string, cfg TableConfig) error {
+func (m *Manager) Ensure(ctx context.Context, nc *nats.Conn, key string, cfg TableConfig) error {
 	if nc == nil {
 		return errors.New("dead-letter: no NATS connection")
 	}
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		return fmt.Errorf("dead-letter: JetStream context: %w", err)
 	}
-	if err := ensureStreams(js, cfg); err != nil {
+	if err := ensureStreams(ctx, js, cfg); err != nil {
 		return err
 	}
-	kv, err := ensureBucket(js)
+	kv, err := ensureBucket(ctx, js)
 	if err != nil {
 		return err
 	}
-	if err := ensureConsumer(js, cfg); err != nil {
+	if err := ensureConsumer(ctx, js, cfg); err != nil {
 		return err
 	}
 
@@ -176,10 +177,10 @@ func (m *Manager) StopAll() {
 
 // ensureStream creates cfg's stream or updates it when subjects, max age or
 // duplicate window differ.
-func ensureStream(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
-	info, err := js.StreamInfo(cfg.Name)
-	if errors.Is(err, nats.ErrStreamNotFound) {
-		if _, err := js.AddStream(cfg); err != nil {
+func ensureStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) error {
+	stream, err := js.Stream(ctx, cfg.Name)
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		if _, err := js.CreateStream(ctx, cfg); err != nil {
 			return fmt.Errorf("create stream %s: %w", cfg.Name, err)
 		}
 		return nil
@@ -187,7 +188,7 @@ func ensureStream(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
 	if err != nil {
 		return fmt.Errorf("stream info %s: %w", cfg.Name, err)
 	}
-	cur := info.Config
+	cur := stream.CachedInfo().Config
 	if slices.Equal(cur.Subjects, cfg.Subjects) && cur.MaxAge == cfg.MaxAge &&
 		(cfg.Duplicates == 0 || cur.Duplicates == cfg.Duplicates) {
 		return nil
@@ -197,30 +198,30 @@ func ensureStream(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
 	if cfg.Duplicates > 0 {
 		cur.Duplicates = cfg.Duplicates
 	}
-	if _, err := js.UpdateStream(&cur); err != nil {
+	if _, err := js.UpdateStream(ctx, cur); err != nil {
 		return fmt.Errorf("update stream %s: %w", cfg.Name, err)
 	}
 	return nil
 }
 
-func ensureStreams(js nats.JetStreamContext, cfg TableConfig) error {
-	if err := ensureStream(js, &nats.StreamConfig{
+func ensureStreams(ctx context.Context, js jetstream.JetStream, cfg TableConfig) error {
+	if err := ensureStream(ctx, js, jetstream.StreamConfig{
 		Name:        AdvisoriesStreamName(cfg.TasksStream),
 		Description: "Max-deliveries advisories of " + cfg.TasksStream + " (dead-letter input)",
 		Subjects:    []string{AdvisorySubject(cfg.TasksStream)},
-		Retention:   nats.LimitsPolicy,
-		Storage:     nats.FileStorage,
+		Retention:   jetstream.LimitsPolicy,
+		Storage:     jetstream.FileStorage,
 		MaxAge:      AdvisoryMaxAge,
 	}); err != nil {
 		return fmt.Errorf("dead-letter advisories stream: %w", err)
 	}
 	maxAge := cfg.maxAge()
-	if err := ensureStream(js, &nats.StreamConfig{
+	if err := ensureStream(ctx, js, jetstream.StreamConfig{
 		Name:        StreamName(cfg.TasksStream),
 		Description: "Dead-lettered (lost and failed) tasks of " + cfg.TasksStream,
 		Subjects:    []string{StreamSubject(cfg.Prefix)},
-		Retention:   nats.LimitsPolicy,
-		Storage:     nats.FileStorage,
+		Retention:   jetstream.LimitsPolicy,
+		Storage:     jetstream.FileStorage,
 		MaxAge:      maxAge,
 		Duplicates:  min(DuplicateWindow, maxAge),
 	}); err != nil {
@@ -229,15 +230,15 @@ func ensureStreams(js nats.JetStreamContext, cfg TableConfig) error {
 	return nil
 }
 
-func ensureBucket(js nats.JetStreamContext) (nats.KeyValue, error) {
-	kv, err := js.KeyValue(KVBucket)
-	if errors.Is(err, nats.ErrBucketNotFound) {
-		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
+func ensureBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, error) {
+	kv, err := js.KeyValue(ctx, KVBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 			Bucket:      KVBucket,
 			Description: "Round Table dead-letter entry state (open, resolved, retried)",
 			History:     5,
 			TTL:         DefaultMaxAge,
-			Storage:     nats.FileStorage,
+			Storage:     jetstream.FileStorage,
 		})
 	}
 	if err != nil {
@@ -246,20 +247,20 @@ func ensureBucket(js nats.JetStreamContext) (nats.KeyValue, error) {
 	return kv, nil
 }
 
-func ensureConsumer(js nats.JetStreamContext, cfg TableConfig) error {
+func ensureConsumer(ctx context.Context, js jetstream.JetStream, cfg TableConfig) error {
 	stream := AdvisoriesStreamName(cfg.TasksStream)
-	_, err := js.ConsumerInfo(stream, ConsumerName)
+	_, err := js.Consumer(ctx, stream, ConsumerName)
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, nats.ErrConsumerNotFound) {
+	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
 		return fmt.Errorf("dead-letter consumer info: %w", err)
 	}
-	if _, err := js.AddConsumer(stream, &nats.ConsumerConfig{
+	if _, err := js.CreateConsumer(ctx, stream, jetstream.ConsumerConfig{
 		Durable:       ConsumerName,
 		Description:   "Round Table operator: turns max-deliveries advisories into dead-letter entries",
-		DeliverPolicy: nats.DeliverAllPolicy,
-		AckPolicy:     nats.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverAllPolicy,
+		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       consumerAckWait,
 		MaxDeliver:    -1,
 	}); err != nil {
@@ -272,16 +273,17 @@ func ensureConsumer(js nats.JetStreamContext, cfg TableConfig) error {
 type watcher struct {
 	cfg TableConfig
 	nc  *nats.Conn
-	js  nats.JetStreamContext
-	kv  nats.KeyValue
+	js  jetstream.JetStream
+	kv  jetstream.KeyValue
 	log logr.Logger
 	now func() time.Time
 
+	ctx       context.Context // cancelled by stop
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	resultSub *nats.Subscription
-	pullSub   *nats.Subscription
-	kvWatch   nats.KeyWatcher
+	consumer  jetstream.Consumer
+	kvWatch   jetstream.KeyWatcher
 
 	mu      sync.Mutex
 	success map[string]time.Time // task ID -> when a success result was seen
@@ -291,14 +293,13 @@ type watcher struct {
 
 func (w *watcher) start() error {
 	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
+	w.ctx, w.cancel = ctx, cancel
 
-	sub, err := w.js.PullSubscribe(AdvisorySubject(w.cfg.TasksStream), ConsumerName,
-		nats.Bind(AdvisoriesStreamName(w.cfg.TasksStream), ConsumerName))
+	cons, err := w.js.Consumer(ctx, AdvisoriesStreamName(w.cfg.TasksStream), ConsumerName)
 	if err != nil {
-		return fmt.Errorf("dead-letter advisory subscription: %w", err)
+		return fmt.Errorf("dead-letter advisory consumer: %w", err)
 	}
-	w.pullSub = sub
+	w.consumer = cons
 
 	// A core subscription: it sees every result without creating a
 	// JetStream consumer, so it can't clash with the WorkQueue results
@@ -309,7 +310,7 @@ func (w *watcher) start() error {
 		return fmt.Errorf("dead-letter results subscription: %w", err)
 	}
 
-	w.kvWatch, err = w.kv.Watch(token(w.cfg.Table) + ".>")
+	w.kvWatch, err = w.kv.Watch(ctx, token(w.cfg.Table)+".>")
 	if err != nil {
 		return fmt.Errorf("dead-letter KV watch: %w", err)
 	}
@@ -335,11 +336,8 @@ func (w *watcher) stop() {
 	if w.kvWatch != nil {
 		_ = w.kvWatch.Stop()
 	}
+	// The durable advisory consumer is kept: only its fetch loop stops.
 	w.wg.Wait()
-	if w.pullSub != nil {
-		// Unsubscribe, not Drain/Delete: the durable consumer must survive.
-		_ = w.pullSub.Unsubscribe()
-	}
 	rtmetrics.DeadLettersOpen.DeletePartialMatch(prometheus.Labels{"table": w.cfg.Table})
 }
 
@@ -347,9 +345,13 @@ func (w *watcher) stop() {
 func (w *watcher) pullLoop(ctx context.Context) {
 	defer w.wg.Done()
 	for ctx.Err() == nil {
-		fctx, cancel := context.WithTimeout(ctx, fetchWait)
-		msgs, err := w.pullSub.Fetch(fetchBatch, nats.Context(fctx))
-		cancel()
+		batch, err := w.consumer.Fetch(fetchBatch, jetstream.FetchMaxWait(fetchWait))
+		if err == nil {
+			for msg := range batch.Messages() {
+				w.processAdvisory(ctx, msg)
+			}
+			err = batch.Error()
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -357,7 +359,7 @@ func (w *watcher) pullLoop(ctx context.Context) {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
 				continue
 			}
-			if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrBadSubscription) {
+			if errors.Is(err, nats.ErrConnectionClosed) {
 				w.log.Info("Dead-letter advisory pull stopped", "error", err.Error())
 				return
 			}
@@ -367,28 +369,27 @@ func (w *watcher) pullLoop(ctx context.Context) {
 				return
 			case <-time.After(retryDelay):
 			}
-			continue
-		}
-		for _, msg := range msgs {
-			if err := w.handleAdvisory(msg.Data); err != nil {
-				if errors.Is(err, errDeletePending) {
-					_ = msg.NakWithDelay(retryDelay)
-					continue
-				}
-				w.log.Error(err, "Dead-letter advisory not processed, will retry")
-				_ = msg.NakWithDelay(retryDelay)
-				continue
-			}
-			_ = msg.Ack()
 		}
 	}
+}
+
+// processAdvisory handles one advisory and acks it, or naks it for a retry.
+func (w *watcher) processAdvisory(ctx context.Context, msg jetstream.Msg) {
+	if err := w.handleAdvisory(ctx, msg.Data()); err != nil {
+		if !errors.Is(err, errDeletePending) {
+			w.log.Error(err, "Dead-letter advisory not processed, will retry")
+		}
+		_ = msg.NakWithDelay(retryDelay)
+		return
+	}
+	_ = msg.Ack()
 }
 
 // handleAdvisory dead-letters the task behind one max-deliveries advisory and
 // removes the never-acked original from the tasks stream once the knight has
 // reported it lost or the grace period since the advisory has passed. It
 // returns errDeletePending while the original is still being kept.
-func (w *watcher) handleAdvisory(data []byte) error {
+func (w *watcher) handleAdvisory(ctx context.Context, data []byte) error {
 	var adv advisory
 	if err := json.Unmarshal(data, &adv); err != nil || adv.StreamSeq == 0 {
 		w.log.Info("Ignoring unreadable max-deliveries advisory", "data", string(data))
@@ -405,7 +406,11 @@ func (w *watcher) handleAdvisory(data []byte) error {
 	if stream == "" {
 		stream = w.cfg.TasksStream
 	}
-	orig, err := w.js.GetMsg(stream, adv.StreamSeq)
+	st, err := w.js.Stream(ctx, stream)
+	if err != nil {
+		return fmt.Errorf("load task %s/%d: %w", stream, adv.StreamSeq, err)
+	}
+	orig, err := st.GetMsg(ctx, adv.StreamSeq)
 	switch {
 	case err == nil:
 		e.Knight = knightFromSubject(orig.Subject)
@@ -415,7 +420,7 @@ func (w *watcher) handleAdvisory(data []byte) error {
 		} else {
 			e.applyTask(&natspkg.TaskPayload{Task: string(orig.Data)})
 		}
-	case errors.Is(err, nats.ErrMsgNotFound):
+	case errors.Is(err, jetstream.ErrMsgNotFound):
 		// Already gone (deleted, aged out): record what the advisory has.
 	default:
 		return fmt.Errorf("load task %s/%d: %w", stream, adv.StreamSeq, err)
@@ -426,7 +431,7 @@ func (w *watcher) handleAdvisory(data []byte) error {
 			e.Task.TaskID = e.TaskID
 		}
 	}
-	if err := w.capture(e); err != nil {
+	if err := w.capture(ctx, e); err != nil {
 		return err
 	}
 	if orig != nil {
@@ -437,7 +442,7 @@ func (w *watcher) handleAdvisory(data []byte) error {
 			w.now().Sub(adv.Timestamp) < w.cfg.lostGrace() {
 			return errDeletePending
 		}
-		if err := w.js.DeleteMsg(stream, adv.StreamSeq); err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
+		if err := st.DeleteMsg(ctx, adv.StreamSeq); err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
 			return fmt.Errorf("delete lost task %s/%d: %w", stream, adv.StreamSeq, err)
 		}
 	}
@@ -465,7 +470,7 @@ func (w *watcher) onResult(msg *nats.Msg) {
 		w.mu.Unlock()
 	}
 	if r.succeeded() {
-		if err := w.resolve(taskID); err != nil {
+		if err := w.resolve(w.ctx, taskID); err != nil {
 			w.log.Error(err, "Dead-letter resolve failed", "taskId", taskID)
 		}
 		return
@@ -480,7 +485,7 @@ func (w *watcher) onResult(msg *nats.Msg) {
 	if e.Knight == "" {
 		e.Knight = "unknown"
 	}
-	if err := w.capture(e); err != nil {
+	if err := w.capture(w.ctx, e); err != nil {
 		// Core NATS: there is no redelivery. The knight's own metric and the
 		// dispatcher still saw the failure.
 		w.log.Error(err, "Dead-letter capture of failed result failed", "taskId", taskID)
@@ -489,17 +494,17 @@ func (w *watcher) onResult(msg *nats.Msg) {
 
 // capture publishes e to the dead-letter stream once per task attempt and
 // records its state.
-func (w *watcher) capture(e *Entry) error {
+func (w *watcher) capture(ctx context.Context, e *Entry) error {
 	e.Table = w.cfg.Table
 	e.Attempt = normAttempt(e.Attempt)
 	key := Key(w.cfg.Table, e.TaskID)
 
-	if ent, err := w.kv.Get(key); err == nil {
+	if ent, err := w.kv.Get(ctx, key); err == nil {
 		var rec Record
 		if json.Unmarshal(ent.Value(), &rec) == nil && rec.Attempt == e.Attempt {
 			return nil // already captured (the other path got there first)
 		}
-	} else if !errors.Is(err, nats.ErrKeyNotFound) {
+	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
 		return fmt.Errorf("dead-letter state %s: %w", key, err)
 	}
 
@@ -511,8 +516,8 @@ func (w *watcher) capture(e *Entry) error {
 	subject := Subject(w.cfg.Prefix, e.Knight, e.TaskID)
 	msg := nats.NewMsg(subject)
 	msg.Data = body
-	msg.Header.Set(nats.MsgIdHdr, MsgID(e.TaskID, e.Attempt))
-	ack, err := w.js.PublishMsg(msg)
+	msg.Header.Set(jetstream.MsgIDHeader, MsgID(e.TaskID, e.Attempt))
+	ack, err := w.js.PublishMsg(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("publish dead-letter entry %s: %w", subject, err)
 	}
@@ -528,7 +533,7 @@ func (w *watcher) capture(e *Entry) error {
 		State: state, Reason: e.Reason, Knight: e.Knight, Attempt: e.Attempt,
 		Subject: subject, UpdatedAt: e.DeadLetteredAt,
 	})
-	if _, err := w.kv.Put(key, rec); err != nil {
+	if _, err := w.kv.Put(ctx, key, rec); err != nil {
 		return fmt.Errorf("dead-letter state %s: %w", key, err)
 	}
 	rtmetrics.TasksDeadLetteredTotal.WithLabelValues(w.cfg.Table, e.Knight, string(e.Reason)).Inc()
@@ -539,7 +544,7 @@ func (w *watcher) capture(e *Entry) error {
 
 // resolve marks an open entry for taskID resolved: the task did finish
 // (e.g. a spurious lost report after an event-loop stall, pi-knight#84).
-func (w *watcher) resolve(taskID string) error {
+func (w *watcher) resolve(ctx context.Context, taskID string) error {
 	now := w.now()
 	w.mu.Lock()
 	w.success[taskID] = now
@@ -551,8 +556,8 @@ func (w *watcher) resolve(taskID string) error {
 	w.mu.Unlock()
 
 	key := Key(w.cfg.Table, taskID)
-	ent, err := w.kv.Get(key)
-	if errors.Is(err, nats.ErrKeyNotFound) {
+	ent, err := w.kv.Get(ctx, key)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -565,7 +570,7 @@ func (w *watcher) resolve(taskID string) error {
 	rec.State = StateResolved
 	rec.UpdatedAt = now.UTC()
 	val, _ := json.Marshal(rec)
-	if _, err := w.kv.Update(key, val, ent.Revision()); err != nil {
+	if _, err := w.kv.Update(ctx, key, val, ent.Revision()); err != nil {
 		return fmt.Errorf("resolve %s: %w", key, err)
 	}
 	w.log.Info("Dead-letter entry resolved by a later success", "taskId", taskID)
@@ -606,13 +611,13 @@ func (w *watcher) watchState(ctx context.Context) {
 	}
 }
 
-func (w *watcher) applyState(ent nats.KeyValueEntry) {
+func (w *watcher) applyState(ent jetstream.KeyValueEntry) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	key := ent.Key()
 	prevKnight, wasOpen := w.open[key]
 	var rec Record
-	isOpen := ent.Operation() == nats.KeyValuePut &&
+	isOpen := ent.Operation() == jetstream.KeyValuePut &&
 		json.Unmarshal(ent.Value(), &rec) == nil && rec.State == StateOpen
 	if isOpen {
 		w.open[key] = rec.Knight

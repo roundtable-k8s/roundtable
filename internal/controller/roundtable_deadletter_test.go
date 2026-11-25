@@ -17,12 +17,13 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
 	natstest "github.com/nats-io/nats-server/v2/test"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -37,6 +38,7 @@ func TestEnsureStreamsCreatesDeadLetterStreams(t *testing.T) {
 	opts.Port = -1
 	opts.JetStream = true
 	opts.StoreDir = t.TempDir()
+	ctx := context.Background()
 	ns := natstest.RunServer(&opts)
 	defer ns.Shutdown()
 
@@ -59,28 +61,26 @@ func TestEnsureStreamsCreatesDeadLetterStreams(t *testing.T) {
 			DeadLetterMaxAge: &metav1.Duration{Duration: 72 * time.Hour},
 		}},
 	}
-	if err := r.ensureStreams(rt); err != nil {
+	if err := r.ensureStreams(ctx, rt); err != nil {
 		t.Fatal(err)
 	}
 	// A second reconcile is a no-op.
-	if err := r.ensureStreams(rt); err != nil {
+	if err := r.ensureStreams(ctx, rt); err != nil {
 		t.Fatal(err)
 	}
 
-	nc := deadletter.Connection(cli)
-	js, _ := nc.JetStream()
-	dlq, err := js.StreamInfo("rt_dev_tasks_DLQ")
+	dlq, err := cli.StreamInfo(ctx, "rt_dev_tasks_DLQ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dlq.Config.MaxAge != 72*time.Hour || dlq.Config.Retention != nats.LimitsPolicy ||
+	if dlq.Config.MaxAge != 72*time.Hour || dlq.Config.Retention != jetstream.LimitsPolicy ||
 		dlq.Config.Duplicates != deadletter.DuplicateWindow || dlq.Config.Subjects[0] != "rt-dev.dlq.>" {
 		t.Fatalf("DLQ stream config = %+v", dlq.Config)
 	}
-	if _, err := js.StreamInfo("rt_dev_tasks_ADVISORIES"); err != nil {
+	if _, err := cli.StreamInfo(ctx, "rt_dev_tasks_ADVISORIES"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := js.ConsumerInfo("rt_dev_tasks_ADVISORIES", deadletter.ConsumerName); err != nil {
+	if _, err := cli.ConsumerAckFloor(ctx, "rt_dev_tasks_ADVISORIES", deadletter.ConsumerName); err != nil {
 		t.Fatal(err)
 	}
 }

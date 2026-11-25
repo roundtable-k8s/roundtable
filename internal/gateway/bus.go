@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -87,6 +88,9 @@ type NATSBus struct {
 	nc *nats.Conn
 	js nats.JetStreamContext
 	kv nats.KeyValue
+	// pub publishes tasks through pkg/nats.PublishTraced, which is on the
+	// jetstream API; the rest of the bus moves to it in #434.
+	pub jetstream.JetStream
 }
 
 // NewNATSBus binds to (or creates) the task-record KV bucket. ttl bounds how
@@ -108,7 +112,11 @@ func NewNATSBus(nc *nats.Conn, bucket string, ttl time.Duration) (*NATSBus, erro
 	if err != nil {
 		return nil, fmt.Errorf("KV bucket %s: %w", bucket, err)
 	}
-	return &NATSBus{nc: nc, js: js, kv: kv}, nil
+	pub, err := jetstream.New(nc)
+	if err != nil {
+		return nil, fmt.Errorf("JetStream context: %w", err)
+	}
+	return &NATSBus{nc: nc, js: js, kv: kv, pub: pub}, nil
 }
 
 // Watch implements Bus.
@@ -149,7 +157,7 @@ func (b *NATSBus) Publish(ctx context.Context, subject string, payload natspkg.T
 	if err != nil {
 		return err
 	}
-	if _, err := natspkg.PublishTraced(ctx, b.js, subject, data, payload.TaskID, natspkg.WithTable(table)); err != nil {
+	if _, err := natspkg.PublishTraced(ctx, b.pub, subject, data, payload.TaskID, natspkg.WithTable(table)); err != nil {
 		return fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return nil

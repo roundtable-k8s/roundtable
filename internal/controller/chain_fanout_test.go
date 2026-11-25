@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -259,15 +259,22 @@ func (f *fanoutFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *fanoutFakeNATS) ConsumerAckFloor(string, string) (uint64, error)     { return f.seq, nil }
-func (f *fanoutFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) { return f.seq, nil }
-func (f *fanoutFakeNATS) PollMessage(subject string, _ time.Duration, _ ...natspkg.SubscribeOption) (*nats.Msg, error) {
+func (f *fanoutFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
+	return f.seq, nil
+}
+func (f *fanoutFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
+	return f.seq, nil
+}
+func (f *fanoutFakeNATS) FetchOne(
+	_ context.Context, _ string, cfg jetstream.ConsumerConfig, _ time.Duration,
+) (jetstream.Msg, error) {
+	subject := cfg.FilterSubject
 	res, ok := f.results[subject]
 	if !ok {
 		return nil, nil
 	}
 	data, _ := json.Marshal(res)
-	return &nats.Msg{Subject: subject, Data: data}, nil
+	return &fakeMsg{subject: subject, data: data}, nil
 }
 
 var _ = Describe("Chain forEach fan-out", func() {

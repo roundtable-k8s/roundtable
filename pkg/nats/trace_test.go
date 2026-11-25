@@ -26,6 +26,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -86,7 +87,7 @@ func TestInjectExtractRoundTrip(t *testing.T) {
 	if msg.Header.Get("traceparent") == "" {
 		t.Fatal("traceparent header not set")
 	}
-	got := trace.SpanContextFromContext(ExtractContext(context.Background(), msg))
+	got := trace.SpanContextFromContext(ExtractContext(context.Background(), msg.Header))
 	want := span.SpanContext()
 	if got.TraceID() != want.TraceID() || got.SpanID() != want.SpanID() || !got.IsRemote() {
 		t.Fatalf("round trip: got %v want %v", got, want)
@@ -97,11 +98,11 @@ func TestExtractWithoutHeadersReturnsInput(t *testing.T) {
 	setupTracing(t)
 	type key struct{}
 	ctx := context.WithValue(context.Background(), key{}, "v")
-	if got := ExtractContext(ctx, &nats.Msg{Subject: "x"}); got != ctx {
+	if got := ExtractContext(ctx, nats.Header{}); got != ctx {
 		t.Fatal("context changed without headers")
 	}
 	if got := ExtractContext(ctx, nil); got != ctx {
-		t.Fatal("context changed for nil msg")
+		t.Fatal("context changed for nil headers")
 	}
 }
 
@@ -118,25 +119,13 @@ func TestPublishJSONSeqCtxPropagatesAndRecordsSpan(t *testing.T) {
 	}
 	parent.End()
 
-	nc, err := nats.Connect(s.ClientURL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer nc.Close()
-	js, _ := nc.JetStream()
-	sub, err := js.SubscribeSync("t.a", nats.DeliverAll())
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg, err := sub.NextMsg(2 * time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tp := msg.Header.Get("traceparent")
+	cons := testConsumer(t, s, "t.a", jetstream.AckNonePolicy, 0)
+	msg := nextMsg(t, cons)
+	tp := msg.Headers().Get("traceparent")
 	if tp == "" {
 		t.Fatal("no traceparent header on published message")
 	}
-	got := trace.SpanContextFromContext(ExtractContext(context.Background(), msg))
+	got := trace.SpanContextFromContext(ExtractContext(context.Background(), msg.Headers()))
 	if got.TraceID() != parent.SpanContext().TraceID() {
 		t.Fatalf("trace id %s != %s", got.TraceID(), parent.SpanContext().TraceID())
 	}
@@ -190,15 +179,8 @@ func TestPublishWithoutTracerHasNoTraceparent(t *testing.T) {
 	if err := c.PublishJSONCtx(context.Background(), "t.b", map[string]string{"a": "b"}); err != nil {
 		t.Fatal(err)
 	}
-	nc, _ := nats.Connect(s.ClientURL())
-	defer nc.Close()
-	js, _ := nc.JetStream()
-	sub, _ := js.SubscribeSync("t.b", nats.DeliverAll())
-	msg, err := sub.NextMsg(2 * time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msg.Header.Get("traceparent") != "" {
+	msg := nextMsg(t, testConsumer(t, s, "t.b", jetstream.AckNonePolicy, 0))
+	if msg.Headers().Get("traceparent") != "" {
 		t.Fatal("unexpected traceparent header")
 	}
 }
@@ -214,27 +196,16 @@ func TestConsumeSpanRedeliveryLinks(t *testing.T) {
 	if err := c.PublishJSONCtx(ctx, "t.c", map[string]string{"a": "b"}); err != nil {
 		t.Fatal(err)
 	}
-	nc, _ := nats.Connect(s.ClientURL())
-	defer nc.Close()
-	js, _ := nc.JetStream()
-	sub, err := js.SubscribeSync("t.c", nats.DeliverAll(), nats.AckExplicit(), nats.AckWait(200*time.Millisecond))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sub.NextMsg(2 * time.Second); err != nil { // first delivery, not acked
-		t.Fatal(err)
-	}
-	msg, err := sub.NextMsg(3 * time.Second) // redelivery
-	if err != nil {
-		t.Fatal(err)
-	}
+	cons := testConsumer(t, s, "t.c", jetstream.AckExplicitPolicy, 200*time.Millisecond)
+	_ = nextMsg(t, cons)    // first delivery, not acked
+	msg := nextMsg(t, cons) // redelivery
 	other, otherSpan := tracer.Start(context.Background(), "poller")
 	otherSpan.End()
 	_, cs := StartConsumeSpan(other, msg)
 	cs.End()
 
 	for _, sp := range exp.GetSpans() {
-		if sp.Name != "process "+msg.Subject {
+		if sp.Name != "process "+msg.Subject() {
 			continue
 		}
 		if sp.Parent.SpanID() == producer.SpanContext().SpanID() {
@@ -256,7 +227,43 @@ func TestConsumeSpanRedeliveryLinks(t *testing.T) {
 func mustStream(t *testing.T, c Client) {
 	t.Helper()
 	cfg := StreamConfig{Name: "T", Subjects: []string{"t.>"}, Retention: RetentionLimits, Storage: StorageMemory}
-	if err := c.CreateStream(cfg); err != nil {
+	if err := c.CreateStream(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// testConsumer creates an ephemeral pull consumer on stream T that delivers
+// every message on subject, on its own connection.
+func testConsumer(
+	t *testing.T, s *natsserver.Server, subject string, ack jetstream.AckPolicy, ackWait time.Duration,
+) jetstream.Consumer {
+	t.Helper()
+	nc, err := nats.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cons, err := js.CreateOrUpdateConsumer(context.Background(), "T", jetstream.ConsumerConfig{
+		FilterSubject: subject,
+		DeliverPolicy: jetstream.DeliverAllPolicy,
+		AckPolicy:     ack,
+		AckWait:       ackWait,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cons
+}
+
+func nextMsg(t *testing.T, cons jetstream.Consumer) jetstream.Msg {
+	t.Helper()
+	msg, err := cons.Next(jetstream.FetchMaxWait(3 * time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msg
 }

@@ -263,13 +263,13 @@ type kvRecord struct {
 }
 
 // kvEntry reads a stored entry of the current run from the chain-outputs bucket.
-func (r *ChainReconciler) kvEntry(key string) (kvRecord, bool) {
+func (r *ChainReconciler) kvEntry(ctx context.Context, key string) (kvRecord, bool) {
 	var v kvRecord
 	natsCli, err := r.natsClient()
 	if err != nil {
 		return v, false
 	}
-	data, err := natsCli.KVGet("chain-outputs", key)
+	data, err := natsCli.KVGet(ctx, "chain-outputs", key)
 	if err != nil {
 		return v, false
 	}
@@ -278,7 +278,7 @@ func (r *ChainReconciler) kvEntry(key string) (kvRecord, bool) {
 
 // kvOutput reads a stored output of the current run from the chain-outputs bucket.
 func (r *ChainReconciler) kvOutput(ctx context.Context, chain *aiv1alpha1.Chain, key string) (string, bool) {
-	v, ok := r.kvEntry(key)
+	v, ok := r.kvEntry(ctx, key)
 	if !ok || v.RunID != chain.Status.RunID {
 		return "", false
 	}

@@ -18,10 +18,12 @@ package nats
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // TestConfigValidation tests config validation
@@ -267,19 +269,19 @@ func TestStreamConfigBuilderPatterns(t *testing.T) {
 func TestRetentionPolicyConversion(t *testing.T) {
 	tests := []struct {
 		policy   RetentionPolicy
-		expected string
+		expected jetstream.RetentionPolicy
 	}{
-		{RetentionLimits, "Limits"},
-		{RetentionWorkQueue, "WorkQueue"},
-		{RetentionInterest, "Interest"},
-		{RetentionPolicy("Unknown"), "WorkQueue"}, // Default fallback
+		{RetentionLimits, jetstream.LimitsPolicy},
+		{RetentionWorkQueue, jetstream.WorkQueuePolicy},
+		{RetentionInterest, jetstream.InterestPolicy},
+		{RetentionPolicy("Unknown"), jetstream.WorkQueuePolicy}, // Default fallback
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.policy), func(t *testing.T) {
-			natsPolicy := tt.policy.ToNATS()
-			// Just verify it returns a valid value (type is int-based)
-			_ = natsPolicy
+			if got := tt.policy.ToNATS(); got != tt.expected {
+				t.Errorf("ToNATS() = %v, want %v", got, tt.expected)
+			}
 		})
 	}
 }
@@ -288,18 +290,18 @@ func TestRetentionPolicyConversion(t *testing.T) {
 func TestStorageTypeConversion(t *testing.T) {
 	tests := []struct {
 		storage  StorageType
-		expected string
+		expected jetstream.StorageType
 	}{
-		{StorageFile, "File"},
-		{StorageMemory, "Memory"},
-		{StorageType("Unknown"), "File"}, // Default fallback
+		{StorageFile, jetstream.FileStorage},
+		{StorageMemory, jetstream.MemoryStorage},
+		{StorageType("Unknown"), jetstream.FileStorage}, // Default fallback
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.storage), func(t *testing.T) {
-			natsStorage := tt.storage.ToNATS()
-			// Just verify it returns a valid value (type is int-based)
-			_ = natsStorage
+			if got := tt.storage.ToNATS(); got != tt.expected {
+				t.Errorf("ToNATS() = %v, want %v", got, tt.expected)
+			}
 		})
 	}
 }
@@ -308,18 +310,18 @@ func TestStorageTypeConversion(t *testing.T) {
 func TestDiscardPolicyConversion(t *testing.T) {
 	tests := []struct {
 		policy   DiscardPolicy
-		expected string
+		expected jetstream.DiscardPolicy
 	}{
-		{DiscardOld, "Old"},
-		{DiscardNew, "New"},
-		{DiscardPolicy("Unknown"), "Old"}, // Default fallback
+		{DiscardOld, jetstream.DiscardOld},
+		{DiscardNew, jetstream.DiscardNew},
+		{DiscardPolicy("Unknown"), jetstream.DiscardOld}, // Default fallback
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.policy), func(t *testing.T) {
-			natsDiscard := tt.policy.ToNATS()
-			// Just verify it returns a valid value (type is int-based)
-			_ = natsDiscard
+			if got := tt.policy.ToNATS(); got != tt.expected {
+				t.Errorf("ToNATS() = %v, want %v", got, tt.expected)
+			}
 		})
 	}
 }
@@ -563,64 +565,18 @@ func TestTaskResultDualFormatGetters(t *testing.T) {
 	})
 }
 
-// TestSubscribeOptions tests subscribe option builders
-func TestSubscribeOptions(t *testing.T) {
-	t.Run("WithDurable sets durable name", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithDurable("test-consumer")(opts)
-		if opts.durable != "test-consumer" {
-			t.Errorf("expected durable=test-consumer, got %s", opts.durable)
-		}
-	})
-
-	t.Run("WithBindStream sets stream name", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithBindStream("test-stream")(opts)
-		if opts.bindStream != "test-stream" {
-			t.Errorf("expected bindStream=test-stream, got %s", opts.bindStream)
-		}
-	})
-
-	t.Run("WithAckExplicit enables explicit ack", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithAckExplicit()(opts)
-		if !opts.ackExplicit {
-			t.Error("expected ackExplicit=true")
-		}
-	})
-
-	t.Run("WithDeliverAll enables deliver all", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithDeliverAll()(opts)
-		if !opts.deliverAll {
-			t.Error("expected deliverAll=true")
-		}
-	})
-
-	t.Run("WithFallbackAutoDetect enables fallback", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithFallbackAutoDetect()(opts)
-		if !opts.fallbackAutoDetect {
-			t.Error("expected fallbackAutoDetect=true")
-		}
-	})
-
-	t.Run("multiple options compose", func(t *testing.T) {
-		opts := &subscribeOptions{}
-		WithDurable("consumer")(opts)
-		WithBindStream("stream")(opts)
-		WithAckExplicit()(opts)
-
-		if opts.durable != "consumer" {
-			t.Errorf("expected durable=consumer, got %s", opts.durable)
-		}
-		if opts.bindStream != "stream" {
-			t.Errorf("expected bindStream=stream, got %s", opts.bindStream)
-		}
-		if !opts.ackExplicit {
-			t.Error("expected ackExplicit=true")
-		}
-	})
+// TestResultConsumerConfig pins the consumer FetchOne reads results with.
+func TestResultConsumerConfig(t *testing.T) {
+	got := ResultConsumerConfig("chain-a-b", "p.results.t1")
+	want := jetstream.ConsumerConfig{
+		Durable:       "chain-a-b",
+		FilterSubject: "p.results.t1",
+		DeliverPolicy: jetstream.DeliverAllPolicy,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResultConsumerConfig = %+v, want %+v", got, want)
+	}
 }
 
 // TestConsumerConfig tests consumer configuration

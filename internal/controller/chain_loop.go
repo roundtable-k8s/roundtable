@@ -170,13 +170,13 @@ func (r *ChainReconciler) fullOutput(ctx context.Context, chain *aiv1alpha1.Chai
 // structured fields the knight reported (kept in the KV entry) or, failing
 // that, the prose fallback over out. Steps that did not succeed, or that the
 // expressions do not mention, get empty values without touching KV.
-func (r *ChainReconciler) structuredVars(chain *aiv1alpha1.Chain, key, out string, load bool) (prs []any, verdict string) {
+func (r *ChainReconciler) structuredVars(ctx context.Context, chain *aiv1alpha1.Chain, key, out string, load bool) (prs []any, verdict string) {
 	prs = []any{}
 	if !load {
 		return prs, ""
 	}
 	st := natspkg.ParseStructured(out)
-	if v, ok := r.kvEntry(key); ok && v.RunID == chain.Status.RunID {
+	if v, ok := r.kvEntry(ctx, key); ok && v.RunID == chain.Status.RunID {
 		if v.Verdict != "" {
 			st.Verdict = v.Verdict
 		}
@@ -200,7 +200,7 @@ func (r *ChainReconciler) conditionVars(ctx context.Context, chain *aiv1alpha1.C
 		if load {
 			out = r.fullOutput(ctx, chain, chain.Name+"."+ss.Name, out)
 		}
-		prs, verdict := r.structuredVars(chain, chain.Name+"."+ss.Name, out, load)
+		prs, verdict := r.structuredVars(ctx, chain, chain.Name+"."+ss.Name, out, load)
 		entry := map[string]any{
 			"name":       ss.Name,
 			"phase":      string(ss.Phase),
@@ -387,7 +387,7 @@ func (r *ChainReconciler) evalUntil(ctx context.Context, chain *aiv1alpha1.Chain
 	expr := spec.Loop.Until
 	vars := r.conditionVars(ctx, chain, expr)
 	last := r.loopLast(ctx, chain, spec, ls, idx)
-	lastPRs, lastVerdict := r.structuredVars(chain, r.loopLastKey(chain, spec, ls, idx), last["output"], last["phase"] == string(aiv1alpha1.ChainStepPhaseSucceeded))
+	lastPRs, lastVerdict := r.structuredVars(ctx, chain, r.loopLastKey(chain, spec, ls, idx), last["output"], last["phase"] == string(aiv1alpha1.ChainStepPhaseSucceeded))
 	vars["last"] = map[string]any{
 		"step": last["step"], "phase": last["phase"], "output": clipForCEL(last["output"]), "error": last["error"],
 		"prs": lastPRs, "verdict": lastVerdict,
@@ -399,7 +399,7 @@ func (r *ChainReconciler) evalUntil(ctx context.Context, chain *aiv1alpha1.Chain
 		if load {
 			out = r.fullOutput(ctx, chain, loopBodyKey(chain, spec.Name, bs.Name), out)
 		}
-		prs, verdict := r.structuredVars(chain, loopBodyKey(chain, spec.Name, bs.Name), out, load)
+		prs, verdict := r.structuredVars(ctx, chain, loopBodyKey(chain, spec.Name, bs.Name), out, load)
 		body[bs.Name] = map[string]any{
 			"phase": string(bs.Phase), "output": clipForCEL(out), "error": bs.Error, "iteration": int64(bs.Iteration),
 			"prs": prs, "verdict": verdict,

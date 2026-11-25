@@ -377,7 +377,7 @@ const wakingRequeue = 5 * time.Second
 // ConsumerPendingSource reports how many tasks are queued or in flight on a
 // JetStream consumer (num_pending + num_ack_pending).
 type ConsumerPendingSource interface {
-	ConsumerPending(stream, consumer string) (uint64, error)
+	ConsumerPending(ctx context.Context, stream, consumer string) (uint64, error)
 }
 
 // hasPendingTasks reports whether the knight's task consumer has queued or
@@ -393,7 +393,7 @@ func (r *KnightReconciler) hasPendingTasks(ctx context.Context, knight *aiv1alph
 	if src == nil || knight.Spec.NATS.Stream == "" {
 		return false
 	}
-	n, err := src.ConsumerPending(knight.Spec.NATS.Stream, knightpkg.TaskConsumerName(knight))
+	n, err := src.ConsumerPending(ctx, knight.Spec.NATS.Stream, knightpkg.TaskConsumerName(knight))
 	if err != nil {
 		logf.FromContext(ctx).V(1).Info("Could not read knight consumer pending count", "knight", knight.Name, "error", err.Error())
 		return false

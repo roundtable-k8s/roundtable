@@ -1295,7 +1295,7 @@ func (r *ChainReconciler) taskDelivered(ctx context.Context, nc natsConfig, knig
 	if err != nil {
 		return false
 	}
-	delivered, err := natsCli.ConsumerDeliveredSeq(nc.TasksStream, natspkg.KnightTaskConsumerName(knightRef))
+	delivered, err := natsCli.ConsumerDeliveredSeq(ctx, nc.TasksStream, natspkg.KnightTaskConsumerName(knightRef))
 	if err != nil {
 		logf.FromContext(ctx).V(1).Info("Could not read knight consumer state", "knight", knightRef, "error", err.Error())
 		return false
@@ -1410,20 +1410,17 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 		subject = natspkg.ResultSubjectWildcard(nc.SubjectPrefix, taskPrefix)
 	}
 
-	// Use ephemeral consumer with explicit ack (compatible with both Limits and WorkQueue retention)
+	// Durable consumer with explicit ack (compatible with both Limits and
+	// WorkQueue retention), deleted again after the poll. FetchOne acks the
+	// result (required for WorkQueue retention).
 	consumerName := natspkg.ChainConsumerName(chainName, stepName)
 
-	msg, err := natsCli.PollMessage(subject, 2*time.Second,
-		natspkg.WithDurable(consumerName),
-		natspkg.WithAckExplicit(),
-		natspkg.WithBindStream(nc.ResultsStream),
-		natspkg.WithDeliverAll(),
-		natspkg.WithFallbackAutoDetect(),
-	)
+	msg, err := natsCli.FetchOne(ctx, nc.ResultsStream,
+		natspkg.ResultConsumerConfig(consumerName, subject), 2*time.Second)
 
-	// Clean up ephemeral consumer
+	// Clean up the consumer
 	defer func() {
-		_ = natsCli.DeleteConsumer(nc.ResultsStream, consumerName)
+		_ = natsCli.DeleteConsumer(ctx, nc.ResultsStream, consumerName)
 	}()
 
 	if err != nil {
@@ -1433,19 +1430,14 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 		return nil, nil // Timeout, no result yet
 	}
 
-	// Ack the message (required for WorkQueue retention)
-	if err := msg.Ack(); err != nil {
-		log.Error(err, "Failed to ack result message")
-	}
-
 	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg, natspkg.WithTable(nc.Table), natspkg.WithTaskID(taskID))
 	consumeSpan.End()
 
-	log.Info("Received result message", "subject", msg.Subject, "dataLen", len(msg.Data))
+	log.Info("Received result message", "subject", msg.Subject(), "dataLen", len(msg.Data()))
 
 	var result natspkg.TaskResult
-	if err := json.Unmarshal(msg.Data, &result); err != nil {
-		log.Error(err, "Failed to unmarshal result", "subject", msg.Subject, "rawPreview", string(msg.Data[:min(200, len(msg.Data))]))
+	if err := json.Unmarshal(msg.Data(), &result); err != nil {
+		log.Error(err, "Failed to unmarshal result", "subject", msg.Subject(), "rawPreview", string(msg.Data()[:min(200, len(msg.Data()))]))
 		return nil, fmt.Errorf("unmarshal result: %w", err)
 	}
 
@@ -1759,7 +1751,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 	}
 
 	key := chainName + "." + stepName
-	if err := natsCli.KVPut("chain-outputs", key, data); err != nil {
+	if err := natsCli.KVPut(ctx, "chain-outputs", key, data); err != nil {
 		log.Error(err, "Failed to store step output to KV", "key", key)
 	} else {
 		log.Info("Stored step output to NATS KV", "bucket", "chain-outputs", "key", key, "size", len(data))
@@ -1785,7 +1777,7 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		}
 
 		key := chain.Name + "." + ss.Name
-		data, err := natsCli.KVGet("chain-outputs", key)
+		data, err := natsCli.KVGet(ctx, "chain-outputs", key)
 		if err != nil {
 			log.V(1).Info("No stored output found for step", "step", ss.Name, "key", key)
 			continue
@@ -1805,7 +1797,7 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		// delete the entry so it cannot mask future runs.
 		if errStr == "" && isEmptyStepOutput(output) {
 			log.Info("Skipping restore of empty stored output, deleting poisoned KV entry", "step", ss.Name, "key", key)
-			if err := natsCli.KVDelete("chain-outputs", key); err != nil {
+			if err := natsCli.KVDelete(ctx, "chain-outputs", key); err != nil {
 				log.Error(err, "Failed to delete poisoned KV entry", "key", key)
 			}
 			continue

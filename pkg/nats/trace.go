@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -78,13 +79,13 @@ func InjectContext(ctx context.Context, msg *nats.Msg) {
 	otel.GetTextMapPropagator().Inject(ctx, headerCarrier(msg.Header))
 }
 
-// ExtractContext returns ctx carrying the remote trace context found in msg's
-// headers. It returns ctx unchanged when msg has no headers.
-func ExtractContext(ctx context.Context, msg *nats.Msg) context.Context {
-	if msg == nil || len(msg.Header) == 0 {
+// ExtractContext returns ctx carrying the remote trace context found in the
+// message headers h. It returns ctx unchanged when there are no headers.
+func ExtractContext(ctx context.Context, h nats.Header) context.Context {
+	if len(h) == 0 {
 		return ctx
 	}
-	return otel.GetTextMapPropagator().Extract(ctx, headerCarrier(msg.Header))
+	return otel.GetTextMapPropagator().Extract(ctx, headerCarrier(h))
 }
 
 // PublishOption configures the producer span of a publish.
@@ -145,14 +146,14 @@ func startPublishSpan(
 // injecting the span's trace context into the message headers. With no tracer
 // provider and no span in ctx the message carries no trace headers.
 func PublishTraced(
-	ctx context.Context, js nats.JetStreamContext, subject string, data []byte, taskID string, opts ...PublishOption,
-) (*nats.PubAck, error) {
+	ctx context.Context, js jetstream.Publisher, subject string, data []byte, taskID string, opts ...PublishOption,
+) (*jetstream.PubAck, error) {
 	ctx, span := startPublishSpan(ctx, subject, taskID, opts...)
 	defer span.End()
 
 	msg := &nats.Msg{Subject: subject, Data: data}
 	InjectContext(ctx, msg)
-	ack, err := js.PublishMsg(msg)
+	ack, err := js.PublishMsg(ctx, msg)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -167,14 +168,14 @@ func PublishTraced(
 // links to the original context, so retries do not create a second parent.
 // The delivery count is recorded when JetStream metadata is available.
 // Callers must End the returned span.
-func StartConsumeSpan(ctx context.Context, msg *nats.Msg, opts ...PublishOption) (context.Context, trace.Span) {
+func StartConsumeSpan(ctx context.Context, msg jetstream.Msg, opts ...PublishOption) (context.Context, trace.Span) {
 	o := publishOptions{}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	attrs := []attribute.KeyValue{
 		attribute.String(attrMessagingSystem, "nats"),
-		attribute.String(attrMessagingDestination, msg.Subject),
+		attribute.String(attrMessagingDestination, msg.Subject()),
 		attribute.String(attrMessagingOperationType, "process"),
 	}
 	if o.table != "" {
@@ -185,7 +186,7 @@ func StartConsumeSpan(ctx context.Context, msg *nats.Msg, opts ...PublishOption)
 	}
 	startOpts := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindConsumer)}
 
-	parent := ExtractContext(ctx, msg)
+	parent := ExtractContext(ctx, msg.Headers())
 	if md, err := msg.Metadata(); err == nil && md != nil {
 		attrs = append(attrs, attribute.Int64(attrDeliveryCount, int64(md.NumDelivered)))
 		if md.NumDelivered > 1 {
@@ -196,5 +197,5 @@ func StartConsumeSpan(ctx context.Context, msg *nats.Msg, opts ...PublishOption)
 		}
 	}
 	startOpts = append(startOpts, trace.WithAttributes(attrs...))
-	return otel.Tracer(tracerName).Start(parent, "process "+msg.Subject, startOpts...)
+	return otel.Tracer(tracerName).Start(parent, "process "+msg.Subject(), startOpts...)
 }

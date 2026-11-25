@@ -19,12 +19,14 @@ package nats
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // Client is the interface for NATS operations in the Round Table operator.
@@ -57,51 +59,68 @@ type Client interface {
 
 	// ConsumerAckFloor returns the stream sequence at or below which every
 	// message has been acknowledged by the named consumer.
-	ConsumerAckFloor(stream, consumer string) (uint64, error)
+	ConsumerAckFloor(ctx context.Context, stream, consumer string) (uint64, error)
 
 	// ConsumerDeliveredSeq returns the highest stream sequence the named
 	// consumer has delivered to a client.
-	ConsumerDeliveredSeq(stream, consumer string) (uint64, error)
-
-	// Subscribe creates a synchronous subscription to a subject.
-	Subscribe(subject string, opts ...SubscribeOption) (*nats.Subscription, error)
+	ConsumerDeliveredSeq(ctx context.Context, stream, consumer string) (uint64, error)
 
 	// CreateStream creates a JetStream stream with the given configuration.
-	CreateStream(config StreamConfig) error
+	// An existing stream is left as it is.
+	CreateStream(ctx context.Context, config StreamConfig) error
 
 	// DeleteStream deletes a JetStream stream.
-	DeleteStream(name string) error
+	DeleteStream(ctx context.Context, name string) error
 
 	// StreamInfo returns information about a stream.
-	StreamInfo(name string) (*nats.StreamInfo, error)
+	StreamInfo(ctx context.Context, name string) (*jetstream.StreamInfo, error)
 
 	// EnsureConsumer creates or updates a JetStream consumer.
-	EnsureConsumer(stream, name string, config ConsumerConfig) error
+	EnsureConsumer(ctx context.Context, stream, name string, config ConsumerConfig) error
 
-	// DeleteConsumer deletes a JetStream consumer.
-	DeleteConsumer(stream, consumer string) error
+	// DeleteConsumer deletes a JetStream consumer (best effort).
+	DeleteConsumer(ctx context.Context, stream, consumer string) error
 
-	// PollMessage polls for a single message with a timeout.
-	PollMessage(subject string, timeout time.Duration, opts ...SubscribeOption) (*nats.Msg, error)
+	// FetchOne creates or updates the pull consumer described by config on
+	// stream, waits up to wait for one message and acknowledges it before
+	// returning it. It returns (nil, nil) when no message arrived in time.
+	// When stream does not exist, the stream is looked up by
+	// config.FilterSubject instead.
+	FetchOne(
+		ctx context.Context, stream string, config jetstream.ConsumerConfig, wait time.Duration,
+	) (jetstream.Msg, error)
 
 	// KVPut stores a value in a NATS KV bucket (creates bucket if needed).
-	KVPut(bucket, key string, value []byte) error
+	KVPut(ctx context.Context, bucket, key string, value []byte) error
 
 	// KVGet retrieves a value from a NATS KV bucket.
-	KVGet(bucket, key string) ([]byte, error)
+	KVGet(ctx context.Context, bucket, key string) ([]byte, error)
 
 	// KVDelete deletes a key from a NATS KV bucket.
-	KVDelete(bucket, key string) error
+	KVDelete(ctx context.Context, bucket, key string) error
 
 	// KVKeys lists all keys in a NATS KV bucket.
-	KVKeys(bucket string) ([]string, error)
+	KVKeys(ctx context.Context, bucket string) ([]string, error)
+}
+
+// ResultConsumerConfig is the consumer FetchOne uses to read one task result:
+// a durable pull consumer named durable that delivers every stored message on
+// subject and needs an explicit ack (which removes the message from a
+// WorkQueue results stream).
+func ResultConsumerConfig(durable, subject string) jetstream.ConsumerConfig {
+	return jetstream.ConsumerConfig{
+		Durable:       durable,
+		FilterSubject: subject,
+		DeliverPolicy: jetstream.DeliverAllPolicy,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	}
 }
 
 // JetStreamClient implements the Client interface using NATS JetStream.
 type JetStreamClient struct {
 	config Config
 	nc     *nats.Conn
-	js     nats.JetStreamContext
+	js     jetstream.JetStream
 	mu     sync.Mutex
 	log    logr.Logger
 }
@@ -139,7 +158,7 @@ func (c *JetStreamClient) Connect() error {
 		return fmt.Errorf("NATS connect to %s failed: %w", c.config.URL, err)
 	}
 
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		nc.Close()
 		return fmt.Errorf("JetStream context failed: %w", err)
@@ -187,21 +206,28 @@ func (c *JetStreamClient) IsConnected() bool {
 	return c.nc != nil && c.nc.IsConnected()
 }
 
+// jetStream connects if needed and returns the JetStream handle.
+func (c *JetStreamClient) jetStream() (jetstream.JetStream, error) {
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.js == nil {
+		return nil, errors.New("JetStream not connected")
+	}
+	return c.js, nil
+}
+
 // Publish publishes raw bytes to a subject.
 func (c *JetStreamClient) Publish(subject string, data []byte) error {
-	if err := c.Connect(); err != nil {
+	js, err := c.jetStream()
+	if err != nil {
 		return err
 	}
-
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	_, err := js.Publish(subject, data)
-	if err != nil {
+	if _, err := js.Publish(context.Background(), subject, data); err != nil {
 		return fmt.Errorf("NATS publish to %s failed: %w", subject, err)
 	}
-
 	return nil
 }
 
@@ -232,13 +258,10 @@ func (c *JetStreamClient) PublishJSONSeqCtx(
 	if err != nil {
 		return 0, fmt.Errorf("marshal JSON payload: %w", err)
 	}
-	if err := c.Connect(); err != nil {
+	js, err := c.jetStream()
+	if err != nil {
 		return 0, err
 	}
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
 	ack, err := PublishTraced(ctx, js, subject, data, taskIDOf(v), opts...)
 	if err != nil {
 		return 0, err
@@ -246,132 +269,70 @@ func (c *JetStreamClient) PublishJSONSeqCtx(
 	return ack.Sequence, nil
 }
 
-// ConsumerAckFloor returns the consumer's acknowledged-floor stream sequence.
-func (c *JetStreamClient) ConsumerAckFloor(stream, consumer string) (uint64, error) {
-	if err := c.Connect(); err != nil {
-		return 0, err
-	}
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-	info, err := js.ConsumerInfo(stream, consumer)
+// consumerInfo returns the named consumer's info.
+func (c *JetStreamClient) consumerInfo(ctx context.Context, stream, consumer string) (*jetstream.ConsumerInfo, error) {
+	js, err := c.jetStream()
 	if err != nil {
-		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+		return nil, err
+	}
+	cons, err := js.Consumer(ctx, stream, consumer)
+	if err != nil {
+		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+	}
+	info, err := cons.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+	}
+	return info, nil
+}
+
+// ConsumerAckFloor returns the consumer's acknowledged-floor stream sequence.
+func (c *JetStreamClient) ConsumerAckFloor(ctx context.Context, stream, consumer string) (uint64, error) {
+	info, err := c.consumerInfo(ctx, stream, consumer)
+	if err != nil {
+		return 0, err
 	}
 	return info.AckFloor.Stream, nil
 }
 
 // ConsumerDeliveredSeq returns the consumer's delivered stream sequence.
-func (c *JetStreamClient) ConsumerDeliveredSeq(stream, consumer string) (uint64, error) {
-	if err := c.Connect(); err != nil {
-		return 0, err
-	}
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-	info, err := js.ConsumerInfo(stream, consumer)
+func (c *JetStreamClient) ConsumerDeliveredSeq(ctx context.Context, stream, consumer string) (uint64, error) {
+	info, err := c.consumerInfo(ctx, stream, consumer)
 	if err != nil {
-		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+		return 0, err
 	}
 	return info.Delivered.Stream, nil
 }
 
 // ConsumerPending returns num_pending + num_ack_pending for the consumer:
 // tasks queued plus tasks delivered but not yet acknowledged.
-func (c *JetStreamClient) ConsumerPending(stream, consumer string) (uint64, error) {
-	if err := c.Connect(); err != nil {
-		return 0, err
-	}
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-	info, err := js.ConsumerInfo(stream, consumer)
+func (c *JetStreamClient) ConsumerPending(ctx context.Context, stream, consumer string) (uint64, error) {
+	info, err := c.consumerInfo(ctx, stream, consumer)
 	if err != nil {
-		return 0, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
+		return 0, err
 	}
 	return info.NumPending + uint64(info.NumAckPending), nil
 }
 
-// Subscribe creates a synchronous subscription to a subject.
-func (c *JetStreamClient) Subscribe(subject string, opts ...SubscribeOption) (*nats.Subscription, error) {
-	if err := c.Connect(); err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	// Apply subscribe options
-	subOpts := &subscribeOptions{}
-	for _, opt := range opts {
-		opt(subOpts)
-	}
-
-	// Build NATS options
-	natsOpts := []nats.SubOpt{}
-	if subOpts.durable != "" {
-		natsOpts = append(natsOpts, nats.Durable(subOpts.durable))
-	}
-	if subOpts.bindStream != "" {
-		natsOpts = append(natsOpts, nats.BindStream(subOpts.bindStream))
-	}
-	if subOpts.ackExplicit {
-		natsOpts = append(natsOpts, nats.AckExplicit())
-	}
-	if subOpts.deliverAll {
-		natsOpts = append(natsOpts, nats.DeliverAll())
-	}
-
-	sub, err := js.SubscribeSync(subject, natsOpts...)
+// CreateStream creates a JetStream stream with the given configuration. An
+// existing stream is left unchanged.
+func (c *JetStreamClient) CreateStream(ctx context.Context, config StreamConfig) error {
+	js, err := c.jetStream()
 	if err != nil {
-		// Try fallback without BindStream if that was the issue
-		if subOpts.bindStream != "" && subOpts.fallbackAutoDetect {
-			c.log.Info("BindStream failed, trying auto-detect", "error", err.Error())
-			natsOptsFallback := []nats.SubOpt{}
-			if subOpts.durable != "" {
-				natsOptsFallback = append(natsOptsFallback, nats.Durable(subOpts.durable))
-			}
-			if subOpts.ackExplicit {
-				natsOptsFallback = append(natsOptsFallback, nats.AckExplicit())
-			}
-			if subOpts.deliverAll {
-				natsOptsFallback = append(natsOptsFallback, nats.DeliverAll())
-			}
-			sub, err = js.SubscribeSync(subject, natsOptsFallback...)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("NATS subscribe to %s failed: %w", subject, err)
-		}
-	}
-
-	return sub, nil
-}
-
-// CreateStream creates a JetStream stream with the given configuration.
-func (c *JetStreamClient) CreateStream(config StreamConfig) error {
-	if err := c.Connect(); err != nil {
 		return err
 	}
 
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
 	// Check if stream already exists
-	_, err := js.StreamInfo(config.Name)
-	if err == nil {
-		return nil // Stream already exists
+	if _, err := js.Stream(ctx, config.Name); err == nil {
+		return nil
 	}
 
-	// Create stream
-	streamConfig := &nats.StreamConfig{
+	streamConfig := jetstream.StreamConfig{
 		Name:      config.Name,
 		Subjects:  config.Subjects,
 		Retention: config.Retention.ToNATS(),
 		Storage:   config.Storage.ToNATS(),
 	}
-
 	if config.MaxAge > 0 {
 		streamConfig.MaxAge = config.MaxAge
 	}
@@ -382,8 +343,7 @@ func (c *JetStreamClient) CreateStream(config StreamConfig) error {
 		streamConfig.Discard = config.Discard.ToNATS()
 	}
 
-	_, err = js.AddStream(streamConfig)
-	if err != nil {
+	if _, err := js.CreateStream(ctx, streamConfig); err != nil {
 		return fmt.Errorf("failed to create stream %s: %w", config.Name, err)
 	}
 
@@ -392,165 +352,135 @@ func (c *JetStreamClient) CreateStream(config StreamConfig) error {
 }
 
 // DeleteStream deletes a JetStream stream.
-func (c *JetStreamClient) DeleteStream(name string) error {
-	if err := c.Connect(); err != nil {
+func (c *JetStreamClient) DeleteStream(ctx context.Context, name string) error {
+	js, err := c.jetStream()
+	if err != nil {
 		return err
 	}
-
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	err := js.DeleteStream(name)
-	if err != nil {
+	if err := js.DeleteStream(ctx, name); err != nil {
 		return fmt.Errorf("failed to delete stream %s: %w", name, err)
 	}
-
 	c.log.Info("Deleted JetStream stream", "name", name)
 	return nil
 }
 
 // StreamInfo returns information about a stream.
-func (c *JetStreamClient) StreamInfo(name string) (*nats.StreamInfo, error) {
-	if err := c.Connect(); err != nil {
+func (c *JetStreamClient) StreamInfo(ctx context.Context, name string) (*jetstream.StreamInfo, error) {
+	js, err := c.jetStream()
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	info, err := js.StreamInfo(name)
+	s, err := js.Stream(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stream info for %s: %w", name, err)
 	}
-
+	info, err := s.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream info for %s: %w", name, err)
+	}
 	return info, nil
 }
 
 // EnsureConsumer creates or updates a JetStream consumer.
-func (c *JetStreamClient) EnsureConsumer(stream, name string, config ConsumerConfig) error {
-	if err := c.Connect(); err != nil {
+func (c *JetStreamClient) EnsureConsumer(ctx context.Context, stream, name string, config ConsumerConfig) error {
+	js, err := c.jetStream()
+	if err != nil {
 		return err
 	}
 
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	consumerConfig := &nats.ConsumerConfig{
-		Durable: name,
-	}
-
-	if config.FilterSubject != "" {
-		consumerConfig.FilterSubject = config.FilterSubject
+	consumerConfig := jetstream.ConsumerConfig{
+		Durable:       name,
+		FilterSubject: config.FilterSubject,
 	}
 	if config.AckPolicy == AckExplicit {
-		consumerConfig.AckPolicy = nats.AckExplicitPolicy
+		consumerConfig.AckPolicy = jetstream.AckExplicitPolicy
 	}
 
-	_, err := js.AddConsumer(stream, consumerConfig)
-	if err != nil {
+	if _, err := js.CreateOrUpdateConsumer(ctx, stream, consumerConfig); err != nil {
 		return fmt.Errorf("failed to create consumer %s on stream %s: %w", name, stream, err)
 	}
-
 	return nil
 }
 
-// DeleteConsumer deletes a JetStream consumer.
-func (c *JetStreamClient) DeleteConsumer(stream, consumer string) error {
-	if err := c.Connect(); err != nil {
+// DeleteConsumer deletes a JetStream consumer. Errors are logged, not
+// returned: deletion is best effort.
+func (c *JetStreamClient) DeleteConsumer(ctx context.Context, stream, consumer string) error {
+	js, err := c.jetStream()
+	if err != nil {
 		return err
 	}
-
-	c.mu.Lock()
-	js := c.js
-	c.mu.Unlock()
-
-	err := js.DeleteConsumer(stream, consumer)
-	if err != nil {
-		// Best effort - log but don't fail on consumer deletion errors
+	if err := js.DeleteConsumer(ctx, stream, consumer); err != nil {
 		c.log.Info("Failed to delete consumer (best effort)", "stream", stream, "consumer", consumer, "error", err.Error())
 	}
-
 	return nil
 }
 
-// PollMessage polls for a single message with a timeout.
-func (c *JetStreamClient) PollMessage(
-	subject string, timeout time.Duration, opts ...SubscribeOption,
-) (*nats.Msg, error) {
-	sub, err := c.Subscribe(subject, opts...)
+// FetchOne reads and acknowledges one message through the consumer described
+// by config on stream. See Client.FetchOne.
+func (c *JetStreamClient) FetchOne(
+	ctx context.Context, stream string, config jetstream.ConsumerConfig, wait time.Duration,
+) (jetstream.Msg, error) {
+	js, err := c.jetStream()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = sub.Unsubscribe() }()
 
-	msg, err := sub.NextMsg(timeout)
-	if err != nil {
-		if err == nats.ErrTimeout {
-			return nil, nil // No message available, not an error
+	cons, err := js.CreateOrUpdateConsumer(ctx, stream, config)
+	if errors.Is(err, jetstream.ErrStreamNotFound) && config.FilterSubject != "" {
+		// The configured stream does not exist: find the one that captures
+		// the subject instead.
+		c.log.Info("Stream not found, looking it up by subject",
+			"stream", stream, "subject", config.FilterSubject)
+		found, lerr := js.StreamNameBySubject(ctx, config.FilterSubject)
+		if lerr != nil {
+			return nil, fmt.Errorf("consumer %s on stream %s: %w (lookup by subject: %v)", config.Durable, stream, err, lerr)
 		}
-		return nil, fmt.Errorf("NATS next msg: %w", err)
+		cons, err = js.CreateOrUpdateConsumer(ctx, found, config)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("consumer %s on stream %s: %w", config.Durable, stream, err)
 	}
 
+	batch, err := cons.Fetch(1, jetstream.FetchMaxWait(wait))
+	if err != nil {
+		return nil, fmt.Errorf("fetch from %s/%s: %w", stream, config.Durable, err)
+	}
+	var msg jetstream.Msg
+	for m := range batch.Messages() {
+		if msg == nil {
+			msg = m
+		}
+	}
+	if err := batch.Error(); err != nil && msg == nil &&
+		!errors.Is(err, nats.ErrTimeout) && !errors.Is(err, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("fetch from %s/%s: %w", stream, config.Durable, err)
+	}
+	if msg == nil {
+		return nil, nil // No message available, not an error
+	}
+
+	// Acknowledge once and wait for the server to confirm, so a caller that
+	// deletes the consumer right after cannot see the message redelivered
+	// (with WorkQueue retention the ack is what removes it from the stream).
+	if config.AckPolicy == jetstream.AckExplicitPolicy || config.AckPolicy == jetstream.AckAllPolicy {
+		if err := msg.DoubleAck(ctx); err != nil {
+			c.log.Error(err, "Failed to ack message", "subject", msg.Subject())
+		}
+	}
 	return msg, nil
 }
 
-// SubscribeOption configures subscription behavior.
-type SubscribeOption func(*subscribeOptions)
-
-type subscribeOptions struct {
-	durable            string
-	bindStream         string
-	ackExplicit        bool
-	deliverAll         bool
-	fallbackAutoDetect bool
-}
-
-// WithDurable sets the durable consumer name.
-func WithDurable(name string) SubscribeOption {
-	return func(o *subscribeOptions) {
-		o.durable = name
+// kvBucket returns a KV bucket, creating it if it doesn't exist.
+func (c *JetStreamClient) kvBucket(ctx context.Context, bucket string) (jetstream.KeyValue, error) {
+	c.mu.Lock()
+	js := c.js
+	c.mu.Unlock()
+	if js == nil {
+		return nil, errors.New("JetStream not connected")
 	}
-}
-
-// WithBindStream binds the subscription to a specific stream.
-func WithBindStream(stream string) SubscribeOption {
-	return func(o *subscribeOptions) {
-		o.bindStream = stream
-	}
-}
-
-// WithAckExplicit requires explicit acknowledgment of messages.
-func WithAckExplicit() SubscribeOption {
-	return func(o *subscribeOptions) {
-		o.ackExplicit = true
-	}
-}
-
-// WithDeliverAll delivers all messages from the start.
-func WithDeliverAll() SubscribeOption {
-	return func(o *subscribeOptions) {
-		o.deliverAll = true
-	}
-}
-
-// WithFallbackAutoDetect enables fallback to auto-detect stream if BindStream fails.
-func WithFallbackAutoDetect() SubscribeOption {
-	return func(o *subscribeOptions) {
-		o.fallbackAutoDetect = true
-	}
-}
-
-// getOrCreateBucket returns a KV bucket, creating it if it doesn't exist.
-func (c *JetStreamClient) getOrCreateBucket(bucket string) (nats.KeyValue, error) {
-	if c.js == nil {
-		return nil, fmt.Errorf("JetStream not connected")
-	}
-	kv, err := c.js.KeyValue(bucket)
-	if err == nats.ErrBucketNotFound {
-		kv, err = c.js.CreateKeyValue(&nats.KeyValueConfig{
+	kv, err := js.KeyValue(ctx, bucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 			Bucket:      bucket,
 			Description: fmt.Sprintf("Round Table %s store", bucket),
 			History:     3,
@@ -567,25 +497,24 @@ func (c *JetStreamClient) getOrCreateBucket(bucket string) (nats.KeyValue, error
 }
 
 // KVPut stores a value in a NATS KV bucket (creates bucket if needed).
-func (c *JetStreamClient) KVPut(bucket, key string, value []byte) error {
-	kv, err := c.getOrCreateBucket(bucket)
+func (c *JetStreamClient) KVPut(ctx context.Context, bucket, key string, value []byte) error {
+	kv, err := c.kvBucket(ctx, bucket)
 	if err != nil {
 		return err
 	}
-	_, err = kv.Put(key, value)
-	if err != nil {
+	if _, err := kv.Put(ctx, key, value); err != nil {
 		return fmt.Errorf("failed to put key %s in bucket %s: %w", key, bucket, err)
 	}
 	return nil
 }
 
 // KVGet retrieves a value from a NATS KV bucket.
-func (c *JetStreamClient) KVGet(bucket, key string) ([]byte, error) {
-	kv, err := c.getOrCreateBucket(bucket)
+func (c *JetStreamClient) KVGet(ctx context.Context, bucket, key string) ([]byte, error) {
+	kv, err := c.kvBucket(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}
-	entry, err := kv.Get(key)
+	entry, err := kv.Get(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get key %s from bucket %s: %w", key, bucket, err)
 	}
@@ -593,22 +522,22 @@ func (c *JetStreamClient) KVGet(bucket, key string) ([]byte, error) {
 }
 
 // KVDelete deletes a key from a NATS KV bucket.
-func (c *JetStreamClient) KVDelete(bucket, key string) error {
-	kv, err := c.getOrCreateBucket(bucket)
+func (c *JetStreamClient) KVDelete(ctx context.Context, bucket, key string) error {
+	kv, err := c.kvBucket(ctx, bucket)
 	if err != nil {
 		return err
 	}
-	return kv.Delete(key)
+	return kv.Delete(ctx, key)
 }
 
 // KVKeys lists all keys in a NATS KV bucket.
-func (c *JetStreamClient) KVKeys(bucket string) ([]string, error) {
-	kv, err := c.getOrCreateBucket(bucket)
+func (c *JetStreamClient) KVKeys(ctx context.Context, bucket string) ([]string, error) {
+	kv, err := c.kvBucket(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}
-	keys, err := kv.Keys()
-	if err == nats.ErrNoKeysFound {
+	keys, err := kv.Keys(ctx)
+	if errors.Is(err, jetstream.ErrNoKeysFound) {
 		return []string{}, nil
 	}
 	if err != nil {
