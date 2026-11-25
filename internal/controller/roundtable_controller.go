@@ -234,7 +234,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Message:            fmt.Sprintf("Cost %.4f exceeds budget %s", totalCost, rt.Spec.Policies.CostBudgetUSD),
 			ObservedGeneration: rt.Generation,
 		})
-		r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded, suspending knights")
+		r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded")
 	default:
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
