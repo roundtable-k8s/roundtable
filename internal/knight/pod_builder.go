@@ -438,7 +438,7 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 	}
 	d := rt.Spec.Defaults
 	return d != nil && (d.Resources != nil || d.Egress != nil || d.Workspace != nil || d.Memory != nil || d.RuntimeClassName != nil ||
-		d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
+		len(d.Arsenals) > 0 || d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
 }
 
 // knightInheritsNothing reports whether the knight sets every field a table can
@@ -447,11 +447,11 @@ func knightInheritsNothing(k *aiv1alpha1.Knight) bool {
 	s := &k.Spec
 	return s.Resources != nil && s.Egress != nil && s.Workspace != nil && s.Memory != nil && s.RuntimeClassName != nil &&
 		s.Model != "" && s.Image != "" && s.TaskTimeoutSeconds > 0 && s.Concurrency > 0 &&
-		s.Vault != nil
+		s.Vault != nil && len(s.Arsenals) > 0
 }
 
 // ApplyTableDefaults fills the knight's unset spec fields in memory from its
-// RoundTable (found via findTable): resources, egress, workspace, memory,
+// RoundTable (found via findTable): resources, egress, workspace, memory, arsenals,
 // runtimeClassName, model, image, taskTimeoutSeconds and concurrency from
 // spec.defaults, and vault from spec.vault. A value on the knight always wins;
 // nothing is merged. A table's workspace existingClaim is not inherited; its
@@ -495,6 +495,12 @@ func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
 	d := rt.Spec.Defaults
 	if d == nil {
 		return
+	}
+	if len(k.Spec.Arsenals) == 0 && len(d.Arsenals) > 0 {
+		k.Spec.Arsenals = make([]aiv1alpha1.KnightArsenal, len(d.Arsenals))
+		for i := range d.Arsenals {
+			d.Arsenals[i].DeepCopyInto(&k.Spec.Arsenals[i])
+		}
 	}
 	if k.Spec.Resources == nil && d.Resources != nil {
 		k.Spec.Resources = d.Resources.DeepCopy()
@@ -661,8 +667,6 @@ type resolvedArsenal struct {
 	aiv1alpha1.KnightArsenal
 	// path is where the synced tree appears inside the arsenal volume.
 	path string
-	// primary is true for spec.arsenal, whose sidecar keeps the name "git-sync".
-	primary bool
 }
 
 // arsenalName derives a DNS-label-ish name from a repo URL's basename.
@@ -687,19 +691,26 @@ func arsenalName(repo string) string {
 	return name
 }
 
-// arsenals returns spec.arsenal (if set) followed by spec.arsenals, with
-// defaults applied, in merge order. Duplicate names get a numeric suffix.
-func (b *PodBuilder) arsenals() []resolvedArsenal {
-	var in []aiv1alpha1.KnightArsenal
-	primary := b.knight.Spec.Arsenal != nil
-	if primary {
-		in = append(in, *b.knight.Spec.Arsenal)
+// defaultArsenalName is the name of the default platform arsenal.
+const defaultArsenalName = "platform"
+
+// effectiveArsenals returns the list as configured, or the single default
+// platform arsenal when it is empty.
+func effectiveArsenals(in []aiv1alpha1.KnightArsenal) []aiv1alpha1.KnightArsenal {
+	if len(in) == 0 {
+		return []aiv1alpha1.KnightArsenal{{Name: defaultArsenalName, Repo: defaultArsenalRepo}}
 	}
-	in = append(in, b.knight.Spec.Arsenals...)
+	return in
+}
+
+// arsenals returns spec.arsenals (or the default platform arsenal when empty)
+// with defaults applied, in merge order. Duplicate names get a numeric suffix.
+func (b *PodBuilder) arsenals() []resolvedArsenal {
+	in := effectiveArsenals(b.knight.Spec.Arsenals)
 
 	out := make([]resolvedArsenal, 0, len(in))
 	seen := map[string]int{}
-	for i, a := range in {
+	for _, a := range in {
 		if a.OCI != nil {
 			if a.Name == "" {
 				a.Name = ociArsenalName(a.OCI.Reference)
@@ -736,7 +747,6 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 		out = append(out, resolvedArsenal{
 			KnightArsenal: a,
 			path:          path,
-			primary:       primary && i == 0,
 		})
 	}
 	return out
@@ -752,11 +762,6 @@ func (b *PodBuilder) WithSkillFilter() *PodBuilder {
 	paths := make([]string, 0, len(arsenals))
 	for _, a := range arsenals {
 		paths = append(paths, a.path)
-	}
-	if len(paths) == 0 {
-		// No arsenal configured: nothing syncs, but keep the sidecar so a
-		// manually populated /arsenal still works.
-		paths = []string{"/arsenal"}
 	}
 
 	skillFilterScript := fmt.Sprintf(`
@@ -853,17 +858,14 @@ done`
 
 // WithGitSync adds one git-sync sidecar per arsenal. Each syncs under
 // /arsenal/.sync/<name> and exposes the current tree at /arsenal/<name>
-// (the same path the single-arsenal layout used). spec.arsenal's sidecar
-// keeps the name "git-sync"; spec.arsenals entries are "git-sync-<name>".
+// (the same path the single-arsenal layout used). Every sidecar is named
+// "git-sync-<name>".
 func (b *PodBuilder) WithGitSync() *PodBuilder {
 	for _, a := range b.arsenals() {
 		if a.OCI != nil {
 			continue
 		}
 		name := "git-sync-" + a.Name
-		if a.primary {
-			name = "git-sync"
-		}
 		// Each arsenal gets its own git-sync root: git-sync may wipe a root
 		// that isn't a clean repo, so roots must never nest or be shared.
 		env := []corev1.EnvVar{

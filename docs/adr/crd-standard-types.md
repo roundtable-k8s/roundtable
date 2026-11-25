@@ -51,7 +51,7 @@ Decision `change` rows are implemented in the same PR as this document.
 | `resources` | `{cpu, memory}` Quantities, "limits", defaulted 200m/256Mi, **ignored by the pod builder** | `corev1.ResourceRequirements` | **change**: `resources: {requests, limits, claims}` applied verbatim to the `app` container. Unset keeps the operator default (requests 100m / 256Mi, no limits). |
 | `taskTimeout` | `int32` seconds, unitless name | `*Seconds` int | **change** → `taskTimeoutSeconds` (same bounds 30–3600, default 120) |
 | `lifecycle.idleTimeout` | Go-duration string (`"30m"`), parsed at runtime, silently ignored if invalid | `*Seconds` int | **change** → `lifecycle.idleTimeoutSeconds` (`int32`, min 0); becomes the ScaledObject `cooldownPeriod` (default 300) |
-| `arsenal.period`, `arsenals[].period` | string `"300s"` | `*Seconds` int (cf. probe `periodSeconds`) | **change** → `periodSeconds` (`int32`, min 1, default 300), rendered as `GITSYNC_PERIOD=<n>s` |
+| `arsenals[].period` | string `"300s"` | `*Seconds` int (cf. probe `periodSeconds`) | **change** → `periodSeconds` (`int32`, min 1, default 300), rendered as `GITSYNC_PERIOD=<n>s` |
 | `workspace.size` | string `"1Gi"` | `resource.Quantity` (as PVC `resources.requests.storage`) | **change** → Quantity (same YAML, now validated at admission) |
 | `github.tokenSecretRef` | bespoke `GitHubTokenSecretRef{name, key=token}` | `corev1.SecretKeySelector` | **change** → `SecretKeySelector`; `key` is now required (no `token` default) and `optional` is honoured on the projected volume |
 | `suspended` | bool | `suspend` (CronJob/Job/Flux) | **change** → `suspend` |
@@ -128,7 +128,7 @@ Decision `change` rows are implemented in the same PR as this document.
 | Value | Current | Standard | Decision |
 |---|---|---|---|
 | `planner.taskTimeout`, `knights.<n>.taskTimeout` | seconds | mirror the CRD | **change** → `taskTimeoutSeconds` |
-| `planner.arsenal.period` | `5m` | mirror the CRD | **change** → `planner.arsenal.periodSeconds` (300) |
+| `planner.arsenals[].period` | `5m` | mirror the CRD | **change** → `planner.arsenals[].periodSeconds` (300) |
 | `knights.<n>.resources` | passed through as `{cpu, memory}` | mirror the CRD | **change**: passed through as `ResourceRequirements` |
 | `knights.<n>.suspended` | bool | mirror the CRD | **change** → `suspend` |
 | `image`, `images.*`, `gateway.image` | `repository` + `tag` (+ `pullPolicy`) | Helm convention | keep; rendered into the Knight `image` string |

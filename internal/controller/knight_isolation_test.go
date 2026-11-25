@@ -192,7 +192,7 @@ func TestIsolationState(t *testing.T) {
 func TestDefaultDenyPolicyHasBaseline(t *testing.T) {
 	k := testEgressKnight("")
 	k.Spec.Egress = nil
-	k.Spec.Arsenal = &aiv1alpha1.KnightArsenal{Repo: "https://github.com/roundtable-k8s/arsenal"}
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Repo: "https://github.com/roundtable-k8s/arsenal"}}
 	r := &KnightReconciler{Isolation: knightpkg.DefaultIsolationSettings()}
 	knightpkg.ApplyIsolationDefaults(k, r.Isolation)
 	allow := r.egressAllowlistOf(k)
@@ -211,7 +211,7 @@ var _ = Describe("Knight arsenal OCI validation", func() {
 
 	It("requires a digest-pinned reference and excludes a custom repo", func() {
 		bad := egressKnight("arsenal-oci-nodigest", nil)
-		bad.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: "registry.example.com/arsenal:latest"}}
+		bad.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: "registry.example.com/arsenal:latest"}}}
 		err := k8sClient.Create(ctx, bad)
 		Expect(apierrors.IsInvalid(err)).To(BeTrue())
 		Expect(err.Error()).To(ContainSubstring("sha256"))
@@ -223,8 +223,8 @@ var _ = Describe("Knight arsenal OCI validation", func() {
 		Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
 
 		ok := egressKnight("arsenal-oci-ok", nil)
-		ok.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: digest}}
+		ok.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: digest}}}
 		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
-		Expect(ok.Spec.Arsenal.OCI.PullPolicy).To(Equal(corev1.PullIfNotPresent))
+		Expect(ok.Spec.Arsenals[0].OCI.PullPolicy).To(Equal(corev1.PullIfNotPresent))
 	})
 })

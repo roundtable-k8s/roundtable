@@ -161,10 +161,10 @@ func TestApplyIsolationDefaults(t *testing.T) {
 
 func TestArsenalGitHosts(t *testing.T) {
 	k := isolationTestKnight()
-	assert.Empty(t, ArsenalGitHosts(k), "no arsenal, no git-sync sidecar")
+	assert.Equal(t, []GitHost{{Host: "github.com", Port: 443}}, ArsenalGitHosts(k), "empty list = default platform arsenal")
 
-	k.Spec.Arsenal = &aiv1alpha1.KnightArsenal{} // default repo
 	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+		{}, // default repo
 		{Repo: "https://GitHub.com/org/other"},
 		{Repo: "git@git.example.org:team/skills.git"},
 		{Repo: "ssh://git@gitea.example.net:2222/x/y"},
@@ -177,4 +177,33 @@ func TestArsenalGitHosts(t *testing.T) {
 		{Host: "gitea.example.net", Port: 2222},
 		{Host: "github.com", Port: 443},
 	}, ArsenalGitHosts(k))
+}
+
+func TestApplyTableDefaultsArsenals(t *testing.T) {
+	tableArsenals := []aiv1alpha1.KnightArsenal{
+		{Name: "team", Repo: "https://github.com/team/skills"},
+		{Name: "pack", Repo: "https://github.com/team/pack"},
+	}
+	defaults := &aiv1alpha1.RoundTableDefaults{Arsenals: tableArsenals}
+
+	t.Run("inherited when the knight sets none", func(t *testing.T) {
+		k, _ := effective(t, isolationTestKnight(), defaults, DefaultIsolationSettings())
+		assert.Equal(t, tableArsenals, k.Spec.Arsenals)
+		sidecars := NewPodBuilder(k, "img").WithArsenal().WithGitSync().sidecars
+		names := make([]string, 0, len(sidecars))
+		for _, c := range sidecars {
+			names = append(names, c.Name)
+		}
+		assert.Equal(t, []string{"git-sync-team", "git-sync-pack"}, names)
+	})
+	t.Run("not inherited when the knight sets its own", func(t *testing.T) {
+		own := isolationTestKnight()
+		own.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "mine", Repo: "https://github.com/me/skills"}}
+		k, _ := effective(t, own, defaults, DefaultIsolationSettings())
+		assert.Equal(t, []aiv1alpha1.KnightArsenal{{Name: "mine", Repo: "https://github.com/me/skills"}}, k.Spec.Arsenals)
+	})
+	t.Run("no table default and no knight list leaves it empty (pod builder defaults it)", func(t *testing.T) {
+		k, _ := effective(t, isolationTestKnight(), nil, DefaultIsolationSettings())
+		assert.Empty(t, k.Spec.Arsenals)
+	})
 }

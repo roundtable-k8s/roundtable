@@ -67,7 +67,7 @@ var _ = Describe("Knight standard types", func() {
 			},
 		}
 		k.Spec.Workspace = &aiv1alpha1.KnightWorkspace{Size: new(resource.MustParse("10Gi"))}
-		k.Spec.Arsenal = &aiv1alpha1.KnightArsenal{Repo: "https://github.com/example/skills", PeriodSeconds: 60}
+		k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Repo: "https://github.com/example/skills", PeriodSeconds: 60}}
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		DeferCleanup(cleanup, k)
 
@@ -90,7 +90,7 @@ var _ = Describe("Knight standard types", func() {
 			switch c.Name {
 			case "app":
 				app = c
-			case "git-sync":
+			case "git-sync-skills":
 				gitSync = c
 			}
 		}

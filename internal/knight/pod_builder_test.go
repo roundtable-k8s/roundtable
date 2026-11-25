@@ -290,7 +290,7 @@ var _ = Describe("PodBuilder", func() {
 		const ref = "registry.example.com/skills/arsenal@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 		It("mounts an OCI-only arsenal as a read-only image volume with no git-sync", func() {
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref}}
+			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref}}}
 			builder.WithArsenal().WithGitSync().WithSkillFilter()
 
 			Expect(builder.sidecars).To(HaveLen(1))
@@ -311,14 +311,14 @@ var _ = Describe("PodBuilder", func() {
 		})
 
 		It("supports a git + OCI pair with distinct names", func() {
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
 			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+				{Name: "arsenal"},
 				{Name: "personal", OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref, PullPolicy: corev1.PullAlways}},
 			}
 			builder.WithArsenal().WithGitSync().WithSkillFilter()
 
 			Expect(builder.sidecars).To(HaveLen(2))
-			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync-arsenal"))
 			Expect(builder.sidecars[1].Name).To(Equal("skill-filter"))
 			var imgs int
 			for _, v := range builder.volumes {
@@ -337,17 +337,11 @@ var _ = Describe("PodBuilder", func() {
 	})
 
 	Describe("WithGitSync", func() {
-		It("does nothing when arsenal not configured", func() {
-			builder.WithGitSync()
-			Expect(builder.sidecars).To(BeEmpty())
-		})
-
-		It("adds git-sync sidecar with defaults", func() {
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
+		It("defaults an empty arsenals list to the platform arsenal", func() {
 			builder.WithGitSync()
 
 			Expect(builder.sidecars).To(HaveLen(1))
-			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync-platform"))
 			Expect(builder.sidecars[0].Image).To(Equal("registry.k8s.io/git-sync/git-sync:v4.4.0"))
 
 			// Check default env vars
@@ -357,20 +351,20 @@ var _ = Describe("PodBuilder", func() {
 			}
 			Expect(envMap["GITSYNC_REPO"]).To(Equal("https://github.com/roundtable-k8s/arsenal"))
 			Expect(envMap["GITSYNC_REF"]).To(Equal("main"))
-			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal/.sync/arsenal"))
-			Expect(envMap["GITSYNC_LINK"]).To(Equal("/arsenal/arsenal"))
+			Expect(envMap["GITSYNC_ROOT"]).To(Equal("/arsenal/.sync/platform"))
+			Expect(envMap["GITSYNC_LINK"]).To(Equal("/arsenal/platform"))
 			Expect(envMap["GITSYNC_PERIOD"]).To(Equal("300s"))
 		})
 
 		It("adds one git-sync sidecar per arsenal with isolated roots", func() {
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
 			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+				{Name: "platform"},
 				{Name: "personal", Repo: "https://github.com/someone/roundtable-arsenal.git", Ref: "dev"},
 			}
 			builder.WithGitSync()
 
 			Expect(builder.sidecars).To(HaveLen(2))
-			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync-platform"))
 			Expect(builder.sidecars[1].Name).To(Equal("git-sync-personal"))
 
 			envMap := make(map[string]string)
@@ -384,7 +378,7 @@ var _ = Describe("PodBuilder", func() {
 			Expect(envMap["GITSYNC_PERIOD"]).To(Equal("300s"))
 		})
 
-		It("supports arsenals without a primary arsenal and dedupes derived names", func() {
+		It("dedupes derived names", func() {
 			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
 				{Repo: "https://github.com/a/skills"},
 				{Repo: "https://github.com/b/skills.git"},
@@ -397,12 +391,12 @@ var _ = Describe("PodBuilder", func() {
 		})
 
 		It("uses custom arsenal configuration", func() {
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{
+			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{
 				Repo:          "https://github.com/custom/arsenal",
 				Ref:           "develop",
 				PeriodSeconds: 60,
 				Image:         "custom/git-sync:v1.0",
-			}
+			}}
 			builder.WithGitSync()
 
 			envMap := make(map[string]string)
@@ -728,7 +722,6 @@ var _ = Describe("PodBuilder", func() {
 
 		It("includes sidecars when configured", func() {
 			builder.WithArsenal().WithSkillFilter()
-			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
 			builder.WithGitSync()
 
 			spec := builder.Build(context.Background())
@@ -737,7 +730,7 @@ var _ = Describe("PodBuilder", func() {
 			Expect(spec.Containers).To(HaveLen(3))
 			Expect(spec.Containers[0].Name).To(Equal("app"))
 			Expect(spec.Containers[1].Name).To(Equal("skill-filter"))
-			Expect(spec.Containers[2].Name).To(Equal("git-sync"))
+			Expect(spec.Containers[2].Name).To(Equal("git-sync-platform"))
 		})
 
 		It("includes all volumes from With* methods", func() {
@@ -770,11 +763,10 @@ var _ = Describe("PodBuilder restricted security", func() {
 		k := &aiv1alpha1.Knight{
 			ObjectMeta: metav1.ObjectMeta{Name: "k", Namespace: "default"},
 			Spec: aiv1alpha1.KnightSpec{
-				Model:   "m",
-				Domain:  "d",
-				Skills:  []string{"a"},
-				Arsenal: &aiv1alpha1.KnightArsenal{},
-				Tools:   &aiv1alpha1.KnightTools{Nix: []string{"kubectl"}},
+				Model:  "m",
+				Domain: "d",
+				Skills: []string{"a"},
+				Tools:  &aiv1alpha1.KnightTools{Nix: []string{"kubectl"}},
 			},
 		}
 		b := NewPodBuilder(k, "img:1").WithWorkspace().WithArsenal().WithSkillFilter().WithGitSync().WithBrowser().WithNixStore()

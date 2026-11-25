@@ -72,68 +72,76 @@ spec:
                   defaults defines default configuration applied to all knights in this table.
                   Individual knight specs can override these values.
                 properties:
-                  arsenal:
-                    description: arsenal configures the default skill arsenal for
-                      knights.
-                    properties:
-                      image:
-                        default: registry.k8s.io/git-sync/git-sync:v4.4.0
-                        description: image overrides the git-sync container image.
-                        type: string
-                      name:
-                        description: |-
-                          name identifies this arsenal: it becomes the sync path /arsenal/<name>
-                          and the sidecar name git-sync-<name>. Defaults to the repo's basename;
-                          a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
-                        maxLength: 40
-                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                        type: string
-                      oci:
-                        description: |-
-                          oci loads the arsenal from an OCI image mounted read-only as an image
-                          volume at /arsenal/<name> instead of syncing a git repo. No git-sync
-                          sidecar is added; repo, ref, periodSeconds and image are ignored.
-                        properties:
-                          pullPolicy:
-                            default: IfNotPresent
-                            description: pullPolicy is the image volume pull policy.
-                            enum:
-                            - Always
-                            - IfNotPresent
-                            - Never
-                            type: string
-                          reference:
-                            description: |-
-                              reference is the image reference, pinned by digest
-                              (e.g. registry.example.com/arsenal@sha256:...).
-                            maxLength: 512
-                            minLength: 1
-                            pattern: '@sha256:[a-f0-9]{64}$'
-                            type: string
-                        required:
-                        - reference
-                        type: object
-                      periodSeconds:
-                        default: 300
-                        description: periodSeconds is how often git-sync pulls the
-                          repo, in seconds.
-                        format: int32
-                        minimum: 1
-                        type: integer
-                      ref:
-                        default: main
-                        description: ref is the git ref to sync.
-                        type: string
-                      repo:
-                        description: |-
-                          repo is the git repository URL containing skills. Defaults to
-                          https://github.com/roundtable-k8s/arsenal (applied by the operator, so
-                          it stays unset for an oci arsenal); mutually exclusive with oci.
-                        type: string
-                    type: object
-                    x-kubernetes-validations:
-                    - message: oci and repo are mutually exclusive
-                      rule: '!has(self.oci) || !has(self.repo)'
+                  arsenals:
+                    description: |-
+                      arsenals is the default ordered skill arsenal list for knights that set
+                      none of their own (first = base, later entries override per skill).
+                    items:
+                      description: |-
+                        KnightArsenal configures one skill arsenal: either a git-sync sidecar (the
+                        default) or, with oci set, a read-only OCI image volume.
+                      properties:
+                        image:
+                          default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                          description: image overrides the git-sync container image.
+                          type: string
+                        name:
+                          description: |-
+                            name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                            and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                            a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                          maxLength: 40
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        oci:
+                          description: |-
+                            oci loads the arsenal from an OCI image mounted read-only as an image
+                            volume at /arsenal/<name> instead of syncing a git repo. No git-sync
+                            sidecar is added; repo, ref, periodSeconds and image are ignored.
+                          properties:
+                            pullPolicy:
+                              default: IfNotPresent
+                              description: pullPolicy is the image volume pull policy.
+                              enum:
+                              - Always
+                              - IfNotPresent
+                              - Never
+                              type: string
+                            reference:
+                              description: |-
+                                reference is the image reference, pinned by digest
+                                (e.g. registry.example.com/arsenal@sha256:...).
+                              maxLength: 512
+                              minLength: 1
+                              pattern: '@sha256:[a-f0-9]{64}$'
+                              type: string
+                          required:
+                          - reference
+                          type: object
+                        periodSeconds:
+                          default: 300
+                          description: periodSeconds is how often git-sync pulls the
+                            repo, in seconds.
+                          format: int32
+                          minimum: 1
+                          type: integer
+                        ref:
+                          default: main
+                          description: ref is the git ref to sync.
+                          type: string
+                        repo:
+                          description: |-
+                            repo is the git repository URL containing skills. Defaults to
+                            https://github.com/roundtable-k8s/arsenal (applied by the operator, so
+                            it stays unset for an oci arsenal); mutually exclusive with oci.
+                          type: string
+                      type: object
+                      x-kubernetes-validations:
+                      - message: oci and repo are mutually exclusive
+                        rule: '!has(self.oci) || !has(self.repo)'
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-type: atomic
                   concurrency:
                     description: |-
                       concurrency is the default max concurrent tasks per pod for the table's
@@ -667,74 +675,14 @@ spec:
                   description: KnightSpec defines the desired state of a Knight —
                     an AI agent in the Round Table.
                   properties:
-                    arsenal:
-                      description: arsenal configures the skill arsenal git-sync sidecar.
-                      properties:
-                        image:
-                          default: registry.k8s.io/git-sync/git-sync:v4.4.0
-                          description: image overrides the git-sync container image.
-                          type: string
-                        name:
-                          description: |-
-                            name identifies this arsenal: it becomes the sync path /arsenal/<name>
-                            and the sidecar name git-sync-<name>. Defaults to the repo's basename;
-                            a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
-                          maxLength: 40
-                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                          type: string
-                        oci:
-                          description: |-
-                            oci loads the arsenal from an OCI image mounted read-only as an image
-                            volume at /arsenal/<name> instead of syncing a git repo. No git-sync
-                            sidecar is added; repo, ref, periodSeconds and image are ignored.
-                          properties:
-                            pullPolicy:
-                              default: IfNotPresent
-                              description: pullPolicy is the image volume pull policy.
-                              enum:
-                              - Always
-                              - IfNotPresent
-                              - Never
-                              type: string
-                            reference:
-                              description: |-
-                                reference is the image reference, pinned by digest
-                                (e.g. registry.example.com/arsenal@sha256:...).
-                              maxLength: 512
-                              minLength: 1
-                              pattern: '@sha256:[a-f0-9]{64}$'
-                              type: string
-                          required:
-                          - reference
-                          type: object
-                        periodSeconds:
-                          default: 300
-                          description: periodSeconds is how often git-sync pulls the
-                            repo, in seconds.
-                          format: int32
-                          minimum: 1
-                          type: integer
-                        ref:
-                          default: main
-                          description: ref is the git ref to sync.
-                          type: string
-                        repo:
-                          description: |-
-                            repo is the git repository URL containing skills. Defaults to
-                            https://github.com/roundtable-k8s/arsenal (applied by the operator, so
-                            it stays unset for an oci arsenal); mutually exclusive with oci.
-                          type: string
-                      type: object
-                      x-kubernetes-validations:
-                      - message: oci and repo are mutually exclusive
-                        rule: '!has(self.oci) || !has(self.repo)'
                     arsenals:
                       description: |-
-                        arsenals lists additional skill arsenals merged into /skills alongside
-                        arsenal. Merging is per skill: /skills/<category>/<skill> links to the
-                        LAST arsenal (in order: arsenal first, then arsenals) that provides that
-                        skill, so later entries override earlier ones. Each entry runs its own
-                        git-sync sidecar.
+                        arsenals is the single ordered list of skill sources merged into /skills.
+                        The first entry is the base; later entries override it per skill:
+                        /skills/<category>/<skill> links to the LAST arsenal that provides that
+                        skill. Each git entry runs its own git-sync-<name> sidecar. When empty
+                        (and no RoundTable default applies) it defaults to one entry
+                        {name: platform, repo: https://github.com/roundtable-k8s/arsenal}.
                       items:
                         description: |-
                           KnightArsenal configures one skill arsenal: either a git-sync sidecar (the

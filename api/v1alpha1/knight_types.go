@@ -238,15 +238,12 @@ type KnightSpec struct {
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
 
-	// arsenal configures the skill arsenal git-sync sidecar.
-	// +optional
-	Arsenal *KnightArsenal `json:"arsenal,omitempty"`
-
-	// arsenals lists additional skill arsenals merged into /skills alongside
-	// arsenal. Merging is per skill: /skills/<category>/<skill> links to the
-	// LAST arsenal (in order: arsenal first, then arsenals) that provides that
-	// skill, so later entries override earlier ones. Each entry runs its own
-	// git-sync sidecar.
+	// arsenals is the single ordered list of skill sources merged into /skills.
+	// The first entry is the base; later entries override it per skill:
+	// /skills/<category>/<skill> links to the LAST arsenal that provides that
+	// skill. Each git entry runs its own git-sync-<name> sidecar. When empty
+	// (and no RoundTable default applies) it defaults to one entry
+	// {name: platform, repo: https://github.com/roundtable-k8s/arsenal}.
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=8

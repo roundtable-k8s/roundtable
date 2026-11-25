@@ -54,10 +54,6 @@ spec:
   prompt:
     {{- toYaml $spec.prompt | nindent 4 }}
   {{- end }}
-  {{- if hasKey $spec "arsenal" }}
-  arsenal:
-    {{- toYaml $spec.arsenal | nindent 4 }}
-  {{- end }}
   {{- if $spec.arsenals }}
   arsenals:
     {{- toYaml $spec.arsenals | nindent 4 }}

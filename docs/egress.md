@@ -48,7 +48,7 @@ Every knight's policy allows, even with an empty allowlist:
 | The knight's NATS server(s) | tasks and results | `toEndpoints` (in-cluster) or the port to any destination |
 | The Kubernetes API | knights use it on purpose (`automountServiceAccountToken: true`) | `toEntities: [kube-apiserver]` |
 | `isolation.egress.baseHosts` (`KNIGHT_EGRESS_BASE_HOSTS`, default `openrouter.ai`, `api.anthropic.com`) | the model providers | `toFQDNs` on 443 |
-| The hosts of the knight's arsenal repos (`spec.arsenal.repo`, `spec.arsenals[].repo`) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
+| The hosts of the knight's arsenal repos (`spec.arsenals[].repo`; the default platform arsenal when empty) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
 
 The knight's own `allowedHosts` are added on top, each on its own `ports` or,
 for a plain string, on `allowedPorts`, and each of its `allowedServices` on that

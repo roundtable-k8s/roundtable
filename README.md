@@ -285,7 +285,7 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 ### What Happens
 
 1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime
-2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenal`, plus any `spec.arsenals`)
+2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenals`; empty = the default platform arsenal)
    (an arsenal with `oci` set is instead mounted read-only as an OCI image volume at `/arsenal/<name>`, pinned by digest, with no sidecar — see `examples/knight-arsenal-oci.yaml`)
 3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash
 4. A NATS JetStream consumer is configured with the knight's filter subjects
