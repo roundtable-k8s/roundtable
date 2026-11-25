@@ -874,6 +874,11 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 			}
 			log.Info("Auto-sanitized chain name", "original", chain.Name, "sanitized", sanitized)
 			plan.Chains[i].Name = sanitized
+			// Register the sanitized name too, so existingChains cannot collide with it.
+			if chainNames[sanitized] {
+				return fmt.Errorf("duplicate chain name: %s", sanitized)
+			}
+			chainNames[sanitized] = true
 		}
 
 		if !validChainPhase(chain.Phase) {
@@ -1307,6 +1312,14 @@ func (p *Planner) validateExistingChains(ctx context.Context, mission *aiv1alpha
 			knight := &aiv1alpha1.Knight{}
 			if err := p.Client.Get(ctx, types.NamespacedName{Name: kn, Namespace: mission.Namespace}, knight); err != nil {
 				return fmt.Errorf("existing chain %q: knight %q not found: %w", ec.Name, kn, err)
+			}
+			if c.Spec.RoundTableRef == nil || aiv1alpha1.RefName(c.Spec.RoundTableRef) == "" {
+				// Unbound chain: its knights must belong to the mission's table.
+				if rt := aiv1alpha1.RefName(mission.Spec.RoundTableRef); rt != "" {
+					if kt := knightpkg.KnightTable(knight); kt != "" && kt != rt {
+						return fmt.Errorf("existing chain %q: knight %q belongs to table %q, not %q", ec.Name, kn, kt, rt)
+					}
+				}
 			}
 			recruited[kn] = true
 			plan.Knights = append(plan.Knights, PlannerKnight{

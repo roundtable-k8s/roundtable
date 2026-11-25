@@ -195,3 +195,33 @@ func TestValidateMaxChainsCountsBothKinds(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestValidateSanitizedGeneratedNameCollidesWithExisting(t *testing.T) {
+	p := existingChainsPlanner(t, nil, tmplChain("good", nil, "dev"))
+	plan := existingPlan(PlannerExistingChain{Name: "good"})
+	plan.Knights = []PlannerKnight{{Name: "galahad"}}
+	plan.Chains = []PlannerChain{{Name: "Good", Steps: []aiv1alpha1.ChainStep{
+		{Name: "s", KnightRef: corev1.LocalObjectReference{Name: "galahad"}, Task: "t"}}}}
+	if err := p.validatePlan(context.Background(), existingChainsMission(), plan); err == nil {
+		t.Error("expected duplicate chain name error after sanitising")
+	}
+}
+
+func TestValidateUnboundChainKnightFromOtherTable(t *testing.T) {
+	foreign := &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: "mordred", Namespace: "default", Labels: map[string]string{aiv1alpha1.LabelRoundTable: "other"}},
+		Spec:       aiv1alpha1.KnightSpec{Domain: "dev", Model: "sonnet"},
+	}
+	c := tmplChain("unbound", nil, "")
+	c.Spec.Steps[0].KnightRef.Name = "mordred"
+	p := existingChainsPlanner(t, nil, foreign, c)
+	err := p.validatePlan(context.Background(), existingChainsMission(), existingPlan(PlannerExistingChain{Name: "unbound"}))
+	if err == nil || !strings.Contains(err.Error(), "belongs to table") {
+		t.Fatalf("err = %v", err)
+	}
+	// a knight of the mission's table is fine
+	ok := tmplChain("bound", nil, "")
+	if err := existingChainsPlanner(t, nil, ok).validatePlan(context.Background(), existingChainsMission(), existingPlan(PlannerExistingChain{Name: "bound"})); err != nil {
+		t.Fatal(err)
+	}
+}

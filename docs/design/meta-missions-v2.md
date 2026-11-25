@@ -125,7 +125,8 @@ instead of generating new ones:
   `inputOverride`); the mission controller runs a mission-scoped copy.
 - Existing chains count against `planner.maxChains`. Knights used by their steps are recruited
   into the plan implicitly as standing knights (`ephemeral: false`) and count against
-  `planner.maxKnights`.
+  `planner.maxKnights`. This happens even when `recruitExisting` is false.
+  Knights of chains with no `roundTableRef` must belong to the mission's table.
 
 ## CRD Changes Needed
 
