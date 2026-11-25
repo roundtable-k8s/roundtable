@@ -344,7 +344,10 @@ target chain's `roundTableRef`.
 `outcome` is `started` (a run started), `deduped` (its run already exists),
 `skipped` (concurrency, a missed `startingDeadlineSeconds`, a filter) or `error`
 (a template that cannot render, or a failed attempt, which is retried and
-counted again). `route` is the registered route template, such as
+counted again). A repeated `Nats-Msg-Id` is dropped by the JetStream stream
+before the Trigger sees it, so stream-level duplicates are not counted; only a
+repeated `dedupeKey` counts as `deduped`. A deleted Trigger's last-fired series
+is removed. `route` is the registered route template, such as
 `POST /v1/knights/{name}/invoke`, never the raw path; requests that match no
 route or fail authentication count under `unmatched`. The gateway serves
 `/metrics` without authentication on its own port (`--metrics-listen`, set to

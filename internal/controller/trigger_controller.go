@@ -28,6 +28,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -111,6 +112,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if apierrors.IsNotFound(err) {
 			r.consumers.stop(req.String())
 			r.pollers.stop(req.String())
+			deleteTriggerLastFired(req.Name)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -758,6 +760,13 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 
 // noTableLabel is the table label of a signal with no table.
 const noTableLabel = "none"
+
+// deleteTriggerLastFired drops a deleted Trigger's last-fired gauge series, so
+// an alert on its age does not fire forever. The counter is left alone: a
+// counter series that stops growing is normal.
+func deleteTriggerLastFired(trigger string) {
+	metrics.TriggerLastFiredTimestampSeconds.DeletePartialMatch(prometheus.Labels{"trigger": trigger})
+}
 
 // Outcomes of roundtable_trigger_firings_total.
 const (
