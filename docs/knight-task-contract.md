@@ -179,7 +179,9 @@ spec:
 automatically (whiteboard decision 12, #377). The runtimes create their tasks
 consumer with `max_deliver: 1` and ack only after the result is published, so a
 knight that dies mid-task does not get the task again. Retry is a manual action
-(#397). Chains keep their own step retries (`retry` / `retryPolicy`): those
+(#397). `spec.nats.maxDeliver` is deprecated and ignored: a value above 1 has no
+effect, and the operator says so with a `MaxDeliverIgnored` warning event and a
+`DeprecatedFieldsUsed=True` condition on the Knight. Chains keep their own step retries (`retry` / `retryPolicy`): those
 publish a new task and are unaffected by what follows.
 
 **Dead-letter stream.** So nothing vanishes, the operator records every lost or
@@ -237,6 +239,13 @@ advisory and the knight's own `lost: true` result give one entry.
 `open` on capture; `resolved` when a `success: true` result for the same task
 id arrives later (a spurious "lost" after an event-loop stall, pi-knight#84);
 `retried` is set by the gateway's retry API (`retriedAs` is the new task ID). Keys expire after 30 days.
+
+**Retries.** A dead-lettered task is re-run only by a manual retry (retry API,
+#397), which publishes a new task. That task carries `attempt` (1-based, so 2
+for the first retry), `retryOf` (the task ID being retried) and, when the
+retry API provides it, `previousFailure` (the failure recorded for the earlier
+attempt, such as its `reason` and `error`). Knights can use them to see they are on a retry; the
+operator uses `attempt` to keep dead-letter entries for each attempt separate.
 
 **Metrics**: `roundtable_tasks_dead_lettered_total{table,knight,reason}` and
 `roundtable_dead_letters_open{table,knight}`.

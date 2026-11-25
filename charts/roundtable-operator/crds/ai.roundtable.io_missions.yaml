@@ -1099,8 +1099,11 @@ spec:
                               type: string
                             maxDeliver:
                               default: 1
-                              description: maxDeliver is the maximum number of delivery
-                                attempts per message.
+                              description: |-
+                                maxDeliver is the maximum number of delivery attempts per message.
+
+                                Deprecated: ignored. Knights always run a task at most once; lost and
+                                failed tasks go to the dead-letter stream and are retried by hand.
                               format: int32
                               minimum: 1
                               type: integer
@@ -2283,8 +2286,11 @@ spec:
                               type: string
                             maxDeliver:
                               default: 1
-                              description: maxDeliver is the maximum number of delivery
-                                attempts per message.
+                              description: |-
+                                maxDeliver is the maximum number of delivery attempts per message.
+
+                                Deprecated: ignored. Knights always run a task at most once; lost and
+                                failed tasks go to the dead-letter stream and are retried by hand.
                               format: int32
                               minimum: 1
                               type: integer
@@ -3187,8 +3193,11 @@ spec:
                               type: string
                             maxDeliver:
                               default: 1
-                              description: maxDeliver is the maximum number of delivery
-                                attempts per message.
+                              description: |-
+                                maxDeliver is the maximum number of delivery attempts per message.
+
+                                Deprecated: ignored. Knights always run a task at most once; lost and
+                                failed tasks go to the dead-letter stream and are retried by hand.
                               format: int32
                               minimum: 1
                               type: integer
@@ -4446,8 +4455,11 @@ spec:
                             type: string
                           maxDeliver:
                             default: 1
-                            description: maxDeliver is the maximum number of delivery
-                              attempts per message.
+                            description: |-
+                              maxDeliver is the maximum number of delivery attempts per message.
+
+                              Deprecated: ignored. Knights always run a task at most once; lost and
+                              failed tasks go to the dead-letter stream and are retried by hand.
                             format: int32
                             minimum: 1
                             type: integer

@@ -99,8 +99,8 @@ Selected per-knight via `spec.runtime: deployment|sandbox`.
 
 Each knight creates a **durable JetStream consumer** with:
 - Filter subject matching its domain
-- Explicit ack policy (exactly-once delivery)
-- MaxDeliver for retry handling
+- Explicit ack policy, `max_deliver: 1` (at most once; no automatic redelivery)
+- Lost and failed tasks go to the dead-letter stream and are retried by hand (see [knight-task-contract.md](knight-task-contract.md#delivery-and-failure))
 
 ### Message Flow
 
