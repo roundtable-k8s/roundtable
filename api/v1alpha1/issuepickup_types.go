@@ -46,6 +46,22 @@ const (
 	// has settled the parent issue of a split run (#319): closed it after all
 	// sub-issues were completed, or handed it back with needs-human.
 	AnnotationPickupParentDone = "ai.roundtable.io/pickup-parent-done"
+
+	// IssuePickupTriggerSuffix names the Trigger generated for a table with
+	// spec.issuePickup.engine: trigger: "<table>-issue-pickup".
+	IssuePickupTriggerSuffix = "-issue-pickup"
+)
+
+// IssuePickupEngine selects what polls GitHub for a table's ready issues.
+// +kubebuilder:validation:Enum=builtin;trigger
+type IssuePickupEngine string
+
+const (
+	// IssuePickupEngineBuiltin is the issue pickup controller's own poller.
+	IssuePickupEngineBuiltin IssuePickupEngine = "builtin"
+	// IssuePickupEngineTrigger runs pickup on a generated Trigger with a
+	// github source ("<table>-issue-pickup").
+	IssuePickupEngineTrigger IssuePickupEngine = "trigger"
 )
 
 // IssuePickupSpec configures polling GitHub for issues labelled ready and
@@ -54,6 +70,18 @@ const (
 // issues in every listed repo.
 // +kubebuilder:validation:XValidation:rule="self.readyLabel != self.inProgressLabel && self.readyLabel != self.needsHumanLabel",message="readyLabel must differ from inProgressLabel and needsHumanLabel"
 type IssuePickupSpec struct {
+	// engine selects what picks up ready issues. builtin (the default) is
+	// the issue pickup controller's own poller. trigger generates a Trigger
+	// named "<table>-issue-pickup" (owned by the RoundTable) with a github
+	// source built from these fields, and the builtin poller only does the
+	// post-run checks (merge verification, failed-run hand-back, split
+	// parents) and cleanup for the table. Switching back to builtin deletes
+	// the generated Trigger. Both engines name a run after its issue, so a
+	// switch never starts a second run for an issue.
+	// +kubebuilder:default=builtin
+	// +optional
+	Engine IssuePickupEngine `json:"engine,omitempty"`
+
 	// suspend stops polling. Chains already started keep running.
 	// +kubebuilder:default=false
 	// +optional
@@ -175,4 +203,25 @@ type IssuePickupStatus struct {
 	// lastError is the last poll's error ("" when it succeeded).
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// engine is the pickup engine in use: builtin or trigger.
+	// +optional
+	Engine IssuePickupEngine `json:"engine,omitempty"`
+
+	// trigger is the generated Trigger the trigger engine runs on.
+	// +optional
+	Trigger string `json:"trigger,omitempty"`
+
+	// triggerEngineSucceededAt is when a run started by the trigger engine
+	// was first seen succeeded on this table. From then on the
+	// BuiltinEngineDeprecated condition is set.
+	// +optional
+	TriggerEngineSucceededAt *metav1.Time `json:"triggerEngineSucceededAt,omitempty"`
+
+	// conditions: BuiltinEngineDeprecated is True once the trigger engine
+	// has run issue pickup successfully on this table (absent before).
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

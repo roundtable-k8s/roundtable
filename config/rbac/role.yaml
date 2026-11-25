@@ -46,6 +46,7 @@ rules:
   - knights
   - missions
   - roundtables
+  - triggers
   verbs:
   - create
   - delete
@@ -76,16 +77,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - ai.roundtable.io
-  resources:
-  - triggers
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - apps
   resources:

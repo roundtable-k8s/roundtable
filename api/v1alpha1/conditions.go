@@ -498,4 +498,17 @@ const (
 	// ReasonTriggerRateLimited indicates GitHub's rate limit is used up; the
 	// poller waits for it to reset.
 	ReasonTriggerRateLimited = "RateLimited"
+
+	// ===== Issue pickup Condition Types and Reasons =====
+
+	// ConditionIssuePickupBuiltinDeprecated is set on
+	// status.issuePickup.conditions once a run started by the trigger engine
+	// (spec.issuePickup.engine: trigger) succeeded on the table. It is absent
+	// before that: the builtin engine is only called deprecated for a table
+	// that has run on the trigger engine.
+	ConditionIssuePickupBuiltinDeprecated = "BuiltinEngineDeprecated"
+
+	// ReasonIssuePickupTriggerEngineProven indicates a trigger-engine run
+	// succeeded on the table.
+	ReasonIssuePickupTriggerEngineProven = "TriggerEngineProven"
 )

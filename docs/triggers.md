@@ -251,7 +251,8 @@ and publishes each item that needs handling to
 `<subjectPrefix>.events.github.<namespace>.<name>` on the table's events
 stream. The Trigger reads that subject like a NATS source, so everything under
 [Delivery](#delivery-nats-webhook-and-github-sources) applies and the bus stays
-the system of record. Nothing about `RoundTable.spec.issuePickup` changes.
+the system of record. Issue pickup can run on a github-source Trigger too, see
+[Issue pickup on a Trigger](#issue-pickup-on-a-trigger).
 
 [`examples/trigger-github.yaml`](../examples/trigger-github.yaml):
 
@@ -319,7 +320,9 @@ header, the default dedupe key. `.Event.Subject` is the Trigger's subject and
   - an item **whose run exists but whose claim is still pending** (see below).
 - Everything else is left alone: an item whose run still exists does not fire
   again. Without `claim`, an item that keeps its labels fires again only after
-  its run was deleted (`ttlSecondsAfterFinished`).
+  its run was deleted (`ttlSecondsAfterFinished`). With `claim`, an item whose
+  run **finished** and that is selected again with its claim pending (someone
+  put the selecting label back) starts that run again, under the same name.
 - An item whose `input` or `dedupeKey` template fails to render is not
   published; it is named in `GitHubReady` until it is fixed.
 
@@ -332,6 +335,67 @@ poll: …`), and the next poll publishes the item again: its run is found by nam
 so nothing starts twice, and only the claim is retried. Remove the selecting
 label in the claim (as above) so an item is not picked again once its run is
 deleted.
+
+The order is: `addLabels`, `assignees`, `comment`, `removeLabels`.
+`claim.comment` is a template posted once per run; besides `.Event` and
+`.Trigger` it sees `.Run.Name` (the run Chain) and `.Run.ID` (its
+`ai.roundtable.io/run` value). The run records the claim in its
+`ai.roundtable.io/trigger-claimed` annotation, so a retried claim does not
+comment again. Every github-source run carries the item's repository in
+`ai.roundtable.io/trigger-github-repo`.
+
+### Per-repository cap, hold and hand-back
+
+Three optional rules decide whether an item without a run (or a finished one
+it would start again) starts now:
+
+- `skipIfBodyMatches`: an item whose title or body matches one of `patterns`
+  (RE2), or that already carries one of `handBack.addLabels`, is handed back
+  instead: `handBack.addLabels` are added, `handBack.comment` (a template that
+  also sees `.Reason`) is posted, then `handBack.removeLabels` are removed.
+  Remove the selecting label there so it is handed back once. Counted as
+  "handed back" in `GitHubReady`, with a `HandedBack` event.
+- `maxActivePerRepository`: at most this many active runs per repository
+  (under `Allow`); more items wait for a later poll.
+- `holdWhilePullRequestLabeled`: while a repository has an open pull request
+  with this label, its items start no new run (counted as held in
+  `GitHubReady`, with a `Held` event). If the pull requests cannot be listed,
+  the repository is held too.
+
+Checked in that order. Items whose run is active are never handed back or
+held; only a pending claim is retried for them.
+
+### Issue pickup on a Trigger
+
+`RoundTable.spec.issuePickup.engine: trigger` makes issue pickup run on a
+generated github-source Trigger instead of its builtin poller (the default
+`builtin` is unchanged). The issue pickup controller owns
+`<table>-issue-pickup` and rebuilds its spec from the `issuePickup` fields;
+edit those, not the Trigger:
+
+| issuePickup | Trigger |
+|---|---|
+| `repos` | `source.github.repositories` |
+| `readyLabel` | `query.labels`, `claim.removeLabels`, `handBack.removeLabels` |
+| `inProgressLabel` | `claim.addLabels` |
+| `needsHumanLabel`, `humanPatterns` | `skipIfBodyMatches` (`handBack.addLabels`, `patterns`) |
+| `breakingLabel` | `holdWhilePullRequestLabeled` |
+| `assignees` | `claim.assignees` (with the pickup claim comment) |
+| `intervalSeconds` | `pollInterval` |
+| `maxActive` / `maxActivePerRepo` | `concurrency.maxActive` / `maxActivePerRepository` |
+| `chainRef` | `target.chainRef`, with `input` rendering `{"repo": ..., "issue": ...}` |
+| `suspend` (or the table's) | `suspend` |
+
+A Trigger labelled `ai.roundtable.io/pickup-roundtable: <table>` and
+controlled by that RoundTable differs from other Triggers in its runs only:
+they are named like the builtin poller's (`<chain>-<repo>-<issue>`, not by
+dedupe hash), carry the pickup label and `pickup-repo` / `pickup-issue`
+annotations, are owned by the RoundTable (deleting the Trigger leaves them
+running), count every pickup Chain of the table for the caps, and are deleted
+by issue pickup after its post-run checks (`ttlSecondsAfterFinished` of the
+Trigger is 0). So switching a table between engines in either direction never
+runs an issue twice. Switching back to `builtin` deletes the Trigger. See
+[issue-pickup.md](issue-pickup.md#engines).
 
 ### Rate limits and GitHubReady
 
@@ -361,11 +425,15 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 | `source.webhook.auth` | `bearerTokenSecretRef` or `hmacSecretRef`: a key of a labelled Secret in the Trigger's namespace. |
 | `source.webhook.eventType` | Fire only on deliveries with this `Ce-Type` (else `X-GitHub-Event`). |
 | `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire. |
-| `source.github.repositories` | `owner/name` of each repository polled (1 to 20). |
+| `source.github.repositories` | `owner/name` of each repository polled (1 to 50). |
 | `source.github.kind` | `issue` (default) or `pullRequest`. |
 | `source.github.query.labels` / `state` | Labels an item must all carry (1 to 10), and `open` (default), `closed` or `all`. |
 | `source.github.pollInterval` | How often the repositories are listed (default `60s`, at least `30s`). |
 | `source.github.claim.addLabels` / `removeLabels` | Labels added to and removed from an item once its run was created. |
+| `source.github.claim.assignees` / `comment` | Logins assigned to the item, and a comment template posted once per run (`.Run.Name`, `.Run.ID`). |
+| `source.github.maxActivePerRepository` | Active runs per repository under `Allow` (0: no cap). |
+| `source.github.holdWhilePullRequestLabeled` | Hold a repository while it has an open pull request with this label. |
+| `source.github.skipIfBodyMatches` | `patterns` on title and body, and `handBack` (`addLabels`, `removeLabels`, `comment` with `.Reason`) for items handed back instead of run. |
 | `target.chainRef` | The Chain (same namespace) each firing copies. |
 | `input` | Go template rendered into the run's `spec.input`. Empty keeps the target's own input. |
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
@@ -396,7 +464,9 @@ redelivered.
 
 ### Dedupe
 
-The run's name is `<chain>-<trigger>-<hash of dedupe key>`. An event whose key
+The run's name is `<chain>-<trigger>-<hash of dedupe key>` (a Trigger
+generated by issue pickup names runs `<chain>-<repo>-<issue>`, see
+[Issue pickup on a Trigger](#issue-pickup-on-a-trigger)). An event whose key
 matches a run that still exists starts nothing, so a key is remembered until
 its run is deleted (`ttlSecondsAfterFinished`). The same name makes redelivery
 safe: if the operator restarts after creating a run but before acking the

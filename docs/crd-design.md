@@ -223,7 +223,10 @@ and, within `maxActive`/`maxActivePerRepo`, copies the `chainRef` Chain to
 `<chainRef>-<repo>-<issue>` with the issue as input, starts it and claims the
 issue (`rt:in-progress` + comment). The copies are owned by the RoundTable;
 finished ones are deleted after `ttlSecondsAfterFinished`. Progress is in
-`status.issuePickup`. See [issue-pickup.md](issue-pickup.md).
+`status.issuePickup`. With `spec.issuePickup.engine: trigger` it instead owns
+a generated github-source Trigger, `<table>-issue-pickup`, that starts the
+runs, and keeps only the post-run checks and cleanup. See
+[issue-pickup.md](issue-pickup.md).
 
 ### Trigger controller (#402)
 

@@ -515,6 +515,21 @@ spec:
                     x-kubernetes-validations:
                     - message: chainRef.name is required
                       rule: size(self.name) > 0
+                  engine:
+                    default: builtin
+                    description: |-
+                      engine selects what picks up ready issues. builtin (the default) is
+                      the issue pickup controller's own poller. trigger generates a Trigger
+                      named "<table>-issue-pickup" (owned by the RoundTable) with a github
+                      source built from these fields, and the builtin poller only does the
+                      post-run checks (merge verification, failed-run hand-back, split
+                      parents) and cleanup for the table. Switching back to builtin deletes
+                      the generated Trigger. Both engines name a run after its issue, so a
+                      switch never starts a second run for an issue.
+                    enum:
+                    - builtin
+                    - trigger
+                    type: string
                   humanPatterns:
                     default:
                     - \.github/workflows
@@ -2299,6 +2314,75 @@ spec:
                     description: active is the number of unfinished pickup Chains.
                     format: int32
                     type: integer
+                  conditions:
+                    description: |-
+                      conditions: BuiltinEngineDeprecated is True once the trigger engine
+                      has run issue pickup successfully on this table (absent before).
+                    items:
+                      description: Condition contains details for one aspect of the
+                        current state of this API Resource.
+                      properties:
+                        lastTransitionTime:
+                          description: |-
+                            lastTransitionTime is the last time the condition transitioned from one status to another.
+                            This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                          format: date-time
+                          type: string
+                        message:
+                          description: |-
+                            message is a human readable message indicating details about the transition.
+                            This may be an empty string.
+                          maxLength: 32768
+                          type: string
+                        observedGeneration:
+                          description: |-
+                            observedGeneration represents the .metadata.generation that the condition was set based upon.
+                            For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                            with respect to the current state of the instance.
+                          format: int64
+                          minimum: 0
+                          type: integer
+                        reason:
+                          description: |-
+                            reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                            Producers of specific condition types may define expected values and meanings for this field,
+                            and whether the values are considered a guaranteed API.
+                            The value should be a CamelCase string.
+                            This field may not be empty.
+                          maxLength: 1024
+                          minLength: 1
+                          pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                          type: string
+                        status:
+                          description: status of the condition, one of True, False,
+                            Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                          maxLength: 316
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                          type: string
+                      required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - type
+                    x-kubernetes-list-type: map
+                  engine:
+                    description: 'engine is the pickup engine in use: builtin or trigger.'
+                    enum:
+                    - builtin
+                    - trigger
+                    type: string
                   lastError:
                     description: lastError is the last poll's error ("" when it succeeded).
                     type: string
@@ -2316,6 +2400,17 @@ spec:
                       human.
                     format: int64
                     type: integer
+                  trigger:
+                    description: trigger is the generated Trigger the trigger engine
+                      runs on.
+                    type: string
+                  triggerEngineSucceededAt:
+                    description: |-
+                      triggerEngineSucceededAt is when a run started by the trigger engine
+                      was first seen succeeded on this table. From then on the
+                      BuiltinEngineDeprecated condition is set.
+                    format: date-time
+                    type: string
                 type: object
               knights:
                 description: knights provides a summary of each knight's status.
