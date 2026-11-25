@@ -1,0 +1,139 @@
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- /*
+  Round Table alerts (#332). Knight metrics use the roundtable_knight_* names
+  and carry `table`, so every aggregation keeps it. Pod rules come from
+  kube-state-metrics/kubelet, which know nothing about tables.
+  `alerts.labels` is merged under the defaults: a user `severity` wins.
+*/ -}}
+{{- $ns := .Release.Namespace }}
+{{- $labels := merge (deepCopy .Values.alerts.labels) (dict "severity" "warning") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: roundtable.knights
+      rules:
+        - alert: KnightTaskFailures
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} failed {{`{{ $value }}`}} tasks in the last hour.
+          expr: |
+            sum by (namespace, table, knight) (increase(roundtable_knight_tasks_total{status=~"error|timeout"}[1h])) > {{ .Values.alerts.taskFailuresPerHour }}
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightNatsDisconnected
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} has lost its NATS connection.
+          expr: |
+            roundtable_knight_nats_connected == 0
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightMetricsAbsent
+          annotations:
+            summary: >-
+              No knight metrics are being scraped: the PodMonitor or the knights are down.
+          expr: |
+            absent(roundtable_knight_nats_connected)
+          for: 30m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightTaskLost
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} lost {{`{{ $value }}`}} tasks in the last hour
+              (delivered to a knight that stopped before finishing).
+          expr: |
+            sum by (namespace, table, knight) (increase(roundtable_knight_tasks_total{status="lost"}[1h])) > 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightLLMCostSpike
+          annotations:
+            summary: >-
+              Table {{`{{ $labels.table }}`}} LLM spend rose {{`{{ $value | humanize }}`}} USD in 24h, above
+              the {{ .Values.alerts.costSpikeUSDPer24h }} USD budget envelope; possible runaway loop.
+          expr: |
+            sum by (table) (increase(roundtable_knight_llm_cost_usd_total[24h])) > {{ .Values.alerts.costSpikeUSDPer24h }}
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableChainStepsSlow
+          annotations:
+            summary: >-
+              Chain {{`{{ $labels.chain }}`}} on table {{`{{ $labels.table }}`}}: p95 step duration is {{`{{ $value | humanizeDuration }}`}}
+              over the last hour, above {{ .Values.alerts.chainStepSlowSeconds }}s; steps may be stuck.
+          expr: |
+            histogram_quantile(0.95, sum by (le, table, chain) (rate(roundtable_chain_step_duration_seconds_bucket[1h]))) > {{ .Values.alerts.chainStepSlowSeconds }}
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+    - name: roundtable.pods
+      rules:
+        - alert: RoundtablePodRestarting
+          annotations:
+            summary: >-
+              {{`{{ $labels.pod }}`}} restarted {{`{{ $value }}`}} times in the last hour.
+          expr: |
+            sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}"}[1h])) > 3
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtablePodOOMKilled
+          annotations:
+            summary: >-
+              {{`{{ $labels.pod }}`}}/{{`{{ $labels.container }}`}} was OOMKilled in the last hour.
+          expr: |
+            max_over_time(kube_pod_container_status_last_terminated_reason{namespace="{{ $ns }}", reason="OOMKilled"}[1h]) == 1
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtablePodEvicted
+          annotations:
+            summary: >-
+              {{`{{ $labels.pod }}`}} was evicted (usually ephemeral-storage over its limit).
+          expr: |
+            max by (namespace, pod) (kube_pod_status_reason{namespace="{{ $ns }}", reason="Evicted"}) > 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtablePVCAlmostFull
+          annotations:
+            summary: >-
+              PVC {{`{{ $labels.persistentvolumeclaim }}`}} is {{`{{ $value | humanizePercentage }}`}} full.
+          expr: |
+            max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_used_bytes{namespace="{{ $ns }}"}
+              / kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}"}
+            ) > 0.85
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+    {{- if .Values.alerts.scaling.enabled }}
+    - name: roundtable.scaling
+      rules:
+        - alert: RoundtableKedaScalerErrors
+          annotations:
+            summary: >-
+              KEDA ScaledObject {{`{{ $labels.scaledObject }}`}} reported {{`{{ $value }}`}} scaler errors in 15m.
+          expr: |
+            sum by (exported_namespace, scaledObject) (increase(keda_scaled_object_errors_total{exported_namespace="{{ $ns }}"}[15m])) > 0
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableHPAScalingInactive
+          annotations:
+            summary: >-
+              HPA {{`{{ $labels.horizontalpodautoscaler }}`}} cannot read its metric
+              (ScalingActive=false, e.g. FailedGetExternalMetric).
+          expr: |
+            kube_horizontalpodautoscaler_status_condition{namespace="{{ $ns }}", condition="ScalingActive", status="false"} == 1
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+    {{- end }}
+{{- end }}
