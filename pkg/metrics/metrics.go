@@ -34,7 +34,7 @@ var (
 
 	// KnightWakeSeconds tracks wake latency: the time from a scaled-to-zero
 	// knight entering Waking (tasks queued) until it becomes Ready.
-	// Labels: knight (knight name), namespace
+	// Labels: table, knight (knight name), namespace
 	// Buckets: 1s, 2s, 4s, ... 512s (covers 1s to 5m and beyond)
 	KnightWakeSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -42,7 +42,7 @@ var (
 			Help:    "Time from a scaled-to-zero knight entering Waking until it is Ready, in seconds",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 10),
 		},
-		[]string{"knight", "namespace"},
+		[]string{"table", "knight", "namespace"},
 	)
 
 	// ChainRunsTotal counts chain runs that reached a terminal phase.
@@ -74,7 +74,7 @@ var (
 			Name: "roundtable_chain_provider_retries_total",
 			Help: "Chain step retries after a transient model provider failure",
 		},
-		[]string{"chain", "step", "reason"},
+		[]string{"table", "chain", "step", "reason"},
 	)
 
 	// ChainStepDurationSeconds observes how long a chain step took, when it

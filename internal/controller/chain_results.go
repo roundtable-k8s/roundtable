@@ -292,7 +292,7 @@ func (r *ChainReconciler) applyStepError(ctx context.Context, chain *aiv1alpha1.
 	if reason, transient := transientProviderReason(result); transient {
 		if int(ss.ProviderRetries) < r.ProviderMaxRetries {
 			ss.ProviderRetries++
-			metrics.ChainProviderRetriesTotal.WithLabelValues(chain.Name, ss.Name, reason).Inc()
+			metrics.ChainProviderRetriesTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, ss.Name, reason).Inc()
 			ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
 			ss.Reason = stepReasonProviderOverloaded
 			ss.TransientReason = reason

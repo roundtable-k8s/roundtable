@@ -134,14 +134,14 @@ func TestKnightWakeSecondsObserved(t *testing.T) {
 	}
 	count := func() uint64 {
 		m := &dto.Metric{}
-		if err := rtmetrics.KnightWakeSeconds.WithLabelValues("wake-metric", "wake-ns").(prometheus.Metric).Write(m); err != nil {
+		if err := rtmetrics.KnightWakeSeconds.WithLabelValues(knightpkg.KnightTable(k), "wake-metric", "wake-ns").(prometheus.Metric).Write(m); err != nil {
 			t.Fatal(err)
 		}
 		return m.GetHistogram().GetSampleCount()
 	}
 	sum := func() float64 {
 		m := &dto.Metric{}
-		_ = rtmetrics.KnightWakeSeconds.WithLabelValues("wake-metric", "wake-ns").(prometheus.Metric).Write(m)
+		_ = rtmetrics.KnightWakeSeconds.WithLabelValues(knightpkg.KnightTable(k), "wake-metric", "wake-ns").(prometheus.Metric).Write(m)
 		return m.GetHistogram().GetSampleSum()
 	}
 

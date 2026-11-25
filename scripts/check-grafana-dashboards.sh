@@ -21,22 +21,24 @@ cms() { grep -c '^    grafana_dashboard: "1"$' <<<"$1" || true; }
 [ "$(count GrafanaDashboard "$(render)")" = 0 ] || fail "defaults render GrafanaDashboards"
 
 on="$(render --set dashboards.enabled=true)"
-[ "$(cms "$on")" = 2 ] || fail "enabled: expected 2 labelled ConfigMaps"
+[ "$(cms "$on")" = 3 ] || fail "enabled: expected 3 labelled ConfigMaps"
 custom="$(render --set dashboards.enabled=true --set dashboards.label=foo --set-string dashboards.labelValue=bar --set dashboards.folder=RT)"
 grep -q '^    foo: "bar"$' <<<"$custom" || fail "custom label not applied"
 grep -q '^    grafana_folder: "RT"$' <<<"$custom" || fail "folder annotation missing"
 
 # Without the CRD the operator option falls back to ConfigMaps.
 nocrd="$(render --set dashboards.enabled=true --set dashboards.grafanaOperator.enabled=true)"
-[ "$(cms "$nocrd")" = 2 ] || fail "grafanaOperator without CRD should render ConfigMaps"
+[ "$(cms "$nocrd")" = 3 ] || fail "grafanaOperator without CRD should render ConfigMaps"
 withcrd="$(render --set dashboards.enabled=true --set dashboards.grafanaOperator.enabled=true --api-versions grafana.integreatly.org/v1beta1)"
-[ "$(count GrafanaDashboard "$withcrd")" = 2 ] || fail "grafanaOperator with CRD: expected 2 GrafanaDashboards"
+[ "$(count GrafanaDashboard "$withcrd")" = 3 ] || fail "grafanaOperator with CRD: expected 3 GrafanaDashboards"
 [ "$(cms "$withcrd")" = 0 ] || fail "grafanaOperator with CRD still renders ConfigMaps"
 
 known='roundtable_knights roundtable_table_cost_usd
 roundtable_knight_tasks_total roundtable_knight_active_tasks roundtable_knight_nats_connected
 roundtable_knight_llm_cost_usd_total roundtable_knight_llm_tokens_total
-roundtable_chain_step_cost_usd_total roundtable_chain_step_tokens_total roundtable_mission_cost_usd_total
+roundtable_chain_step_cost_usd_total roundtable_chain_step_tokens_total
+roundtable_chain_runs_total roundtable_chain_step_duration_seconds_bucket roundtable_chain_provider_retries_total roundtable_missions
+roundtable_dead_letters_open roundtable_knight_consumer_ready roundtable_knight_isolated roundtable_knight_wake_seconds_bucket roundtable_mission_cost_usd_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas'
 
 for f in "$chart"/dashboards/*.json; do

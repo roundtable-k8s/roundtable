@@ -54,7 +54,7 @@ An install has many tables, so every signal that is about one table says which.
 | Signal | Where the table goes |
 |---|---|
 | Resource and span attributes | `roundtable.table` |
-| Metrics | label `table` |
+| Metrics | label `table` on every `roundtable_*` metric of an install-wide operator or knight (the wake and provider-retry metrics included); only `roundtable_ui_http_*` is install-wide |
 | Logs | field `table` |
 | Activity events | field `table` (optional, additive, stays `v: 1`) |
 | Agent cards | in the key `<table>.<knight>` and as a field |

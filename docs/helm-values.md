@@ -373,7 +373,7 @@ inherits it from `spec.roundTableRef`.
 
 ### Grafana dashboards
 
-Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overview** (knights by phase, tasks/min, error rate, active tasks, NATS connectivity, KEDA desired vs actual replicas) and **Cost and tokens** (spend and tokens per model and knight, 24h spend, spend per table). They query the `roundtable_*` metric names and need Prometheus scraping the operator and the knights, plus kube-state-metrics for the replicas panel. Every dashboard has a `datasource`, a `namespace` and a multi-select `table` variable; the `table` filter is applied to every `roundtable_*` query. The KEDA panel is filtered by namespace only, since HPAs carry no table label. Per-chain cost is not shown: knight metrics carry no chain label.
+Three dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overview** (knights by phase, tasks/min, error rate, active tasks, NATS connectivity, KEDA desired vs actual replicas), **Cost and tokens** (spend and tokens per model and knight, 24h spend, spend per table) and **Chains and platform** (chain runs by status, step p95, provider retries, missions by phase, dead letters, consumers, isolation, wake latency). They query the `roundtable_*` metric names and need Prometheus scraping the operator and the knights, plus kube-state-metrics for the replicas panel. Every dashboard has a `datasource`, a `namespace` and a multi-select `table` variable; the `table` filter is applied to every `roundtable_*` query. The KEDA panel is filtered by namespace only, since HPAs carry no table label. Per-chain cost is not shown: knight metrics carry no chain label.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -491,6 +491,8 @@ scaling rules are scoped to the release namespace.
 | `alerts.costSpikeUSDPer24h` | number | `15` | `KnightLLMCostSpike` threshold: USD per table over 24h |
 | `alerts.taskFailuresPerHour` | number | `2` | `KnightTaskFailures` threshold: failed tasks per knight per hour |
 | `alerts.chainStepSlowSeconds` | number | `1800` | `RoundtableChainStepsSlow` threshold: p95 step duration over 1h, from `roundtable_chain_step_duration_seconds` |
+| `alerts.chainFailureRatio` | number | `0.5` | `RoundtableChainRunsFailing` threshold: failed share (0-1) of `roundtable_chain_runs_total` over 1h |
+| `alerts.deadLettersOpenMinutes` | number | `15` | `RoundtableDeadLettersOpen`: minutes `roundtable_dead_letters_open` stays above 0 |
 | `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
 | `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
 
@@ -509,4 +511,4 @@ The operator exposes Prometheus metrics on its metrics endpoint, including:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `roundtable_knight_wake_seconds` | histogram | `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. Condition timestamps have 1s resolution, so values are whole seconds. |
+| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. Condition timestamps have 1s resolution, so values are whole seconds. |

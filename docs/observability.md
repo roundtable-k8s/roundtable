@@ -305,6 +305,9 @@ ConfigMaps or `GrafanaDashboard` CRs.
 - *Round Table / Fleet overview*: knights by phase, warm pool knights, tasks
   per minute, task error rate, active tasks, NATS connected, KEDA desired vs
   actual replicas.
+- *Round Table / Chains and platform*: chain runs by status, p95 step
+  duration, provider retries, missions by phase, dead letters open, ready
+  knight consumers, isolation state and wake latency.
 - *Round Table / Cost and tokens*: 24h spend, spend rate per model and per
   knight, spend per table, tokens per model and per knight, cost per job
   (chain, step, knight) and cost per mission.
@@ -321,6 +324,10 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query.
 | `KnightTaskLost` | tasks were delivered to a knight that stopped before finishing |
 | `KnightLLMCostSpike` | a table's 24h LLM spend exceeds `alerts.costSpikeUSDPer24h` |
 | `RoundtableChainStepsSlow` | a chain's p95 step duration exceeds `alerts.chainStepSlowSeconds` |
+| `RoundtableDeadLettersOpen` | dead letters stay open for `alerts.deadLettersOpenMinutes` |
+| `KnightConsumerNotReady` | a knight's task consumer is missing or misconfigured for 10m |
+| `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
+| `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
 | `RoundtablePodRestarting`, `RoundtablePodOOMKilled`, `RoundtablePodEvicted` | pod health |
 | `RoundtablePVCAlmostFull` | a PVC is nearly full |
 | `RoundtableKedaScalerErrors`, `RoundtableHPAScalingInactive` | scaling problems (`alerts.scaling.enabled`) |

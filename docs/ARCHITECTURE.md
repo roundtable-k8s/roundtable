@@ -286,7 +286,8 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` (`succeeded`, `partially_succeeded`, `failed`) |
 | `roundtable_chain_noop_runs_total` | counter | `table`, `chain` |
 | `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` |
-| `roundtable_knight_wake_seconds` | histogram | `knight`, `namespace` |
+| `roundtable_chain_provider_retries_total` | counter | `table`, `chain`, `step`, `reason` |
+| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` |
 | `roundtable_tasks_dead_lettered_total` | counter | `table`, `knight`, `reason` |
 | `roundtable_dead_letters_open` | gauge | `table`, `knight` |
 
