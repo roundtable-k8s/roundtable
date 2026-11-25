@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -98,6 +99,28 @@ func TestRunSuccess(t *testing.T) {
 	}
 	if g.bodies[1] != "{}" {
 		t.Errorf("body without scheduled time = %s", g.bodies[1])
+	}
+}
+
+func TestRunJobName(t *testing.T) {
+	g := newFakeGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"subject":"s","seq":1,"key":"k"}`))
+	})
+	at := time.Date(2026, 11, 25, 2, 0, 0, 0, time.UTC)
+	job := fmt.Sprintf("trigger-nightly-%d", at.Unix()/60)
+	if code, _, errOut := run("--gateway", g.URL, "--trigger", "roundtable/nightly",
+		"--token-file", tokenFile(t, saToken), "--job-name", job); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if g.bodies[0] != `{"scheduledTime":"2026-11-25T02:00:00Z"}` {
+		t.Errorf("body = %s", g.bodies[0])
+	}
+	for _, bad := range []string{"nightly", "nightly-", "nightly-abc", "nightly-0"} {
+		if code, _, _ := run("--gateway", g.URL, "--trigger", "roundtable/nightly",
+			"--token-file", tokenFile(t, saToken), "--job-name", bad); code != 2 {
+			t.Errorf("job name %q: exit %d, want 2", bad, code)
+		}
 	}
 }
 

@@ -969,7 +969,7 @@ makes (`manager fire-trigger`, below). Served with the webhook endpoint
   truncated to the minute.
 - **Publish, don't run.** The gateway publishes a schedule event to
   `<subjectPrefix>.events.schedule.<namespace>.<name>` on the Trigger's
-  RoundTable events stream and answers **202**:
+  RoundTable events stream (its `roundTableRef`, else its target Chain's, else its target knight's, else `default`, the same table the trigger controller reads) and answers **202**:
 
   ```json
   {"subject": "rt.events.schedule.roundtable.nightly", "stream": "rt_tasks_EVENTS",
@@ -999,8 +999,15 @@ no other image and no Kubernetes client:
   --gateway http://roundtable-gateway.roundtable.svc:8080 \
   --trigger roundtable/nightly \
   --token-file /var/run/secrets/roundtable/trigger/token \
-  [--scheduled-time 2026-11-25T02:00:00Z] [--timeout 30s]
+  [--job-name "$JOB_NAME" | --scheduled-time 2026-11-25T02:00:00Z] [--timeout 30s]
 ```
+
+`--job-name` takes the CronJob's Job name (the pod's
+`batch.kubernetes.io/job-name` label), which the CronJob controller builds as
+`<cronjob>-<unix minutes of the scheduled time>`, and sends that time as the
+firing's scheduled time. A late start, a catch-up run or a retry then keeps
+the slot's key. It wins over `--scheduled-time`; a name that does not end in
+unix minutes exits 2.
 
 It reads the token, makes the one call and exits 0 on a 202. A refusal, an
 unreachable gateway or no answer within `--timeout` (default 30 s) exits 1

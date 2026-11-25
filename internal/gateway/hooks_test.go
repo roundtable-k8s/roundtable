@@ -131,7 +131,17 @@ func newHookEnv(t *testing.T, hooks HookOptions, enabled bool, allowed ...string
 		hookTrigger(testNS, "signed", aiv1alpha1.TriggerWebhookAuth{HMACSecretRef: secretRef("hmac")}),
 		hookTrigger(testNS, "unlabelled", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("unlabelled")}),
 		hookTrigger(hookOtherNS, "alerts", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("bearer")}),
-		scheduleTrigger(testNS, "nightly"), scheduleTrigger(hookOtherNS, "nightly"),
+		fireScheduleTrigger(testNS, "nightly"), fireScheduleTrigger(hookOtherNS, "nightly"),
+		&aiv1alpha1.Chain{
+			ObjectMeta: metav1.ObjectMeta{Name: "tabled", Namespace: testNS},
+			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: &corev1.LocalObjectReference{Name: "dev"}},
+		},
+		func() *aiv1alpha1.Trigger {
+			trg := fireScheduleTrigger(testNS, "viachain")
+			trg.Spec.RoundTableRef = nil // the target Chain's table
+			trg.Spec.Target.ChainRef.Name = "tabled"
+			return trg
+		}(),
 	}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 	bus, err := NewNATSBus(context.Background(), nc, "gateway_tasks_test", time.Hour)

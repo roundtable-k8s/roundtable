@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,6 +44,21 @@ const DefaultTokenFile = "/var/run/secrets/roundtable/trigger/token"
 
 // DefaultTimeout bounds the whole call.
 const DefaultTimeout = 30 * time.Second
+
+// ScheduledTimeFromJobName returns the scheduled time encoded in the name of a
+// Job the CronJob controller created: <cronjob>-<unix minutes of the
+// scheduled time>.
+func ScheduledTimeFromJobName(job string) (time.Time, error) {
+	i := strings.LastIndexByte(job, '-')
+	if i < 0 || i == len(job)-1 {
+		return time.Time{}, fmt.Errorf("job name %q is not <cronjob>-<scheduled unix minutes>", job)
+	}
+	mins, err := strconv.ParseInt(job[i+1:], 10, 64)
+	if err != nil || mins <= 0 {
+		return time.Time{}, fmt.Errorf("job name %q does not end in the scheduled unix minutes", job)
+	}
+	return time.Unix(mins*60, 0).UTC(), nil
+}
 
 // maxErrorBody bounds how much of an error response is reported.
 const maxErrorBody = 512
@@ -147,12 +163,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(Command, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var o Options
-	var trigger, scheduled string
+	var trigger, scheduled, job string
 	fs.StringVar(&o.Gateway, "gateway", os.Getenv("ROUNDTABLE_GATEWAY_URL"), "Base URL of the Round Table gateway.")
 	fs.StringVar(&trigger, "trigger", "", "The Trigger to fire, <namespace>/<name>.")
 	fs.StringVar(&o.TokenFile, "token-file", DefaultTokenFile, "File holding the bearer token (the projected ServiceAccount token).")
 	fs.StringVar(&scheduled, "scheduled-time", "",
 		"The schedule time this firing is for (RFC 3339). Empty: the gateway uses now, truncated to the minute.")
+	fs.StringVar(&job, "job-name", "",
+		"Name of the CronJob's Job (batch.kubernetes.io/job-name); the schedule time is read from it. Overrides --scheduled-time.")
 	fs.DurationVar(&o.Timeout, "timeout", DefaultTimeout, "Upper bound on the call.")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -171,6 +189,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		t, err := time.Parse(time.RFC3339, scheduled)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%s: --scheduled-time: %v\n", Command, err)
+			return 2
+		}
+		o.ScheduledTime = t
+	}
+	if job != "" {
+		t, err := ScheduledTimeFromJobName(job)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: --job-name: %v\n", Command, err)
 			return 2
 		}
 		o.ScheduledTime = t

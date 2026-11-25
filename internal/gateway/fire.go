@@ -171,7 +171,16 @@ func (s *Service) handleFireTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	rtName := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
+	// The same table the trigger controller reads the firings from.
+	rtName, err := s.Resolver.TriggerTable(ctx, trg)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			log.Error(err, "Schedule Trigger's RoundTable not resolvable")
+			err = fmt.Errorf("%w: the Trigger's RoundTable is not available", ErrUnavailable)
+		}
+		writeError(w, err)
+		return
+	}
 	setRequestTable(ctx, rtName)
 	req, err := readFireRequest(w, r)
 	if err != nil {

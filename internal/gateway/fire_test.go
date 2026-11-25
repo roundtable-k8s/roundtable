@@ -30,7 +30,7 @@ import (
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
-func scheduleTrigger(ns, name string) *aiv1alpha1.Trigger {
+func fireScheduleTrigger(ns, name string) *aiv1alpha1.Trigger {
 	return &aiv1alpha1.Trigger{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: aiv1alpha1.TriggerSpec{
@@ -116,6 +116,12 @@ func TestFireTrigger(t *testing.T) {
 	if ev.Trigger != testNS+"/nightly" || ev.Key != "2026-11-25T02:00:00Z" || ev.Caller != testNS+"/trigger-nightly" ||
 		!ev.ScheduledTime.Equal(time.Date(2026, 11, 25, 2, 0, 0, 0, time.UTC)) {
 		t.Errorf("event = %+v", ev)
+	}
+
+	// No roundTableRef: the target Chain's table, as the controller reads it.
+	resp, body = e.fire(t, "/v1/triggers/"+testNS+"/viachain/fire", testToken, `{"scheduledTime":"2026-11-25T02:00:00Z"}`)
+	if resp.StatusCode != http.StatusAccepted || body["subject"] != natspkg.ScheduleEventSubject(prefix, testNS, "viachain") {
+		t.Fatalf("Trigger without roundTableRef: %d %v", resp.StatusCode, body)
 	}
 
 	// A second run for the same slot (seconds later, another offset) has the
