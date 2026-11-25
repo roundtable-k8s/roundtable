@@ -16,6 +16,9 @@ spec:
     - project
     - shared
   nats:
+    # The table's streams: a knight does not inherit them.
+    stream: roundtable_dev_tasks
+    resultsStream: roundtable_dev_results
     subjects:
       - "roundtable-dev.tasks.lead.>"
   # Reads and comments through the GitHub API; never builds code.
@@ -43,8 +46,12 @@ spec:
   model: sonnet
   skills:
     - project
+    - coding
     - shared
   nats:
+    # The table's streams: a knight does not inherit them.
+    stream: roundtable_dev_tasks
+    resultsStream: roundtable_dev_results
     subjects:
       - "roundtable-dev.tasks.coder.>"
   # GitHub for clone, push and the API, and the package registries a build
@@ -59,8 +66,10 @@ spec:
       - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
+  # A persistent workspace: PR feedback resumes the coder's session, which a
+  # replaced pod with an ephemeral workspace would lose.
   workspace:
-    mode: ephemeral
+    mode: pvc
     size: 10Gi
   concurrency: 1
   taskTimeoutSeconds: 3600

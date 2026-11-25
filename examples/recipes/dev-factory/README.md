@@ -15,15 +15,19 @@ next to it and removes nothing ([switching over](#from-the-built-in-pipeline-to-
 | [`roundtable.yaml`](roundtable.yaml) | The table: `issuePickup.engine: trigger`, `issuePickup.postRun: chain`, `prFeedback.engine: trigger`, model aliases |
 | [`knights.yaml`](knights.yaml) | The lead `rt-lead` and one coder `rt-coder`, isolated with an allowlist |
 
-The repo `acme/api`, the table name `roundtable-dev` and the subject prefix
-`roundtable-dev` are placeholders; change them together.
+The repo `acme/api`, the table name `roundtable-dev`, the subject prefix
+`roundtable-dev` and the streams `roundtable_dev_tasks` / `roundtable_dev_results`
+are placeholders; change them together. The knights name the table's streams
+themselves (`spec.nats.stream`, `spec.nats.resultsStream`): a knight does not
+inherit them, and with the defaults it would never receive a task. Pickup names
+runs `<chain>-<repo name>-<issue>` without the owner (`pr-pipeline-api-12`).
 
 ## The life of an issue
 
 ```
 issue labelled rt:ready
   → Trigger roundtable-dev-issue-pickup          claims it (rt:in-progress, comment)
-  → Chain pr-pipeline-acme-api-<n>               one copy per issue
+  → Chain pr-pipeline-api-<n>               one copy per issue
       plan (lead) → implement (coder) → review (lead) ⇄ fix (coder)
       → merge (lead: gh pr merge --auto --squash)
       → verify (lead: rt-verify) → close_parent (split runs only)
@@ -81,7 +85,7 @@ nothing fails and the issue stays `rt:in-progress`
    comment from `handback` naming the failed steps; `rt:in-progress` is gone.
    That comment is the first thing to read.
 2. The Chain. `kubectl -n roundtable get chain` lists the runs;
-   `kubectl -n roundtable describe chain pr-pipeline-acme-api-<n>` shows each
+   `kubectl -n roundtable describe chain pr-pipeline-api-<n>` shows each
    step's status and output (`status.stepStatuses`). The `merge` output has the
    PR URLs and fix rounds. Resume a failed run with the
    `ai.roundtable.io/retry-failed` annotation
