@@ -125,6 +125,7 @@ helm-check: helm ## Lint the Helm chart and check examples/chain-pr-pipeline.yam
 	HELM="$(HELM)" scripts/check-metrics.sh
 	HELM="$(HELM)" scripts/check-prometheusrule.sh
 	HELM="$(HELM)" scripts/check-grafana-dashboards.sh
+	HELM="$(HELM)" scripts/check-telemetry-env.sh
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration

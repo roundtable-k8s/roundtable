@@ -76,12 +76,14 @@ Opt-in ingress NetworkPolicies for the operator, the dashboard and knight pods. 
 |-----|------|---------|-------------|
 | `networkPolicy.enabled` | bool | `false` | Render the operator, dashboard and knight policies |
 | `networkPolicy.metricsFrom` | list | monitoring namespace | NetworkPolicyPeers allowed to scrape metrics: the operator's metrics port and knights' `:3000/metrics`. The dashboard also accepts these peers. Empty denies all scraping |
+| `networkPolicy.otlpFrom` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed to send OTLP (4317/4318) to the collector; only rendered when `telemetry.collector.enabled`. Empty allows no one |
 | `networkPolicy.dashboardFrom` | list | `[]` | NetworkPolicyPeers allowed to reach the dashboard's `http` port, in addition to `metricsFrom`. Empty means only `metricsFrom` |
 | `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint when enabled via `extraArgs`; ignored when `metrics.enabled` is true (the policy then allows 8080) |
 
 What each policy allows:
 
 - **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and the metrics port (8080 when `metrics.enabled`, else `operatorMetricsPort`), from `metricsFrom`.
+- **OpenTelemetry Collector** (`<release>-roundtable-operator-otel-collector`, only when `telemetry.collector.enabled`): ports 4317 and 4318, from `otlpFrom`. The collector pods use their own `app.kubernetes.io/name: roundtable-otel-collector`, so the operator policy and Deployment selector never match them.
 - **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
 - **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).
 
@@ -323,6 +325,68 @@ Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overvie
 | `dashboards.grafanaOperator.instanceSelector` | object | `{dashboards: grafana}` | `matchLabels` selecting the Grafana instance(s) |
 
 `make helm-check` runs `scripts/check-grafana-dashboards.sh`, which verifies the rendering, that the JSON parses, and that every query uses only known metric names and filters on `$table`.
+
+### Telemetry
+
+Sets the standard OpenTelemetry `OTEL_*` environment variables on the
+operator (`roundtable-operator`), gateway (`roundtable-gateway`) and dashboard
+(`roundtable-ui`) Deployments. With `telemetry.enabled=false` only
+`OTEL_SDK_DISABLED=true` is set. Knight pods are not affected.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `telemetry.enabled` | bool | `false` | Turn OTel export on |
+| `telemetry.otlp.endpoint` | string | `""` | `OTEL_EXPORTER_OTLP_ENDPOINT`, e.g. `http://otel-collector.observability:4317`; omitted when empty |
+| `telemetry.otlp.protocol` | string | `grpc` | `OTEL_EXPORTER_OTLP_PROTOCOL`: `grpc` or `http/protobuf` |
+| `telemetry.sampling.ratio` | number | `1.0` | `OTEL_TRACES_SAMPLER_ARG` (sampler `parentbased_traceidratio`) |
+| `telemetry.captureContent` | bool | `true` | `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT`: prompt/response text on gen_ai spans, redacted before export |
+| `telemetry.resourceAttributes` | object | `{}` | Extra attributes, rendered sorted as `OTEL_RESOURCE_ATTRIBUTES=k=v,...` |
+| `telemetry.traceUrlTemplate` | string | `""` | Dashboard `TRACE_URL_TEMPLATE` deep link containing `{traceId}` |
+
+#### OpenTelemetry Collector
+
+An optional collector (`telemetry.collector.*`, off by default) gives the stack
+a telemetry endpoint without choosing a backend. It runs as one non-root,
+read-only-root-filesystem Pod without a service account token, and a Service
+`<release>-otel-collector` exposing OTLP gRPC (4317) and HTTP (4318). Every
+pipeline runs `memory_limiter`, `redaction`, `batch`, so secrets are redacted
+for every source, including ones whose own spans cannot be redacted in-process.
+The `roundtable.table` attribute is not dropped (`allow_all_keys: true`). When
+enabled and `telemetry.otlp.endpoint` is empty, `OTEL_EXPORTER_OTLP_ENDPOINT`
+defaults to `http://<release>-otel-collector.<namespace>:4317` (`:4318` when
+`telemetry.otlp.protocol=http/protobuf`). The standard backend is being chosen
+in #385.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `telemetry.collector.enabled` | bool | `false` | Render the collector Deployment, Service and ConfigMap |
+| `telemetry.collector.image.repository` / `.tag` | string | `otel/opentelemetry-collector-contrib` / pinned release | Must be a contrib build (`redactionprocessor`) |
+| `telemetry.collector.resources` | object | `{}` | Container resources |
+| `telemetry.collector.redaction.enabled` | bool | `true` | Add the `redaction` processor to every pipeline |
+| `telemetry.collector.redaction.blockedValues` | list | secret patterns | RE2 regexes; the default is ported from the knights' `redactSecrets` list (pi-knight `src/hooks.ts`). Setting it replaces the list |
+| `telemetry.collector.exporters` | object | `{debug: {}}` | Passed into the collector `exporters`; every exporter a pipeline names must be defined here (or in `extraConfig`), otherwise rendering fails. Helm merges maps, so remove the default with `--set telemetry.collector.exporters.debug=null` |
+| `telemetry.collector.pipelines` | object | `traces/metrics/logs: [debug]` | Exporter names per signal; a signal set to an empty list or `null` gets no pipeline |
+| `telemetry.collector.extraConfig` | object | `{}` | Deep-merged last into the collector config |
+
+Exporter examples (no auth headers or secret refs are modelled yet):
+
+```yaml
+telemetry:
+  enabled: true
+  collector:
+    enabled: true
+    exporters:
+      debug: null
+      otlp/traces:                       # OTLP to a trace store
+        endpoint: tempo.observability:4317
+        tls: {insecure: true}
+      otlphttp/llm:                      # otlphttp to an LLM viewer
+        endpoint: http://langfuse.observability:3000/api/public/otel
+    pipelines:
+      traces: [otlp/traces, otlphttp/llm]
+      metrics: []
+      logs: []
+```
 
 ### Scheduling
 
