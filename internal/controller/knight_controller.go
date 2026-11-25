@@ -644,8 +644,8 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 		cm.Data["mise.toml"] = knightpkg.GenerateMiseToml(knight)
 
 		// Generate apt.txt for system packages
-		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Apt) > 0 {
-			cm.Data["apt.txt"] = strings.Join(knight.Spec.Tools.Apt, "\n")
+		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Apt) > 0 { //nolint:staticcheck // still generated for one more release
+			cm.Data["apt.txt"] = strings.Join(knight.Spec.Tools.Apt, "\n") //nolint:staticcheck // still generated for one more release
 		}
 
 		// Skill categories for the skill-filter sidecar
@@ -1158,27 +1158,47 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 	return len(missing) > 0 || len(unreadable) > 0
 }
 
-// setDeprecatedFieldsCondition reports deprecated, ignored spec fields. A
-// spec.nats.maxDeliver above 1 does nothing (tasks run at most once), so it
-// sets DeprecatedFieldsUsed=True and records a MaxDeliverIgnored warning once
-// per generation. The condition is removed when no such field is set.
+// setDeprecatedFieldsCondition reports deprecated spec fields. It sets
+// DeprecatedFieldsUsed=True when spec.nats.maxDeliver is above 1 (ignored:
+// tasks run at most once), or when spec.tools.apt or spec.tools.mise is
+// non-empty (use tools.nix / tools.flakes). One Warning event per field is
+// recorded per generation (MaxDeliverIgnored, ToolsAptDeprecated,
+// ToolsMiseDeprecated) and the message lists every deprecated field in use.
+// The condition is removed when none is set.
 func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knight) {
-	maxDeliver := knight.Spec.NATS.MaxDeliver //nolint:staticcheck // reading the deprecated field to report it
-	if maxDeliver <= 1 {
+	type deprecated struct{ reason, msg string }
+	var used []deprecated
+	if md := knight.Spec.NATS.MaxDeliver; md > 1 { //nolint:staticcheck // reading the deprecated field to report it
+		used = append(used, deprecated{"MaxDeliverIgnored", fmt.Sprintf(
+			"spec.nats.maxDeliver=%d is deprecated and ignored: knights always run a task at most once; lost and failed tasks go to the dead-letter stream and are retried by hand", md)})
+	}
+	tools := knight.Spec.Tools
+	if tools != nil && len(tools.Apt) > 0 { //nolint:staticcheck // reading the deprecated field to report it
+		used = append(used, deprecated{"ToolsAptDeprecated",
+			"spec.tools.apt is deprecated and will be removed: knight containers run as non-root, so apt installs cannot succeed; use spec.tools.nix or spec.tools.flakes"})
+	}
+	if tools != nil && len(tools.Mise) > 0 { //nolint:staticcheck // reading the deprecated field to report it
+		used = append(used, deprecated{"ToolsMiseDeprecated",
+			"spec.tools.mise is deprecated and will be removed: mise tools are unpinned and downloaded at every start; use spec.tools.nix or spec.tools.flakes"})
+	}
+	if len(used) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
 		return
 	}
 	prev := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
-	msg := fmt.Sprintf("spec.nats.maxDeliver=%d is deprecated and ignored: knights always run a task at most once; lost and failed tasks go to the dead-letter stream and are retried by hand",
-		maxDeliver)
-	if prev == nil || prev.ObservedGeneration != knight.Generation {
-		r.Recorder.Event(knight, corev1.EventTypeWarning, "MaxDeliverIgnored", msg)
+	newGen := prev == nil || prev.ObservedGeneration != knight.Generation
+	msgs := make([]string, 0, len(used))
+	for _, d := range used {
+		if newGen {
+			r.Recorder.Event(knight, corev1.EventTypeWarning, d.reason, d.msg)
+		}
+		msgs = append(msgs, d.msg)
 	}
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightDeprecatedFieldsUsed,
 		Status:             metav1.ConditionTrue,
 		Reason:             aiv1alpha1.ReasonKnightDeprecatedFieldsUsed,
-		Message:            msg,
+		Message:            strings.Join(msgs, "; "),
 		ObservedGeneration: knight.Generation,
 	})
 }
