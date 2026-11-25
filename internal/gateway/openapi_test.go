@@ -115,7 +115,7 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 		return false
 	}
 	off := roundTrip(t, openAPIService(t, false, false, false))
-	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules"} {
+	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules", "/v1/triggers"} {
 		if has(off, p) {
 			t.Errorf("%s documented although its feature is disabled", p)
 		}
@@ -126,7 +126,7 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 		}
 	}
 	on := roundTrip(t, openAPIService(t, true, true, true, true))
-	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules"} {
+	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules", "/v1/triggers"} {
 		if !has(on, p) {
 			t.Errorf("%s missing although its feature is enabled", p)
 		}

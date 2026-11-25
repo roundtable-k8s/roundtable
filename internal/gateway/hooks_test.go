@@ -55,6 +55,8 @@ const (
 type hookEnv struct {
 	server *httptest.Server
 	js     jetstream.JetStream
+	auth   *TokenAuth
+	svc    *Service
 }
 
 func hookSecret(ns, name, value string, labelled bool) *corev1.Secret {
@@ -129,6 +131,17 @@ func newHookEnv(t *testing.T, hooks HookOptions, enabled bool, allowed ...string
 		hookTrigger(testNS, "signed", aiv1alpha1.TriggerWebhookAuth{HMACSecretRef: secretRef("hmac")}),
 		hookTrigger(testNS, "unlabelled", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("unlabelled")}),
 		hookTrigger(hookOtherNS, "alerts", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("bearer")}),
+		fireScheduleTrigger(testNS, "nightly"), fireScheduleTrigger(hookOtherNS, "nightly"),
+		&aiv1alpha1.Chain{
+			ObjectMeta: metav1.ObjectMeta{Name: "tabled", Namespace: testNS},
+			Spec:       aiv1alpha1.ChainSpec{RoundTableRef: &corev1.LocalObjectReference{Name: "dev"}},
+		},
+		func() *aiv1alpha1.Trigger {
+			trg := fireScheduleTrigger(testNS, "viachain")
+			trg.Spec.RoundTableRef = nil // the target Chain's table
+			trg.Spec.Target.ChainRef.Name = "tabled"
+			return trg
+		}(),
 	}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 	bus, err := NewNATSBus(context.Background(), nc, "gateway_tasks_test", time.Hour)
@@ -149,7 +162,7 @@ func newHookEnv(t *testing.T, hooks HookOptions, enabled bool, allowed ...string
 	}
 	server := httptest.NewServer(Handler(svc, auth))
 	t.Cleanup(server.Close)
-	return &hookEnv{server: server, js: js}
+	return &hookEnv{server: server, js: js, auth: auth, svc: svc}
 }
 
 func (e *hookEnv) post(t *testing.T, path string, body []byte, headers map[string]string) (*http.Response, map[string]any) {

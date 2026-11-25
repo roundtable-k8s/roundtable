@@ -362,4 +362,8 @@ func TestEventHelpers(t *testing.T) {
 	if got := GitHubEventSubject("fleet-a", "roundtable", "ready"); got != "fleet-a.events.github.roundtable.ready" {
 		t.Errorf("GitHubEventSubject = %q", got)
 	}
+	got := ScheduleEventSubject("fleet-a", "roundtable", "nightly")
+	if got != "fleet-a.events.schedule.roundtable.nightly" {
+		t.Errorf("ScheduleEventSubject = %q", got)
+	}
 }

@@ -136,6 +136,41 @@ func (r *Resolver) KnightTable(ctx context.Context, namespace, name string) (str
 	return t.RoundTable, nil
 }
 
+// TriggerTable returns the RoundTable whose events stream carries a
+// scheduled Trigger's firings: its roundTableRef, else its target Chain's
+// roundTableRef, else its target knight's RoundTable (resolved as Invoke
+// resolves it), else the RoundTable named "default". The trigger controller
+// reads the firings there and the gateway's fire endpoint publishes them
+// there, so both must resolve it with this function.
+func (r *Resolver) TriggerTable(ctx context.Context, trg *aiv1alpha1.Trigger) (string, error) {
+	if name := aiv1alpha1.RefName(trg.Spec.RoundTableRef); name != "" {
+		return name, nil
+	}
+	switch target := trg.Spec.Target; {
+	case target.ChainRef != nil:
+		chain := &aiv1alpha1.Chain{}
+		err := r.Client.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain)
+		switch {
+		case apierrors.IsNotFound(err):
+			return "", fmt.Errorf("%w: chain %s/%s", ErrNotFound, trg.Namespace, target.ChainRef.Name)
+		case err != nil:
+			return "", fmt.Errorf("get chain %s/%s: %w", trg.Namespace, target.ChainRef.Name, err)
+		}
+		if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+			return name, nil
+		}
+	case target.Knight != nil:
+		name, err := r.KnightTable(ctx, trg.Namespace, target.Knight.Name)
+		if err != nil {
+			return "", err
+		}
+		if name != "" {
+			return name, nil
+		}
+	}
+	return defaultTableName, nil
+}
+
 // knightInfo summarises a Knight for list_knights.
 func knightInfo(k *aiv1alpha1.Knight, defaultImage string) KnightInfo {
 	table := k.Labels[aiv1alpha1.LabelRoundTable]

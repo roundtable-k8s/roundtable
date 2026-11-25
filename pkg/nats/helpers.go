@@ -110,6 +110,17 @@ func GitHubEventSubject(prefix, namespace, name string) string {
 	return EventSubject(prefix, "github."+namespace+"."+name)
 }
 
+// ScheduleEventSubject is the subject the gateway publishes a schedule
+// Trigger's firings to (POST /v1/triggers/{namespace}/{name}/fire, called by
+// the Trigger's CronJob). Format: {prefix}.events.schedule.{namespace}.{name}.
+func ScheduleEventSubject(prefix, namespace, name string) string {
+	return EventSubject(prefix, "schedule."+namespace+"."+name)
+}
+
+// ScheduledTimeHeader carries a schedule firing's scheduled time (RFC 3339,
+// UTC, whole minutes).
+const ScheduledTimeHeader = "Roundtable-Scheduled-Time"
+
 // EventKeyHeader carries an event's default dedupe key when it differs from
 // its Nats-Msg-Id (a github-source item: "<owner/name>#<number>").
 const EventKeyHeader = "Roundtable-Event-Key"

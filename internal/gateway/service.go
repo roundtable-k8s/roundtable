@@ -102,8 +102,10 @@ type Service struct {
 	// Schedules reads Triggers with a schedule source (and Chains, for their
 	// RoundTable). nil disables the schedule endpoints.
 	Schedules client.Client
-	// Hooks reads webhook Triggers, their RoundTables and their labelled
-	// credential Secrets. nil disables POST /v1/hooks/{namespace}/{trigger}.
+	// Hooks reads webhook and schedule Triggers, their RoundTables and the
+	// webhook Triggers' labelled credential Secrets. nil disables
+	// POST /v1/hooks/{namespace}/{trigger} and
+	// POST /v1/triggers/{namespace}/{name}/fire.
 	Hooks client.Reader
 	// ScheduleReader reads schedule Triggers and the Chains they started. nil
 	// disables GET /v1/schedules/{namespace}/{name}/runs and its result route.

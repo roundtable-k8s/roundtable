@@ -335,6 +335,16 @@ var openAPIOperations = map[string]obj{
 			"413": jsonResp("Body too large.", schemaRef("Error")),
 		}, "400", "401", "404", "429", "503"),
 	},
+	"POST /v1/triggers/{namespace}/{name}/fire": {
+		"summary": "Fire a schedule Trigger", "tags": []any{"triggers"},
+		"description": "Called by the Trigger's CronJob. Allowed for the Trigger's own ServiceAccount (<namespace>/trigger-<name>) and static tokens. " +
+			"Publishes a schedule event keyed by the scheduled time (truncated to the minute) to the Trigger's events subject; the trigger controller dedupes and records the firing.",
+		"parameters":  []any{pathParam("namespace", "Trigger namespace."), pathParam("name", "Trigger name.")},
+		"requestBody": jsonBody(schemaRef("FireRequest"), false),
+		"responses": errs(obj{
+			"202": jsonResp("Firing published.", schemaRef("FireResult")),
+		}, "400", "401", "403", "404", "422", "503"),
+	},
 }
 
 var openAPISchemas = obj{
@@ -477,6 +487,17 @@ var openAPISchemas = obj{
 			"name": str(""), "phase": str(""), "error": str(""), "output": str(""), "outputTruncated": boolean(""),
 		})),
 		"output": str("The run's final output."), "outputTruncated": boolean(""),
+	}),
+	"FireRequest": object(nil, obj{
+		"scheduledTime": obj{"type": "string", "format": "date-time",
+			"description": "The schedule time this firing is for; omitted: now. Truncated to the minute."},
+	}),
+	"FireResult": object([]string{"subject", "stream", "seq", "key", "scheduledTime"}, obj{
+		"subject": str("NATS subject the firing was published on."), "stream": str("JetStream stream."),
+		"seq":           integer("Stream sequence of the firing."),
+		"duplicate":     boolean("JetStream dropped the firing as a repeat of one for the same scheduled time."),
+		"key":           str("Firing key: the scheduled time, RFC 3339 in UTC."),
+		"scheduledTime": obj{"type": "string", "format": "date-time"},
 	}),
 	"HookResult": object([]string{"subject", "stream", "seq"}, obj{
 		"subject": str("NATS subject the delivery was published on."), "stream": str("JetStream stream."),
