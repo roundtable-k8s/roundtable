@@ -164,6 +164,24 @@ func (m *Manager) Stop(key string) {
 	}
 }
 
+// Resolve marks the entry of taskID on the RoundTable identified by key
+// resolved, as a later success result would: the task's work is done (#591,
+// a merge step that timed out with its PRs queued). It also remembers the
+// task as succeeded, so a failure result that arrives afterwards is captured
+// resolved, not open. A table without a running watcher is a no-op.
+func (m *Manager) Resolve(ctx context.Context, key, taskID string) error {
+	if m == nil || taskID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	w, ok := m.watchers[key]
+	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return w.resolve(ctx, taskID)
+}
+
 // StopAll stops every watcher.
 func (m *Manager) StopAll() {
 	m.mu.Lock()

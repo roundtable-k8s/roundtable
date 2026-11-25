@@ -147,7 +147,8 @@ func TestPRPipelinePostRunScriptCheck(t *testing.T) {
 
 // simulatePostRunPipeline walks the example in spec order like
 // simulatePRPipeline, but the steps in failed fail (plan with prose output)
-// and the post-run loops converge.
+// and the post-run loops converge. A failed name ending in ":timeout" fails
+// with the operator's step timeout error.
 func simulatePostRunPipeline(t *testing.T, chain *aiv1alpha1.Chain, planOut string, outcome aiv1alpha1.ChainLoopOutcome, failed ...string) []string {
 	t.Helper()
 	steps := map[string]any{}
@@ -174,6 +175,9 @@ func simulatePostRunPipeline(t *testing.T, chain *aiv1alpha1.Chain, planOut stri
 				if strings.HasPrefix(s.Name, "fixloop_") {
 					entry["outcome"], entry["iterations"] = string(outcome), int64(2)
 				}
+			}
+			if slices.Contains(failed, s.Name+":timeout") {
+				entry["phase"], entry["error"], entry["outcome"] = "Failed", "step timed out after 3600s", ""
 			}
 			if slices.Contains(failed, s.Name) {
 				entry["phase"], entry["error"], entry["outcome"] = "Failed", "boom", ""
@@ -216,7 +220,11 @@ func TestPRPipelinePostRunExampleRouting(t *testing.T) {
 		"fix loop fails → handback":               {plan(false), converged, []string{"fixloop_rt_ui"}, with(impl, "handback")},
 		"merge fails → handback, no verify":       {plan(false), converged, []string{"merge"}, with(impl, "merge", "handback")},
 		"verify fails → handback":                 {plan(false), converged, []string{"verify"}, with(impl, "merge", "verify", "handback")},
-		"close_parent fails → handback":           {plan(true), converged, []string{"close_parent"}, with(split, "merge", "verify", "close_parent", "handback")},
+		// #591: a queued PR is a finished merge; verify checks it after a timeout.
+		"merge times out → verify, no handback":         {plan(false), converged, []string{"merge:timeout"}, with(impl, "merge", "verify")},
+		"merge times out, verify fails → handback":      {plan(false), converged, []string{"merge:timeout", "verify"}, with(impl, "merge", "verify", "handback")},
+		"split merge times out → verify → close_parent": {plan(true), converged, []string{"merge:timeout"}, with(split, "merge", "verify", "close_parent")},
+		"close_parent fails → handback":                 {plan(true), converged, []string{"close_parent"}, with(split, "merge", "verify", "close_parent", "handback")},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

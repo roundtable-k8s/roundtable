@@ -60,11 +60,41 @@ func TestParseStructuredProse(t *testing.T) {
 		"last verdict wins":     {"Verdict: needs_changes\n...\nVerdict: ship_it", Structured{Verdict: VerdictShipIt}},
 		"no verdict in passing": {"we should not ship it yet", Structured{}},
 		"nothing":               {"hello", Structured{}},
+		"merge step lines": {"https://github.com/o/r/pull/1 queued (position 2)\n" +
+			"https://github.com/o/r/pull/2 merged\nhttps://github.com/o/r/pull/3 blocked: ci failing",
+			Structured{PRs: []PRRef{
+				{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1", Action: PRActionQueued},
+				{Repo: "o/r", Number: 2, URL: "https://github.com/o/r/pull/2", Action: PRActionMerged},
+				{Repo: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3"},
+			}}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := ParseStructured(tc.in); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPRsLanded(t *testing.T) {
+	q := PRRef{URL: "u1", Action: PRActionQueued}
+	m := PRRef{URL: "u2", Action: PRActionMerged}
+	cases := map[string]struct {
+		prs  []PRRef
+		want bool
+	}{
+		"none":            {nil, false},
+		"queued":          {[]PRRef{q}, true},
+		"queued+merged":   {[]PRRef{q, m}, true},
+		"one blocked":     {[]PRRef{q, {URL: "u3", Action: "blocked"}}, false},
+		"no action":       {[]PRRef{{URL: "u4"}}, false},
+		"opened not done": {[]PRRef{{URL: "u5", Action: PRActionOpened}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := PRsLanded(tc.prs); got != tc.want {
+				t.Fatalf("PRsLanded(%+v) = %v, want %v", tc.prs, got, tc.want)
 			}
 		})
 	}

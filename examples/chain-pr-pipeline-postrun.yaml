@@ -363,11 +363,15 @@ spec:
         Final review:
         {{ .Output }}{{ end }}{{ end }}
 
-        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`.
-        Then wait until each one is merged, closed, or blocked by a failing required
-        check (check every few minutes, give up after 50 minutes).
-        Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
-        then a line "Fix rounds: <n>" and a last line
+        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`
+        (approve it first if the repo requires an approval). A queued PR is a
+        finished merge: stop as soon as every PR is queued or already merged.
+        Never poll or wait for CI or the merge queue to finish.
+        Reply with one line per PR, "<url> queued", "<url> queued (position <n>)"
+        when the queue position is known, "<url> merged", or
+        "<url> closed|blocked: <reason>" when it could not be queued, and report
+        the same PRs in the structured prs[] with action "queued" or "merged".
+        Then a line "Fix rounds: <n>" and a last line
         "Tiering: implement=<alias the plan chose> fix=deep review rounds=<n>"
         (the alias is in the plan: {{ .Steps.plan.Output }}).
 
@@ -394,7 +398,7 @@ spec:
 
     - name: verify
       dependsOn: [merge]
-      when: 'steps.merge.phase == "Succeeded"'
+      when: 'steps.merge.phase == "Succeeded" || (steps.merge.phase == "Failed" && (steps.merge.error.contains("timed out") || steps.merge.error.contains("timeout")))'
       continueOnFailure: true
       loop:
         until: 'last.output.contains("rt-verify: ok")'
@@ -406,7 +410,9 @@ spec:
             timeoutSeconds: 1800
             task: |
               Verify on GitHub that every pull request of {{ .Input }} is merged or queued.
-              The merge step reported:
+              A queued PR counts as done: do not wait for it to merge.
+              The merge step reported (one "<url> queued|merged|closed|blocked" line per PR;
+              empty when it timed out, then the PRs below are what to check):
               {{ .Steps.merge.Output }}
               The final review's structured result:
               {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Converged" }}verdict: {{ .Verdict }}
@@ -456,7 +462,7 @@ spec:
 
     - name: handback
       dependsOn: [verify, close_parent, escalate]
-      when: '["plan", "implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui", "review", "fixloop_rt_operator", "fixloop_rt_ui", "merge", "escalate", "verify", "close_parent"].exists(s, steps[s].phase == "Failed")'
+      when: '["plan", "implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui", "review", "fixloop_rt_operator", "fixloop_rt_ui", "merge", "escalate", "verify", "close_parent"].exists(s, steps[s].phase == "Failed" && !(s == "merge" && steps.verify.phase == "Succeeded"))'
       loop:
         until: 'last.output.contains("rt-handback: ok")'
         maxIterations: 1

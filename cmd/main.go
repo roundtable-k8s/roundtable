@@ -452,10 +452,11 @@ func main() {
 	}
 	// Issue pickup (#224) only acts on RoundTables that set spec.issuePickup.
 	if err := (&controller.IssuePickupReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("issuepickup-controller"), //nolint:staticcheck // SA1019: see note above
-		GitHub:   githubFactory,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorderFor("issuepickup-controller"), //nolint:staticcheck // SA1019: see note above
+		GitHub:      githubFactory,
+		DeadLetters: deadLetters,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "IssuePickup")
 		os.Exit(1)

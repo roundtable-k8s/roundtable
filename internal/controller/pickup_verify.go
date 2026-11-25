@@ -309,6 +309,11 @@ func (r *IssuePickupReconciler) handBackFailed(ctx context.Context, gh *github.C
 	if err != nil {
 		return fmt.Errorf("bad %s annotation: %w", aiv1alpha1.AnnotationPickupIssue, err)
 	}
+	// #591: a merge step that timed out with its PRs queued is done; the
+	// run is recorded as succeeded and verified on the next poll.
+	if ok, err := r.recoverQueuedMerge(ctx, gh, rt, c); err != nil || ok {
+		return err
+	}
 	// Only an issue the run still holds is handed back: one a human (or the
 	// escalate step) already dealt with, or that was closed, is left alone.
 	gi, err := gh.GetIssue(ctx, repo, issue)

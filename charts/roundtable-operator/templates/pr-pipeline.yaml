@@ -31,10 +31,17 @@ succeeded plan and escalate needs no failed work step. Three steps are added,
 each a one-round loop whose until checks the arsenal script's "ok" line, so a
 missing script or a failed check fails the step:
   verify       (after merge)       rt-verify: PRs merged or queued, review posted
+                                   (also after a merge timeout, #591)
   close_parent (split runs)        rt-close-parent: closes the split parent
   handback     (any step failed)   rt-handback: needs-human, comment, in-progress off
 handback has no continueOnFailure: if it fails the run fails and the operator
 releases the issue.
+
+Merge (#591): a queued PR is a finished merge. The merge step queues the PRs
+and returns without waiting for CI or the queue. If it still times out, verify
+runs anyway and a merge timeout it verified does not trigger handback; the
+operator then records the merge step as succeeded when GitHub shows every PR
+merged or queued, and resolves the step's timeout dead-letter entry.
 
 $o / $c emit the Chain's own Go-template delimiters, which the operator renders
 at dispatch time (Helm must not).
@@ -334,11 +341,15 @@ spec:
         {{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
         {{- end }}
 
-        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`.
-        Then wait until each one is merged, closed, or blocked by a failing required
-        check (check every few minutes, give up after 50 minutes).
-        Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
-        then a line "Fix rounds: <n>" and a last line
+        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`
+        (approve it first if the repo requires an approval). A queued PR is a
+        finished merge: stop as soon as every PR is queued or already merged.
+        Never poll or wait for CI or the merge queue to finish.
+        Reply with one line per PR, "<url> queued", "<url> queued (position <n>)"
+        when the queue position is known, "<url> merged", or
+        "<url> closed|blocked: <reason>" when it could not be queued, and report
+        the same PRs in the structured prs[] with action "queued" or "merged".
+        Then a line "Fix rounds: <n>" and a last line
         "Tiering: implement=<alias the plan chose> fix={{ $fixModel }} review rounds=<n>"
         (the alias is in the plan: {{ $o }} .Steps.plan.Output {{ $c }}).
 
@@ -375,7 +386,7 @@ spec:
 
     - name: verify
       dependsOn: [merge]
-      when: 'steps.merge.phase == "Succeeded"'
+      when: 'steps.merge.phase == "Succeeded" || (steps.merge.phase == "Failed" && (steps.merge.error.contains("timed out") || steps.merge.error.contains("timeout")))'
       continueOnFailure: true
       loop:
         until: 'last.output.contains("rt-verify: ok")'
@@ -390,7 +401,9 @@ spec:
             timeoutSeconds: 1800
             task: |
               Verify on GitHub that every pull request of {{ $o }} .Input {{ $c }} is merged or queued.
-              The merge step reported:
+              A queued PR counts as done: do not wait for it to merge.
+              The merge step reported (one "<url> queued|merged|closed|blocked" line per PR;
+              empty when it timed out, then the PRs below are what to check):
               {{ $o }} .Steps.merge.Output {{ $c }}
               The final review's structured result:
               {{- range $loops }}
@@ -441,7 +454,7 @@ spec:
 
     - name: handback
       dependsOn: [verify, close_parent, escalate]
-      when: '{{ $allList }}.exists(s, steps[s].phase == "Failed")'
+      when: '{{ $allList }}.exists(s, steps[s].phase == "Failed" && !(s == "merge" && steps.verify.phase == "Succeeded"))'
       loop:
         until: 'last.output.contains("rt-handback: ok")'
         maxIterations: 1

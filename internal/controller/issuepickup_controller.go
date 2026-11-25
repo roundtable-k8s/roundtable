@@ -41,6 +41,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
+	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	"github.com/roundtable-k8s/roundtable/internal/github"
 )
 
@@ -70,6 +71,10 @@ type IssuePickupReconciler struct {
 
 	// GitHub builds GitHub clients; nil means api.github.com.
 	GitHub *github.ClientFactory
+
+	// DeadLetters resolves the dead-letter entry of a merge step that timed
+	// out with its PRs queued (#591). Nil skips that.
+	DeadLetters *deadletter.Manager
 
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
