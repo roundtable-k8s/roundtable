@@ -12,8 +12,20 @@ spec:
     - kubernetes
     - shared
 
-  # Runs isolated under the defaults (#387): kubectl, helm and flux talk to
-  # the Kubernetes API, which the egress baseline allows.
+  # Runs isolated under the defaults (#387). kubectl, helm and flux talk to the
+  # Kubernetes API, which the egress baseline allows. But tools.mise downloads
+  # the binaries when the pod starts, and a failed install is only a warning,
+  # so the knight needs the download hosts allowed or it starts without tools.
+  # (Alternative: move the tools to tools.nix, which needs no egress at start.)
+  egress:
+    allowedHosts:
+      - "mise-versions.jdx.dev"
+      - "github.com"
+      - "api.github.com"
+      - "*.githubusercontent.com"
+      - "dl.k8s.io"
+      - "get.helm.sh"
+
   tools:
     mise:
       - kubectl

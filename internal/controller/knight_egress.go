@@ -374,7 +374,7 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = aiv1alpha1.ReasonFQDNPolicyUnavailable
 		cond.Message = fmt.Sprintf("%s CiliumNetworkPolicy is not served, so hostnames can't be enforced; "+
-			"NetworkPolicy %s allows DNS, NATS and the allowed ports to any destination",
+			"NetworkPolicy %s allows DNS, NATS, the Kubernetes API (ports 443 and 6443) and the allowed ports to any destination",
 			rtruntime.CiliumNetworkPolicyGVK.GroupVersion(), egressPolicyName(k))
 	}
 	meta.SetStatusCondition(&k.Status.Conditions, cond)
