@@ -275,6 +275,51 @@ operator (`roundtable-operator`), gateway (`roundtable-gateway`) and dashboard
 | `telemetry.resourceAttributes` | object | `{}` | Extra attributes, rendered sorted as `OTEL_RESOURCE_ATTRIBUTES=k=v,...` |
 | `telemetry.traceUrlTemplate` | string | `""` | Dashboard `TRACE_URL_TEMPLATE` deep link containing `{traceId}` |
 
+#### OpenTelemetry Collector
+
+An optional collector (`telemetry.collector.*`, off by default) gives the stack
+a telemetry endpoint without choosing a backend. It runs as one non-root,
+read-only-root-filesystem Pod without a service account token, and a Service
+`<release>-otel-collector` exposing OTLP gRPC (4317) and HTTP (4318). Every
+pipeline runs `memory_limiter`, `redaction`, `batch`, so secrets are redacted
+for every source, including ones whose own spans cannot be redacted in-process.
+The `roundtable.table` attribute is not dropped (`allow_all_keys: true`). When
+enabled and `telemetry.otlp.endpoint` is empty, `OTEL_EXPORTER_OTLP_ENDPOINT`
+defaults to `http://<release>-otel-collector.<namespace>:4317` (`:4318` when
+`telemetry.otlp.protocol=http/protobuf`). The standard backend is being chosen
+in #385.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `telemetry.collector.enabled` | bool | `false` | Render the collector Deployment, Service and ConfigMap |
+| `telemetry.collector.image.repository` / `.tag` | string | `otel/opentelemetry-collector-contrib` / pinned release | Must be a contrib build (`redactionprocessor`) |
+| `telemetry.collector.resources` | object | `{}` | Container resources |
+| `telemetry.collector.redaction.enabled` | bool | `true` | Add the `redaction` processor to every pipeline |
+| `telemetry.collector.redaction.blockedValues` | list | secret patterns | RE2 regexes; the default is ported from the knights' `redactSecrets` list (pi-knight `src/hooks.ts`). Setting it replaces the list |
+| `telemetry.collector.exporters` | object | `{debug: {}}` | Passed verbatim into the collector `exporters`. Helm merges maps, so remove the default with `--set telemetry.collector.exporters.debug=null` |
+| `telemetry.collector.pipelines` | object | `traces/metrics/logs: [debug]` | Exporter names per signal; a signal set to an empty list or `null` gets no pipeline |
+| `telemetry.collector.extraConfig` | object | `{}` | Deep-merged last into the collector config |
+
+Exporter examples (no auth headers or secret refs are modelled yet):
+
+```yaml
+telemetry:
+  enabled: true
+  collector:
+    enabled: true
+    exporters:
+      debug: null
+      otlp/traces:                       # OTLP to a trace store
+        endpoint: tempo.observability:4317
+        tls: {insecure: true}
+      otlphttp/llm:                      # otlphttp to an LLM viewer
+        endpoint: http://langfuse.observability:3000/api/public/otel
+    pipelines:
+      traces: [otlp/traces, otlphttp/llm]
+      metrics: []
+      logs: []
+```
+
 ### Scheduling
 
 | Key | Type | Default | Description |

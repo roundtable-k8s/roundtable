@@ -1,0 +1,119 @@
+{{- if .Values.telemetry.collector.enabled }}
+{{- $c := .Values.telemetry.collector }}
+{{- $name := include "roundtable-operator.collectorName" . }}
+{{- /* Collector config: otlp in; memory_limiter, redaction (when enabled), batch;
+       exporters and pipelines from values; extraConfig merged last. */}}
+{{- $processors := list "memory_limiter" }}
+{{- if $c.redaction.enabled }}{{ $processors = append $processors "redaction" }}{{ end }}
+{{- $processors = append $processors "batch" }}
+{{- $pipelines := dict }}
+{{- range $signal, $exporters := $c.pipelines }}
+{{- if $exporters }}
+{{- $_ := set $pipelines $signal (dict "receivers" (list "otlp") "processors" $processors "exporters" $exporters) }}
+{{- end }}
+{{- end }}
+{{- $procs := dict "memory_limiter" (dict "check_interval" "1s" "limit_percentage" 80 "spike_limit_percentage" 25) "batch" dict }}
+{{- if $c.redaction.enabled }}
+{{- $_ := set $procs "redaction" (dict "allow_all_keys" true "blocked_values" $c.redaction.blockedValues) }}
+{{- end }}
+{{- $config := dict
+  "receivers" (dict "otlp" (dict "protocols" (dict "grpc" (dict "endpoint" "0.0.0.0:4317") "http" (dict "endpoint" "0.0.0.0:4318"))))
+  "processors" $procs
+  "exporters" $c.exporters
+  "service" (dict "pipelines" $pipelines "telemetry" (dict "metrics" (dict "level" "none"))) }}
+{{- $config = mustMergeOverwrite $config (deepCopy $c.extraConfig) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+data:
+  config.yaml: |
+    {{- toYaml $config | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  selector:
+    {{- include "roundtable-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "roundtable-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: otel-collector
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ toYaml $config | sha256sum }}
+      labels:
+        {{- include "roundtable-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-collector
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          readinessProbe:
+            tcpSocket:
+              port: otlp-grpc
+          livenessProbe:
+            tcpSocket:
+              port: otlp-grpc
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+{{- end }}

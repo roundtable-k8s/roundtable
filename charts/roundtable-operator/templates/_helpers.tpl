@@ -68,9 +68,13 @@ are sorted by key (range over a map is ordered) for stable output.
 {{- define "roundtable-operator.telemetryEnv" -}}
 {{- $t := .root.Values.telemetry -}}
 {{- if $t.enabled -}}
-{{- if $t.otlp.endpoint }}
+{{- $endpoint := $t.otlp.endpoint }}
+{{- if and (not $endpoint) $t.collector.enabled }}
+{{- $endpoint = include "roundtable-operator.collectorEndpoint" .root }}
+{{- end }}
+{{- if $endpoint }}
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
-  value: {{ $t.otlp.endpoint | quote }}
+  value: {{ $endpoint | quote }}
 {{- end }}
 - name: OTEL_EXPORTER_OTLP_PROTOCOL
   value: {{ $t.otlp.protocol | quote }}
@@ -94,4 +98,20 @@ are sorted by key (range over a map is ordered) for stable output.
 - name: OTEL_SDK_DISABLED
   value: "true"
 {{- end }}
+{{- end }}
+
+{{/*
+Name of the optional OpenTelemetry Collector Deployment and Service.
+*/}}
+{{- define "roundtable-operator.collectorName" -}}
+{{- printf "%s-otel-collector" (include "roundtable-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+In-cluster OTLP endpoint of the optional collector: gRPC (4317) unless
+telemetry.otlp.protocol is http/protobuf (4318).
+*/}}
+{{- define "roundtable-operator.collectorEndpoint" -}}
+{{- $port := ternary 4318 4317 (eq .Values.telemetry.otlp.protocol "http/protobuf") -}}
+{{- printf "http://%s.%s:%d" (include "roundtable-operator.collectorName" .) .Release.Namespace (int $port) }}
 {{- end }}
