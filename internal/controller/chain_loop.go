@@ -774,6 +774,7 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		RunID:     chain.Status.RunID,
 		Task:      taskStr,
 		Model:     model,
+		Effort:    body.Effort,
 	}
 	roundCtx := withRunSpan(ctx, chain, roundSpanKey(groupStepSpanKey(spec.Name, ss.StartedAt), ls.Iteration))
 	seq, err := r.publishTask(roundCtx, nc, knight.Spec.Domain, knightName, payload)

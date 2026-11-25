@@ -241,6 +241,18 @@ spec:
                       items:
                         type: string
                       type: array
+                    effort:
+                      description: |-
+                        effort overrides the knight's reasoning effort for this step.
+                        Empty means the knight's own spec.effort. Sent to the knight in the task
+                        payload; the runtime maps it onto its own setting.
+                      enum:
+                      - low
+                      - medium
+                      - high
+                      - xhigh
+                      - max
+                      type: string
                     failurePolicy:
                       description: |-
                         failurePolicy decides what a failed item does to a forEach step.
@@ -383,6 +395,18 @@ spec:
                           items:
                             description: ChainLoopStep is one step of a loop body.
                             properties:
+                              effort:
+                                description: |-
+                                  effort overrides the knight's reasoning effort for this body step (same as ChainStep.effort).
+                                  Empty means the knight's own spec.effort. Sent to the knight in the task
+                                  payload; the runtime maps it onto its own setting.
+                                enum:
+                                - low
+                                - medium
+                                - high
+                                - xhigh
+                                - max
+                                type: string
                               knightRef:
                                 description: knightRef names the Knight that runs
                                   this body step.

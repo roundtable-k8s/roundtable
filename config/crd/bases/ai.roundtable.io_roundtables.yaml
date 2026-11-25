@@ -696,6 +696,19 @@ spec:
                         Used for NATS subject routing and skill filtering.
                       minLength: 1
                       type: string
+                    effort:
+                      description: |-
+                        effort is the knight's default reasoning effort. It is passed to the
+                        pod as KNIGHT_EFFORT; the runtime maps it onto its own setting. A chain
+                        step's effort overrides it for that task. Unset leaves the runtime's
+                        own configuration alone.
+                      enum:
+                      - low
+                      - medium
+                      - high
+                      - xhigh
+                      - max
+                      type: string
                     egress:
                       description: |-
                         egress restricts the knight's outbound traffic to DNS, its NATS server
@@ -1979,6 +1992,19 @@ spec:
                           domain is the knight's area of expertise (e.g., "security", "infrastructure", "finance").
                           Used for NATS subject routing and skill filtering.
                         minLength: 1
+                        type: string
+                      effort:
+                        description: |-
+                          effort is the knight's default reasoning effort. It is passed to the
+                          pod as KNIGHT_EFFORT; the runtime maps it onto its own setting. A chain
+                          step's effort overrides it for that task. Unset leaves the runtime's
+                          own configuration alone.
+                        enum:
+                        - low
+                        - medium
+                        - high
+                        - xhigh
+                        - max
                         type: string
                       egress:
                         description: |-

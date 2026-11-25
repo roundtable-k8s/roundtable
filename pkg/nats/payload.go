@@ -40,6 +40,11 @@ type TaskPayload struct {
 	// checked it suits the knight's runtime. Empty means the knight default.
 	Model string `json:"model,omitempty"`
 
+	// Effort overrides the knight's reasoning effort for this task only
+	// (optional): low, medium, high, xhigh or max. Empty means the knight's
+	// configured effort (KNIGHT_EFFORT, from Knight.spec.effort).
+	Effort string `json:"effort,omitempty"`
+
 	// Attempt is the 1-based attempt number of this task (optional; absent
 	// means 1). Set by a manual retry (#397); the dead-letter stream keys its
 	// de-duplication on taskId and attempt.

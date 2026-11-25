@@ -188,6 +188,13 @@ type ChainStep struct {
 	// +optional
 	Model string `json:"model,omitempty"`
 
+	// effort overrides the knight's reasoning effort for this step.
+	// Empty means the knight's own spec.effort. Sent to the knight in the task
+	// payload; the runtime maps it onto its own setting.
+	// +kubebuilder:validation:Enum=low;medium;high;xhigh;max
+	// +optional
+	Effort string `json:"effort,omitempty"`
+
 	// fallbackRef names the Knight (same namespace) that re-runs this step
 	// when the primary knight refuses the task for plan quota (#321: a
 	// claude-knight plan-reserve refusal, "Task refused: Claude plan ...
@@ -362,6 +369,13 @@ type ChainLoopStep struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$`
 	// +optional
 	Model string `json:"model,omitempty"`
+
+	// effort overrides the knight's reasoning effort for this body step (same as ChainStep.effort).
+	// Empty means the knight's own spec.effort. Sent to the knight in the task
+	// payload; the runtime maps it onto its own setting.
+	// +kubebuilder:validation:Enum=low;medium;high;xhigh;max
+	// +optional
+	Effort string `json:"effort,omitempty"`
 
 	// retry configures retries of a failed body task (per round), overriding
 	// the chain-level retryPolicy.

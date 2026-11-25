@@ -909,6 +909,9 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		env = append(env, corev1.EnvVar{Name: "BROWSER_CDP_URL", Value: "http://localhost:9222"})
 	}
 
+	if b.knight.Spec.Effort != "" {
+		env = append(env, corev1.EnvVar{Name: "KNIGHT_EFFORT", Value: b.knight.Spec.Effort})
+	}
 	env = append(env, corev1.EnvVar{Name: "ROUNDTABLE_TABLE", Value: KnightTable(b.knight)})
 	cardsBucket := b.cardsBucket
 	if cardsBucket == "" {
