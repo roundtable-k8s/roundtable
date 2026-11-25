@@ -2436,6 +2436,77 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              derivedEgress:
+                description: |-
+                  derivedEgress lists the egress destinations the operator derived from
+                  spec.mcpServers[].url and added to the knight's egress policy, beyond
+                  what spec.egress lists itself. Unset when nothing was derived.
+                properties:
+                  allowedHosts:
+                    description: |-
+                      allowedHosts are external hosts reached by an MCP server URL, each on
+                      the URL's port.
+                    items:
+                      description: |-
+                        EgressHost is a decoded allowedHosts entry: a host name, optionally with its
+                        own ports.
+                      properties:
+                        host:
+                          description: Host is an exact host name or a "*." wildcard
+                            prefix.
+                          type: string
+                        ports:
+                          description: |-
+                            Ports are the TCP ports allowed to Host. Empty uses the knight's
+                            allowedPorts.
+                          items:
+                            format: int32
+                            type: integer
+                          type: array
+                      required:
+                      - host
+                      type: object
+                    type: array
+                  allowedServices:
+                    description: allowedServices are in-cluster Services reached by
+                      an MCP server URL.
+                    items:
+                      description: EgressService is an in-cluster Service a knight
+                        may reach on the listed ports.
+                      properties:
+                        name:
+                          description: name is the Service's name.
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        namespace:
+                          description: namespace is the Service's namespace. Empty
+                            means the knight's namespace.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        ports:
+                          description: |-
+                            ports are the Service ports the knight dials. The policy allows each
+                            port's targetPort on the Service's pods (policies apply after the
+                            Service address is translated to a pod); a port the Service does not
+                            expose is allowed as a pod port as-is.
+                          items:
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          maxItems: 8
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-type: set
+                      required:
+                      - name
+                      - ports
+                      type: object
+                    type: array
+                type: object
               lastTaskAt:
                 description: lastTaskAt is the timestamp of the last completed task.
                 format: date-time

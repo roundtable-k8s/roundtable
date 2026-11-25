@@ -478,6 +478,7 @@ func newCiliumEgressPolicy(k *aiv1alpha1.Knight) *unstructured.Unstructured {
 func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Knight) error {
 	allow := r.egressAllowlistOf(k)
 	if allow == nil {
+		k.Status.DerivedEgress = nil
 		meta.RemoveStatusCondition(&k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		return r.deleteEgressPolicies(ctx, k)
 	}
@@ -486,6 +487,14 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	// An EgressAllowlist holds decoded hosts, so the raw entries are parsed here.
 	hosts, dropped := aiv1alpha1.ParseEgressHosts(k.Spec.Egress.AllowedHosts)
 	allow.AllowedHosts = hosts
+	// Destinations of the knight's MCP servers are allowed on top; an invalid
+	// URL is reported like an invalid host, with the rest still rendered.
+	derived, mcpErrs := deriveMCPEgress(k)
+	k.Status.DerivedEgress = derived
+	if derived != nil {
+		allow.AllowedHosts = append(allow.AllowedHosts, derived.AllowedHosts...)
+	}
+	dropped = append(dropped, mcpErrs...)
 	var err error
 	var services []EgressServicePeer
 	var missing []string
@@ -543,7 +552,7 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		}
 	}
 	if err == nil && len(dropped) > 0 {
-		err = fmt.Errorf("%d allowedHosts entr(ies) invalid and not allowed: %w", len(dropped), errors.Join(dropped...))
+		err = fmt.Errorf("%d allowedHosts or mcpServers entr(ies) invalid and not allowed: %w", len(dropped), errors.Join(dropped...))
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = aiv1alpha1.ReasonEgressPolicyFailed
 		cond.Message = fmt.Sprintf("%s; the policy was rendered from the valid entries only (%s)", err.Error(), cond.Message)
@@ -578,14 +587,18 @@ type egressServiceRef struct {
 	Ports     []int32
 }
 
-// egressServiceRefs returns the Services in the knight's spec.egress (empty
-// namespace = the knight's), merged by namespace/name and sorted.
+// egressServiceRefs returns the Services in the knight's spec.egress and the
+// ones derived from its mcpServers URLs (empty namespace = the knight's), merged by namespace/name and sorted.
 func egressServiceRefs(k *aiv1alpha1.Knight) []egressServiceRef {
 	if k.Spec.Egress == nil {
 		return nil
 	}
 	byKey := map[types.NamespacedName][]int32{}
-	for _, s := range k.Spec.Egress.AllowedServices {
+	services := slices.Clone(k.Spec.Egress.AllowedServices)
+	if derived, _ := deriveMCPEgress(k); derived != nil {
+		services = append(services, derived.AllowedServices...)
+	}
+	for _, s := range services {
 		ns := s.Namespace
 		if ns == "" {
 			ns = k.Namespace
@@ -688,6 +701,7 @@ func (r *KnightReconciler) serviceKnightRequests(ctx context.Context, obj client
 	var reqs []reconcile.Request
 	for i := range knights.Items {
 		k := knightpkg.WithTableDefaults(ctx, r.Client, &knights.Items[i])
+		knightpkg.ApplyIsolationDefaults(k, r.Isolation)
 		if k.Spec.Isolation.EgressOptedOut() {
 			continue
 		}
