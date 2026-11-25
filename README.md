@@ -227,6 +227,21 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
     └────────────────────────────────────────────┘
 ```
 
+## Observability
+
+Every component (operator, invoke gateway, dashboard, knights) emits
+OpenTelemetry traces through a collector to the backend you choose, with one
+trace per Chain run or Mission and the table on every signal. The chart also
+ships Grafana dashboards and Prometheus alerts. Prompts and responses are
+captured by default and redacted; turn that off per install or per table.
+
+- [docs/observability.md](docs/observability.md): architecture, the
+  `telemetry` values, exporter examples (Tempo, Jaeger, OTLP SaaS), TraceQL
+  queries, dashboards, alerts and privacy
+- [examples/observability/](examples/observability/): try it with Jaeger
+- [Telemetry conventions](docs/design/telemetry-conventions.md): span,
+  attribute and metric names
+
 ## Ecosystem
 
 | Component | Description | Repo |
