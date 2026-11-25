@@ -184,7 +184,10 @@ What lands there, on `<prefix>.dlq.<knight>.<taskId>`:
   (scale to zero, crash loop, deleted knight). The operator's durable consumer
   `roundtable-dead-letter` on that stream loads the original task by
   `stream_seq`, writes the entry with the original payload and then deletes the
-  never-acked message from the tasks stream. If the original is already gone,
+  never-acked message from the tasks stream, but only once the knight's own
+  `lost: true` result has arrived or about 45 s have passed since the advisory
+  (the knights load the same message to publish that result, which the chain
+  controller, planner and gateway wait for). If the original is already gone,
   the entry carries what the advisory has (knight from the consumer name, the
   sequence) and `taskId: seq-<n>`.
 - **Failed tasks**: every result with `success: false` (or an `error` and no

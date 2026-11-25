@@ -45,7 +45,16 @@ const (
 	// successMemory is how long a success:true result is remembered, so an
 	// entry captured just after it (advisory processed late) starts resolved.
 	successMemory = 15 * time.Minute
+	// DefaultLostGrace is how long after a max-deliveries advisory the
+	// original task is kept in the tasks stream, so the knights' own
+	// watchLostTasks can still load it and publish their lost result (which
+	// the chain controller, planner and gateway rely on).
+	DefaultLostGrace = 45 * time.Second
 )
+
+// errDeletePending means the entry was captured but the original task is
+// still within its grace period; the advisory is retried later.
+var errDeletePending = errors.New("original task kept until the knight's lost report or the grace period")
 
 // TableConfig identifies one RoundTable's NATS layout.
 type TableConfig struct {
@@ -57,6 +66,17 @@ type TableConfig struct {
 	TasksStream string
 	// MaxAge is the dead-letter stream retention; 0 means DefaultMaxAge.
 	MaxAge time.Duration
+	// LostGrace is how long after the advisory the original task is kept
+	// unless the knight's lost result arrives earlier; 0 means
+	// DefaultLostGrace.
+	LostGrace time.Duration
+}
+
+func (c TableConfig) lostGrace() time.Duration {
+	if c.LostGrace > 0 {
+		return c.LostGrace
+	}
+	return DefaultLostGrace
 }
 
 func (c TableConfig) maxAge() time.Duration {
@@ -121,6 +141,7 @@ func (m *Manager) Ensure(nc *nats.Conn, key string, cfg TableConfig) error {
 		now:     m.now,
 		success: map[string]time.Time{},
 		open:    map[string]string{},
+		lost:    map[string]time.Time{},
 	}
 	if err := w.start(); err != nil {
 		w.stop()
@@ -265,6 +286,7 @@ type watcher struct {
 	mu      sync.Mutex
 	success map[string]time.Time // task ID -> when a success result was seen
 	open    map[string]string    // KV key -> knight, for open entries
+	lost    map[string]time.Time // task ID -> when a knight's lost result was seen
 }
 
 func (w *watcher) start() error {
@@ -349,6 +371,10 @@ func (w *watcher) pullLoop(ctx context.Context) {
 		}
 		for _, msg := range msgs {
 			if err := w.handleAdvisory(msg.Data); err != nil {
+				if errors.Is(err, errDeletePending) {
+					_ = msg.NakWithDelay(retryDelay)
+					continue
+				}
 				w.log.Error(err, "Dead-letter advisory not processed, will retry")
 				_ = msg.NakWithDelay(retryDelay)
 				continue
@@ -359,7 +385,9 @@ func (w *watcher) pullLoop(ctx context.Context) {
 }
 
 // handleAdvisory dead-letters the task behind one max-deliveries advisory and
-// removes the never-acked original from the tasks stream.
+// removes the never-acked original from the tasks stream once the knight has
+// reported it lost or the grace period since the advisory has passed. It
+// returns errDeletePending while the original is still being kept.
 func (w *watcher) handleAdvisory(data []byte) error {
 	var adv advisory
 	if err := json.Unmarshal(data, &adv); err != nil || adv.StreamSeq == 0 {
@@ -402,6 +430,13 @@ func (w *watcher) handleAdvisory(data []byte) error {
 		return err
 	}
 	if orig != nil {
+		// The knights load the original on the same advisory to learn the
+		// task ID for their lost result; deleting it first would leave the
+		// chain controller, planner and gateway waiting for their timeout.
+		if !w.lostReported(e.TaskID) && !adv.Timestamp.IsZero() &&
+			w.now().Sub(adv.Timestamp) < w.cfg.lostGrace() {
+			return errDeletePending
+		}
 		if err := w.js.DeleteMsg(stream, adv.StreamSeq); err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
 			return fmt.Errorf("delete lost task %s/%d: %w", stream, adv.StreamSeq, err)
 		}
@@ -418,6 +453,16 @@ func (w *watcher) onResult(msg *nats.Msg) {
 	taskID := r.GetTaskID()
 	if taskID == "" {
 		taskID = strings.TrimPrefix(msg.Subject, w.cfg.Prefix+".results.")
+	}
+	if r.Lost {
+		w.mu.Lock()
+		w.lost[taskID] = w.now()
+		for id, t := range w.lost {
+			if w.now().Sub(t) > successMemory {
+				delete(w.lost, id)
+			}
+		}
+		w.mu.Unlock()
 	}
 	if r.succeeded() {
 		if err := w.resolve(taskID); err != nil {
@@ -525,6 +570,13 @@ func (w *watcher) resolve(taskID string) error {
 	}
 	w.log.Info("Dead-letter entry resolved by a later success", "taskId", taskID)
 	return nil
+}
+
+func (w *watcher) lostReported(taskID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	t, ok := w.lost[taskID]
+	return ok && w.now().Sub(t) <= successMemory
 }
 
 func (w *watcher) succeededRecently(taskID string) bool {

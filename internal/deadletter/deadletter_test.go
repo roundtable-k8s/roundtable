@@ -62,6 +62,13 @@ func runNATS(t *testing.T) *natsserver.Server {
 // streams (as ensureStreams creates them) and a running dead-letter watcher.
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvGrace(t, time.Second)
+}
+
+// newEnvGrace is newEnv with the given grace period before a lost task's
+// original is deleted from the tasks stream.
+func newEnvGrace(t *testing.T, grace time.Duration) *env {
+	t.Helper()
 	ns := runNATS(t)
 	nc, err := nats.Connect(ns.ClientURL())
 	if err != nil {
@@ -78,7 +85,7 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	e := &env{t: t, nc: nc, js: js, m: NewManager(logr.Discard()),
-		cfg: TableConfig{Table: testTable, Prefix: testPrefix, TasksStream: testTasks}}
+		cfg: TableConfig{Table: testTable, Prefix: testPrefix, TasksStream: testTasks, LostGrace: grace}}
 	if err := e.m.Ensure(nc, "roundtable/"+testTable, e.cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +214,7 @@ func TestLostTaskDeadLetteredWithoutKnightListening(t *testing.T) {
 	if got.Attempt != 1 || got.StreamSeq == 0 || got.DeadLetteredAt.IsZero() {
 		t.Fatalf("entry attempt/seq/time = %d/%d/%v", got.Attempt, got.StreamSeq, got.DeadLetteredAt)
 	}
-	eventually(t, 5*time.Second, "original removed from tasks stream", func() bool {
+	eventually(t, 15*time.Second, "original removed from tasks stream", func() bool {
 		info, err := e.js.StreamInfo(testTasks)
 		return err == nil && info.State.Msgs == 0
 	})
@@ -402,5 +409,44 @@ func TestNamesAndTokens(t *testing.T) {
 	}
 	if knightFromConsumer("Galahad-consumer") != "galahad" || knightFromSubject("p.tasks.d.galahad") != "galahad" {
 		t.Error("knight name mapping")
+	}
+}
+
+func (e *env) tasksMsgs() uint64 {
+	e.t.Helper()
+	info, err := e.js.StreamInfo(testTasks)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return info.State.Msgs
+}
+
+// The original must stay readable so the knights' own lost report (which
+// loads it on the same advisory) still works.
+func TestLostTaskKeptDuringGraceThenDeleted(t *testing.T) {
+	e := newEnvGrace(t, 3*time.Second)
+	e.loseTask("tristan", natspkg.TaskPayload{TaskID: "t-grace", Task: "work"})
+	eventually(t, 10*time.Second, "entry", func() bool { return len(e.entries()) == 1 })
+	if n := e.tasksMsgs(); n != 1 {
+		t.Fatalf("original deleted immediately (msgs=%d); knights could not report it lost", n)
+	}
+	eventually(t, 15*time.Second, "original removed after grace", func() bool { return e.tasksMsgs() == 0 })
+	if n := len(e.entries()); n != 1 {
+		t.Fatalf("entries = %d, want 1", n)
+	}
+}
+
+func TestLostTaskDeletedOnceKnightReportedLost(t *testing.T) {
+	e := newEnvGrace(t, time.Hour)
+	e.loseTask("galahad", natspkg.TaskPayload{TaskID: "t-reported", Task: "work"})
+	eventually(t, 10*time.Second, "entry", func() bool { return len(e.entries()) == 1 })
+	time.Sleep(300 * time.Millisecond)
+	if n := e.tasksMsgs(); n != 1 {
+		t.Fatalf("original deleted before the knight reported (msgs=%d)", n)
+	}
+	e.publishResult(map[string]any{"task_id": "t-reported", "knight": "Galahad", "success": false, "lost": true, "error": "lost"})
+	eventually(t, 15*time.Second, "original removed after lost report", func() bool { return e.tasksMsgs() == 0 })
+	if n := len(e.entries()); n != 1 {
+		t.Fatalf("entries = %d, want 1", n)
 	}
 }

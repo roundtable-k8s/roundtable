@@ -193,6 +193,8 @@ type advisory struct {
 	Consumer   string `json:"consumer"`
 	StreamSeq  uint64 `json:"stream_seq"`
 	Deliveries uint64 `json:"deliveries"`
+	// Timestamp is when the advisory was raised.
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // result is a knight result as published on <prefix>.results.<taskId>.
