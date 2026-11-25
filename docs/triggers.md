@@ -593,6 +593,53 @@ works with the gateway disabled too.
 - `spec.input` is not used (put the text in `target.knight.task`), and a
   github source needs a Chain target.
 
+## Mission target
+
+`target.mission` creates a [Mission](../docs/phase-3-dynamic-missions.md) per
+firing, so a goal can run on a schedule or on an event ("every Monday, review
+the backlog"; "when this alert fires, investigate").
+[`examples/trigger-mission.yaml`](../examples/trigger-mission.yaml) is a weekly
+read-only review.
+
+```yaml
+spec:
+  roundTableRef: {name: fleet-a}   # required: the Mission runs on this table
+  target:
+    mission:
+      objective: "Investigate {{ .Event.Data.alert }}"   # Go template, same data as spec.input
+      successCriteria: "A root cause and a proposed fix"  # also a template
+      metaMission: true             # default; false needs chains
+      recruitExisting: false
+      planner: {knight: "", context: "", maxChains: 4, maxKnights: 2}
+      costBudgetUSD: "2.50"         # required, > 0
+      timeoutSeconds: 3600
+      ttlSeconds: 86400
+      knights: [kay]                # pre-seed existing knights
+      chains: [{name: triage, input: "..."}]
+```
+
+Exactly one of `target.chainRef`, `target.knight` and `target.mission` may be
+set. The Mission is built by the gateway's mission builder
+(`POST /v1/missions`), so both paths validate the same fields and caps
+(budget, ttl, timeout, references); a request it rejects is recorded in
+`status.recentFirings` and not retried. There is no way to give an image,
+Secret, pod or knight spec.
+
+- A firing creates a Mission named `<trigger>-<8 hex of the dedupe key>` on
+  `roundTableRef`, labelled `ai.roundtable.io/trigger=<trigger>` and owned by the
+  Trigger. The Mission runs, then cleans itself up after `ttlSeconds`.
+- `status.recentFirings[].run` is the Mission name; once it finishes `phase` is
+  its final phase and `outcome` is `succeeded`, `failed` or `lost` (expired or
+  already cleaned up).
+- `status.activeRuns` lists the unfinished Missions: `Forbid` skips while one
+  exists, `Allow` caps them at `maxActive`. `Replace` is rejected.
+- Dedupe: a Mission already named for the key means it fired; this holds until
+  the Mission is cleaned up.
+- A firing while the RoundTable is at `policies.maxMissions` is recorded as
+  skipped with the reason, not left queued in `Pending`.
+- `spec.input` is not used (put the text in `target.mission.objective`), and a
+  github source needs a Chain target.
+
 ## Spec
 
 | Field | Meaning |

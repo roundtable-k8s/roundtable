@@ -476,9 +476,9 @@ type TriggerScheduleSource struct {
 	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
 }
 
-// TriggerTarget is what a firing starts: a run of a Chain, or one task sent
-// to a knight. Exactly one is set.
-// +kubebuilder:validation:XValidation:rule="[has(self.chainRef), has(self.knight)].filter(x, x).size() == 1",message="set exactly one of target.chainRef or target.knight"
+// TriggerTarget is what a firing starts: a run of a Chain, one task sent to
+// a knight, or a Mission. Exactly one is set.
+// +kubebuilder:validation:XValidation:rule="[has(self.chainRef), has(self.knight), has(self.mission)].filter(x, x).size() == 1",message="set exactly one of target.chainRef, target.knight or target.mission"
 type TriggerTarget struct {
 	// chainRef names the Chain (same namespace) a firing starts a copy of.
 	// +optional
@@ -489,6 +489,116 @@ type TriggerTarget struct {
 	// KV bucket), and status.recentFirings[].run is its task ID.
 	// +optional
 	Knight *TriggerKnightTarget `json:"knight,omitempty"`
+
+	// mission creates a Mission per firing on the Trigger's RoundTable
+	// (spec.roundTableRef), named <trigger>-<short firing key>, owned by the
+	// Trigger. status.recentFirings[].run is the Mission name.
+	// +optional
+	Mission *TriggerMissionTarget `json:"mission,omitempty"`
+}
+
+// TriggerMissionTarget is one Mission created per firing. It carries the
+// fields the gateway's POST /v1/missions accepts and is validated the same
+// way: no image, Secret, pod or knight spec, or RoundTable template.
+type TriggerMissionTarget struct {
+	// objective is a Go template rendered into the Mission's objective, with
+	// the same data as spec.input (.Event, .Trigger). An objective that
+	// renders empty fires nothing.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=16384
+	// +required
+	Objective string `json:"objective"`
+
+	// successCriteria is a Go template (same data as objective) saying how
+	// to tell whether the Mission succeeded.
+	// +kubebuilder:validation:MaxLength=16384
+	// +optional
+	SuccessCriteria string `json:"successCriteria,omitempty"`
+
+	// metaMission lets a planner knight break the objective into chains
+	// (planner overrides apply). Defaults to true; false needs chains.
+	// +kubebuilder:default=true
+	// +optional
+	MetaMission *bool `json:"metaMission,omitempty"`
+
+	// recruitExisting lets the Mission use standing knights.
+	// +optional
+	RecruitExisting bool `json:"recruitExisting,omitempty"`
+
+	// planner overrides the RoundTable's planner knight and limits.
+	// +optional
+	Planner *TriggerMissionPlanner `json:"planner,omitempty"`
+
+	// costBudgetUSD is the Mission's spending cap, a decimal greater than 0
+	// (for example "2.50"), at most the gateway's maximum.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=32
+	// +required
+	CostBudgetUSD string `json:"costBudgetUSD"`
+
+	// timeoutSeconds is how long the Mission may run before it fails
+	// (60-86400); unset uses the gateway's default.
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+
+	// ttlSeconds is how long until the Mission is cleaned up (60-604800);
+	// unset uses the gateway's default.
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=604800
+	// +optional
+	TTLSeconds int32 `json:"ttlSeconds,omitempty"`
+
+	// knights pre-seeds existing Knights (same namespace) taking part.
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Knights []string `json:"knights,omitempty"`
+
+	// chains pre-seeds existing Chains (same namespace) the Mission runs.
+	// +kubebuilder:validation:MaxItems=20
+	// +optional
+	Chains []TriggerMissionChain `json:"chains,omitempty"`
+}
+
+// TriggerMissionPlanner overrides the planner of a meta-mission.
+type TriggerMissionPlanner struct {
+	// knight is an existing Knight to plan with; empty uses the
+	// RoundTable's planner.
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Knight string `json:"knight,omitempty"`
+
+	// context is extra information for the planner.
+	// +kubebuilder:validation:MaxLength=65536
+	// +optional
+	Context string `json:"context,omitempty"`
+
+	// maxChains is the most chains the planner may generate (1-20).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	MaxChains int32 `json:"maxChains,omitempty"`
+
+	// maxKnights is the most ephemeral knights the planner may generate (1-50).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxKnights int32 `json:"maxKnights,omitempty"`
+}
+
+// TriggerMissionChain names an existing Chain and its input for the Mission.
+type TriggerMissionChain struct {
+	// name of the Chain (same namespace).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +required
+	Name string `json:"name"`
+
+	// input for this run of the Chain.
+	// +kubebuilder:validation:MaxLength=65536
+	// +optional
+	Input string `json:"input,omitempty"`
 }
 
 // TriggerKnightTarget is one task sent to a knight per firing.
@@ -552,6 +662,10 @@ type TriggerConcurrency struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.source.nats) || has(self.roundTableRef)",message="roundTableRef is required for source.nats"
 // +kubebuilder:validation:XValidation:rule="!has(self.source.webhook) || has(self.roundTableRef)",message="roundTableRef is required for source.webhook"
 // +kubebuilder:validation:XValidation:rule="!has(self.source.github) || has(self.roundTableRef)",message="roundTableRef is required for source.github"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.mission) || has(self.roundTableRef)",message="roundTableRef is required for target.mission: the Mission runs on that RoundTable"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.mission) || !has(self.source.github)",message="target.mission is not supported with source.github: use target.chainRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.mission) || !has(self.input) || size(self.input) == 0",message="spec.input is for target.chainRef: put a Mission's text in target.mission.objective"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.mission) || !has(self.concurrency) || !has(self.concurrency.policy) || self.concurrency.policy != 'Replace'",message="concurrency.policy Replace is not supported with target.mission: a created Mission is not withdrawn"
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.source.github)",message="target.knight is not supported with source.github: use target.chainRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.input) || size(self.input) == 0",message="spec.input is for target.chainRef: put a knight's text in target.knight.task"
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.concurrency) || !has(self.concurrency.policy) || self.concurrency.policy != 'Replace'",message="concurrency.policy Replace is not supported with target.knight: a sent task cannot be withdrawn"
@@ -604,7 +718,8 @@ type TriggerSpec struct {
 	// ttlSecondsAfterFinished deletes a finished run this long after it
 	// completed. Its dedupe key is forgotten then too. 0 keeps finished runs.
 	// A knight target's tasks are kept as long as the gateway keeps task
-	// records (gateway.taskTTL) instead.
+	// records (gateway.taskTTL) instead; a mission target's Missions clean
+	// themselves up (target.mission.ttlSeconds).
 	// +kubebuilder:default=86400
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -625,10 +740,16 @@ type TriggerFiring struct {
 	// +optional
 	Run string `json:"run,omitempty"`
 
-	// outcome is how the firing's task ended, once known (knight target):
-	// succeeded, failed or lost.
+	// outcome is how the firing's task or Mission ended, once known (knight
+	// and mission targets): succeeded, failed or lost (a task without a
+	// result in time; a Mission that expired or was deleted).
 	// +optional
 	Outcome TriggerFiringOutcome `json:"outcome,omitempty"`
+
+	// phase is the final phase of the Mission the firing created (mission
+	// target), once it finished.
+	// +optional
+	Phase string `json:"phase,omitempty"`
 
 	// skipReason says why the firing started nothing.
 	// +optional
@@ -689,6 +810,7 @@ type TriggerStatus struct {
 // +kubebuilder:resource:shortName=trg,categories=roundtable
 // +kubebuilder:printcolumn:name="Chain",type=string,JSONPath=`.spec.target.chainRef.name`
 // +kubebuilder:printcolumn:name="Knight",type=string,JSONPath=`.spec.target.knight.name`
+// +kubebuilder:printcolumn:name="Mission",type=string,JSONPath=`.spec.target.mission.objective`,priority=1
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Last Fired",type=date,JSONPath=`.status.lastFiredAt`
 // +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`

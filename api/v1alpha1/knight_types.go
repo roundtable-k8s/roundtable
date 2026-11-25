@@ -51,6 +51,10 @@ const (
 	// CreatedByGateway is the LabelCreatedBy value of gateway-created resources.
 	CreatedByGateway = "gateway"
 
+	// CreatedByTrigger is the LabelCreatedBy value of Missions a Trigger's
+	// mission target creates.
+	CreatedByTrigger = "trigger"
+
 	// AnnotationCaller records who asked the invoke gateway for a chain run or
 	// mission: "<namespace>/<name>" for a Kubernetes ServiceAccount, the
 	// token's name for a static gateway token.

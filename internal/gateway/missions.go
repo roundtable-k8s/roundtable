@@ -264,6 +264,14 @@ func (s *Service) StartMission(ctx context.Context, req StartMissionRequest) (*M
 	return s.missionView(ctx, m, true), nil
 }
 
+// BuildMission validates a mission request and turns it into a Mission
+// (not yet created), checking every reference. The operator's Trigger
+// mission target uses it too, so both paths validate the same fields; the
+// caller sets the Mission's name, labels and owner.
+func (s *Service) BuildMission(ctx context.Context, ns string, req StartMissionRequest) (*aiv1alpha1.Mission, error) {
+	return s.buildMission(ctx, ns, req)
+}
+
 // buildMission turns a request into a Mission, checking every reference.
 func (s *Service) buildMission(ctx context.Context, ns string, req StartMissionRequest) (*aiv1alpha1.Mission, error) {
 	o := s.Opts.Missions

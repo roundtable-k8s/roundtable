@@ -165,7 +165,17 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if latest.Spec.Target.Knight != nil {
+	if latest.Spec.Target.Mission != nil {
+		// A mission target's active runs are its unfinished Missions.
+		active, pollAfter, err := r.collectMissions(ctx, latest, now)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		latest.Status.ActiveRuns = active
+		if pollAfter > 0 && (gcAfter == 0 || pollAfter < gcAfter) {
+			gcAfter = pollAfter
+		}
+	} else if latest.Spec.Target.Knight != nil {
 		// A knight target's active runs are its tasks without a result.
 		pollAfter, err := r.collectTasks(ctx, latest, now)
 		if err != nil {
@@ -188,7 +198,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		latest.Status.LastPolledAt = nil
 	}
 	patch := client.MergeFrom(orig)
-	if latest.Spec.Source.GitHub != nil || latest.Spec.Target.Knight != nil {
+	if latest.Spec.Source.GitHub != nil || latest.Spec.Target.Knight != nil || latest.Spec.Target.Mission != nil {
 		// The poll loop writes GitHubReady concurrently, and a firing adds
 		// a knight target's task to activeRuns: don't overwrite them with a
 		// stale list (a conflict requeues).
@@ -337,6 +347,25 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 		if reason != "" {
 			return notReady(reason, "%s", msg)
 		}
+	case target.Mission != nil:
+		if _, err := parseTriggerTemplate("objective", target.Mission.Objective); err != nil {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "target.mission.objective: %v", err)
+		}
+		if _, err := parseTriggerTemplate("successCriteria", target.Mission.SuccessCriteria); err != nil {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "target.mission.successCriteria: %v", err)
+		}
+		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" || trg.Spec.RoundTableRef == nil ||
+			trg.Spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec,
+				"target.mission needs roundTableRef and does not support source.github, spec.input or concurrency.policy Replace")
+		}
+		rt := &aiv1alpha1.RoundTable{}
+		if err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Spec.RoundTableRef.Name}, rt); err != nil {
+			if apierrors.IsNotFound(err) {
+				return notReady(aiv1alpha1.ReasonTriggerTargetNotFound, "RoundTable %q not found", trg.Spec.RoundTableRef.Name)
+			}
+			return ctrl.Result{}, metav1.Condition{}, err
+		}
 	case target.ChainRef != nil:
 		chain := &aiv1alpha1.Chain{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err != nil {
@@ -346,7 +375,7 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 			return ctrl.Result{}, metav1.Condition{}, err
 		}
 	default:
-		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "set target.chainRef or target.knight")
+		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "set target.chainRef, target.knight or target.mission")
 	}
 
 	switch src := trg.Spec.Source; {
@@ -652,6 +681,17 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	firing.Key = truncate(key, 253)
 
+	if trg.Spec.Target.Mission != nil {
+		return r.fireMission(ctx, missionFiring{
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
+			skip: skip,
+			deduped: func(format string, args ...any) (triggerOutcome, error) {
+				metricOutcome = triggerOutcomeDeduped
+				defer func() { metricOutcome = "" }()
+				return skip(triggerHandled, format, args...)
+			},
+		})
+	}
 	if trg.Spec.Target.Knight != nil {
 		return r.fireKnight(ctx, knightFiring{
 			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
@@ -992,6 +1032,7 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Trigger{}).
 		Owns(&aiv1alpha1.Chain{}).
+		Owns(&aiv1alpha1.Mission{}).
 		Named("trigger").
 		Complete(r)
 }
