@@ -149,6 +149,17 @@ var KnightIsolated = prometheus.NewGaugeVec(
 	[]string{"table", "knight", "reason"},
 )
 
+// KnightConsumerReady is 1 when the knight's durable task consumer exists
+// with the expected config (ConsumerReady=True) and 0 otherwise, so an alert
+// can catch a knight KEDA cannot wake. Labels: table, knight.
+var KnightConsumerReady = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_knight_consumer_ready",
+		Help: "1 when the knight's durable task consumer exists with the expected config, 0 otherwise, by table and knight",
+	},
+	[]string{"table", "knight"},
+)
+
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
@@ -162,6 +173,7 @@ func init() {
 		TableCostUSD,
 		WarmPoolKnights,
 		KnightIsolated,
+		KnightConsumerReady,
 		TasksDeadLetteredTotal,
 		DeadLettersOpen,
 	)

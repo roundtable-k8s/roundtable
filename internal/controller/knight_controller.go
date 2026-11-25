@@ -85,6 +85,11 @@ type KnightReconciler struct {
 	// PendingSource overrides the consumer backlog lookup (tests).
 	PendingSource ConsumerPendingSource
 
+	// Consumers overrides the NATS client the knight's durable task consumer
+	// is created, adopted and deleted with (tests). Nil uses NATS; without
+	// either the operator leaves consumers to the runtimes.
+	Consumers KnightConsumerClient
+
 	// Now overrides the clock used for wake-latency measurement (tests).
 	Now func() time.Time
 
@@ -181,7 +186,11 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if knight.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(knight, knightFinalizer) {
 			log.Info("Cleaning up knight resources", "knight", knight.Name)
-			// NATS consumer cleanup would go here (future: NATS admin API call)
+			// The task consumer goes first; retried for a bounded time.
+			if done, retry := r.finalizeConsumer(ctx, knight); !done {
+				return ctrl.Result{RequeueAfter: retry}, nil
+			}
+			deleteConsumerMetric(knight)
 			// Best effort: the RoundTable reconcile also drops the card (#393).
 			if err := deleteKnightCards(ctx, r.Client, r.NATS, r.CardsBucket, knight); err != nil {
 				log.Error(err, "Failed to delete agent cards")
@@ -227,10 +236,19 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	knightpkg.ApplyIsolationDefaults(knight, r.Isolation)
 	knight.Status.Model = knight.Spec.Model
 
+	// The durable task consumer exists whatever the runtime state (parked,
+	// suspended, scaled to zero), so tasks queue and KEDA can wake the knight.
+	// A failure sets ConsumerReady=False and retries; it does not fail the
+	// rest of the reconcile.
+	consumerChanged, consumerErr := r.reconcileConsumer(ctx, knight)
+	if consumerErr != nil {
+		log.Info("Knight consumer not ready", "error", consumerErr.Error())
+	}
+
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
 	// with a clear condition and leave any existing runtime resources alone.
 	if knight.Spec.Runtime == runtimeSandbox && !r.SandboxEnabled {
-		return r.reconcileRuntimeUnavailable(ctx, knight)
+		return retryConsumer(consumerErr)(r.reconcileRuntimeUnavailable(ctx, knight, consumerChanged))
 	}
 
 	// Resolve the runtime backend for this knight
@@ -252,9 +270,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			if err := backend.Suspend(ctx, knight); err != nil {
 				return ctrl.Result{}, err
 			}
-			return r.finishSuspended(ctx, knight)
+			return retryConsumer(consumerErr)(ctrl.Result{}, r.finishSuspended(ctx, knight))
 		}
-		return r.reconcileSuspended(ctx, knight)
+		return retryConsumer(consumerErr)(ctrl.Result{}, r.reconcileSuspended(ctx, knight))
 	}
 
 	// (After the suspend step, so a parked knight can still be suspended.)
@@ -268,7 +286,8 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			}
 			msg := runtimeClassNotFoundMessage(name, rcSource)
 			changed := r.setIsolated(knight, metav1.ConditionFalse, aiv1alpha1.ReasonRuntimeClassNotFound, msg)
-			return r.parkKnightWith(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound, msg, changed)
+			return retryConsumer(consumerErr)(
+				r.parkKnightWith(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound, msg, changed || consumerChanged))
 		}
 	}
 
@@ -376,7 +395,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if mcpHeadersPending && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
+	if (mcpHeadersPending || consumerErr != nil) && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
 		nixRequeue = RequeueSlow
 	}
 
@@ -462,13 +481,15 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 // reconcileRuntimeUnavailable marks a knight whose runtime backend is not
 // enabled (runtime: sandbox without the agent-sandbox v1beta1 API) and
 // requeues slowly. The status is only written when it changes.
-func (r *KnightReconciler) reconcileRuntimeUnavailable(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
+func (r *KnightReconciler) reconcileRuntimeUnavailable(
+	ctx context.Context, knight *aiv1alpha1.Knight, changed bool,
+) (ctrl.Result, error) {
 	msg := fmt.Sprintf("Knight requests runtime %q, but the operator started without the sandbox backend: "+
 		"%s Sandbox is not served by the API server (or --enable-sandbox-backend=false). "+
 		"Install agent-sandbox v1.0.0 or later and restart the operator, or set spec.runtime to \"deployment\".",
 		knight.Spec.Runtime, rtruntime.SandboxGVK.GroupVersion())
 
-	return r.parkKnight(ctx, knight, aiv1alpha1.ReasonSandboxUnavailable, msg)
+	return r.parkKnightWith(ctx, knight, aiv1alpha1.ReasonSandboxUnavailable, msg, changed)
 }
 
 // runtimeClassOf returns the knight's effective RuntimeClass name ("" if none).
@@ -479,15 +500,10 @@ func runtimeClassOf(knight *aiv1alpha1.Knight) string {
 	return *knight.Spec.RuntimeClassName
 }
 
-// parkKnight marks a knight RuntimeAvailable=False / Available=False with the
-// given reason, leaves its runtime resources alone and requeues slowly. The
-// status is only written when it changes.
-func (r *KnightReconciler) parkKnight(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string) (ctrl.Result, error) {
-	return r.parkKnightWith(ctx, knight, reason, msg, false)
-}
-
-// parkKnightWith is parkKnight that also writes the status when the caller
-// already changed it (changed).
+// parkKnightWith marks a knight RuntimeAvailable=False / Available=False
+// with the given reason, leaves its runtime resources alone and requeues
+// slowly. The status is written when it changes or when the caller already
+// changed it (changed).
 func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string, changed bool) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	changed = meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
@@ -526,7 +542,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 }
 
 // reconcileSuspended scales the deployment to 0 and updates status.
-func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
+func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
 
 	deploy := &appsv1.Deployment{}
@@ -536,7 +552,7 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 		if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas != zero {
 			deploy.Spec.Replicas = &zero
 			if err := r.Update(ctx, deploy); err != nil {
-				return ctrl.Result{}, err
+				return err
 			}
 			log.Info("Suspended knight — scaled to 0", "knight", knight.Name)
 			r.Recorder.Event(knight, corev1.EventTypeNormal, "Suspended", "Knight suspended")
@@ -554,14 +570,14 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 	})
 	knight.Status.ObservedGeneration = knight.Generation
 	if err := r.Status().Update(ctx, knight); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // finishSuspended updates the Knight status after the RuntimeBackend has suspended it.
-func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
+func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	knight.Status.Phase = aiv1alpha1.KnightPhaseSuspended
 	knight.Status.Ready = false
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
@@ -573,9 +589,9 @@ func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alph
 	})
 	knight.Status.ObservedGeneration = knight.Generation
 	if err := r.Status().Update(ctx, knight); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // reconcileConfigMap creates/updates the knight's tool and prompt configuration.

@@ -189,8 +189,10 @@ spec:
 ## Delivery and failure
 
 **At most once.** A task is delivered to one knight once and never re-run
-automatically (whiteboard decision 12, #377). The runtimes create their tasks
-consumer with `max_deliver: 1` and ack only after the result is published, so a
+automatically (whiteboard decision 12, #377). Each knight's tasks consumer has
+`max_deliver: 1` (the operator owns it, see
+[ARCHITECTURE.md](ARCHITECTURE.md#jetstream-topology-who-owns-what)) and the
+runtimes ack only after the result is published, so a
 knight that dies mid-task does not get the task again. Retry is a manual action
 (#397). `spec.nats.maxDeliver` is deprecated and ignored: a value above 1 has no
 effect, and the operator says so with a `MaxDeliverIgnored` warning event and a

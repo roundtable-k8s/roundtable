@@ -579,50 +579,6 @@ func TestResultConsumerConfig(t *testing.T) {
 	}
 }
 
-// TestConsumerConfig tests consumer configuration
-func TestConsumerConfig(t *testing.T) {
-	tests := []struct {
-		name   string
-		config ConsumerConfig
-		valid  bool
-	}{
-		{
-			name: "valid durable consumer",
-			config: ConsumerConfig{
-				Durable:       "test-consumer",
-				FilterSubject: "test.tasks.>",
-				AckPolicy:     AckExplicit,
-			},
-			valid: true,
-		},
-		{
-			name: "minimal config",
-			config: ConsumerConfig{
-				Durable: "consumer",
-			},
-			valid: true,
-		},
-		{
-			name: "empty durable name",
-			config: ConsumerConfig{
-				Durable: "",
-			},
-			valid: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.valid && tt.config.Durable == "" {
-				t.Error("valid config should have non-empty durable name")
-			}
-			if !tt.valid && tt.config.Durable != "" {
-				t.Error("invalid config should have empty durable name")
-			}
-		})
-	}
-}
-
 // TestJSONPublishErrors tests JSON marshaling error handling
 func TestJSONPublishErrors(t *testing.T) {
 	config := Config{

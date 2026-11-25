@@ -68,9 +68,10 @@ func (f *fakeNATSClient) DeleteStream(context.Context, string) error            
 func (f *fakeNATSClient) StreamInfo(context.Context, string) (*jetstream.StreamInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (f *fakeNATSClient) EnsureConsumer(context.Context, string, string, natspkg.ConsumerConfig) error {
-	return nil
+func (f *fakeNATSClient) EnsureConsumer(context.Context, string, jetstream.ConsumerConfig) (natspkg.ConsumerAction, error) {
+	return natspkg.ConsumerUnchanged, nil
 }
+func (f *fakeNATSClient) RemoveConsumer(context.Context, string, string) error { return nil }
 func (f *fakeNATSClient) DeleteConsumer(context.Context, string, string) error { return nil }
 func (f *fakeNATSClient) FetchOne(context.Context, string, jetstream.ConsumerConfig, time.Duration) (jetstream.Msg, error) {
 	return nil, fmt.Errorf("not implemented")

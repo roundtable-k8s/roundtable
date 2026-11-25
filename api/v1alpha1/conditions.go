@@ -130,6 +130,26 @@ const (
 	// for ConditionKnightDeprecatedFieldsUsed.
 	ReasonKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
 
+	// ConditionKnightConsumerReady reports whether the knight's durable task
+	// consumer (<Knight>-consumer on spec.nats.stream) exists with the
+	// expected config. The operator creates, updates and adopts it, so it
+	// exists while the knight is scaled to zero, and deletes it with the
+	// Knight. Absent when the operator runs without NATS.
+	ConditionKnightConsumerReady = "ConsumerReady"
+
+	// ReasonConsumerReady means the consumer exists with the expected config.
+	ReasonConsumerReady = "ConsumerReady"
+
+	// ReasonConsumerNATSUnavailable means the operator could not reach NATS.
+	ReasonConsumerNATSUnavailable = "NATSUnavailable"
+
+	// ReasonConsumerStreamNotFound means spec.nats.stream does not exist.
+	ReasonConsumerStreamNotFound = "StreamNotFound"
+
+	// ReasonConsumerFailed means JetStream rejected the consumer create or
+	// update.
+	ReasonConsumerFailed = "ConsumerFailed"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.

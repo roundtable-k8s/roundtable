@@ -75,11 +75,18 @@ type Client interface {
 	// StreamInfo returns information about a stream.
 	StreamInfo(ctx context.Context, name string) (*jetstream.StreamInfo, error)
 
-	// EnsureConsumer creates or updates a JetStream consumer.
-	EnsureConsumer(ctx context.Context, stream, name string, config ConsumerConfig) error
+	// EnsureConsumer makes the durable consumer config.Durable on stream
+	// match config: it creates it, updates mutable fields in place, or
+	// recreates it only when a field NATS cannot update differs. A consumer
+	// that already matches is not written.
+	EnsureConsumer(ctx context.Context, stream string, config jetstream.ConsumerConfig) (ConsumerAction, error)
 
 	// DeleteConsumer deletes a JetStream consumer (best effort).
 	DeleteConsumer(ctx context.Context, stream, consumer string) error
+
+	// RemoveConsumer deletes a JetStream consumer and returns the error, if
+	// any. A consumer or stream that is already gone is not an error.
+	RemoveConsumer(ctx context.Context, stream, consumer string) error
 
 	// FetchOne creates or updates the pull consumer described by config on
 	// stream, waits up to wait for one message and acknowledges it before
@@ -379,27 +386,6 @@ func (c *JetStreamClient) StreamInfo(ctx context.Context, name string) (*jetstre
 		return nil, fmt.Errorf("failed to get stream info for %s: %w", name, err)
 	}
 	return info, nil
-}
-
-// EnsureConsumer creates or updates a JetStream consumer.
-func (c *JetStreamClient) EnsureConsumer(ctx context.Context, stream, name string, config ConsumerConfig) error {
-	js, err := c.jetStream()
-	if err != nil {
-		return err
-	}
-
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       name,
-		FilterSubject: config.FilterSubject,
-	}
-	if config.AckPolicy == AckExplicit {
-		consumerConfig.AckPolicy = jetstream.AckExplicitPolicy
-	}
-
-	if _, err := js.CreateOrUpdateConsumer(ctx, stream, consumerConfig); err != nil {
-		return fmt.Errorf("failed to create consumer %s on stream %s: %w", name, stream, err)
-	}
-	return nil
 }
 
 // DeleteConsumer deletes a JetStream consumer. Errors are logged, not
