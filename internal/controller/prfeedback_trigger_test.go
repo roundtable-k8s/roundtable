@@ -517,8 +517,15 @@ var _ = Describe("GitHub source state selectors", func() {
 		Expect(items[2].FailedChecks).To(Equal([]githubFailedCheck{{Name: "test", URL: "https://github.com/o/r/actions/runs/1/job/21", Summary: "1 failed"}}))
 		Expect(items[2].eventKey()).To(Equal("o/r#2@ci:c2"))
 		Expect(items[3].FailureKind).To(Equal(failureKindMergeQueue))
-		Expect(items[3].eventKey()).To(Equal("o/r#3@merge-queue:c3:mg3"))
+		Expect(items[3].eventKey()).To(Equal("o/r#3@merge-queue:mg3"))
 		Expect(items[3].Author).To(Equal("dunce-bot[bot]"))
+
+		By("keeping the key stable when the head changes but the failed merge group stays newest")
+		gh.pulls[2] = fakePull(3, "c3-new")
+		again := list(src())
+		Expect(again).To(HaveLen(3))
+		Expect(again[3].HeadSHA).To(Equal("c3-new"))
+		Expect(again[3].eventKey()).To(Equal(items[3].eventKey()))
 
 		By("round-tripping the payload through an event")
 		ev, err := githubEvent(items[2], "s", time.Now())

@@ -74,16 +74,17 @@ func githubStateSource(src *aiv1alpha1.TriggerGitHubSource) bool {
 }
 
 // eventKey is the item's event key: its key, plus the failure kind and head
-// commit (and merge group commit) for a state-selector item.
+// commit (merge group commit for merge-queue failures) for a state-selector item.
 func (i githubItem) eventKey() string {
 	if i.GitHubPRState == nil {
 		return i.key()
 	}
-	k := i.key() + "@" + i.FailureKind + ":" + i.HeadSHA
-	if i.MergeGroupSHA != "" {
-		k += ":" + i.MergeGroupSHA
+	// A merge-queue rejection belongs to its merge group, not to the head it
+	// was queued from: keying on the head would re-fire after the fix push.
+	if i.FailureKind == failureKindMergeQueue && i.MergeGroupSHA != "" {
+		return i.key() + "@" + i.FailureKind + ":" + i.MergeGroupSHA
 	}
-	return k
+	return i.key() + "@" + i.FailureKind + ":" + i.HeadSHA
 }
 
 // githubCandidate is an item a poll selected, with the issue form the skip
