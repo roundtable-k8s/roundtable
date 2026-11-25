@@ -363,6 +363,8 @@ const (
 )
 
 // KnightWorkspace configures the knight's workspace storage at /data.
+// +kubebuilder:validation:XValidation:rule="!has(self.fromSnapshot) || !has(self.existingClaim)",message="workspace.fromSnapshot cannot be combined with workspace.existingClaim"
+// +kubebuilder:validation:XValidation:rule="!has(self.fromSnapshot) || !has(self.mode) || self.mode != 'ephemeral'",message="workspace.fromSnapshot cannot be combined with workspace.mode: ephemeral"
 type KnightWorkspace struct {
 	// mode selects the workspace storage.
 	// "pvc" (default) uses one persistent ReadWriteOnce volume, so the knight
@@ -387,6 +389,16 @@ type KnightWorkspace struct {
 	// +kubebuilder:default="1Gi"
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
+
+	// fromSnapshot is the name of a VolumeSnapshot in the knight's namespace to
+	// create the workspace PVC from (restore or fork). It only applies when the
+	// PVC is created: an existing PVC is left alone. The PVC is not created
+	// until the snapshot exists and is readyToUse. The PVC size is the larger
+	// of size and the snapshot's restoreSize. Not allowed with existingClaim
+	// or mode: ephemeral. Needs the snapshot.storage.k8s.io/v1 API.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	FromSnapshot string `json:"fromSnapshot,omitempty"`
 
 	// snapshots configures on-demand CSI VolumeSnapshots of the workspace PVC
 	// (mode: pvc only). A snapshot is taken when the ai.roundtable.io/snapshot

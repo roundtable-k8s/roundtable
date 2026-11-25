@@ -1,0 +1,28 @@
+# Fork a knight: galahad-fork starts with a copy of galahad's workspace.
+# First take a snapshot of galahad's workspace (needs the CSI external
+# snapshotter):
+#   kubectl annotate knight galahad ai.roundtable.io/snapshot=fork-1
+#   kubectl get volumesnapshots -l roundtable.io/knight=galahad
+# then put the VolumeSnapshot name in fromSnapshot. The PVC is only created
+# once the snapshot is readyToUse (condition WorkspaceReady=False,
+# SnapshotNotReady until then); an existing PVC is never replaced.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: galahad-fork
+  namespace: roundtable
+spec:
+  domain: security
+  model: claude-sonnet-4-20250514
+  skills:
+    - security
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.security-fork.>"
+  workspace:
+    size: 2Gi
+    # Name of a VolumeSnapshot of galahad's workspace, in this namespace.
+    fromSnapshot: galahad-ws-1767225600

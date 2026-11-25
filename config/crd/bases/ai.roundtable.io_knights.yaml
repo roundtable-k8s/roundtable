@@ -1077,6 +1077,16 @@ spec:
                       With more than one replica the claim must be ReadWriteMany; the operator
                       cannot check access modes, so a ReadWriteOnce claim leaves a stuck pod.
                     type: string
+                  fromSnapshot:
+                    description: |-
+                      fromSnapshot is the name of a VolumeSnapshot in the knight's namespace to
+                      create the workspace PVC from (restore or fork). It only applies when the
+                      PVC is created: an existing PVC is left alone. The PVC is not created
+                      until the snapshot exists and is readyToUse. The PVC size is the larger
+                      of size and the snapshot's restoreSize. Not allowed with existingClaim
+                      or mode: ephemeral. Needs the snapshot.storage.k8s.io/v1 API.
+                    maxLength: 253
+                    type: string
                   mode:
                     default: pvc
                     description: |-
@@ -1120,6 +1130,13 @@ spec:
                         type: integer
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: workspace.fromSnapshot cannot be combined with workspace.existingClaim
+                  rule: '!has(self.fromSnapshot) || !has(self.existingClaim)'
+                - message: 'workspace.fromSnapshot cannot be combined with workspace.mode:
+                    ephemeral'
+                  rule: '!has(self.fromSnapshot) || !has(self.mode) || self.mode !=
+                    ''ephemeral'''
             required:
             - domain
             - nats
