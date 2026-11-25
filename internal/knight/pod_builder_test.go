@@ -366,6 +366,95 @@ var _ = Describe("PodBuilder", func() {
 		})
 	})
 
+	Describe("telemetry env", func() {
+		appEnv := func() map[string]corev1.EnvVar {
+			spec := builder.Build(context.Background())
+			m := map[string]corev1.EnvVar{}
+			for _, c := range spec.Containers {
+				if c.Name == "app" {
+					for _, e := range c.Env {
+						m[e.Name] = e
+					}
+				} else {
+					for _, e := range c.Env {
+						Expect(e.Name).NotTo(HavePrefix("OTEL_"))
+					}
+				}
+			}
+			return m
+		}
+		tel := Telemetry{
+			Endpoint: "http://otel:4318", Protocol: "http/protobuf",
+			Sampler: "parentbased_traceidratio", SamplerArg: "0.5",
+			ResourceAttrs: "deployment.environment=prod",
+		}
+
+		It("injects endpoint, sampler and knight attributes", func() {
+			knight.Labels = map[string]string{aiv1alpha1.LabelRoundTable: "camelot"}
+			builder.WithTelemetry(tel)
+			env := appEnv()
+			Expect(env["OTEL_EXPORTER_OTLP_ENDPOINT"].Value).To(Equal("http://otel:4318"))
+			Expect(env["OTEL_TRACES_SAMPLER"].Value).To(Equal("parentbased_traceidratio"))
+			Expect(env["OTEL_TRACES_SAMPLER_ARG"].Value).To(Equal("0.5"))
+			Expect(env["ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT"].Value).To(Equal("true"))
+			Expect(env).NotTo(HaveKey("OTEL_SERVICE_NAME"))
+			Expect(env).NotTo(HaveKey("OTEL_SDK_DISABLED"))
+			attrs := env["OTEL_RESOURCE_ATTRIBUTES"].Value
+			Expect(attrs).To(ContainSubstring("deployment.environment=prod"))
+			Expect(attrs).To(ContainSubstring("roundtable.knight=test-knight"))
+			Expect(attrs).To(ContainSubstring("roundtable.table=camelot"))
+			Expect(attrs).To(ContainSubstring("roundtable.knight.runtime=pi"))
+			Expect(attrs).To(ContainSubstring("k8s.namespace.name=$(POD_NAMESPACE)"))
+			Expect(attrs).To(ContainSubstring("k8s.pod.name=$(POD_NAME)"))
+			Expect(attrs).To(ContainSubstring("k8s.node.name=$(NODE_NAME)"))
+			Expect(attrs).NotTo(ContainSubstring("roundtable.mission"))
+			Expect(env["POD_NAME"].ValueFrom).NotTo(BeNil())
+		})
+
+		It("reports the claude runtime for claude-knight images", func() {
+			knight.Spec.Image = "ghcr.io/roundtable-k8s/claude-knight:latest"
+			builder.WithTelemetry(tel)
+			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.knight.runtime=claude"))
+		})
+
+		It("adds the mission for mission knights", func() {
+			knight.Labels = map[string]string{aiv1alpha1.LabelMission: "m1"}
+			builder.WithTelemetry(tel)
+			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.mission=m1"))
+			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.table=none"))
+		})
+
+		It("sets only OTEL_SDK_DISABLED=true without an endpoint", func() {
+			builder.WithTelemetry(Telemetry{})
+			env := appEnv()
+			Expect(env).To(HaveKeyWithValue("OTEL_SDK_DISABLED", corev1.EnvVar{Name: "OTEL_SDK_DISABLED", Value: "true"}))
+			for name := range env {
+				if strings.HasPrefix(name, "OTEL_") {
+					Expect(name).To(Equal("OTEL_SDK_DISABLED"))
+				}
+			}
+		})
+
+		It("lets the knight's own env win", func() {
+			knight.Spec.Env = []corev1.EnvVar{{Name: "OTEL_TRACES_SAMPLER", Value: "always_off"}}
+			builder.WithTelemetry(tel)
+			spec := builder.Build(context.Background())
+			n := 0
+			for _, c := range spec.Containers {
+				if c.Name != "app" {
+					continue
+				}
+				for _, e := range c.Env {
+					if e.Name == "OTEL_TRACES_SAMPLER" {
+						n++
+						Expect(e.Value).To(Equal("always_off"))
+					}
+				}
+			}
+			Expect(n).To(Equal(1))
+		})
+	})
+
 	Describe("ROUNDTABLE_TABLE", func() {
 		envOf := func() map[string]string {
 			spec := builder.Build(context.Background())

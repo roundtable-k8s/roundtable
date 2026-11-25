@@ -58,6 +58,7 @@ type PodBuilder struct {
 	sidecars   []corev1.Container
 	env        []corev1.EnvVar
 	envFrom    []corev1.EnvFromSource
+	telemetry  *Telemetry // nil: read from the operator environment
 	defaultImg string
 	security   PodSecurity
 	reader     client.Reader
@@ -82,6 +83,13 @@ func NewPodBuilder(k *aiv1alpha1.Knight, defaultImage string) *PodBuilder {
 // DefaultPodSecurity when not called.
 func (b *PodBuilder) WithSecurity(s PodSecurity) *PodBuilder {
 	b.security = s.OrDefault()
+	return b
+}
+
+// WithTelemetry overrides the telemetry settings (default: the operator's
+// OTEL_* environment, read once).
+func (b *PodBuilder) WithTelemetry(t Telemetry) *PodBuilder {
+	b.telemetry = &t
 	return b
 }
 
@@ -907,6 +915,15 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		cardsBucket = natspkg.DefaultCardsBucket
 	}
 	env = append(env, corev1.EnvVar{Name: "KNIGHT_CARDS_BUCKET", Value: cardsBucket})
+
+	// OTEL_* env (operator-wide telemetry config), skipping any var the
+	// knight sets itself via spec.env or the builder's extra env.
+	tel := processTelemetry()
+	if b.telemetry != nil {
+		tel = *b.telemetry
+	}
+	userEnv := append(append([]corev1.EnvVar{}, b.knight.Spec.Env...), b.env...)
+	env = mergeMissingEnv(env, tel.Env(b.knight, image), userEnv)
 
 	// Append user-defined env vars
 	env = append(env, b.knight.Spec.Env...)
