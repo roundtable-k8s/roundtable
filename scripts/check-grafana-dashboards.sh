@@ -33,7 +33,7 @@ withcrd="$(render --set dashboards.enabled=true --set dashboards.grafanaOperator
 [ "$(count GrafanaDashboard "$withcrd")" = 2 ] || fail "grafanaOperator with CRD: expected 2 GrafanaDashboards"
 [ "$(cms "$withcrd")" = 0 ] || fail "grafanaOperator with CRD still renders ConfigMaps"
 
-known='roundtable_knights roundtable_warm_pool_knights roundtable_table_cost_usd
+known='roundtable_knights roundtable_table_cost_usd
 roundtable_knight_tasks_total roundtable_knight_active_tasks roundtable_knight_nats_connected
 roundtable_knight_llm_cost_usd_total roundtable_knight_llm_tokens_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas'

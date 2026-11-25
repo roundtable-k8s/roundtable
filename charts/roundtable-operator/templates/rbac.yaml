@@ -36,9 +36,6 @@ rules:
   - apiGroups: ["agents.x-k8s.io"]
     resources: ["sandboxes", "sandboxes/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["extensions.agents.x-k8s.io"]
-    resources: ["sandboxtemplates", "sandboxclaims", "sandboxwarmpools"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Knight scaling — KEDA ScaledObjects and PodDisruptionBudgets
   - apiGroups: ["keda.sh"]
     resources: ["scaledobjects"]

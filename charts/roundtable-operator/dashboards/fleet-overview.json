@@ -81,7 +81,7 @@
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 12,
+        "w": 24,
         "h": 8
       },
       "targets": [
@@ -93,39 +93,6 @@
           },
           "expr": "sum by (phase) (roundtable_knights{namespace=~\"$namespace\", table=~\"$table\"})",
           "legendFormat": "{{phase}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 2,
-      "type": "timeseries",
-      "title": "Warm pool knights",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (state) (roundtable_warm_pool_knights{namespace=~\"$namespace\", table=~\"$table\"})",
-          "legendFormat": "{{state}}"
         }
       ],
       "fieldConfig": {

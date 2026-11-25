@@ -345,13 +345,13 @@ and `gh` shim read the file on every call. The token is never put in the env.
 
 Resolution order: the Knight's own `spec.github.tokenSecretRef`, then the
 RoundTable named by the knight's `ai.roundtable.io/round-table` label (or the
-older `ai.roundtable.io/table` label). Mission and warm-pool knights get the
+older `ai.roundtable.io/table` label). Mission knights get the
 table's value copied into their spec, and a mission's ephemeral RoundTable
 inherits it from `spec.roundTableRef`.
 
 ### Grafana dashboards
 
-Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overview** (knights by phase, warm pool, tasks/min, error rate, active tasks, NATS connectivity, KEDA desired vs actual replicas) and **Cost and tokens** (spend and tokens per model and knight, 24h spend, spend per table). They query the `roundtable_*` metric names and need Prometheus scraping the operator and the knights, plus kube-state-metrics for the replicas panel. Every dashboard has a `datasource`, a `namespace` and a multi-select `table` variable; the `table` filter is applied to every `roundtable_*` query. The KEDA panel is filtered by namespace only, since HPAs carry no table label. Per-chain cost is not shown: knight metrics carry no chain label.
+Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overview** (knights by phase, tasks/min, error rate, active tasks, NATS connectivity, KEDA desired vs actual replicas) and **Cost and tokens** (spend and tokens per model and knight, 24h spend, spend per table). They query the `roundtable_*` metric names and need Prometheus scraping the operator and the knights, plus kube-state-metrics for the replicas panel. Every dashboard has a `datasource`, a `namespace` and a multi-select `table` variable; the `table` filter is applied to every `roundtable_*` query. The KEDA panel is filtered by namespace only, since HPAs carry no table label. Per-chain cost is not shown: knight metrics carry no chain label.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

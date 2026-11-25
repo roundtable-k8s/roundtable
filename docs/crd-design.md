@@ -109,7 +109,7 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
 
 **Reconciliation Loop:**
 
-1. **Assembling** — Create ephemeral Knight CRs (owned by Mission). Wait for all knights to reach Ready phase.
+1. **Assembling** — Create ephemeral Knight CRs (owned by Mission) directly, always cold. Wait for all knights to reach Ready phase.
 2. **Briefing** — Publish briefing message to `mission-{name}.briefing` NATS subject. Configure additional NATS consumers on participating knights for mission-scoped subjects.
 3. **Active** — Execute setup chains, then active chains. Monitor for objective completion or timeout.
 4. **Complete** — Set `Succeeded` or `Failed`. Execute teardown chains.
@@ -126,6 +126,28 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
 - Ephemeral Knight CRs (ownerRef → Mission)
 - NATS consumers for mission-scoped subjects
 - ConfigMap with mission context
+
+**Mission knights and the sandbox runtime (#483):**
+
+Each mission knight is created as `<mission>-<knight>` with an owner
+reference to the Mission, so deleting the mission deletes the knight. It
+carries the annotation `ai.roundtable.io/shutdown-time`, set to the mission's
+expiry (`status.expiresAt` = start + `spec.ttlSeconds`). When the knight's
+template (or inline `ephemeralSpec`) says `runtime: sandbox`, the knight is one
+bare agent-sandbox `Sandbox`, and the Sandbox backend copies the annotation into
+`Sandbox.spec.shutdownTime`. agent-sandbox stops the pod at that time even if
+the mission's cleanup never runs; the default `shutdownPolicy: Retain` keeps the
+Sandbox object until the Knight is deleted. Deployment knights ignore the
+annotation.
+
+> **Breaking change (#483):** `RoundTable.spec.warmPool` and
+> `RoundTable.status.warmPool` are removed, along with the
+> `roundtable_warm_pool_knights` metric and its dashboard panel. The pool never
+> reused a running pod: a claim created a new mission knight and deleted the
+> warm one. Remove `warmPool` from RoundTable manifests before applying the new
+> CRD. Warm starts will come back through upstream agent-sandbox pools
+> (`SandboxTemplate` + `SandboxWarmPool`) if the cold-start spike in #368
+> supports them.
 
 **Mission results (`spec.retainResults`, default true):**
 

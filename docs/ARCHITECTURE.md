@@ -42,8 +42,8 @@
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │         Knight Pods (pi-knight runtime)              │  │
 │  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐      │  │
-│  │  │Galahad │ │Tristan │ │ Warm-1 │ │ Warm-2 │      │  │
-│  │  │security│ │ infra  │ │(idle)  │ │(idle)  │      │  │
+│  │  │Galahad │ │Tristan │ │msn-a-  │ │msn-a-  │      │  │
+│  │  │security│ │ infra  │ │ scout  │ │ coder  │      │  │
 │  │  └───┬────┘ └───┬────┘ └────────┘ └────────┘      │  │
 │  │      │          │                                    │  │
 │  │      ▼          ▼                                    │  │
@@ -62,7 +62,7 @@
 Each CRD has a dedicated reconciler following the standard Kubernetes controller pattern:
 
 **KnightReconciler**: Task consumer → ConfigMap → PVC → Runtime (Deployment or Sandbox) → Status
-**RoundTableReconciler**: Knight discovery → Health aggregation → NATS streams → Warm pool → Cost check
+**RoundTableReconciler**: Knight discovery → Health aggregation → NATS streams → Agent cards → Cost check
 **ChainReconciler**: Step ordering → Task dispatch → Output collection → Template rendering → Next step
 **MissionReconciler**: State machine (Pending → Provisioning → Planning → Assembling → Briefing → Active → Cleanup)
 
@@ -165,22 +165,16 @@ Pending → Provisioning → Planning → Assembling → Briefing → Active →
 | **Pending** | Validate spec, set initial status |
 | **Provisioning** | Create ephemeral RoundTable + NATS streams |
 | **Planning** | (meta-missions) Dispatch to planner knight, receive Chain definitions |
-| **Assembling** | Create/claim knights, wait for Ready. **Warm pool claiming happens here.** |
+| **Assembling** | Create mission knights, wait for Ready |
 | **Briefing** | Publish mission context to all knights via NATS |
 | **Active** | Execute chains, track costs, monitor timeout |
 | **CleaningUp** | Delete ephemeral resources, preserve results if configured |
 
-## Warm Pool
+## Mission Knights
 
-RoundTable maintains pre-warmed knight pods for instant mission startup:
+The assembler creates each ephemeral mission knight directly as `<mission>-<knight>`, owned by the Mission, so deleting the mission deletes the knight. Every mission knight carries the annotation `ai.roundtable.io/shutdown-time`: the mission's expiry (`status.expiresAt`, start + `ttlSeconds`). A knight whose template says `runtime: sandbox` is one bare agent-sandbox `Sandbox`, and the Sandbox backend copies that annotation into the Sandbox's `spec.shutdownTime`, so its pod stops at the mission's expiry even if cleanup never runs. Mission knights always start cold.
 
-1. **RoundTable controller** creates N warm knights (labeled `warm-pool=true`, `claimed=false`)
-2. **Mission assembler** tries to claim warm knights before cold-starting
-3. **Optimistic locking** prevents race conditions — conflict → try next candidate
-4. **Pool replenishes** automatically (burst-limited to 5 per reconcile)
-5. **Idle recycling** deletes warm knights older than `maxIdleTimeSeconds`
-
-Result: Mission spin-up goes from ~30s to <1s.
+There is no warm pool: `RoundTable.spec.warmPool` was removed in #483 because it never reused a running pod. Warm starts will come back through upstream agent-sandbox pools (`SandboxTemplate` + `SandboxWarmPool`) if the cold-start spike in #368 supports them.
 
 ## Chain Execution
 
@@ -216,7 +210,6 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_knights` | gauge | `table`, `phase` |
 | `roundtable_missions` | gauge | `table`, `phase` |
 | `roundtable_table_cost_usd` | gauge | `table` |
-| `roundtable_warm_pool_knights` | gauge | `table`, `state` |
 | `roundtable_knight_isolated` | gauge | `table`, `knight`, `reason` (1 for the current `Isolated` condition reason) |
 | `roundtable_knight_consumer_ready` | gauge | `table`, `knight` (1 when the knight's task consumer exists with the expected config, else 0) |
 | `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` (`succeeded`, `partially_succeeded`, `failed`) |
