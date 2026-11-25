@@ -9,5 +9,4 @@ knights may and may not do. Each recipe is applied on top of a RoundTable (see
 |---|---|
 | [`homelab-watch/`](homelab-watch/) | An Alertmanager webhook Trigger starts a read-only triage chain on a knight ([triggers docs](../../docs/triggers.md#webhook-source)) |
 | [`personal-fleet/`](personal-fleet/) | Three persona knights (research, infrastructure, editor) on a shared notes volume, a scheduled `morning-briefing` Chain and an on-demand chain run through the gateway |
-
-More recipes (the dev factory) follow.
+| [`dev-factory/`](dev-factory/) | Issue to merged PR: GitHub Triggers for pickup and PR feedback, the PR pipeline and feedback Chains, post-run checks as chain steps, a lead knight and a coder |

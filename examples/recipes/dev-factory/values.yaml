@@ -1,0 +1,25 @@
+# Chart values for the dev factory: the pr-pipeline Chain in chain post-run
+# mode and the PR feedback Chain. Pass with `helm upgrade --install -f`
+# next to your other values. See README.md.
+prPipeline:
+  enabled: true
+  name: pr-pipeline
+  roundTableRef:
+    name: roundtable-dev
+  lead: rt-lead
+  coders:
+    - rt-coder
+  # The planner's model tiers: cheap for small, well-specified issues, deep
+  # for design-heavy ones. Every fix round runs fixModel.
+  implementModels: [cheap, fast, deep]
+  fixModel: deep
+  maxIterations: 3
+  # Optional: a coder on a runtime with its own quota, used when rt-coder
+  # refuses a task for plan quota. Must be a knight in this namespace.
+  # fallbackCoder: rt-coder-glm
+  # The chain's verify, close_parent and handback steps do the post-run
+  # checks. The table must say postRun: chain too (roundtable.yaml).
+  postRun: chain
+  feedback:
+    enabled: true
+    name: pr-pipeline-feedback
