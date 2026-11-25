@@ -775,7 +775,7 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 		Task:      taskStr,
 		Model:     model,
 	}
-	seq, err := r.publishTask(nc, knight.Spec.Domain, knightName, payload)
+	seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, knightName, payload)
 	if err != nil {
 		log.Error(err, "Failed to publish loop body task", "body", body.Name)
 		return

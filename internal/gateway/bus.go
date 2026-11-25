@@ -35,7 +35,7 @@ type Bus interface {
 	Watch(subject string) (ResultWatch, error)
 	// Publish publishes a task through JetStream, so it fails when no
 	// stream captures the subject.
-	Publish(subject string, payload natspkg.TaskPayload) error
+	Publish(ctx context.Context, subject string, payload natspkg.TaskPayload, table string) error
 	// LastResult returns the newest message on subject in stream, or nil
 	// when there is none. It never consumes or acknowledges the message.
 	LastResult(stream, subject string) ([]byte, error)
@@ -124,12 +124,12 @@ func (w *natsWatch) Next(ctx context.Context) ([]byte, error) {
 func (w *natsWatch) Close() { _ = w.sub.Unsubscribe() }
 
 // Publish implements Bus.
-func (b *NATSBus) Publish(subject string, payload natspkg.TaskPayload) error {
+func (b *NATSBus) Publish(ctx context.Context, subject string, payload natspkg.TaskPayload, table string) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	if _, err := b.js.Publish(subject, data); err != nil {
+	if _, err := natspkg.PublishTraced(ctx, b.js, subject, data, payload.TaskID, natspkg.WithTable(table)); err != nil {
 		return fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return nil

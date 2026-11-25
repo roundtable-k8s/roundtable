@@ -246,3 +246,7 @@ var _ = Describe("Chain per-step model override", func() {
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "got %v", err)
 	})
 })
+
+func (f *modelFakeNATS) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
+	return f.PublishJSONSeq(subject, v)
+}

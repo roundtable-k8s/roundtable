@@ -406,7 +406,7 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 	}
 	subject := natspkg.TaskSubject(prefix, plannerKnight.Spec.Domain, plannerKnight.Name)
 
-	if err := natsClient.PublishJSON(subject, payload); err != nil {
+	if err := natsClient.PublishJSONCtx(ctx, subject, payload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
 		return "", fmt.Errorf("failed to publish planning task: %w", err)
 	}
 
@@ -644,6 +644,10 @@ func (p *Planner) pollPlanningResult(ctx context.Context, mission *aiv1alpha1.Mi
 		log.V(1).Info("Planning result not yet available", "taskID", taskID)
 		return nil, nil
 	}
+
+	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg,
+		natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef)), natspkg.WithTaskID(taskID))
+	consumeSpan.End()
 
 	if err := msg.Ack(); err != nil {
 		log.Error(err, "Failed to ack planning result message")

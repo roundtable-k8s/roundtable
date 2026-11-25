@@ -691,3 +691,7 @@ var _ = Describe("Chain forEach fan-out", func() {
 		Expect(cond.Message).To(ContainSubstring(fmt.Sprintf("%q must be listed in dependsOn", "plan")))
 	})
 })
+
+func (f *fanoutFakeNATS) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
+	return f.PublishJSONSeq(subject, v)
+}

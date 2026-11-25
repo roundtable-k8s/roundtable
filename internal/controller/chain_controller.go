@@ -64,6 +64,8 @@ type natsConfig struct {
 	// per-step model overrides. Not NATS config, but resolved from the same
 	// RoundTable lookup.
 	ModelAliases map[string]string
+	// Table is the RoundTable name, used for the roundtable.table span attribute.
+	Table string
 }
 
 // ChainReconciler reconciles a Chain object.
@@ -986,7 +988,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Model:     model,
 		}
 
-		seq, err := r.publishTask(nc, knight.Spec.Domain, knightName, payload)
+		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, knightName, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -1209,19 +1211,20 @@ func (r *ChainReconciler) resolveNATSConfig(ctx context.Context, chain *aiv1alph
 		TasksStream:   rt.Spec.NATS.TasksStream,
 		ResultsStream: rt.Spec.NATS.ResultsStream,
 		ModelAliases:  rt.Spec.ModelAliases,
+		Table:         rt.Name,
 	}, nil
 }
 
 // publishTask publishes a task to NATS JetStream.
 // It returns the tasks-stream sequence of the published message.
-func (r *ChainReconciler) publishTask(nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
+func (r *ChainReconciler) publishTask(ctx context.Context, nc natsConfig, domain, knightName string, payload natspkg.TaskPayload) (uint64, error) {
 	natsCli, err := r.natsClient()
 	if err != nil {
 		return 0, err
 	}
 
 	subject := natspkg.TaskSubject(nc.SubjectPrefix, domain, knightName)
-	return natsCli.PublishJSONSeq(subject, payload)
+	return natsCli.PublishJSONSeqCtx(ctx, subject, payload, natspkg.WithTable(nc.Table))
 }
 
 // defaultMaxQueueWait bounds how long a task may sit unclaimed by its knight.
@@ -1411,6 +1414,9 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 	if err := msg.Ack(); err != nil {
 		log.Error(err, "Failed to ack result message")
 	}
+
+	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg, natspkg.WithTable(nc.Table), natspkg.WithTaskID(taskID))
+	consumeSpan.End()
 
 	log.Info("Received result message", "subject", msg.Subject, "dataLen", len(msg.Data))
 
@@ -1662,7 +1668,7 @@ func (r *ChainReconciler) writeArtifact(ctx context.Context, nc natsConfig, chai
 	}
 
 	subject := natspkg.TaskSubject(nc.SubjectPrefix, knight.Spec.Domain, knightName)
-	return natsCli.PublishJSON(subject, payload)
+	return natsCli.PublishJSONCtx(ctx, subject, payload, natspkg.WithTable(nc.Table))
 }
 
 // emptyOutputSentinels are placeholder strings produced by knights when an

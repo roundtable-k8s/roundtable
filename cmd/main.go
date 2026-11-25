@@ -22,6 +22,9 @@ import (
 	"os"
 	"strings"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+
 	_ "time/tzdata" // embed IANA tz database: the distroless base image has none
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -116,6 +119,13 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Register the W3C trace-context + baggage propagator unless something
+	// else already installed one, so trace context crosses NATS.
+	if len(otel.GetTextMapPropagator().Fields()) == 0 {
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{}, propagation.Baggage{}))
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
