@@ -1213,9 +1213,11 @@ var _ = Describe("Trigger controller", func() {
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(10 * time.Second)
 			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due, "")
 
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-cron") }, "10s").Should(HaveLen(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }).Should(HaveLen(1))
 			ms := missionsOf("mt-cron")
-			Expect(ms).To(HaveLen(1))
 			m := ms[0]
 			Expect(m.Name).To(HavePrefix("mt-cron-"))
 			Expect(m.Spec.Objective).To(Equal("Review mt-cron at " + due.Format("15:04")))
@@ -1233,7 +1235,8 @@ var _ = Describe("Trigger controller", func() {
 
 			// The next time finds the Mission unfinished: nothing is created.
 			clock = due.Add(5*time.Minute + time.Second)
-			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due.Add(5*time.Minute), "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }, "10s").Should(HaveLen(2))
 			Expect(missionsOf("mt-cron")).To(HaveLen(1))
 			Expect(getTrigger("mt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
 
@@ -1248,6 +1251,9 @@ var _ = Describe("Trigger controller", func() {
 			setPhase(&m, aiv1alpha1.MissionPhaseCleaningUp)
 			clock = due.Add(10*time.Minute + time.Second)
 			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due.Add(10*time.Minute), "")
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-cron") }, "10s").Should(HaveLen(2))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }).Should(HaveLen(3))
 			st = getTrigger("mt-cron").Status
 			Expect(st.ActiveRuns).To(ContainElement(Not(Equal(m.Name))))
 			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
@@ -1291,8 +1297,11 @@ var _ = Describe("Trigger controller", func() {
 			t := scheduleMissionTrigger("mt-bad", func(s *aiv1alpha1.TriggerSpec) {
 				s.Target.Mission.CostBudgetUSD = "1000000"
 			})
-			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
 			reconcileTrigger("mt-bad")
+			fireSchedule("mt-bad", due, "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-bad").Status.RecentFirings }, "10s").Should(HaveLen(1))
 			Expect(missionsOf("mt-bad")).To(BeEmpty())
 			Expect(getTrigger("mt-bad").Status.RecentFirings[0].SkipReason).To(ContainSubstring("costBudgetUSD"))
 		})
@@ -1307,10 +1316,13 @@ var _ = Describe("Trigger controller", func() {
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(time.Second)
 			reconcileTrigger("mt-limit")
-			Expect(missionsOf("mt-limit")).To(HaveLen(1))
+			fireSchedule("mt-limit", due, "")
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-limit") }, "10s").Should(HaveLen(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-limit").Status.RecentFirings }).Should(HaveLen(1))
 
 			clock = due.Add(5*time.Minute + time.Second)
-			reconcileTrigger("mt-limit")
+			fireSchedule("mt-limit", due.Add(5*time.Minute), "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-limit").Status.RecentFirings }, "10s").Should(HaveLen(2))
 			Expect(missionsOf("mt-limit")).To(HaveLen(1))
 			Expect(getTrigger("mt-limit").Status.RecentFirings[0].SkipReason).To(ContainSubstring("policies.maxMissions 1"))
 		})
