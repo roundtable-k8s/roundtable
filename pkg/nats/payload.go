@@ -39,6 +39,14 @@ type TaskPayload struct {
 	// (optional). The operator has already resolved RoundTable aliases and
 	// checked it suits the knight's runtime. Empty means the knight default.
 	Model string `json:"model,omitempty"`
+
+	// Attempt is the 1-based attempt number of this task (optional; absent
+	// means 1). Set by a manual retry (#397); the dead-letter stream keys its
+	// de-duplication on taskId and attempt.
+	Attempt int `json:"attempt,omitempty"`
+
+	// RetryOf is the task ID this task retries (optional, set by a manual retry).
+	RetryOf string `json:"retryOf,omitempty"`
 }
 
 // TaskResult is the JSON payload received from NATS for a completed task.

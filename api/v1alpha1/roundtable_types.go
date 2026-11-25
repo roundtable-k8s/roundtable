@@ -159,6 +159,12 @@ type RoundTableNATS struct {
 	// +kubebuilder:validation:Enum=Limits;Interest;WorkQueue
 	// +optional
 	StreamRetention string `json:"streamRetention,omitempty"`
+
+	// deadLetterMaxAge is how long entries are kept in the table's dead-letter
+	// stream (<tasksStream>_DLQ), which records lost and failed tasks. Only
+	// used when createStreams is true. Defaults to 720h (30 days).
+	// +optional
+	DeadLetterMaxAge *metav1.Duration `json:"deadLetterMaxAge,omitempty"`
 }
 
 // RoundTableDefaults defines default configuration inherited by knights in this table.

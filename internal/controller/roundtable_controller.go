@@ -36,6 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -50,6 +51,10 @@ type RoundTableReconciler struct {
 	Recorder record.EventRecorder
 
 	NATS *natspkg.Provider
+
+	// DeadLetters captures each table's lost and failed tasks into its
+	// dead-letter stream (#396). Nil disables it.
+	DeadLetters *deadletter.Manager
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -73,6 +78,9 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, req.NamespacedName, rt); err != nil {
 		if client.IgnoreNotFound(err) == nil {
+			if r.DeadLetters != nil {
+				r.DeadLetters.Stop(req.String())
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -358,6 +366,32 @@ func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 		return fmt.Errorf("results stream: %w", err)
 	}
 
+	return r.ensureDeadLetters(rt, natsCli)
+}
+
+// ensureDeadLetters creates the table's advisories and dead-letter streams and
+// keeps its dead-letter watcher running. Skipped when no Manager is wired or
+// the client exposes no raw connection (test fakes).
+func (r *RoundTableReconciler) ensureDeadLetters(rt *aiv1alpha1.RoundTable, natsCli natspkg.Client) error {
+	if r.DeadLetters == nil {
+		return nil
+	}
+	nc := deadletter.Connection(natsCli)
+	if nc == nil {
+		return nil
+	}
+	cfg := deadletter.TableConfig{
+		Table:       rt.Name,
+		Prefix:      rt.Spec.NATS.SubjectPrefix,
+		TasksStream: rt.Spec.NATS.TasksStream,
+	}
+	if d := rt.Spec.NATS.DeadLetterMaxAge; d != nil {
+		cfg.MaxAge = d.Duration
+	}
+	key := client.ObjectKeyFromObject(rt).String()
+	if err := r.DeadLetters.Ensure(nc, key, cfg); err != nil {
+		return fmt.Errorf("dead-letter: %w", err)
+	}
 	return nil
 }
 

@@ -117,6 +117,26 @@ var (
 	)
 )
 
+// TasksDeadLetteredTotal counts tasks written to a table's dead-letter stream.
+// Labels: table, knight, reason (lost, failed, timeout, usage_limited, refused).
+var TasksDeadLetteredTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "roundtable_tasks_dead_lettered_total",
+		Help: "Tasks written to the dead-letter stream, by table, knight and reason",
+	},
+	[]string{"table", "knight", "reason"},
+)
+
+// DeadLettersOpen is the number of dead-letter entries still in state open
+// (neither resolved by a later success nor retried). Labels: table, knight.
+var DeadLettersOpen = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_dead_letters_open",
+		Help: "Dead-letter entries in state open, by table and knight",
+	},
+	[]string{"table", "knight"},
+)
+
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
@@ -129,5 +149,7 @@ func init() {
 		CostTotalUSD,
 		WarmPoolSize,
 		ReconcileErrorsTotal,
+		TasksDeadLetteredTotal,
+		DeadLettersOpen,
 	)
 }

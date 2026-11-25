@@ -158,6 +158,20 @@ func (c *JetStreamClient) Close() error {
 	return nil
 }
 
+// Conn returns the underlying NATS connection, or nil before Connect. It is
+// not part of Client so test fakes need not provide it; callers that need raw
+// JetStream access (the dead-letter watcher) type-assert for ConnProvider.
+func (c *JetStreamClient) Conn() *nats.Conn {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.nc
+}
+
+// ConnProvider is implemented by clients that expose their NATS connection.
+type ConnProvider interface {
+	Conn() *nats.Conn
+}
+
 // IsConnected returns true if the client is connected to NATS.
 func (c *JetStreamClient) IsConnected() bool {
 	c.mu.Lock()
