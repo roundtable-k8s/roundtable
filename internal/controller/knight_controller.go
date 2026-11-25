@@ -274,6 +274,12 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		log.Error(err, "Failed to reconcile PVC")
 	}
 
+	// 2a. Memory PVC (spec.memory) and the MemoryShared condition.
+	if err := r.reconcileMemory(ctx, knight); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to reconcile memory PVC")
+	}
+
 	// 2b. Nix tools — built into a per-tool-list OCI image the knight mounts.
 	//     Returns an interval to come back on while an image is published, to
 	//     re-verify it is still in the registry.
@@ -759,6 +765,7 @@ func (r *KnightReconciler) BuildPodSpec(ctx context.Context, k *aiv1alpha1.Knigh
 		WithSecurity(r.KnightSecurity).
 		WithReader(r.Client).
 		WithWorkspace().
+		WithMemory().
 		WithConfig(configMapName).
 		WithNixStore().
 		WithVault().

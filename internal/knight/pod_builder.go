@@ -227,6 +227,63 @@ func (b *PodBuilder) WithVault() *PodBuilder {
 	return b
 }
 
+// MemoryRoot is where the knight's memory volume is mounted
+// (KNIGHT_MEMORY_ROOT); the knight's own memory is MemoryDir.
+const MemoryRoot = "/memory"
+
+// MemoryDir returns the knight's own read-write memory directory,
+// /memory/<knight> (KNIGHT_MEMORY_DIR).
+func MemoryDir(k *aiv1alpha1.Knight) string {
+	return MemoryRoot + "/" + k.Name
+}
+
+// MemoryClaimName returns the PVC the operator creates for a knight's memory
+// when spec.memory has no existingClaim: <knight>-memory.
+func MemoryClaimName(k *aiv1alpha1.Knight) string {
+	return k.Name + "-memory"
+}
+
+// WithMemory mounts the knight's persistent memory volume (spec.memory) and
+// sets KNIGHT_MEMORY_DIR=/memory/<knight> and KNIGHT_MEMORY_ROOT=/memory.
+//
+// Without existingClaim the per-knight PVC <knight>-memory is mounted
+// read-write at /memory/<knight>. With existingClaim the shared claim is
+// mounted read-only at /memory (every knight's memory) and its <knight>
+// sub-directory read-write at /memory/<knight>; the kubelet creates the
+// sub-directory. No spec.memory adds nothing.
+func (b *PodBuilder) WithMemory() *PodBuilder {
+	m := b.knight.Spec.Memory
+	if m == nil {
+		return b
+	}
+	dir := MemoryDir(b.knight)
+	if m.ExistingClaim != "" {
+		b.volumes = append(b.volumes, corev1.Volume{
+			Name: "memory",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: m.ExistingClaim},
+			},
+		})
+		b.mounts = append(b.mounts,
+			corev1.VolumeMount{Name: "memory", MountPath: MemoryRoot, ReadOnly: true},
+			corev1.VolumeMount{Name: "memory", MountPath: dir, SubPath: b.knight.Name},
+		)
+	} else {
+		b.volumes = append(b.volumes, corev1.Volume{
+			Name: "memory",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: MemoryClaimName(b.knight)},
+			},
+		})
+		b.mounts = append(b.mounts, corev1.VolumeMount{Name: "memory", MountPath: dir})
+	}
+	b.env = append(b.env,
+		corev1.EnvVar{Name: "KNIGHT_MEMORY_DIR", Value: dir},
+		corev1.EnvVar{Name: "KNIGHT_MEMORY_ROOT", Value: MemoryRoot},
+	)
+	return b
+}
+
 // WithSharedWorkspace adds the RoundTable shared workspace PVC if configured.
 func (b *PodBuilder) WithSharedWorkspace(ctx context.Context) *PodBuilder {
 	if b.reader == nil {
@@ -377,7 +434,7 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 		return true
 	}
 	d := rt.Spec.Defaults
-	return d != nil && (d.Resources != nil || d.Egress != nil || d.Workspace != nil || d.RuntimeClassName != nil ||
+	return d != nil && (d.Resources != nil || d.Egress != nil || d.Workspace != nil || d.Memory != nil || d.RuntimeClassName != nil ||
 		d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
 }
 
@@ -385,16 +442,17 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 // default, so no table lookup is needed.
 func knightInheritsNothing(k *aiv1alpha1.Knight) bool {
 	s := &k.Spec
-	return s.Resources != nil && s.Egress != nil && s.Workspace != nil && s.RuntimeClassName != nil &&
+	return s.Resources != nil && s.Egress != nil && s.Workspace != nil && s.Memory != nil && s.RuntimeClassName != nil &&
 		s.Model != "" && s.Image != "" && s.TaskTimeoutSeconds > 0 && s.Concurrency > 0 &&
 		s.Vault != nil
 }
 
 // ApplyTableDefaults fills the knight's unset spec fields in memory from its
-// RoundTable (found via findTable): resources, egress, workspace, runtimeClassName,
-// model, image, taskTimeoutSeconds and concurrency from spec.defaults, and
-// vault from spec.vault. A value on the knight always wins; nothing is merged.
-// A table's workspace existingClaim is not inherited. Afterwards model,
+// RoundTable (found via findTable): resources, egress, workspace, memory,
+// runtimeClassName, model, image, taskTimeoutSeconds and concurrency from
+// spec.defaults, and vault from spec.vault. A value on the knight always wins;
+// nothing is merged. A table's workspace existingClaim is not inherited; its
+// memory existingClaim is (a shared memory claim is meant for the table). Afterwards model,
 // concurrency and taskTimeoutSeconds still unset get the operator defaults
 // (DefaultModel, DefaultConcurrency, DefaultTaskTimeoutSeconds); image keeps
 // falling back to the operator's default image in EffectiveImage.
@@ -449,6 +507,9 @@ func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
 		ws := d.Workspace.DeepCopy()
 		ws.ExistingClaim = ""
 		k.Spec.Workspace = ws
+	}
+	if k.Spec.Memory == nil && d.Memory != nil {
+		k.Spec.Memory = d.Memory.DeepCopy()
 	}
 	if k.Spec.Model == "" {
 		k.Spec.Model = d.Model

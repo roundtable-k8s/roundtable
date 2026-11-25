@@ -219,6 +219,12 @@ type KnightSpec struct {
 	// +optional
 	Workspace *KnightWorkspace `json:"workspace,omitempty"`
 
+	// memory gives the knight a persistent memory volume, separate from the
+	// /data workspace, that every replica mounts read-write at
+	// /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+	// +optional
+	Memory *KnightMemory `json:"memory,omitempty"`
+
 	// lifecycle controls suspend/resume behavior.
 	// +optional
 	Lifecycle *KnightLifecycle `json:"lifecycle,omitempty"`
@@ -299,6 +305,35 @@ type KnightWorkspace struct {
 	// +kubebuilder:default="1Gi"
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
+}
+
+// KnightMemory configures the knight's persistent memory volume.
+//
+// The layout is the same with or without existingClaim: the knight's own
+// memory is read-write at /memory/<knight> (KNIGHT_MEMORY_DIR) and /memory
+// (KNIGHT_MEMORY_ROOT) is its parent. Without existingClaim the operator
+// creates the ReadWriteMany PVC <knight>-memory, owned by the Knight and
+// deleted with it, and mounts it at /memory/<knight>. With existingClaim the
+// whole claim is mounted read-only at /memory (every knight's memory) and the
+// claim's <knight> sub-directory read-write at /memory/<knight>; the operator
+// never creates or deletes that claim.
+type KnightMemory struct {
+	// size is the storage request of the PVC the operator creates.
+	// Defaults to 1Gi. Ignored with existingClaim.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
+	// storageClassName is the StorageClass of the PVC the operator creates;
+	// empty uses the cluster default. It must support ReadWriteMany when the
+	// knight runs more than one pod. Ignored with existingClaim.
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
+
+	// existingClaim is a ReadWriteMany PVC shared by several knights (for
+	// example a whole table) instead of a per-knight claim. Each knight writes
+	// only its own <knight> sub-directory and reads everyone else's.
+	// +optional
+	ExistingClaim string `json:"existingClaim,omitempty"`
 }
 
 // KnightLifecycle controls suspend/resume behavior for the knight.

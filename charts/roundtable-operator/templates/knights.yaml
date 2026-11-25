@@ -72,6 +72,10 @@ spec:
   workspace:
     {{- toYaml $workspace | nindent 4 }}
   {{- end }}
+  {{- if $spec.memory }}
+  memory:
+    {{- toYaml $spec.memory | nindent 4 }}
+  {{- end }}
   {{- if $resources }}
   resources:
     {{- toYaml $resources | nindent 4 }}
