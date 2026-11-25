@@ -99,6 +99,12 @@ networkPolicy:
 | `images.dashboard.repository` | string | `ghcr.io/roundtable-k8s/roundtable-ui` | Dashboard image |
 | `images.dashboard.tag` | string | `latest` | Dashboard image tag |
 
+### Pod Security
+
+Every container the chart and operator create (operator, gateway, dashboard and all knight containers) meets the Pod Security Standard `restricted` profile: `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `runAsNonRoot: true` and `seccompProfile: RuntimeDefault`. The namespace can be labelled `pod-security.kubernetes.io/enforce: restricted`.
+
+The one exception is the tools-image builder Job (`toolsImage.*`), which runs a Nix build with `allowPrivilegeEscalation: true` and as root. It needs `baseline`/`privileged`: run it in a separate namespace or exempt it from enforcement.
+
 ### Dashboard
 
 | Key | Type | Default | Description |
