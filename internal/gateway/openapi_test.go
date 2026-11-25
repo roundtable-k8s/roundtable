@@ -256,6 +256,6 @@ func TestOpenAPIEndpointRequiresAuth(t *testing.T) {
 		t.Errorf("openapi = %v", doc["openapi"])
 	}
 	if _, ok := doc["paths"].(map[string]any)["/v1/missions"]; !ok {
-		t.Error("missions documented off")
+		t.Error("/v1/missions missing from the OpenAPI document with missions enabled")
 	}
 }

@@ -54,6 +54,11 @@ func (s *Service) openAPIDocument() (obj, error) {
 			paths[path] = item
 		}
 		o := maps.Clone(op)
+		if resp, ok := o["responses"].(obj); ok && method != "" && path != "/healthz" {
+			resp = maps.Clone(resp)
+			resp["500"] = ref("responses", "Error500")
+			o["responses"] = resp
+		}
 		if rt.public {
 			o["security"] = []any{}
 		}
@@ -61,7 +66,7 @@ func (s *Service) openAPIDocument() (obj, error) {
 	}
 	version := s.Opts.Version
 	if version == "" {
-		version = "dev"
+		version = DefaultAPIVersion
 	}
 	return obj{
 		"openapi": "3.1.0",
@@ -152,6 +157,9 @@ func listOp(summary, tag, key, item string, params ...obj) obj {
 	}
 }
 
+// DefaultAPIVersion is the version reported when none is configured.
+const DefaultAPIVersion = "dev"
+
 var openAPIResponses = obj{
 	"Error400": jsonResp("Invalid request.", schemaRef("Error")),
 	"Error401": jsonResp("Missing or wrong bearer token.", schemaRef("Error")),
@@ -160,6 +168,7 @@ var openAPIResponses = obj{
 	"Error409": jsonResp("Conflict with the resource's current state.", schemaRef("ConflictError")),
 	"Error422": jsonResp("The request is well-formed but cannot be processed.", schemaRef("Error")),
 	"Error429": jsonResp("Too many in-flight invocations (or webhook rate limit; see Retry-After).", schemaRef("Error")),
+	"Error500": jsonResp("Unexpected server error.", schemaRef("Error")),
 	"Error503": jsonResp("A dependency (NATS, the Kubernetes API) is unavailable.", schemaRef("Error")),
 }
 
@@ -232,7 +241,9 @@ var openAPIOperations = map[string]obj{
 			"201": obj{"description": "Mission created (or finished within waitSeconds).",
 				"headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
 				"content": obj{"application/json": obj{"schema": schemaRef("Mission")}}},
-			"202": jsonResp("Created and still running after waitSeconds.", schemaRef("Mission")),
+			"202": obj{"description": "Created and still running after waitSeconds.",
+				"headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
+				"content": obj{"application/json": obj{"schema": schemaRef("Mission")}}},
 		}, "400", "401", "403", "404", "422", "503"),
 	},
 	"GET /v1/missions": listOp("List missions", "missions", "missions", "Mission",
@@ -306,7 +317,7 @@ var openAPIOperations = map[string]obj{
 		"responses": errs(obj{
 			"202": jsonResp("Delivery published.", schemaRef("HookResult")),
 			"413": jsonResp("Body too large.", schemaRef("Error")),
-		}, "401", "404", "429", "503"),
+		}, "400", "401", "404", "429", "503"),
 	},
 }
 

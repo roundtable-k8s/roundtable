@@ -78,7 +78,8 @@ func main() {
 	flag.IntVar(&maxStreams, "max-streams", 64, "Maximum concurrently open event streams (0 = unlimited).")
 	flag.StringVar(&defaultImage, "default-knight-image", os.Getenv("DEFAULT_KNIGHT_IMAGE"),
 		"The operator's DEFAULT_KNIGHT_IMAGE, used to infer knight runtimes for model validation.")
-	flag.StringVar(&apiVersion, "api-version", "dev", "Version reported by the OpenAPI document (the chart's appVersion).")
+	flag.StringVar(&apiVersion, "api-version", gateway.DefaultAPIVersion,
+		"Version reported by the OpenAPI document (the chart's appVersion).")
 	flag.BoolVar(&missionsEnabled, "missions", true,
 		"Serve the mission endpoints (needs RBAC to create, read and delete Missions).")
 	flag.Float64Var(&maxBudgetUSD, "mission-max-budget-usd", 10, "Upper bound on a mission's costBudgetUSD.")
