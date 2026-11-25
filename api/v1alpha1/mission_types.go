@@ -273,6 +273,10 @@ type MissionStatus struct {
 	// +optional
 	TotalCost string `json:"totalCost,omitempty"`
 
+	// tokens is the token use of the mission's chains.
+	// +optional
+	Tokens *TokenTotals `json:"tokens,omitempty"`
+
 	// costBreakdown provides per-knight cost information for this mission.
 	// +optional
 	CostBreakdown []MissionKnightCost `json:"costBreakdown,omitempty"`
@@ -408,6 +412,14 @@ type MissionChainStatus struct {
 	// phase is the chain's current phase.
 	// +optional
 	Phase ChainPhase `json:"phase,omitempty"`
+
+	// costUSD is the chain's cost in USD (the chain's status.costUSD).
+	// +optional
+	CostUSD string `json:"costUSD,omitempty"`
+
+	// tokens is the chain's token use (the chain's status.tokens).
+	// +optional
+	Tokens *TokenTotals `json:"tokens,omitempty"`
 }
 
 // MissionPlanner configures the planning phase.

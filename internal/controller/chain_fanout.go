@@ -493,6 +493,7 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 				continue
 			}
 			done = true
+			r.recordUsage(ctx, chain, ss, spec.KnightRef.Name, result)
 			errMsg, output = result.GetError(), result.GetOutput()
 			if errMsg == "" && isEmptyStepOutput(output) {
 				errMsg = errEmptyOutput

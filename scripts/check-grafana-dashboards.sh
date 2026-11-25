@@ -36,6 +36,7 @@ withcrd="$(render --set dashboards.enabled=true --set dashboards.grafanaOperator
 known='roundtable_knights roundtable_table_cost_usd
 roundtable_knight_tasks_total roundtable_knight_active_tasks roundtable_knight_nats_connected
 roundtable_knight_llm_cost_usd_total roundtable_knight_llm_tokens_total
+roundtable_chain_step_cost_usd_total roundtable_chain_step_tokens_total roundtable_mission_cost_usd_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas'
 
 for f in "$chart"/dashboards/*.json; do

@@ -151,6 +151,7 @@ func (r *ChainReconciler) collectResults(ctx context.Context, chain *aiv1alpha1.
 			r.collectStepResult(ctx, chain, run, ss)
 		}
 	}
+	refreshChainUsage(chain)
 }
 
 // collectStepResult advances one running step.
@@ -215,6 +216,11 @@ func (r *ChainReconciler) applyStepResult(ctx context.Context, nc natsConfig, ch
 	if result.Model != "" {
 		ss.Model = result.Model
 	}
+	knight := ss.Knight
+	if knight == "" && spec != nil {
+		knight = spec.KnightRef.Name
+	}
+	r.recordUsage(ctx, chain, ss, knight, result)
 	resultErr := result.GetError()
 	resultOutput := result.GetOutput()
 	if resultErr == "" && isEmptyStepOutput(resultOutput) {

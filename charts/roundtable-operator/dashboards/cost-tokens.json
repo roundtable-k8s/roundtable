@@ -275,6 +275,120 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "Cost per job (24h)",
+      "description": "Cost and tokens per chain (the template's name for runs started by issue pickup or a Trigger), step and knight. billing=subscription is notional cost.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (chain, step, knight, billing) (increase(roundtable_chain_step_cost_usd_total{namespace=~\"$namespace\", table=~\"$table\"}[24h]))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (chain, step, knight) (increase(roundtable_chain_step_tokens_total{namespace=~\"$namespace\", table=~\"$table\"}[24h]))",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cost (USD)"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tokens"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Cost per mission (24h)",
+      "description": "Cost of each mission's finished step attempts, split by billing. Filter billing!=\"subscription\" for real spend.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (mission, billing) (increase(roundtable_mission_cost_usd_total{namespace=~\"$namespace\", table=~\"$table\"}[24h]))",
+          "legendFormat": "{{mission}} ({{billing}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      }
     }
   ]
 }
