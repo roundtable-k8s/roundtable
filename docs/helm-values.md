@@ -233,4 +233,4 @@ The operator exposes Prometheus metrics on its metrics endpoint, including:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `roundtable_knight_wake_seconds` | histogram | `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. |
+| `roundtable_knight_wake_seconds` | histogram | `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. Condition timestamps have 1s resolution, so values are whole seconds. |

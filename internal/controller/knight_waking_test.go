@@ -108,8 +108,7 @@ func TestKnightWakingReadsCapitalisedConsumer(t *testing.T) {
 
 func TestKnightWakeSecondsObserved(t *testing.T) {
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	old := nowFunc
-	defer func() { nowFunc = old }()
+	var clock time.Time
 
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
@@ -124,11 +123,11 @@ func TestKnightWakeSecondsObserved(t *testing.T) {
 		Spec:       appsv1.DeploymentSpec{Replicas: &zero},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k, d).WithStatusSubresource(k, d).Build()
-	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10), PendingSource: &fakePending{n: 2}}
+	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10), PendingSource: &fakePending{n: 0}, Now: func() time.Time { return clock }}
 	scaling := knightpkg.Scaling{Autoscaled: true}
 	update := func(now time.Time) {
 		t.Helper()
-		nowFunc = func() time.Time { return now }
+		clock = now
 		if err := r.updateStatus(context.Background(), k, scaling, nil); err != nil {
 			t.Fatalf("updateStatus: %v", err)
 		}
@@ -146,23 +145,34 @@ func TestKnightWakeSecondsObserved(t *testing.T) {
 		return m.GetHistogram().GetSampleSum()
 	}
 
-	// ScaledToZero -> Waking (condition transition time is set by the API call).
+	pending := r.PendingSource.(*fakePending)
+
+	// T0: idle at zero -> ScaledToZero.
 	update(base)
+	if availReason(k) != aiv1alpha1.ReasonKnightScaledToZero {
+		t.Fatalf("reason = %q, want ScaledToZero", availReason(k))
+	}
+
+	// T0+60s: tasks queued -> Waking. The wake clock starts now, not at T0.
+	pending.n = 2
+	update(base.Add(60 * time.Second))
 	if availReason(k) != aiv1alpha1.ReasonKnightWaking {
 		t.Fatalf("reason = %q, want Waking", availReason(k))
 	}
-	meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAvailable).LastTransitionTime = metav1.NewTime(base)
+	if got := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAvailable).LastTransitionTime.Time; !got.Equal(base.Add(60 * time.Second)) {
+		t.Fatalf("Waking started at %v, want %v", got, base.Add(60*time.Second))
+	}
 	if count() != 0 {
 		t.Fatalf("observation before Ready")
 	}
 
-	// Still waking 5s later: no observation.
-	update(base.Add(5 * time.Second))
+	// Still waking: no observation and the start time is unchanged.
+	update(base.Add(65 * time.Second))
 	if count() != 0 {
 		t.Fatalf("observation while still Waking")
 	}
 
-	// Pod becomes ready 12s after entering Waking.
+	// Pod becomes ready 12s after entering Waking (T0+72s).
 	dep := &appsv1.Deployment{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "wake-metric", Namespace: "wake-ns"}, dep); err != nil {
 		t.Fatal(err)
@@ -176,7 +186,7 @@ func TestKnightWakeSecondsObserved(t *testing.T) {
 	if err := c.Status().Update(context.Background(), dep); err != nil {
 		t.Fatal(err)
 	}
-	update(base.Add(12 * time.Second))
+	update(base.Add(72 * time.Second))
 	if availReason(k) != aiv1alpha1.ReasonKnightReady {
 		t.Fatalf("reason = %q, want Ready", availReason(k))
 	}
@@ -185,7 +195,7 @@ func TestKnightWakeSecondsObserved(t *testing.T) {
 	}
 
 	// Further Ready reconciles do not observe again.
-	update(base.Add(20 * time.Second))
+	update(base.Add(80 * time.Second))
 	if count() != 1 {
 		t.Errorf("count=%d after steady Ready, want 1", count())
 	}
