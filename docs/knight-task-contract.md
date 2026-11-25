@@ -166,6 +166,9 @@ spec:
 - `steps[].model` is a model ID or an alias name; alias names win over literal
   models (an alias `opus: claude-opus-4-1` pins what `opus` means for the table).
   Aliases resolve one level deep.
+- `RoundTable.spec.modelAliases` is capped at 64 entries (`MaxProperties=64`).
+  Alias **values** are not pattern-validated at admission (only a step's
+  `model` is); a bad value surfaces at dispatch as a model mismatch.
 - Aliases come from the chain's `roundTableRef` (for mission chains: the
   mission's `roundTableRef`, else `default`).
 - `status.stepStatuses[].model` shows the resolved model sent with the task, then

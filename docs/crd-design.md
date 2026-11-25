@@ -186,7 +186,12 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   `replicas`/`maxReplicas` above 1 on the default PVC (a ReadWriteMany
   `existingClaim` is allowed) and on `runtime: sandbox`. See
   [memory.md](memory.md) for how workspace, vault and shared mounts
-  relate to knight memory.
+  relate to knight memory. An `existingClaim` used with more than one replica
+  must be ReadWriteMany: the operator and CEL cannot read a claim's access
+  modes, so a ReadWriteOnce claim with `replicas > 1` is not rejected and
+  leaves a surge pod stuck instead.
+- **Tools flakes.** `spec.tools.flakes` refs that use `git+ssh` need matching
+  SSH credentials on the tools builder Job; without them the build fails.
 - **Memory.** `spec.memory` adds a persistent memory volume separate from the
   workspace, so memory survives pod replacement, scaling and restarts. The
   knight's own memory is read-write at `/memory/<knight>`

@@ -82,6 +82,9 @@ var (
 		`(?im)^[\s>*_#-]*verdict[\s*_]*[:=-][\s*_` + "`" + `]*(ship[ _-]?it|needs[ _-]?changes)\b`)
 	prURLRe     = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)`)
 	prRepoRefRe = regexp.MustCompile(`\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)\b`)
+	// prBareRefRe assumes a bare #N in the output is a PR. GitHub shares the
+	// number space, so an issue reference in prose can match too; it is only
+	// used when no URL or owner/repo#N reference was found.
 	prBareRefRe = regexp.MustCompile(`(?:^|[^\w/#&])#(\d+)\b`)
 )
 
