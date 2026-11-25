@@ -27,6 +27,7 @@ helm install roundtable charts/roundtable-operator \
 | `resources.requests.memory` | string | `64Mi` | Memory request |
 | `resources.limits.cpu` | string | `200m` | CPU limit |
 | `resources.limits.memory` | string | `128Mi` | Memory limit |
+| `mission.resultsTTL` | duration | `720h` | How long retained mission results (`spec.retainResults`) are kept in the `mission-results` NATS KV bucket (Go duration; 720h = 30 days). An existing bucket with a different TTL is updated |
 | `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1beta1` Sandbox is served), `true`, or `false`. Supports agent-sandbox v1.0.0 or later (developed against v1.0.12) |
 | `keda` | string | `auto` | KEDA autoscaling for knights with `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`: `auto` (enable only if `keda.sh/v1alpha1` ScaledObject is served), `true`, or `false` |
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |

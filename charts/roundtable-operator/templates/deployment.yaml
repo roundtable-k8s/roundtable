@@ -46,6 +46,7 @@ spec:
             - --enable-sandbox-backend={{ if kindIs "bool" .Values.sandboxBackend }}{{ .Values.sandboxBackend }}{{ else }}{{ .Values.sandboxBackend | default "auto" }}{{ end }}
             - --enable-keda={{ if kindIs "bool" .Values.keda }}{{ .Values.keda }}{{ else }}{{ .Values.keda | default "auto" }}{{ end }}
             - --provider-overload-max-retries={{ .Values.providerOverload.maxRetries }}
+            - --mission-results-ttl={{ .Values.mission.resultsTTL | default "720h" }}
             {{- with .Values.natsMonitoringEndpoint }}
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}

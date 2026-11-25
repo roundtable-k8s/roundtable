@@ -276,7 +276,7 @@ type MissionStatus struct {
     // +optional
     ChainStatuses []MissionChainStatus `json:"chainStatuses,omitempty"`
 
-    // resultsConfigMap is the name of the ConfigMap containing preserved results
+    // resultsConfigMap (deprecated alias of resultsRef): "<bucket>.<key>" of the NATS KV entry with preserved results
     // (only set when retainResults=true and mission is complete).
     // +optional
     ResultsConfigMap string `json:"resultsConfigMap,omitempty"`

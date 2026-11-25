@@ -125,6 +125,34 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
 - NATS consumers for mission-scoped subjects
 - ConfigMap with mission context
 
+**Mission results (`spec.retainResults`, default true):**
+
+Before cleanup the controller writes one JSON document to the NATS KV bucket
+`mission-results`, under the key `<mission name>`. No ConfigMap is written.
+`status.resultsRef` (`bucket`, `key`) says where it is; the deprecated
+`status.resultsConfigMap` holds the same location as `<bucket>.<key>` and is
+removed in a later release.
+
+The document holds `summary`, `timeline`, per-chain step `chains` outputs,
+`knights`, `costs`, and, so planner work can be copied out and reused,
+`generatedChains` (the full chain specs) and `generatedSkills`
+(`name`, `knight`, `content`).
+
+Entries expire after **30 days** by default. Set the Helm value
+`mission.resultsTTL` (a Go duration such as `720h`) to change it; the operator
+applies it when it creates the bucket and updates an existing bucket whose TTL
+differs. Read a result before it expires:
+
+```bash
+# with the NATS CLI (-s <server URL>)
+nats kv get mission-results <mission-name> --raw | jq '.generatedChains, .generatedSkills'
+```
+
+Find the key with `kubectl get mission <name> -o jsonpath='{.status.resultsRef}'`
+(the gateway's mission endpoints and the dashboard report the mission's phase
+and result, not the KV location). Archive anything you need beyond the TTL;
+the operator does not commit results to git.
+
 ### RoundTable Controller
 
 **Reconciliation Loop:**

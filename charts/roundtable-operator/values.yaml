@@ -53,6 +53,14 @@ natsMonitoringEndpoint: ""
 providerOverload:
   maxRetries: 4
 
+# Missions.
+mission:
+  # How long the retained results of a mission (spec.retainResults) stay in the
+  # mission-results NATS KV bucket, as a Go duration (720h = 30 days). The
+  # operator applies it when it creates the bucket and updates an existing
+  # bucket whose TTL differs. Copy results out (nats kv get) before they expire.
+  resultsTTL: 720h
+
 # Additional args to pass to the manager
 extraArgs: []
 

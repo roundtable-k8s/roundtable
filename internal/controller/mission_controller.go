@@ -764,12 +764,12 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 	}
 
 	// Store results to NATS KV if retainResults is true and not already stored
-	if mission.Spec.RetainResults && mission.Status.ResultsConfigMap == "" {
+	if mission.Spec.RetainResults && mission.Status.ResultsRef == nil {
 		if err := r.Cleaner.StoreResultsToKV(ctx, mission); err != nil {
 			log.Error(err, "Failed to store results to NATS KV")
 			// Continue with cleanup even if this fails — set the key anyway
 			// to prevent infinite retry loop
-			mission.Status.ResultsConfigMap = fmt.Sprintf("mission-results.%s", mission.Name)
+			missionpkg.SetResultsRef(mission, missionpkg.ResultsBucketName(), missionpkg.ResultsKey(mission))
 		}
 	}
 

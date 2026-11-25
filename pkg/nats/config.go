@@ -35,6 +35,37 @@ type Config struct {
 
 	// ReconnectWait is the duration to wait between reconnect attempts.
 	ReconnectWait time.Duration
+
+	// ResultsTTL is how long entries of the mission-results KV bucket are
+	// kept. Zero means DefaultResultsTTL.
+	ResultsTTL time.Duration
+}
+
+const (
+	// ResultsBucket is the NATS KV bucket holding retained mission results.
+	ResultsBucket = "mission-results"
+
+	// DefaultResultsTTL is the retention of ResultsBucket when none is set.
+	DefaultResultsTTL = 30 * 24 * time.Hour
+
+	// defaultKVTTL is the retention of every other KV bucket.
+	defaultKVTTL = 30 * 24 * time.Hour
+)
+
+// ResultsTTLOrDefault returns ResultsTTL, or DefaultResultsTTL when unset.
+func (c Config) ResultsTTLOrDefault() time.Duration {
+	if c.ResultsTTL > 0 {
+		return c.ResultsTTL
+	}
+	return DefaultResultsTTL
+}
+
+// kvTTL returns the TTL a KV bucket should have.
+func (c Config) kvTTL(bucket string) time.Duration {
+	if bucket == ResultsBucket {
+		return c.ResultsTTLOrDefault()
+	}
+	return defaultKVTTL
 }
 
 // DefaultConfig returns a Config with sensible defaults for the Round Table operator.

@@ -217,10 +217,12 @@ func missionNotifyPayload(mission *aiv1alpha1.Mission) notify.Payload {
 	output, truncated := notify.Truncate(mission.Status.Result)
 
 	var outputRef *notify.OutputRef
-	if mission.Status.ResultsConfigMap != "" {
-		// Legacy field name — it holds a "<bucket>.<key>" NATS KV reference.
+	if ref := mission.Status.ResultsRef; ref != nil {
+		outputRef = &notify.OutputRef{NATSKV: &notify.NATSKVRef{Bucket: ref.Bucket, Key: ref.Key}}
+	} else if mission.Status.ResultsConfigMap != "" {
+		// Status written by an older operator: only the deprecated alias is set.
 		outputRef = &notify.OutputRef{NATSKV: &notify.NATSKVRef{
-			Bucket: "mission-results",
+			Bucket: missionpkg.ResultsBucketName(),
 			Key:    mission.Name,
 		}}
 	}
