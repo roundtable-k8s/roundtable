@@ -213,6 +213,19 @@ const (
 	// Status=False means cleanup is in progress.
 	ConditionCleanupComplete = "CleanupComplete"
 
+	// ConditionMissionAdmitted indicates whether the mission passed its
+	// RoundTable's policies.maxMissions admission check.
+	// Status=False (reason TableAtMissionLimit) means the mission is queued in
+	// Pending because the table is at its limit. Status=True means it was admitted.
+	ConditionMissionAdmitted = "Admitted"
+
+	// ReasonTableAtMissionLimit is the Admitted=False reason for a mission
+	// queued behind its table's maxMissions limit.
+	ReasonTableAtMissionLimit = "TableAtMissionLimit"
+
+	// ReasonMissionAdmitted is the Admitted=True reason.
+	ReasonMissionAdmitted = "Admitted"
+
 	// ===== Shared Condition Types (Chain + Mission) =====
 
 	// ConditionNotificationSent indicates the state of the spec.notify

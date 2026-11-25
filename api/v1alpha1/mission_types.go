@@ -214,6 +214,18 @@ const (
 	MissionPhaseCleaningUp   MissionPhase = "CleaningUp"
 )
 
+// IsActive reports whether a mission in this phase occupies a slot of its
+// RoundTable's policies.maxMissions: it is provisioning, planning, assembling,
+// briefing or running. Pending, terminal and CleaningUp missions are not active.
+func (p MissionPhase) IsActive() bool {
+	switch p {
+	case MissionPhaseProvisioning, MissionPhasePlanning, MissionPhaseAssembling,
+		MissionPhaseBriefing, MissionPhaseActive:
+		return true
+	}
+	return false
+}
+
 // MissionKnightStatus tracks the status of a knight within the mission.
 type MissionKnightStatus struct {
 	// name is the knight name.

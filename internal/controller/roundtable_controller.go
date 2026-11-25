@@ -424,8 +424,7 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 	var count int32
 	for _, m := range missionList.Items {
 		if aiv1alpha1.RefName(m.Spec.RoundTableRef) == rt.Name {
-			switch m.Status.Phase {
-			case aiv1alpha1.MissionPhaseAssembling, aiv1alpha1.MissionPhaseBriefing, aiv1alpha1.MissionPhaseActive:
+			if m.Status.Phase.IsActive() {
 				count++
 			}
 		}
