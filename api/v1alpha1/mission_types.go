@@ -234,6 +234,17 @@ type MissionStatus struct {
 	// +optional
 	Phase MissionPhase `json:"phase,omitempty"`
 
+	// traceContext is the W3C trace context of the mission's root span.
+	// The plan, the briefing tasks and every chain the mission starts are
+	// spans of this one trace. Unset when tracing is off.
+	// +optional
+	TraceContext *TraceContext `json:"traceContext,omitempty"`
+
+	// traceID is the trace ID of the mission's trace (32 hex characters), for
+	// linking to a trace backend. Unset when tracing is off.
+	// +optional
+	TraceID string `json:"traceID,omitempty"`
+
 	// knightStatuses tracks the status of each participating knight.
 	// +optional
 	KnightStatuses []MissionKnightStatus `json:"knightStatuses,omitempty"`
@@ -476,6 +487,10 @@ type GeneratedChain struct {
 
 // PlanningResult tracks the outcome of the planning phase.
 type PlanningResult struct {
+	// startedAt is when the planning task was dispatched.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
 	// completedAt is when planning finished.
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`

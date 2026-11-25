@@ -19,6 +19,7 @@ package telemetry
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -89,3 +90,33 @@ func randomSpanID() trace.SpanID {
 	}
 	return sid
 }
+
+// DeriveSpanID returns the span ID for a stable key in trace tid, so a span
+// can be emitted after the fact with an ID its children already carry.
+func DeriveSpanID(tid trace.TraceID, key string) trace.SpanID {
+	h := sha256.New()
+	h.Write(tid[:])
+	h.Write([]byte(key))
+	var sid trace.SpanID
+	copy(sid[:], h.Sum(nil))
+	if !sid.IsValid() {
+		sid[len(sid)-1] = 1
+	}
+	return sid
+}
+
+// ChildSpanContext returns the context of the span for key under root.
+func ChildSpanContext(root trace.SpanContext, key string) trace.SpanContext {
+	return trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    root.TraceID(),
+		SpanID:     DeriveSpanID(root.TraceID(), key),
+		TraceFlags: root.TraceFlags(),
+		TraceState: root.TraceState(),
+		Remote:     true,
+	})
+}
+
+// AnnotationParentTraceparent marks a Chain created by a Mission: its value
+// is the W3C traceparent of the mission's root span, and the chain's run
+// trace becomes a part of the mission's trace instead of a new one.
+const AnnotationParentTraceparent = "ai.roundtable.io/parent-traceparent"

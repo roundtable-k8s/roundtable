@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -61,6 +63,21 @@ type MissionReconciler struct {
 	Assembler   *missionpkg.KnightAssembler
 	Cleaner     *missionpkg.Cleaner
 	CostTracker *missionpkg.CostTracker
+
+	// TracerProvider makes the mission spans; nil uses the global one.
+	TracerProvider trace.TracerProvider
+}
+
+// emitMissionSpan emits the mission's root span as it ends. errMsg marks it failed.
+func (r *MissionReconciler) emitMissionSpan(ctx context.Context, mission *aiv1alpha1.Mission, errMsg string) {
+	var start time.Time
+	if mission.Status.StartedAt != nil {
+		start = mission.Status.StartedAt.Time
+	} else {
+		start = mission.CreationTimestamp.Time
+	}
+	missionpkg.EmitSpan(ctx, r.TracerProvider, mission, "", "mission "+mission.Name,
+		missionpkg.SpanEnd{Start: start, End: time.Now(), ErrMsg: errMsg})
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -121,6 +138,7 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		expiresAt := metav1.NewTime(now.Add(time.Duration(mission.Spec.TTLSeconds) * time.Second))
 		mission.Status.ExpiresAt = &expiresAt
 		r.initKnightStatuses(mission)
+		missionpkg.EnsureTrace(ctx, r.TracerProvider, mission)
 		err := status.ForMission(mission).
 			Phase(aiv1alpha1.MissionPhasePending).
 			Apply(ctx, r.Client)
@@ -130,6 +148,10 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		r.Recorder.Eventf(mission, corev1.EventTypeNormal, "PhaseTransition", "Mission transitioned to %s", aiv1alpha1.MissionPhasePending)
 		return ctrl.Result{}, err
 	}
+
+	// A mission from before tracing existed gets its trace on first reconcile
+	// (kept by the next status write).
+	missionpkg.EnsureTrace(ctx, r.TracerProvider, mission)
 
 	// Check TTL expiration in any non-terminal phase
 	if res, handled, err := r.reconcileTTLExpiry(ctx, mission); handled {
@@ -180,11 +202,23 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				ObservedGeneration: mission.Generation,
 			})
 		}
+		outcome := mission.Status.Phase
 		mission.Status.Phase = aiv1alpha1.MissionPhaseCleaningUp
 		mission.Status.ObservedGeneration = mission.Generation
 		err := r.Status().Update(ctx, mission)
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
+		}
+		if err == nil {
+			// The mission ends here; once its status says so, so does its trace.
+			errMsg := ""
+			if outcome == aiv1alpha1.MissionPhaseFailed {
+				errMsg = mission.Status.Result
+				if errMsg == "" {
+					errMsg = "mission failed"
+				}
+			}
+			r.emitMissionSpan(ctx, mission, errMsg)
 		}
 		return ctrl.Result{RequeueAfter: RequeueDefault}, err
 	case aiv1alpha1.MissionPhaseCleaningUp:
@@ -225,6 +259,9 @@ func (r *MissionReconciler) reconcileTTLExpiry(ctx context.Context, mission *aiv
 		Apply(ctx, r.Client)
 	if apierrors.IsConflict(err) {
 		return ctrl.Result{Requeue: true}, true, nil
+	}
+	if err == nil {
+		r.emitMissionSpan(ctx, mission, "mission expired (TTL exceeded)")
 	}
 	r.Recorder.Event(mission, corev1.EventTypeWarning, "Timeout", "Mission exceeded TTL")
 	r.Recorder.Eventf(mission, corev1.EventTypeNormal, "PhaseTransition", "Mission transitioned to %s", aiv1alpha1.MissionPhaseCleaningUp)
@@ -1008,11 +1045,19 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 			}
 		}
 		taskSubject := natspkg.TaskSubject(briefingPrefix, knight.Spec.Domain, mk.Name)
-		if err := natsCli.PublishJSONCtx(ctx, taskSubject, taskPayload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
+		// Each briefing task is a span under the mission, and the knight's
+		// task a child of it.
+		span := missionpkg.BriefingSpanKey(mk.Name)
+		started := time.Now()
+		if err := natsCli.PublishJSONCtx(missionpkg.WithSpan(ctx, mission, span), taskSubject, taskPayload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
 			log.Error(err, "Failed to publish briefing to knight", "knight", mk.Name, "subject", taskSubject)
 			continue
 		}
 		published++
+		missionpkg.EmitSpan(ctx, r.TracerProvider, mission, span, "briefing "+mk.Name, missionpkg.SpanEnd{
+			Start: started, End: time.Now(),
+			Attrs: []attribute.KeyValue{missionpkg.KnightAttr(mk.Name), missionpkg.TaskAttr(taskPayload.TaskID)},
+		})
 	}
 
 	if attempted > 0 && published == 0 {
@@ -1075,6 +1120,7 @@ func (r *MissionReconciler) ensureMissionChain(ctx context.Context, mission *aiv
 				"ai.roundtable.io/mission":     mission.Name,
 				"ai.roundtable.io/chain-phase": chainRef.Phase,
 			},
+			Annotations: missionpkg.ParentAnnotations(mission),
 		},
 		Spec: aiv1alpha1.ChainSpec{
 			Description:     fmt.Sprintf("Mission %s: %s", mission.Name, sourceChain.Spec.Description),

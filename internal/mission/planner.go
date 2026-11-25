@@ -9,6 +9,7 @@ import (
 
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/util"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,9 @@ type Planner struct {
 	Client client.Client
 	Scheme *runtime.Scheme
 	NATS   *natspkg.Provider
+
+	// TracerProvider makes the plan span; nil uses the global one.
+	TracerProvider trace.TracerProvider
 }
 
 // natsClient returns the NATS client from the provider.
@@ -101,7 +105,13 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		mission.Status.Phase = aiv1alpha1.MissionPhaseFailed
 		mission.Status.Result = fmt.Sprintf("Planning failed: %s", pr.Error)
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
+		planErr := pr.Error
+		err := p.Client.Status().Update(ctx, mission)
+		if err == nil {
+			// Once: the mission is Failed from here on.
+			EmitPlanSpan(ctx, p.TracerProvider, mission, planErr)
+		}
+		return ctrl.Result{}, err
 	}
 
 	// Check if planning already completed successfully
@@ -159,6 +169,8 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		}
 		log.Info("Dispatched planning task", "taskID", taskID, "knight", plannerKnight.Name)
 		mission.Status.PlanningTaskID = taskID
+		now := metav1.Now()
+		pr.StartedAt = &now
 		if err := p.Client.Status().Update(ctx, mission); err != nil {
 			// Status update failed (likely conflict). Log but don't requeue
 			// aggressively — the deterministic taskID prevents duplicate work.
@@ -271,6 +283,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		// If status update fails, return error for requeue with fresh object
 		return ctrl.Result{}, fmt.Errorf("failed to update mission status after plan application: %w", err)
 	}
+	EmitPlanSpan(ctx, p.TracerProvider, mission, "")
 
 	return ctrl.Result{}, nil
 }
@@ -407,7 +420,8 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 	}
 	subject := natspkg.TaskSubject(prefix, plannerKnight.Spec.Domain, plannerKnight.Name)
 
-	if err := natsClient.PublishJSONCtx(ctx, subject, payload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
+	// The planner's task is a child of the mission's plan span.
+	if err := natsClient.PublishJSONCtx(WithSpan(ctx, mission, planSpanKey), subject, payload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
 		return "", fmt.Errorf("failed to publish planning task: %w", err)
 	}
 
@@ -1022,6 +1036,7 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 					aiv1alpha1.LabelEphemeral:       "true",
 					"ai.roundtable.io/generated-by": "planner",
 				},
+				Annotations: ParentAnnotations(mission),
 				OwnerReferences: []metav1.OwnerReference{
 					*metav1.NewControllerRef(mission, aiv1alpha1.GroupVersion.WithKind("Mission")),
 				},

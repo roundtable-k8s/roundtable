@@ -38,7 +38,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"strconv"
 	"sync"
 	"time"
@@ -105,6 +104,17 @@ func runSpanContext(chain *aiv1alpha1.Chain) trace.SpanContext {
 	return trace.SpanContextFromContext(w3c.Extract(context.Background(), carrier))
 }
 
+// missionSpanContext returns the span of the mission that created the chain
+// (annotation telemetry.AnnotationParentTraceparent); invalid for a chain
+// that is not part of a mission trace.
+func missionSpanContext(chain *aiv1alpha1.Chain) trace.SpanContext {
+	tp := chain.Annotations[telemetry.AnnotationParentTraceparent]
+	if tp == "" {
+		return trace.SpanContext{}
+	}
+	return trace.SpanContextFromContext(w3c.Extract(context.Background(), propagation.MapCarrier{"traceparent": tp}))
+}
+
 // resetRunTrace drops the trace of the previous run; the next reconcile of
 // a running chain starts a new one.
 func resetRunTrace(chain *aiv1alpha1.Chain) {
@@ -122,7 +132,14 @@ func (r *ChainReconciler) ensureRunTrace(ctx context.Context, chain *aiv1alpha1.
 	// The span only draws the root's IDs and sampling decision from the
 	// provider. It is never ended, so never exported: the root span is
 	// emitted with these IDs when the run ends.
-	_, probe := r.tracer().Start(ctx, "chain "+chain.Name, trace.WithNewRoot())
+	// A chain started by a mission joins the mission's trace instead.
+	var startOpts []trace.SpanStartOption
+	if parent := missionSpanContext(chain); parent.IsValid() {
+		ctx = trace.ContextWithRemoteSpanContext(ctx, parent)
+	} else {
+		startOpts = append(startOpts, trace.WithNewRoot())
+	}
+	_, probe := r.tracer().Start(ctx, "chain "+chain.Name, startOpts...)
 	sc := probe.SpanContext()
 	if !sc.IsValid() {
 		return
@@ -156,27 +173,12 @@ func roundSpanKey(stepKey string, round int32) string {
 	return stepKey + "/round/" + strconv.FormatInt(int64(round), 10)
 }
 
-// deriveSpanID returns the span ID for key in trace tid.
 func deriveSpanID(tid trace.TraceID, key string) trace.SpanID {
-	h := sha256.New()
-	h.Write(tid[:])
-	h.Write([]byte(key))
-	var sid trace.SpanID
-	copy(sid[:], h.Sum(nil))
-	if !sid.IsValid() {
-		sid[len(sid)-1] = 1
-	}
-	return sid
+	return telemetry.DeriveSpanID(tid, key)
 }
 
 func childSpanContext(root trace.SpanContext, key string) trace.SpanContext {
-	return trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    root.TraceID(),
-		SpanID:     deriveSpanID(root.TraceID(), key),
-		TraceFlags: root.TraceFlags(),
-		TraceState: root.TraceState(),
-		Remote:     true,
-	})
+	return telemetry.ChildSpanContext(root, key)
 }
 
 // withRunSpan returns ctx parented on the run's span for key, so a task
@@ -265,6 +267,10 @@ func chainRunSpans(chain *aiv1alpha1.Chain, now time.Time) map[trace.SpanID]runS
 		if c := meta.FindStatusCondition(st.Conditions, aiv1alpha1.ConditionChainComplete); c != nil && c.Message != "" {
 			rs.errMsg = c.Message
 		}
+	}
+	// A chain started by a mission is a child of the mission's span.
+	if mp := missionSpanContext(chain); mp.IsValid() && mp.TraceID() == root.TraceID() {
+		rs.parent = mp
 	}
 	add(rs)
 
