@@ -284,6 +284,32 @@ inherits it from `spec.roundTableRef`.
 | `tolerations` | list | `[]` | Tolerations for operator pod |
 | `affinity` | object | `{}` | Affinity rules for operator pod |
 
+### Alerts
+
+Opt-in `PrometheusRule` (`templates/prometheusrule.yaml`). Rendered only when
+`alerts.enabled=true` and the cluster serves `monitoring.coreos.com/v1`.
+Knight rules use the `roundtable_knight_*` metrics (they only match once
+knights emit those names) and keep `table` in every aggregation. Pod and
+scaling rules are scoped to the release namespace.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `alerts.enabled` | bool | `false` | Render the `PrometheusRule` |
+| `alerts.costSpikeUSDPer24h` | number | `15` | `KnightLLMCostSpike` threshold: USD per table over 24h |
+| `alerts.taskFailuresPerHour` | number | `2` | `KnightTaskFailures` threshold: failed tasks per knight per hour |
+| `alerts.chainStepSlowSeconds` | number | `1800` | `RoundtableChainStepsSlow` threshold: p95 step duration over 1h, from `roundtable_chain_step_duration_seconds` |
+| `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
+| `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
+
+Groups: `roundtable.knights` (task failures, NATS disconnected, metrics absent,
+lost tasks, cost spike, slow chain steps), `roundtable.pods` (restarts,
+OOMKilled, Evicted, PVC almost full) and `roundtable.scaling`. A chain that
+never finishes a step produces no step observation, so detecting a wholly
+stuck run needs a started-runs or in-flight metric (follow-up).
+
+`scripts/check-prometheusrule.sh` (part of `make helm-check`) renders the rules
+and runs `promtool check rules` on them.
+
 ## Operator metrics
 
 The operator exposes Prometheus metrics on its metrics endpoint, including:

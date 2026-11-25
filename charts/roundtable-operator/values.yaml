@@ -395,3 +395,22 @@ metrics:
   podMonitor:
     # PodMonitor for knight pods (port 3000, container "app").
     enabled: false
+
+# PrometheusRule with the Round Table alerts (#332). Off by default; needs the
+# monitoring.coreos.com/v1 API (prometheus-operator). Knight alerts use the
+# roundtable_knight_* metrics and keep `table` in every aggregation.
+alerts:
+  enabled: false
+  # LLM spend per table over 24h above which KnightLLMCostSpike fires (USD).
+  costSpikeUSDPer24h: 15
+  # Failed tasks per knight per hour above which KnightTaskFailures fires.
+  taskFailuresPerHour: 2
+  # p95 chain step duration (seconds, over 1h) above which
+  # RoundtableChainStepsSlow fires. Step histogram buckets stop at ~34min.
+  chainStepSlowSeconds: 1800
+  # Extra labels on every rule; `severity` here overrides the default "warning".
+  labels: {}
+  scaling:
+    # roundtable.scaling group (KEDA scaler errors, HPA ScalingActive=false).
+    # Needs KEDA's and kube-state-metrics' metrics; disable if you have neither.
+    enabled: true
