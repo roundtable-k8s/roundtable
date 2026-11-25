@@ -387,6 +387,57 @@ type KnightWorkspace struct {
 	// +kubebuilder:default="1Gi"
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
+
+	// snapshots configures on-demand CSI VolumeSnapshots of the workspace PVC
+	// (mode: pvc only). A snapshot is taken when the ai.roundtable.io/snapshot
+	// annotation gets a new value. Needs the snapshot.storage.k8s.io/v1 API.
+	// +optional
+	Snapshots *WorkspaceSnapshots `json:"snapshots,omitempty"`
+}
+
+// AnnotationKnightSnapshot, set on a Knight to a value not seen before, takes
+// a VolumeSnapshot of the knight's workspace PVC. The value is arbitrary.
+const AnnotationKnightSnapshot = "ai.roundtable.io/snapshot"
+
+// WorkspaceSnapshots configures workspace VolumeSnapshots.
+type WorkspaceSnapshots struct {
+	// className is the VolumeSnapshotClass. Empty uses the cluster default.
+	// +optional
+	ClassName string `json:"className,omitempty"`
+
+	// keep is how many snapshots of this knight to retain; once the newest is
+	// ready, the oldest beyond keep are deleted.
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Keep *int32 `json:"keep,omitempty"`
+}
+
+// KnightWorkspaceStatus reports the state of the workspace.
+type KnightWorkspaceStatus struct {
+	// lastSnapshotRequest is the last value of the ai.roundtable.io/snapshot
+	// annotation that was handled.
+	// +optional
+	LastSnapshotRequest string `json:"lastSnapshotRequest,omitempty"`
+
+	// snapshots lists the knight's workspace VolumeSnapshots, oldest first.
+	// +listType=atomic
+	// +optional
+	Snapshots []WorkspaceSnapshotStatus `json:"snapshots,omitempty"`
+}
+
+// WorkspaceSnapshotStatus is one workspace VolumeSnapshot.
+type WorkspaceSnapshotStatus struct {
+	// name is the VolumeSnapshot name.
+	Name string `json:"name"`
+
+	// createdAt is when the VolumeSnapshot object was created.
+	// +optional
+	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+
+	// readyToUse mirrors the VolumeSnapshot's status.readyToUse.
+	// +optional
+	ReadyToUse bool `json:"readyToUse,omitempty"`
 }
 
 // KnightMemory configures the knight's persistent memory volume.
@@ -747,6 +798,10 @@ type KnightStatus struct {
 	// so clients need not read KEDA objects.
 	// +optional
 	Scaling *KnightScalingStatus `json:"scaling,omitempty"`
+
+	// workspace reports workspace snapshots.
+	// +optional
+	Workspace *KnightWorkspaceStatus `json:"workspace,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional

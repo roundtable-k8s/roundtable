@@ -92,6 +92,12 @@ const (
 	// that supports ReadWriteMany.
 	ConditionKnightMemoryShared = "MemoryShared"
 
+	// ConditionKnightWorkspaceSnapshots reports the outcome of the
+	// ai.roundtable.io/snapshot annotation. Absent while the annotation is
+	// unused and the knight has no snapshots. False when snapshots can't be
+	// taken (SnapshotAPIUnavailable, WorkspaceNotPersistent, SnapshotFailed).
+	ConditionKnightWorkspaceSnapshots = "WorkspaceSnapshots"
+
 	// ConditionKnightDeprecatedFieldsUsed is True when the Knight sets a
 	// deprecated, ignored spec field (currently spec.nats.maxDeliver above 1).
 	// The condition is absent otherwise.
@@ -258,6 +264,20 @@ const (
 	// ReasonAutoscalingUnsupported indicates autoscaling was requested on a
 	// runtime the operator can't autoscale (runtime: sandbox).
 	ReasonAutoscalingUnsupported = "UnsupportedRuntime"
+
+	// ReasonSnapshotAPIUnavailable indicates the operator found no
+	// snapshot.storage.k8s.io/v1 VolumeSnapshot API at startup.
+	ReasonSnapshotAPIUnavailable = "SnapshotAPIUnavailable"
+
+	// ReasonWorkspaceNotPersistent indicates a snapshot was requested for an
+	// ephemeral workspace.
+	ReasonWorkspaceNotPersistent = "WorkspaceNotPersistent"
+
+	// ReasonSnapshotFailed indicates creating or pruning VolumeSnapshots failed.
+	ReasonSnapshotFailed = "SnapshotFailed"
+
+	// ReasonSnapshotsReady indicates the workspace snapshots are in order.
+	ReasonSnapshotsReady = "SnapshotsReady"
 
 	// ReasonMemoryNotRWX indicates the knight's memory PVC was bound without
 	// ReadWriteMany although the knight can run more than one pod.

@@ -122,6 +122,11 @@ type KnightReconciler struct {
 	// EgressRestricted=False (FQDNPolicyUnavailable).
 	CiliumEnabled bool
 
+	// SnapshotsEnabled reports whether snapshot.storage.k8s.io/v1
+	// VolumeSnapshot is served. When false the ai.roundtable.io/snapshot
+	// annotation only sets WorkspaceSnapshots=False.
+	SnapshotsEnabled bool
+
 	// EgressNetPol configures the DNS and NATS peers of knight egress
 	// policies (the chart's missionNetworkPolicy values, shared with mission
 	// NetworkPolicies). Nil uses the defaults.
@@ -163,6 +168,7 @@ const runtimeDeployment = "deployment"
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=node.k8s.io,resources=runtimeclasses,verbs=get;list;watch
 
 func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -319,6 +325,12 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.reconcileMemory(ctx, knight); err != nil {
 		reconcileErr = err
 		log.Error(err, "Failed to reconcile memory PVC")
+	}
+
+	// 2a'. Workspace VolumeSnapshots (annotation-triggered).
+	if err := r.reconcileSnapshots(ctx, knight); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to reconcile workspace snapshots")
 	}
 
 	// 2b. Nix tools — built into a per-tool-list OCI image the knight mounts.
@@ -1167,6 +1179,11 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		cnp := &unstructured.Unstructured{}
 		cnp.SetGroupVersionKind(rtruntime.CiliumNetworkPolicyGVK)
 		b = b.Owns(cnp)
+	}
+	if r.SnapshotsEnabled {
+		vs := &unstructured.Unstructured{}
+		vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
+		b = b.Owns(vs)
 	}
 	return b.Named("knight").Complete(r)
 }
