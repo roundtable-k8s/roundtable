@@ -230,6 +230,7 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if err != nil {
 		return nil, err
 	}
+	setRequestTable(ctx, aiv1alpha1.RefName(tmpl.Spec.RoundTableRef))
 	if !invokable(tmpl) {
 		return nil, fmt.Errorf("%w: chain %s/%s is not invokable through the gateway (it needs the label %s=true)",
 			ErrForbidden, ns, chainName, aiv1alpha1.LabelInvokable)

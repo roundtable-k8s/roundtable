@@ -202,6 +202,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	if err != nil {
 		return nil, err
 	}
+	setRequestTable(ctx, t.RoundTable)
 	if t.Knight.Spec.Suspend {
 		return nil, fmt.Errorf("%w: knight %s/%s is suspended", ErrUnavailable, ns, knightName)
 	}

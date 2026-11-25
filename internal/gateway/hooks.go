@@ -293,6 +293,7 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	setRequestTable(ctx, aiv1alpha1.RefName(trg.Spec.RoundTableRef))
 	if ok, wait := s.hookLimits.allow(ns+"/"+name, s.now()); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(max(wait.Seconds(), 1)))))
 		writeError(w, fmt.Errorf("%w: rate limit for this hook exceeded", ErrBusy))

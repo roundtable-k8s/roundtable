@@ -329,6 +329,31 @@ When an alert names a chain or knight, use the TraceQL queries above with the
 same `table`, `chain` or `knight` to find the slow or failing span. Details and
 thresholds: [helm-values.md](helm-values.md#grafana-dashboards).
 
+## Trigger and gateway metrics
+
+Both carry the `table` label (`none` when unknown). A Trigger's table is its
+target chain's `roundTableRef`.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` |
+| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
+| `roundtable_gateway_requests_total` | counter | `table`, `route`, `code` |
+| `roundtable_gateway_request_duration_seconds` | histogram | `route` |
+
+`outcome` is `started` (a run started), `deduped` (its run already exists),
+`skipped` (concurrency, a missed `startingDeadlineSeconds`, a filter) or `error`
+(a template that cannot render, or a failed attempt, which is retried and
+counted again). `route` is the registered route template, such as
+`POST /v1/knights/{name}/invoke`, never the raw path; requests that match no
+route or fail authentication count under `unmatched`. The gateway serves
+`/metrics` without authentication on its own port (`--metrics-listen`, set to
+`:8081` when `metrics.enabled`), separate from the API port.
+
+Examples: `time() - roundtable_trigger_last_fired_timestamp_seconds > 86400`
+finds a schedule that stopped firing; `sum by (route) (rate(roundtable_gateway_requests_total{code=~"5.."}[5m]))`
+finds failing gateway routes.
+
 ## Cost and token totals per run, step and mission
 
 Each finished task attempt reports `cost` (USD), `tokens` (`input`, `output`

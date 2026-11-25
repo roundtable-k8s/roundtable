@@ -27,6 +27,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -39,8 +40,14 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
+
+// firings reads roundtable_trigger_firings_total for a trigger of the test table.
+func firings(trigger, source, outcome string) float64 {
+	return testutil.ToFloat64(metrics.TriggerFiringsTotal.WithLabelValues("trg-rt", trigger, source, outcome))
+}
 
 var _ = Describe("Trigger controller", func() {
 	const (
@@ -328,6 +335,10 @@ var _ = Describe("Trigger controller", func() {
 			// Another subject outside the filter starts nothing either.
 			publish(prefix+".events.other", "m2", `{"service":"web"}`)
 			Consistently(func() int { return len(runsOf("on-deploy")) }, 2*time.Second, 200*time.Millisecond).Should(Equal(1))
+			Expect(firings("on-deploy", "nats", "started")).To(Equal(1.0))
+			// The stream drops a repeated Nats-Msg-Id before the Trigger sees it.
+			Expect(firings("on-deploy", "nats", "deduped")).To(Equal(0.0))
+			Expect(testutil.ToFloat64(metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(rtName, "on-deploy"))).To(BeNumerically(">", 0))
 		})
 
 		It("starts nothing for a repeated dedupeKey", func() {
@@ -344,6 +355,8 @@ var _ = Describe("Trigger controller", func() {
 				g.Expect(f[0].Key).To(Equal("42"))
 			}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 			Expect(runsOf("dedupe")).To(HaveLen(1))
+			Expect(firings("dedupe", "nats", "started")).To(Equal(1.0))
+			Expect(firings("dedupe", "nats", "deduped")).To(Equal(1.0))
 		})
 
 		It("skips with Forbid while a run is active", func() {
@@ -545,6 +558,7 @@ var _ = Describe("Trigger controller", func() {
 			reconcileTrigger("cron")
 			Expect(runsOf("cron")).To(HaveLen(1))
 			Expect(getTrigger("cron").Status.RecentFirings).To(HaveLen(1))
+			Expect(firings("cron", "schedule", "started")).To(Equal(1.0))
 		})
 
 		It("catches up a missed time once, within startingDeadlineSeconds", func() {

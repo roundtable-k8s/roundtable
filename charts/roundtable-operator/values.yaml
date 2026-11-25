@@ -553,7 +553,8 @@ metrics:
   # Extra labels added to every monitor (e.g. the Prometheus selector label).
   labels: {}
   serviceMonitor:
-    # ServiceMonitors for the operator and (when dashboard.enabled) the dashboard.
+    # ServiceMonitors for the operator, the gateway (when gateway.enabled) and
+    # (when dashboard.enabled) the dashboard.
     enabled: false
   podMonitor:
     # PodMonitor for knight pods (port 3000, container "app").

@@ -140,7 +140,7 @@ func (v verdict) String() string {
 	case verdictNeedsChanges:
 		return "needs changes"
 	}
-	return "none"
+	return noTableLabel
 }
 
 func (p prRef) String() string { return fmt.Sprintf("%s#%d", p.repo, p.number) }

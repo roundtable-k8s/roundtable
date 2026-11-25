@@ -52,7 +52,7 @@ Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com
 | `metrics.enabled` | bool | `false` | Enable the operator metrics endpoint, port and Service; gates all monitors |
 | `metrics.interval` | string | `1m` | Scrape interval for all monitors |
 | `metrics.labels` | map | `{}` | Extra labels on every monitor (for Prometheus selectors) |
-| `metrics.serviceMonitor.enabled` | bool | `false` | ServiceMonitors for the operator and, if `dashboard.enabled`, the dashboard |
+| `metrics.serviceMonitor.enabled` | bool | `false` | ServiceMonitors for the operator, the gateway (if `gateway.enabled`; port 8081 `/metrics`, served when `metrics.enabled`, unauthenticated, allowed from `networkPolicy.metricsFrom`) and, if `dashboard.enabled`, the dashboard |
 | `metrics.podMonitor.enabled` | bool | `false` | PodMonitor for knights (`podIP:3000/metrics`, container `app`); fills in `table` from the `ai.roundtable.io/round-table` pod label without overriding a `table` label the knight sets |
 
 ### OpenTelemetry tracing

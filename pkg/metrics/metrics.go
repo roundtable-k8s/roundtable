@@ -181,6 +181,50 @@ var KnightConsumerReady = prometheus.NewGaugeVec(
 	[]string{"table", "knight"},
 )
 
+// TriggerFiringsTotal counts Trigger events by what became of them. Labels:
+// table (the target chain's roundTableRef, none if unset), trigger, source
+// (schedule, nats, webhook, github), outcome (started, deduped, skipped,
+// error).
+var TriggerFiringsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "roundtable_trigger_firings_total",
+		Help: "Trigger events by table, trigger, source and outcome",
+	},
+	[]string{"table", "trigger", "source", "outcome"},
+)
+
+// TriggerLastFiredTimestampSeconds is the Unix time a Trigger last started a
+// run. Labels: table, trigger.
+var TriggerLastFiredTimestampSeconds = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_trigger_last_fired_timestamp_seconds",
+		Help: "Unix time of the Trigger's last started run, by table and trigger",
+	},
+	[]string{"table", "trigger"},
+)
+
+// GatewayRequestsTotal counts invoke gateway HTTP requests. route is the
+// registered route pattern (never the raw path), code the HTTP status, table
+// the request's RoundTable (none when not known).
+var GatewayRequestsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "roundtable_gateway_requests_total",
+		Help: "Invoke gateway HTTP requests by route template, status code and table",
+	},
+	[]string{"route", "code", "table"},
+)
+
+// GatewayRequestDurationSeconds observes invoke gateway request duration.
+// Requests can wait for a knight, so the buckets reach ~17min.
+var GatewayRequestDurationSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "roundtable_gateway_request_duration_seconds",
+		Help:    "Invoke gateway HTTP request duration in seconds by route template",
+		Buckets: prometheus.ExponentialBuckets(0.01, 4, 10),
+	},
+	[]string{"route"},
+)
+
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
@@ -199,5 +243,9 @@ func init() {
 		KnightConsumerReady,
 		TasksDeadLetteredTotal,
 		DeadLettersOpen,
+		TriggerFiringsTotal,
+		TriggerLastFiredTimestampSeconds,
+		GatewayRequestsTotal,
+		GatewayRequestDurationSeconds,
 	)
 }

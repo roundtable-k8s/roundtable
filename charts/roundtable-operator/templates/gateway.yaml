@@ -287,6 +287,9 @@ spec:
             {{- if $runs.enabled }}
             - --run-ttl={{ $gw.runTTL | default "24h" }}
             {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - --metrics-listen=:8081
+            {{- end }}
             - --hooks={{ $hooks.enabled | default false }}
             {{- if $hooks.enabled }}
             - --hook-max-body-bytes={{ int64 ($hooks.maxBodyBytes | default 1048576) }}
@@ -303,6 +306,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: 8081
+            {{- end }}
           volumeMounts:
             - name: token
               mountPath: /var/run/secrets/roundtable/gateway
@@ -374,5 +381,13 @@ spec:
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if and .Values.metrics.enabled (.Values.networkPolicy.metricsFrom | default list) }}
+    # Prometheus scrapes the metrics port from networkPolicy.metricsFrom.
+    - ports:
+        - port: metrics
+          protocol: TCP
+      from:
+        {{- toYaml .Values.networkPolicy.metricsFrom | nindent 8 }}
+    {{- end }}
 {{- end }}
 {{- end }}

@@ -73,7 +73,7 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		mux.HandleFunc("POST /v1/hooks/{namespace}/{trigger}", svc.handleHook)
 	}
 	mux.Handle("/", auth.Wrap(api))
-	return mux
+	return instrument(mux)
 }
 
 func (s *Service) handleListKnights(w http.ResponseWriter, r *http.Request) {

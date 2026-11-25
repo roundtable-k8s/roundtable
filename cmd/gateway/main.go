@@ -31,11 +31,13 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
@@ -50,15 +52,17 @@ func envOr(key, def string) string {
 
 func main() {
 	var (
-		listen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
-		defaultTimeout, maxTimeout, taskTTL, runTTL                          time.Duration
-		maxInFlight, maxStreams                                              int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled     bool
-		maxBudgetUSD, hookRate                                               float64
-		maxMissionTTL, maxMissionTimeout, hookBurst                          int
-		hookMaxBody                                                          int64
+		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
+		defaultTimeout, maxTimeout, taskTTL, runTTL                                         time.Duration
+		maxInFlight, maxStreams                                                             int
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled                    bool
+		maxBudgetUSD, hookRate                                                              float64
+		maxMissionTTL, maxMissionTimeout, hookBurst                                         int
+		hookMaxBody                                                                         int64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
+	flag.StringVar(&metricsListen, "metrics-listen", "",
+		"Address of the unauthenticated Prometheus /metrics endpoint (e.g. :8081). Empty disables it.")
 	flag.StringVar(&natsURL, "nats-url", envOr("NATS_URL", "nats://nats.database.svc:4222"), "NATS server URL.")
 	flag.StringVar(&tokenFile, "token-file", "/var/run/secrets/roundtable/gateway/token",
 		"File holding the accepted bearer token(s), one per line.")
@@ -197,6 +201,25 @@ func main() {
 	if runsEnabled {
 		// Delete the gateway's finished run copies once they are past --run-ttl.
 		go svc.RunJanitor(ctx, min(max(runTTL/4, time.Minute), 10*time.Minute))
+	}
+	if metricsListen != "" {
+		// A separate port: /metrics carries no bearer token, so it stays off
+		// the API listener.
+		mm := http.NewServeMux()
+		mm.Handle("GET /metrics", promhttp.HandlerFor(crmetrics.Registry, promhttp.HandlerOpts{}))
+		msrv := &http.Server{Addr: metricsListen, Handler: mm, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := msrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error(err, "Metrics server failed")
+				os.Exit(1)
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = msrv.Shutdown(shutdownCtx)
+		}()
 	}
 	go func() {
 		<-ctx.Done()
