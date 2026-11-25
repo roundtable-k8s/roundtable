@@ -29,6 +29,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/util"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // knightToolPATH returns the container PATH for a knight, set as a pod-spec env
@@ -59,6 +60,8 @@ type PodBuilder struct {
 	defaultImg string
 	security   PodSecurity
 	reader     client.Reader
+	// cardsBucket is the agent cards KV bucket (KNIGHT_CARDS_BUCKET).
+	cardsBucket string
 }
 
 // NewPodBuilder creates a new PodBuilder for the given Knight.
@@ -78,6 +81,13 @@ func NewPodBuilder(k *aiv1alpha1.Knight, defaultImage string) *PodBuilder {
 // DefaultPodSecurity when not called.
 func (b *PodBuilder) WithSecurity(s PodSecurity) *PodBuilder {
 	b.security = s.OrDefault()
+	return b
+}
+
+// WithCardsBucket sets the agent cards KV bucket the knight reads its roster
+// from (KNIGHT_CARDS_BUCKET). Empty means natspkg.DefaultCardsBucket.
+func (b *PodBuilder) WithCardsBucket(bucket string) *PodBuilder {
+	b.cardsBucket = bucket
 	return b
 }
 
@@ -905,6 +915,11 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	}
 
 	env = append(env, corev1.EnvVar{Name: "ROUNDTABLE_TABLE", Value: KnightTable(b.knight)})
+	cardsBucket := b.cardsBucket
+	if cardsBucket == "" {
+		cardsBucket = natspkg.DefaultCardsBucket
+	}
+	env = append(env, corev1.EnvVar{Name: "KNIGHT_CARDS_BUCKET", Value: cardsBucket})
 
 	// Append user-defined env vars
 	env = append(env, b.knight.Spec.Env...)

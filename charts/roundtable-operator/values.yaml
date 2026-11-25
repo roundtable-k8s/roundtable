@@ -59,6 +59,13 @@ extraArgs: []
 notify:
   allowedURLPrefixes: []
 
+# Agent cards (docs/agent-cards.md): the RoundTable controller keeps one card
+# per knight in this NATS KV bucket, key <table>.<knight>
+# (CARDS_KV_BUCKET; knight pods get it as KNIGHT_CARDS_BUCKET). The bucket is
+# created if missing (history 1, no TTL).
+cards:
+  bucket: roundtable-cards
+
 # Global image settings for managed components — pinned to git SHAs of each
 # repo's main; bump here (with a chart version bump), then update the chart
 # version in dapper-cluster

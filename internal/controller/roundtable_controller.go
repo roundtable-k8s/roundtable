@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -56,6 +58,20 @@ type RoundTableReconciler struct {
 	// DeadLetters captures each table's lost and failed tasks into its
 	// dead-letter stream (#396). Nil disables it.
 	DeadLetters *deadletter.Manager
+
+	// CardsBucket is the NATS KV bucket holding the agent cards (#393);
+	// empty means natspkg.DefaultCardsBucket.
+	CardsBucket string
+
+	// ServiceInfoTimeout bounds the $SRV.INFO request for the skills of
+	// running knights; zero means one second.
+	ServiceInfoTimeout time.Duration
+
+	// Now overrides the clock (tests).
+	Now func() time.Time
+
+	skillsMu        sync.Mutex
+	skillsQueriedAt map[string]time.Time
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -82,6 +98,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if r.DeadLetters != nil {
 				r.DeadLetters.Stop(req.String())
 			}
+			r.cleanupDeletedTableCards(ctx, req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -91,6 +108,10 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Handle suspended state
 	if rt.Spec.Suspend {
+		// Cards outlive suspension: knights at zero keep theirs.
+		if knights, err := r.discoverKnights(ctx, rt); err == nil {
+			r.reconcileCards(ctx, rt, knights)
+		}
 		rt.Status.Phase = aiv1alpha1.RoundTablePhaseSuspended
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
@@ -165,6 +186,9 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			})
 		}
 	}
+
+	// 3b. Agent cards (#393)
+	r.reconcileCards(ctx, rt, knights)
 
 	// 4. Warm Pool Reconciliation
 	if rt.Spec.WarmPool != nil && rt.Spec.WarmPool.Size > 0 {
@@ -624,6 +648,8 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 func (r *RoundTableReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.RoundTable{}).
+		// A Knight change updates its card within seconds (#393).
+		Watches(&aiv1alpha1.Knight{}, handler.EnqueueRequestsFromMapFunc(r.knightTables)).
 		Named("roundtable").
 		Complete(r)
 }
