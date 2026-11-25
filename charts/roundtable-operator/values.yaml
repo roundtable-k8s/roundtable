@@ -496,6 +496,15 @@ prPipeline:
   fallbackCoder: ""
   # Fix → re-review rounds before escalating.
   maxIterations: 3
+  # Who checks a finished run on GitHub (#538, docs/pr-pipeline.md). builtin:
+  # the operator (spec.issuePickup.postRun: builtin, the default). chain: the
+  # chain's own verify, close_parent and handback steps call the arsenal
+  # scripts in postRunScripts; set spec.issuePickup.postRun: chain on the
+  # table too, so the operator stops doing the same work.
+  postRun: builtin
+  # Directory of the arsenal's post-run scripts (rt-verify, rt-close-parent,
+  # rt-handback) in the lead knight's pod. Only used with postRun: chain.
+  postRunScripts: /skills/project/pr-postrun/scripts
   timeoutSeconds: 86400
   maxQueueWaitSeconds: 3600
   # Optional initial input, e.g. '{"repo": "roundtable-k8s/roundtable", "issue": 225}'.

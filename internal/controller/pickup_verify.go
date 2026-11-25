@@ -125,6 +125,9 @@ func syncReview(ctx context.Context, gh *github.Client, ref prRef, want verdict,
 // prStateClosed is the GitHub PR state for a closed (not merged) PR.
 const prStateClosed = "closed"
 
+// issueStateOpen is the GitHub state of an open issue.
+const issueStateOpen = "open"
+
 type prRef struct {
 	repo   string
 	number int
@@ -308,7 +311,7 @@ func (r *IssuePickupReconciler) handBackFailed(ctx context.Context, gh *github.C
 	if err != nil {
 		return fmt.Errorf("get %s#%d: %w", repo, issue, err)
 	}
-	if gi.State == "open" && gi.HasLabel(labels.inProgress) {
+	if gi.State == issueStateOpen && gi.HasLabel(labels.inProgress) {
 		if err := r.labelFailedIssue(ctx, gh, rt, c, repo, issue, labels); err != nil {
 			return err
 		}

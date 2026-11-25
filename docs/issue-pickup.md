@@ -73,6 +73,12 @@ and removes `inProgressLabel`. An issue that is closed or no longer carries
 alone. `ai.roundtable.io/pickup-verified` on the Chain records that the run was
 handled, and a failed Chain is not garbage-collected before that.
 
+This, the merge verification and [split parents](#split-parents-319) are the
+`postRun: builtin` checks. With `postRun: chain` the pipeline's `verify`,
+`handback` and `close_parent` steps do them, and the operator only releases
+the issue of a finished run (see
+[pr-pipeline.md](pr-pipeline.md#post-run-checks-builtin-or-chain)).
+
 ### Breaking changes
 
 Breaking-change protocol (#260, see
@@ -199,6 +205,7 @@ engine.
 | `ttlSecondsAfterFinished` | `604800` | Delete finished pickup Chains after this long; `0` keeps them |
 | `suspend` | `false` | Stop polling |
 | `engine` | `builtin` | `builtin` or `trigger`, see [Engines](#engines) |
+| `postRun` | `builtin` | `builtin`: the operator verifies the merge, hands failed runs back and closes split parents. `chain`: the pipeline's own steps do that and the operator only releases an issue a finished run left in progress. See [pr-pipeline.md](pr-pipeline.md#post-run-checks-builtin-or-chain) |
 
 The operator flag `--github-api-url` (default `https://api.github.com`, set
 through the chart's `extraArgs`) points it at another GitHub API, e.g. GitHub

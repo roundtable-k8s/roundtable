@@ -317,6 +317,8 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `prPipeline.fixModel` | string | `deep` | Model alias for every fix round, so a cheap draft is fixed by a stronger model |
 | `prPipeline.fallbackCoder` | string | `""` | Fallback coder knight for plan-quota refusals (#321): the refused implement/split/fix step re-runs on this knight with no model override; empty = defer until the plan window resets |
 | `prPipeline.maxIterations` | int | `3` | Fix → re-review rounds before escalating |
+| `prPipeline.postRun` | string | `builtin` | `chain` adds the `verify`, `close_parent` and `handback` steps that do the post-run checks; pair it with the table's `spec.issuePickup.postRun: chain` ([docs](pr-pipeline.md#post-run-checks-builtin-or-chain)) |
+| `prPipeline.postRunScripts` | string | `/skills/project/pr-postrun/scripts` | Directory of the arsenal's `rt-verify`, `rt-close-parent` and `rt-handback` in the lead's pod (`postRun: chain` only) |
 | `prPipeline.timeoutSeconds` | int | `86400` | Chain timeout (seconds) |
 | `prPipeline.maxQueueWaitSeconds` | int | `3600` | Max seconds a task may wait for its knight |
 | `prPipeline.input` | string | `""` | Initial input, `{"repo": "<owner>/<repo>", "issue": <n>}` |

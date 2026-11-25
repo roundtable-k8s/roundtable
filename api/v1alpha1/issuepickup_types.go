@@ -64,6 +64,21 @@ const (
 	IssuePickupEngineTrigger IssuePickupEngine = "trigger"
 )
 
+// IssuePickupPostRun selects who does the PR checks after a pickup run.
+// +kubebuilder:validation:Enum=builtin;chain
+type IssuePickupPostRun string
+
+const (
+	// IssuePickupPostRunBuiltin: the operator verifies that the run's PRs are
+	// merged or queued (posting a missing review), hands a failed run's issue
+	// back, and closes a split run's parent issue.
+	IssuePickupPostRunBuiltin IssuePickupPostRun = "builtin"
+	// IssuePickupPostRunChain: steps of the chain do that work. The operator
+	// parses no step output; it only releases an issue a finished run left
+	// in progress (see IssuePickupSpec.PostRun).
+	IssuePickupPostRunChain IssuePickupPostRun = "chain"
+)
+
 // IssuePickupSpec configures polling GitHub for issues labelled ready and
 // starting one copy of a Chain (the PR pipeline) per issue. The operator uses
 // the RoundTable's spec.github.tokenSecretRef token; it needs read/write on
@@ -81,6 +96,22 @@ type IssuePickupSpec struct {
 	// +kubebuilder:default=builtin
 	// +optional
 	Engine IssuePickupEngine `json:"engine,omitempty"`
+
+	// postRun selects who checks a finished run on GitHub. builtin (the
+	// default): the operator parses the run's "PRs:" and "Verdict:" lines,
+	// checks every PR is merged or queued (queueing it or posting the
+	// missing review when it can), hands failed runs back with
+	// needsHumanLabel and closes the parent issue of a split run once its
+	// sub-issues are done. chain: the chain's own steps do all of that (the
+	// chart's PR pipeline with prPipeline.postRun: chain) and the operator
+	// only releases the issue: when a finished run did not succeed, or left
+	// needsHumanLabel on the issue, and the issue is still open with
+	// inProgressLabel, it gets needsHumanLabel and loses inProgressLabel, so
+	// a failed verify or handback step never leaves it in progress. See
+	// docs/pr-pipeline.md.
+	// +kubebuilder:default=builtin
+	// +optional
+	PostRun IssuePickupPostRun `json:"postRun,omitempty"`
 
 	// suspend stops polling. Chains already started keep running.
 	// +kubebuilder:default=false

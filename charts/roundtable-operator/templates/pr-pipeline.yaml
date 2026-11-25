@@ -23,6 +23,19 @@ Lead steps (plan, review, merge, escalate) set no model unless prPipeline.leadMo
 is set: the aliases are single-valued per RoundTable and only valid for the coders'
 runtime, so a lead on another runtime (e.g. pi-knight) uses its own default (#244).
 
+Post-run (#538, docs/pr-pipeline.md): with prPipeline.postRun: chain (for a
+table with spec.issuePickup.postRun: chain) the chain does the checks the
+operator does otherwise. Every work step gets continueOnFailure, so a failure
+reaches the final steps instead of skipping them; implement/split need a
+succeeded plan and escalate needs no failed work step. Three steps are added,
+each a one-round loop whose until checks the arsenal script's "ok" line, so a
+missing script or a failed check fails the step:
+  verify       (after merge)       rt-verify: PRs merged or queued, review posted
+  close_parent (split runs)        rt-close-parent: closes the split parent
+  handback     (any step failed)   rt-handback: needs-human, comment, in-progress off
+handback has no continueOnFailure: if it fails the run fails and the operator
+releases the issue.
+
 $o / $c emit the Chain's own Go-template delimiters, which the operator renders
 at dispatch time (Helm must not).
 */ -}}
@@ -45,6 +58,8 @@ at dispatch time (Helm must not).
      the cheap/fast/deep aliases are Claude models). Unset: the step is
      deferred until the plan window resets. */ -}}
 {{- $fallback := .fallbackCoder | default "" }}
+{{- $chainPostRun := eq (.postRun | default "builtin") "chain" }}
+{{- $scripts := .postRunScripts | default "/skills/project/pr-postrun/scripts" }}
 {{- $impl := list }}
 {{- $loops := list }}
 {{- range $coders }}
@@ -57,6 +72,17 @@ at dispatch time (Helm must not).
 {{- end }}
 {{- $implList := printf "[\"%s\"]" (join "\", \"" $impl) }}
 {{- $loopList := printf "[\"%s\"]" (join "\", \"" $loops) }}
+{{- /* Work steps before merge/escalate, and every step handback looks at. */}}
+{{- $work := concat (list "plan") $impl (list "review") $loops }}
+{{- $workList := printf "[\"%s\"]" (join "\", \"" $work) }}
+{{- $all := concat $work (list "merge" "escalate" "verify" "close_parent") }}
+{{- $allList := printf "[\"%s\"]" (join "\", \"" $all) }}
+{{- $planOK := "" }}
+{{- $noFail := "" }}
+{{- if $chainPostRun }}
+{{- $planOK = "steps.plan.phase == \"Succeeded\" && " }}
+{{- $noFail = printf "!%s.exists(s, steps[s].phase == \"Failed\") && " $workList }}
+{{- end }}
 ---
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain
@@ -82,6 +108,9 @@ spec:
       model: {{ $leadModel }}
 {{- end }}
       timeoutSeconds: 1800
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       task: |
         Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
 
@@ -141,8 +170,11 @@ spec:
         name: {{ $fallback }}
 {{- end }}
       dependsOn: [plan]
-      when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).model == "{{ . }}" && !json(steps.plan.output).split'
+      when: '{{ $planOK }}json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).model == "{{ . }}" && !json(steps.plan.output).split'
       timeoutSeconds: 3600
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       task: |
         Implement this GitHub issue. Input (JSON with repo and issue): {{ $o }} .Input {{ $c }}
         Plan: {{ $o }} .Steps.plan.Output {{ $c }}
@@ -172,8 +204,11 @@ spec:
         name: {{ $fallback }}
 {{- end }}
       dependsOn: [plan]
-      when: 'json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).split'
+      when: '{{ $planOK }}json(steps.plan.output).coder == "{{ $coder }}" && json(steps.plan.output).split'
       timeoutSeconds: 3600
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       forEach:
         from: steps.plan
         path: .issues
@@ -208,6 +243,9 @@ spec:
       dependsOn: [{{ join ", " $impl }}]
       when: '{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
       timeoutSeconds: 1800
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       task: |
         Review the pull request(s) for {{ $o }} .Input {{ $c }}.
         Implementation report:
@@ -226,6 +264,9 @@ spec:
     - name: fixloop_{{ $k }}
       dependsOn: [review]
       when: 'steps.review.phase == "Succeeded" && json(steps.plan.output).coder == "{{ $coder }}"'
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
 {{- if $fallback }}
       fallbackRef:
         name: {{ $fallback }}
@@ -282,6 +323,9 @@ spec:
       dependsOn: [{{ join ", " $loops }}]
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Converged")'
       timeoutSeconds: 3600
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       task: |
         The review of {{ $o }} .Input {{ $c }} passed.
         {{- range $loops }}
@@ -305,8 +349,15 @@ spec:
       model: {{ $leadModel }}
 {{- end }}
       dependsOn: [{{ join ", " $loops }}]
+{{- if $chainPostRun }}
+      when: '{{ $noFail }}({{ $loopList }}.exists(s, steps[s].outcome == "Exhausted") || !{{ $implList }}.exists(s, steps[s].phase == "Succeeded"))'
+{{- else }}
       when: '{{ $loopList }}.exists(s, steps[s].outcome == "Exhausted") || !{{ $implList }}.exists(s, steps[s].phase == "Succeeded")'
+{{- end }}
       timeoutSeconds: 600
+{{- if $chainPostRun }}
+      continueOnFailure: true
+{{- end }}
       task: |
         Escalate {{ $o }} .Input {{ $c }} to a human.
         {{- range $loops }}
@@ -320,5 +371,100 @@ spec:
         every PR on the last review's "PRs:" line, and comment on each with the
         last review (or the plan) and why it was escalated. Do not merge.
         Reply with the URLs you labelled.
+{{- if $chainPostRun }}
+
+    - name: verify
+      dependsOn: [merge]
+      when: 'steps.merge.phase == "Succeeded"'
+      continueOnFailure: true
+      loop:
+        until: 'last.output.contains("rt-verify: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: {{ $lead }}
+{{- if $leadModel }}
+            model: {{ $leadModel }}
+{{- end }}
+            timeoutSeconds: 1800
+            task: |
+              Verify on GitHub that every pull request of {{ $o }} .Input {{ $c }} is merged or queued.
+              The merge step reported:
+              {{ $o }} .Steps.merge.Output {{ $c }}
+              The final review (its structured "prs" and "verdict", shown here as the
+              "PRs:" and "Verdict:" lines):
+              {{- range $loops }}
+              {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Outcome "Converged" {{ $c }}{{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+              {{- end }}
+
+              Use the arsenal script, never gh by hand:
+              1. Write the final review above to /tmp/review-<issue>.md.
+              2. Run: bash {{ $scripts }}/rt-verify <repo> <issue> <ship_it|needs_changes> /tmp/review-<issue>.md <pr-url> [<pr-url> ...]
+                 with the review's verdict and every PR it lists. It posts the
+                 review when the PR has none with that verdict (rt-review),
+                 queues a ship-it PR that is still open, and hands the issue back
+                 (needs-human) when a PR is closed, a draft, held or not queueable.
+              If {{ $scripts }}/rt-verify does not exist, do not do its work yourself:
+              reply with exactly "rt-verify: missing script {{ $scripts }}/rt-verify" and stop.
+              Reply with the script's last output line.
+
+    - name: close_parent
+      dependsOn: [verify]
+      when: 'steps.verify.phase == "Succeeded" && json(steps.plan.output).split'
+      continueOnFailure: true
+      loop:
+        until: 'last.output.contains("rt-close-parent: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: {{ $lead }}
+{{- if $leadModel }}
+            model: {{ $leadModel }}
+{{- end }}
+            timeoutSeconds: 3600
+            task: |
+              {{ $o }} .Input {{ $c }} was split into sub-issues; settle the parent issue.
+              Plan (its "issues" are the sub-issues): {{ $o }} .Steps.plan.Output {{ $c }}
+
+              Run: bash {{ $scripts }}/rt-close-parent <repo> <issue> <sub-issue> [<sub-issue> ...]
+              It waits for the sub-issues to close, closes the parent when every one
+              was completed and hands the parent back (needs-human) when one was
+              closed as not planned, needs a human or is still open at its timeout.
+              If {{ $scripts }}/rt-close-parent does not exist, do not do its work yourself:
+              reply with exactly "rt-close-parent: missing script {{ $scripts }}/rt-close-parent" and stop.
+              Reply with the script's last output line.
+
+    - name: handback
+      dependsOn: [verify, close_parent, escalate]
+      when: '{{ $allList }}.exists(s, steps[s].phase == "Failed")'
+      loop:
+        until: 'last.output.contains("rt-handback: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: {{ $lead }}
+{{- if $leadModel }}
+            model: {{ $leadModel }}
+{{- end }}
+            timeoutSeconds: 600
+            task: |
+              A step of the PR pipeline for {{ $o }} .Input {{ $c }} failed. Failed steps:
+              {{- range $all }}
+              {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Phase "Failed" {{ $c }}- {{ . }}: {{ $o }} .Error {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+              {{- end }}
+
+              Hand the issue back to a human with the arsenal script, never gh by hand:
+              1. Write the failed steps above to /tmp/handback-<issue>.md.
+              2. Run: bash {{ $scripts }}/rt-handback <repo> <issue> /tmp/handback-<issue>.md
+                 It adds needs-human, comments the failed steps and removes the
+                 in-progress label, and does nothing for an issue that is closed or
+                 no longer in progress.
+              If {{ $scripts }}/rt-handback does not exist, do not do its work yourself:
+              reply with exactly "rt-handback: missing script {{ $scripts }}/rt-handback" and stop.
+              Reply with the script's last output line.
+{{- end }}
 {{- end }}
 {{- end }}

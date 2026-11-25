@@ -23,6 +23,9 @@ It is built only from existing Chain features: `when` and `loop`
 - Rendered example: [`examples/chain-pr-pipeline.yaml`](../examples/chain-pr-pipeline.yaml)
   (coders `rt-operator` and `rt-ui`). It is generated from the chart; change
   the template and re-render instead of editing it.
+  [`examples/chain-pr-pipeline-postrun.yaml`](../examples/chain-pr-pipeline-postrun.yaml)
+  is the same with `prPipeline.postRun: chain`
+  ([post-run checks](#post-run-checks-builtin-or-chain)).
 
 ## Input
 
@@ -261,7 +264,8 @@ helm template rt charts/roundtable-operator -n roundtable \
 ```
 
 then drop the `# Source` line, `---` and the Helm labels, and keep the
-example's header comment.
+example's header comment. Render `examples/chain-pr-pipeline-postrun.yaml`
+the same way with `--set prPipeline.postRun=chain`.
 
 `make helm-check` lints the chart and fails if the example no longer matches
 the rendered template. CI doesn't run it yet, so run it after any change to
@@ -285,6 +289,97 @@ Switch with `kubectl patch roundtable <table> --type merge -p
 '{"spec":{"issuePickup":{"engine":"trigger"}}}'`, and back with
 `"engine":"builtin"`: that deletes the generated Trigger, running Chains keep
 going and are not started twice. See [issue-pickup.md](issue-pickup.md#engines).
+
+## Post-run checks: builtin or chain
+
+After a pickup run finishes, someone has to check GitHub: are the PRs merged
+or queued, does each carry the review verdict, is a failed run's issue handed
+back, is a split run's parent issue closed? Each table picks who does it with
+`spec.issuePickup.postRun` on the RoundTable, and the chart's pipeline must
+match it with `prPipeline.postRun`.
+
+| | `builtin` (default) | `chain` |
+|---|---|---|
+| Merge verification | operator: parses the `PRs:` and `Verdict:` lines, posts a missing review, queues an open ship-it PR, hands problems back | `verify` step: `rt-verify` |
+| Failed run | operator: needs-human, comment naming the failed steps, in-progress removed | `handback` step: `rt-handback` |
+| Split parent | operator: closes it once every sub-issue is completed (polls) | `close_parent` step: `rt-close-parent` |
+| Operator after a run | all of the above | only releases the issue (below) |
+| Chart | `prPipeline.postRun: builtin` | `prPipeline.postRun: chain` ([`examples/chain-pr-pipeline-postrun.yaml`](../examples/chain-pr-pipeline-postrun.yaml)) |
+
+### The chain mode
+
+`prPipeline.postRun: chain` renders three more steps, all on the lead:
+
+```
+... → merge → verify        (merge Succeeded)
+            → close_parent  (verify Succeeded and the plan split)
+handback                    (any step Failed; runs last)
+```
+
+- Every work step (plan to escalate) gets `continueOnFailure: true`, so a
+  failure reaches `handback` instead of skipping it. The implement and split
+  steps also need a succeeded plan, and escalate needs no failed work step, so
+  after a failure only `handback` runs.
+- `verify`, `close_parent` and `handback` are one-round `loop`s whose `until`
+  checks the script's `ok` line (`rt-verify: ok`, `rt-close-parent: ok`,
+  `rt-handback: ok`). A failed check, a knight that skipped the script, or a
+  missing script (the task tells the knight to reply
+  `<script>: missing script <path>` and not to do the work by hand) exhausts
+  the loop and fails the step.
+- `handback` has no `continueOnFailure`: when it fails, the run fails.
+- The GitHub work lives in arsenal scripts, not in prompts. Their directory is
+  `prPipeline.postRunScripts` (default `/skills/project/pr-postrun/scripts`):
+
+| Step | Script | Interface |
+|---|---|---|
+| `verify` | `rt-verify <repo> <issue> <ship_it\|needs_changes> <review-file> <pr-url>...` | For each PR: merged or queued is fine; an open PR whose newest review verdict differs gets the review file posted with `rt-review` (`project/pr-review`), which also queues a ship-it PR; closed, draft, `needs-human`/`hold` or not queueable is a problem. Problems: issue gets `needs-human`, a comment listing them, in-progress removed; last line `rt-verify: needs-human ...`, exit 1. Otherwise last line `rt-verify: ok ...`. |
+| `close_parent` | `rt-close-parent <repo> <parent> <sub-issue>...` | Waits (default 50 min, `--wait-minutes`) for the sub-issues to close. All completed: closes the parent with a comment, removes in-progress. One closed as not planned, labelled `needs-human` or still open at the timeout: hands the parent back (`needs-human`, comment, in-progress removed). Both end `rt-close-parent: ok closed\|handed-back ...`. |
+| `handback` | `rt-handback <repo> <issue> <summary-file>` | When the issue is open and in progress: adds `needs-human`, comments the summary, removes in-progress (last, so a retry repeats nothing visible). A closed issue or one no longer in progress is left alone. Ends `rt-handback: ok ...`. |
+
+All three accept `--in-progress-label` and `--needs-human-label` (defaults
+`rt:in-progress`, `needs-human`) and exit 2 on bad usage. The scripts are
+tracked in [roundtable-k8s/arsenal#16](https://github.com/roundtable-k8s/arsenal/issues/16);
+until they ship, a chain-mode run fails its post-run steps and the operator
+hands the issue back.
+
+Task templates do not expose the structured `prs` and `verdict` fields yet,
+so `verify` gets the final review's text (whose `PRs:` and `Verdict:` lines are
+what the structured fields are parsed from) and the knight passes the PR URLs
+and the verdict to `rt-verify` as arguments.
+
+### What the operator still does with `postRun: chain`
+
+The operator parses no step output for the table. It counts unfinished runs
+against `maxActive` / `maxActivePerRepo` (a finished run frees its slot) and
+garbage-collects finished Chains after `ttlSecondsAfterFinished`. Once per
+finished run it also releases the issue if the run left it open with
+`rt:in-progress`:
+
+- the issue already has `needs-human` (escalate, verify or handback labelled
+  it): `rt:in-progress` is removed;
+- the run did not succeed (Failed, e.g. `handback` itself failed, or
+  PartiallySucceeded): `needs-human`, a comment naming the failed steps, and
+  `rt:in-progress` removed;
+- the run succeeded: nothing. The queued PRs close the issue when they merge,
+  and `close_parent` settled a split parent.
+
+So no issue stays `rt:in-progress` because a `verify` or `handback` step
+failed.
+
+### Switching a table
+
+Switch both settings together while the table has no unfinished pickup runs
+and no split parent still waiting to close (a builtin run's parent is only
+closed by the builtin mode):
+
+1. Set `prPipeline.postRun: chain` in the chart values and upgrade the
+   release (the `pr-pipeline` Chain template gets the new steps; runs already
+   started keep their copy).
+2. `kubectl patch roundtable <table> --type merge -p '{"spec":{"issuePickup":{"postRun":"chain"}}}'`.
+
+Back: `"postRun":"builtin"` on the table and `prPipeline.postRun: builtin`.
+Never run a chain-mode pipeline on a builtin table (both would verify and hand
+back), or a builtin pipeline on a chain table (nobody would verify the merge).
 
 By hand:
 

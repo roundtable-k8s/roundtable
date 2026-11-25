@@ -448,6 +448,7 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(p.TTLSecondsAfterFinished).To(Equal(new(int32(604800))))
 		Expect(p.HumanPatterns).To(HaveLen(3))
 		Expect(p.BreakingLabel).To(Equal("breaking"))
+		Expect(p.PostRun).To(Equal(aiv1alpha1.IssuePickupPostRunBuiltin))
 	})
 
 	It("holds new work in a repo while a breaking PR is open (#260)", func() {
@@ -957,6 +958,121 @@ var _ = Describe("IssuePickup controller", func() {
 			tick()
 			Expect(gh.labels(repo, 314)).To(ConsistOf("needs-human"))
 			Expect(handled(name)).To(BeTrue())
+		})
+	})
+
+	// postRun: chain (#538): the chain's steps verify, hand back and close a
+	// split parent; the operator only releases the issue.
+	Context("postRun: chain", func() {
+		BeforeEach(func() {
+			rt := getRT()
+			rt.Spec.IssuePickup.PostRun = aiv1alpha1.IssuePickupPostRunChain
+			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		})
+		// run picks up issue n and finishes its chain with phase and steps.
+		run := func(n int, phase aiv1alpha1.ChainPhase, steps ...aiv1alpha1.ChainStepStatus) string {
+			gh.add(repo, n, "Fix", "body", "rt:ready")
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			c := &chains[0]
+			c.Status.Phase = phase
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = steps
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return c.Name
+		}
+		handled := func(name string) bool {
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			return c.Annotations[aiv1alpha1.AnnotationPickupVerified] == c.Status.LastRunTrigger
+		}
+		ok := func(name, out string) aiv1alpha1.ChainStepStatus {
+			return aiv1alpha1.ChainStepStatus{Name: name, Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: out}
+		}
+
+		It("does not verify the merge step: no review, no queueing, no needs-human", func() {
+			// builtin would post the review and label the issue for the closed PR.
+			gh.setPR(github.PullRequest{State: "closed"})
+			name := run(301, aiv1alpha1.ChainPhaseSucceeded,
+				ok("review", "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"),
+				ok("merge", "queued"), ok("verify", "ok"))
+			tick()
+			tick()
+			Expect(gh.reviews).To(BeEmpty())
+			Expect(gh.autoMerged).To(BeEmpty())
+			Expect(gh.labels(repo, 301)).To(ConsistOf("rt:in-progress"))
+			Expect(gh.commentsOn(repo, 301)).To(HaveLen(1)) // the claim only
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("does not close a split parent", func() {
+			gh.add(repo, 320, "Part one", "Part of #319")
+			gh.mu.Lock()
+			gh.find(repo, 320).State = "closed"
+			gh.find(repo, 320).StateReason = "completed"
+			gh.mu.Unlock()
+			name := run(319, aiv1alpha1.ChainPhaseSucceeded,
+				ok("plan", "```json\n{\"coder\":\"x\",\"split\":true,\"issues\":[{\"number\":320,\"title\":\"a\"}]}\n```"),
+				ok("merge", "queued"))
+			tick()
+			tick()
+			gh.mu.Lock()
+			state := gh.find(repo, 319).State
+			gh.mu.Unlock()
+			Expect(state).NotTo(Equal("closed"))
+			Expect(gh.labels(repo, 319)).To(ConsistOf("rt:in-progress"))
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			Expect(c.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationPickupParentDone))
+		})
+
+		It("frees the issue when the final verify step failed", func() {
+			name := run(538, aiv1alpha1.ChainPhaseFailed,
+				ok("merge", "queued"),
+				aiv1alpha1.ChainStepStatus{Name: "verify", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "pr-verify: not found"},
+				aiv1alpha1.ChainStepStatus{Name: "handback", Phase: aiv1alpha1.ChainStepPhaseSkipped, Reason: "ChainFailed"})
+			Expect(pickupChains()[0].Status.Phase).To(Equal(aiv1alpha1.ChainPhaseFailed))
+			tick()
+			Expect(gh.labels(repo, 538)).To(ConsistOf("needs-human"))
+			comments := gh.commentsOn(repo, 538)
+			Expect(comments).To(HaveLen(2))
+			Expect(comments[1]).To(ContainSubstring("`verify`: pr-verify: not found"))
+			Expect(handled(name)).To(BeTrue())
+
+			By("releasing once per run")
+			tick()
+			Expect(gh.commentsOn(repo, 538)).To(HaveLen(2))
+		})
+
+		It("only removes in-progress when a step already handed the issue back", func() {
+			name := run(540, aiv1alpha1.ChainPhasePartiallySucceeded,
+				aiv1alpha1.ChainStepStatus{Name: "review", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "timeout"},
+				ok("handback", "labelled"))
+			gh.mu.Lock()
+			gh.find(repo, 540).Labels = append(gh.find(repo, 540).Labels, github.Label{Name: "needs-human"})
+			gh.mu.Unlock()
+			tick()
+			Expect(gh.labels(repo, 540)).To(ConsistOf("needs-human"))
+			Expect(gh.commentsOn(repo, 540)).To(HaveLen(1))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("leaves an issue the handback step already released alone, then garbage-collects the chain", func() {
+			rt := getRT()
+			rt.Spec.IssuePickup.TTLSecondsAfterFinished = new(int32(1))
+			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+			name := run(541, aiv1alpha1.ChainPhasePartiallySucceeded,
+				aiv1alpha1.ChainStepStatus{Name: "review", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "timeout"},
+				ok("handback", "labelled"))
+			gh.setLabels(541, "needs-human")
+			tick()
+			Expect(gh.labels(repo, 541)).To(ConsistOf("needs-human"))
+			Expect(gh.commentsOn(repo, 541)).To(HaveLen(1))
+			Expect(handled(name)).To(BeTrue())
+			tick()
+			Expect(pickupChains()).To(BeEmpty())
 		})
 	})
 
