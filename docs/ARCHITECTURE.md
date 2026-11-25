@@ -173,6 +173,7 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_missions` | gauge | `table`, `phase` |
 | `roundtable_table_cost_usd` | gauge | `table` |
 | `roundtable_warm_pool_knights` | gauge | `table`, `state` |
+| `roundtable_knight_isolated` | gauge | `table`, `knight`, `reason` (1 for the current `Isolated` condition reason) |
 | `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` (`succeeded`, `partially_succeeded`, `failed`) |
 | `roundtable_chain_noop_runs_total` | counter | `table`, `chain` |
 | `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` |

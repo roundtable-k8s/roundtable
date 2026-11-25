@@ -133,9 +133,11 @@ type KnightSpec struct {
 	// runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
 	// pod runs under (for example "gvisor"). It applies to both runtime:
 	// deployment and runtime: sandbox. When unset the table default applies,
-	// and when that is unset too the cluster's default runtime is used. If the
-	// RuntimeClass does not exist the knight reports RuntimeAvailable=False
-	// with reason RuntimeClassNotFound.
+	// and when that is unset too the operator default (KNIGHT_DEFAULT_RUNTIME_CLASS,
+	// "gvisor" unless the install turns it off). An empty string means the
+	// cluster's default runtime. isolation.runtime: none clears it. If the
+	// RuntimeClass does not exist the knight is parked with
+	// RuntimeAvailable=False and Isolated=False, reason RuntimeClassNotFound.
 	// +optional
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 
@@ -144,10 +146,23 @@ type KnightSpec struct {
 	// CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
 	// cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
 	// allows the allowed ports to any destination and reports
-	// EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
-	// policy is rendered.
+	// EgressRestricted=False (FQDNPolicyUnavailable). When unset the table
+	// default applies, and when that is unset too an empty allowlist (unless
+	// the operator's default egress mode is off). The baseline (Kubernetes
+	// API, the operator's base hosts and the arsenal git hosts) is always
+	// allowed. isolation.egress: unrestricted renders no policy.
 	// +optional
 	Egress *KnightEgress `json:"egress,omitempty"`
+
+	// isolation opts the knight out of the operator's isolation defaults. By
+	// default every knight runs under the operator's default RuntimeClass
+	// (gvisor) and behind a default-deny egress policy (DNS, NATS, the
+	// Kubernetes API, the operator's base hosts, its arsenal git hosts and its
+	// own allowedHosts). Opting out needs a reason, and the knight reports
+	// Isolated=False with reason OptedOut. There is deliberately no table-level
+	// opt-out.
+	// +optional
+	Isolation *KnightIsolation `json:"isolation,omitempty"`
 
 	// concurrency is the maximum number of concurrent tasks the knight can process.
 	// When unset the knight's RoundTable spec.defaults.concurrency applies, and
@@ -460,6 +475,54 @@ type KnightCapabilities struct {
 	Browser bool `json:"browser,omitempty"`
 }
 
+// Values of KnightIsolation.Runtime and KnightIsolation.Egress.
+const (
+	IsolationDefault      = "default"
+	IsolationRuntimeNone  = "none"
+	IsolationUnrestricted = "unrestricted"
+)
+
+// KnightIsolation is a knight's explicit opt-out of the isolation defaults.
+// The reason rule is a Knight.spec rule (not on this type) so it costs nothing
+// where KnightSpec is nested in Mission and RoundTable lists; a mission
+// template without a reason is rejected when its Knight is created.
+type KnightIsolation struct {
+	// runtime is "default" (run under the RuntimeClass from spec.runtimeClassName,
+	// the table default or the operator default) or "none" (run without a
+	// sandboxing RuntimeClass, even if one is set elsewhere).
+	// +kubebuilder:validation:Enum=default;none
+	// +kubebuilder:validation:MaxLength=16
+	// +optional
+	Runtime string `json:"runtime,omitempty"`
+
+	// egress is "default" (spec.egress, the table default or an empty
+	// allowlist, on top of the baseline) or "unrestricted" (no egress policy).
+	// +kubebuilder:validation:Enum=default;unrestricted
+	// +kubebuilder:validation:MaxLength=16
+	// +optional
+	Egress string `json:"egress,omitempty"`
+
+	// reason says why the knight opts out (for example "needs ptrace for the
+	// debugger skill"). Required, at least 10 characters, when runtime or
+	// egress is not "default". It is shown in the Isolated condition.
+	// +kubebuilder:validation:MinLength=10
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Reason string `json:"reason,omitempty"`
+}
+
+// RuntimeOptedOut reports whether the knight opts out of the sandboxing
+// RuntimeClass (isolation.runtime: none).
+func (i *KnightIsolation) RuntimeOptedOut() bool {
+	return i != nil && i.Runtime == IsolationRuntimeNone
+}
+
+// EgressOptedOut reports whether the knight opts out of the egress policy
+// (isolation.egress: unrestricted).
+func (i *KnightIsolation) EgressOptedOut() bool {
+	return i != nil && i.Egress == IsolationUnrestricted
+}
+
 // KnightEgress is a knight's egress allowlist.
 type KnightEgress struct {
 	// allowedHosts are the hostnames the knight may reach, each an exact host
@@ -707,6 +770,7 @@ type KnightStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.readyReplicas`,priority=1
+// +kubebuilder:printcolumn:name="Isolated",type=string,JSONPath=`.status.conditions[?(@.type=="Isolated")].status`
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.tasksCompleted`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
@@ -726,6 +790,7 @@ type Knight struct {
 	// +kubebuilder:validation:XValidation:rule="!has(self.maxReplicas) || !has(self.replicas) || self.maxReplicas >= self.replicas",message="maxReplicas must be greater than or equal to replicas"
 	// +kubebuilder:validation:XValidation:rule="((has(self.replicas) ? self.replicas : 1) <= 1 && (has(self.maxReplicas) ? self.maxReplicas : 1) <= 1) || (has(self.workspace) && ((has(self.workspace.mode) && self.workspace.mode == 'ephemeral') || (has(self.workspace.existingClaim) && size(self.workspace.existingClaim) > 0)))",message="replicas or maxReplicas above 1 need workspace.mode: ephemeral (or a ReadWriteMany workspace.existingClaim); the default workspace PVC is ReadWriteOnce"
 	// +kubebuilder:validation:XValidation:rule="!has(self.workspace) || !has(self.workspace.mode) || self.workspace.mode != 'ephemeral' || !has(self.workspace.existingClaim) || size(self.workspace.existingClaim) == 0",message="workspace.existingClaim cannot be combined with workspace.mode: ephemeral"
+	// +kubebuilder:validation:XValidation:rule="!has(self.isolation) || has(self.isolation.reason) || ((!has(self.isolation.runtime) || self.isolation.runtime == 'default') && (!has(self.isolation.egress) || self.isolation.egress == 'default'))",message="isolation.reason (at least 10 characters) is required when isolation.runtime or isolation.egress is not default"
 	// +kubebuilder:validation:XValidation:rule="!has(self.runtime) || self.runtime != 'sandbox' || ((has(self.replicas) ? self.replicas : 1) <= 1 && (has(self.maxReplicas) ? self.maxReplicas : 1) <= 1)",message="runtime: sandbox runs a single pod; replicas and maxReplicas must be 1"
 	Spec KnightSpec `json:"spec"`
 

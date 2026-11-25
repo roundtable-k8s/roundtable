@@ -21,6 +21,13 @@ spec:
     - name: personal
       repo: https://github.com/<you>/<your-skills-repo>
 
+  # Isolated by default (gVisor + default-deny egress, #387). Galahad scans
+  # and looks up targets chosen per task, which no fixed allowlist can name,
+  # so it opts out of the egress policy, with the reason on record.
+  isolation:
+    egress: unrestricted
+    reason: "nmap/whois/shodan reach targets chosen per task"
+
   tools:
     apt:
       - nmap

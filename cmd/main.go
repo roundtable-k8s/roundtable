@@ -337,6 +337,9 @@ func main() {
 	cardsBucket := natspkg.CardsBucketFromEnv()
 	knightSecurity := knightpkg.PodSecurityFromEnv()
 	egressNetPol := mission.NetPolSettingsFromEnv()
+	isolation := knightpkg.IsolationSettingsFromEnv()
+	setupLog.Info("Knight isolation defaults", "runtimeClassName", isolation.RuntimeClassName,
+		"egressDeny", isolation.EgressDeny, "baseHosts", isolation.BaseHosts)
 	// Note: GetEventRecorderFor is deprecated (SA1019); GetEventRecorder returns a different
 	// events API type and needs controller changes, so the migration is deferred.
 	knightReconciler := &controller.KnightReconciler{
@@ -353,6 +356,7 @@ func main() {
 		NATS:                   natsProvider,
 		CiliumEnabled:          ciliumEnabled,
 		EgressNetPol:           &egressNetPol,
+		Isolation:              isolation,
 	}
 
 	// Create runtime backends
@@ -432,8 +436,9 @@ func main() {
 		Notify:   notifier,
 		Planner:  missionPlanner,
 		Assembler: &mission.KnightAssembler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			EgressDeny: isolation.EgressDeny,
 		},
 		Cleaner:     &mission.Cleaner{Client: mgr.GetClient(), NATS: natsProvider},
 		CostTracker: &mission.CostTracker{Client: mgr.GetClient()},

@@ -77,6 +77,25 @@ spec:
             # Pinned nixpkgs ref for reproducible knight tool builds.
             - name: KNIGHT_NIXPKGS_REF
               value: "{{ .Values.nixpkgs.ref }}"
+            # Isolation defaults (#387): every knight runs under this
+            # RuntimeClass and behind default-deny egress unless its spec opts
+            # out. isolation.runtimeClassName: "" and isolation.egress.mode: off
+            # turn the defaults off for the whole install.
+            {{- with .Values.isolation }}
+            - name: KNIGHT_DEFAULT_RUNTIME_CLASS
+              value: {{ if kindIs "string" .runtimeClassName }}{{ .runtimeClassName | quote }}{{ else }}"gvisor"{{ end }}
+            {{- $egress := .egress | default dict }}
+            {{- $mode := $egress.mode }}
+            {{- if kindIs "bool" $mode }}{{ $mode = ternary "deny" "off" $mode }}{{ end }}
+            {{- if kindIs "invalid" $mode }}{{ $mode = "deny" }}{{ end }}
+            {{- if not (has $mode (list "deny" "off")) }}
+            {{- fail (printf "isolation.egress.mode must be \"deny\" or \"off\", got %v" $mode) }}
+            {{- end }}
+            - name: KNIGHT_DEFAULT_EGRESS
+              value: {{ $mode | quote }}
+            - name: KNIGHT_EGRESS_BASE_HOSTS
+              value: {{ join "," ($egress.baseHosts | default list) | quote }}
+            {{- end }}
             {{- with .Values.toolsImage }}
             {{- if .repository }}
             # Per-knight tools images: build Nix tools into an OCI image per

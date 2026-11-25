@@ -7,25 +7,56 @@ keeping credentials out of pods (#169, #173) it caps the damage.
 
 ## End state and what is live today
 
-The intended model (whiteboard decision 8, #377) is **isolated by default**:
-every knight reaches only DNS, its NATS server and its allow-listed hosts, and
-opting out is explicit on the Knight. Two steps get there:
+The model (whiteboard decision 8, #377) is **isolated by default**: every
+knight is behind a default-deny egress policy and reaches only the baseline
+below plus its allow-listed hosts. Opting out is explicit on the Knight.
 
 | Step | Status |
 | --- | --- |
 | `Knight.spec.egress` renders a per-knight policy (#348) | live |
-| `RoundTable.spec.defaults.egress` gives every knight of a table an allowlist (this page, #349) | live |
-| Default-deny for every knight, with an explicit per-knight opt-out (#387) | **not yet**: until #387 lands a knight with no `egress` (own or inherited) has no egress policy |
+| `RoundTable.spec.defaults.egress` gives every knight of a table an allowlist (#349) | live |
+| Default-deny for every knight, with an explicit per-knight opt-out (#387) | live (chart `isolation.egress.mode: deny`, the default) |
+
+The allowlist is resolved in this order: the knight's `egress`, then the
+table's `defaults.egress`, then an empty allowlist (the baseline only). With
+the install-wide `isolation.egress.mode: "off"` the last step is skipped, so
+knights without an allowlist get no policy.
 
 There is no table-level opt-out: a table can only supply an allowlist. Opt-outs
-stay on the Knight (#387).
+stay on the Knight:
+
+```yaml
+spec:
+  isolation:
+    egress: unrestricted   # no egress policy at all
+    reason: "crawls arbitrary research sources"
+```
+
+`reason` is required (at least 10 characters); the knight then reports
+`Isolated=False`, reason `OptedOut`. See
+[runtime-isolation.md](runtime-isolation.md) for the `Isolated` condition and
+the `roundtable_knight_isolated` metric.
+
+## The baseline
+
+Every knight's policy allows, even with an empty allowlist:
+
+| What | Why | Rendered as (Cilium) |
+| --- | --- | --- |
+| Cluster DNS | name resolution, and Cilium's DNS proxy for `toFQDNs` | `toEndpoints` on 53 with a DNS rule |
+| The knight's NATS server(s) | tasks and results | `toEndpoints` (in-cluster) or the port to any destination |
+| The Kubernetes API | knights use it on purpose (`automountServiceAccountToken: true`) | `toEntities: [kube-apiserver]` |
+| `isolation.egress.baseHosts` (`KNIGHT_EGRESS_BASE_HOSTS`, default `openrouter.ai`, `api.anthropic.com`) | the model providers | `toFQDNs` on 443 |
+| The hosts of the knight's arsenal repos (`spec.arsenal.repo`, `spec.arsenals[].repo`) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
+
+The knight's own `allowedHosts` are added on top, on its `allowedPorts`.
 
 ## The fields
 
 ```yaml
 # Knight.spec.egress, or RoundTable.spec.defaults.egress (same type)
 egress:
-  allowedHosts:            # exact hosts or "*." wildcards; empty = DNS and NATS only
+  allowedHosts:            # exact hosts or "*." wildcards; empty = the baseline only
     - api.anthropic.com
     - "*.githubusercontent.com"   # subdomains only, not githubusercontent.com itself
   allowedPorts: [443]      # TCP, default 443
@@ -33,19 +64,24 @@ egress:
 
 - A knight's own `egress` wins over the table's. Allowlists are **not merged**
   (same rule as `resources`); an explicit `egress: {}` is its own value and
-  means DNS and NATS only.
+  means the baseline only.
 - The table default applies to the table's standing knights (those labelled
   `ai.roundtable.io/round-table`).
-- The operator renders `CiliumNetworkPolicy knight-<name>-egress` allowing DNS
-  (with a DNS proxy rule, which FQDN tracking needs), the knight's NATS server
-  and each allowed host on the allowed ports. Everything else is denied.
+- The operator renders `CiliumNetworkPolicy knight-<name>-egress` allowing the
+  baseline and each allowed host on the allowed ports. Everything else is
+  denied.
+- Mission knights are Knights too and get the same policy and the same
+  opt-out rules (only their template or inline spec can opt out). Under
+  default-deny the operator no longer creates the per-mission
+  `mission-<name>-isolation` NetworkPolicy, which allowed 443 to anywhere and
+  would have widened the knight's policy (NetworkPolicies are additive).
 
 ## Cilium vs fallback
 
 | Cluster | Result | `EgressRestricted` condition |
 | --- | --- | --- |
 | `cilium.io/v2` `CiliumNetworkPolicy` is served | Hostname allowlist enforced with `toFQDNs` | `True`, reason `FQDNPolicyApplied` |
-| Not served | A plain `NetworkPolicy` allows DNS, NATS and the allowed **ports** to **any** destination; hostnames cannot be enforced | `False`, reason `FQDNPolicyUnavailable` |
+| Not served | A plain `NetworkPolicy` allows DNS, NATS and, to **any** destination, the Kubernetes API ports (443, 6443), the baseline hosts' ports and the allowed **ports**; hostnames cannot be enforced | `False`, reason `FQDNPolicyUnavailable` |
 | Applying the policy failed | See the condition message | `False`, reason `EgressPolicyFailed` |
 
 Do not treat a fallback cluster as isolated: check `EgressRestricted` before
@@ -68,10 +104,23 @@ kubectl get knight galahad -o jsonpath='{.status.conditions[?(@.type=="EgressRes
   the template can only filter by IP/CIDR and port. Use the template for
   coarse limits and expect no per-host allowlist there.
 
+## Tool installs need egress
+
+`tools.apt`, `tools.pip` and `tools.mise` download their packages **when the
+pod starts**, and a failed install is only a warning: the knight still starts
+and reports Ready, but without the tools. Under default-deny, allow the package
+hosts in `allowedHosts` (for example your apt mirrors, `pypi.org` and
+`files.pythonhosted.org` for pip, and for mise `mise-versions.jdx.dev`,
+`github.com`, `api.github.com`, `*.githubusercontent.com` plus the tool's own
+download host such as `dl.k8s.io` or `get.helm.sh`), or move the tools to
+`tools.nix`, which needs no egress at pod start. When enabling isolation on an
+existing knight, check its `tools` first; see `examples/tristan.yaml`.
+
 ## Finding the hosts a knight needs
 
-1. Start the knight with a generous allowlist (or none, before default-deny) on a
-   Cilium cluster with Hubble.
+1. Start the knight with a generous allowlist (or temporarily with
+   `isolation.egress: unrestricted` and a reason) on a Cilium cluster with
+   Hubble.
 2. Run its normal tasks, then list what it contacted:
 
    ```sh

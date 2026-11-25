@@ -137,6 +137,18 @@ var DeadLettersOpen = prometheus.NewGaugeVec(
 	[]string{"table", "knight"},
 )
 
+// KnightIsolated is 1 for each knight's current Isolated condition reason
+// (Isolated, OptedOut, RuntimeClassNotFound, FQDNPolicyUnavailable,
+// EgressPolicyFailed, IsolationDisabled), so a dashboard or alert can list
+// every knight that is not isolated. Labels: table, knight, reason.
+var KnightIsolated = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_knight_isolated",
+		Help: "1 for the knight's current Isolated condition reason (Isolated when isolated), by table, knight and reason",
+	},
+	[]string{"table", "knight", "reason"},
+)
+
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
@@ -149,6 +161,7 @@ func init() {
 		Missions,
 		TableCostUSD,
 		WarmPoolKnights,
+		KnightIsolated,
 		TasksDeadLetteredTotal,
 		DeadLettersOpen,
 	)

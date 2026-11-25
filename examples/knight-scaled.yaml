@@ -17,6 +17,13 @@ spec:
     resultsStream: rt_dev_results
     subjects:
       - "rt_dev.tasks.dev.>"
+  # Default-deny egress (#387) allows DNS, NATS, the Kubernetes API, the
+  # model providers and the arsenal hosts; a coder also needs GitHub.
+  egress:
+    allowedHosts:
+      - github.com
+      - api.github.com
+      - "*.githubusercontent.com"
   concurrency: 1        # tasks per pod
   replicas: 1           # KEDA minReplicaCount (0 with suspendPolicy: auto)
   maxReplicas: 4        # KEDA maxReplicaCount

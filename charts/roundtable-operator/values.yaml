@@ -126,9 +126,33 @@ toolsImage:
   # built-in pin. Changing it changes every tools image tag.
   nix2containerRev: ""
 
+# Isolation defaults (#387). Every knight runs under isolation.runtimeClassName
+# and behind default-deny egress (DNS, NATS, the Kubernetes API, baseHosts, its
+# arsenal git hosts and its own spec.egress.allowedHosts) unless the Knight
+# opts out with spec.isolation and a reason. A knight whose RuntimeClass does
+# not exist is parked (Isolated=False, RuntimeClassNotFound): install gVisor
+# first, or set runtimeClassName: "" to turn the default off for the whole
+# install. egress.mode: "off" renders an egress policy only for knights (or
+# tables) that set egress. Knights that set runtimeClassName or spec.egress
+# themselves are honoured either way. See docs/runtime-isolation.md and
+# docs/egress.md.
+isolation:
+  # Default RuntimeClass for every knight (KNIGHT_DEFAULT_RUNTIME_CLASS).
+  runtimeClassName: gvisor
+  egress:
+    # "deny" or "off" (KNIGHT_DEFAULT_EGRESS). Quote "off": YAML reads a bare
+    # off as false (which is treated as "off" too).
+    mode: deny
+    # Hosts every knight may reach on 443, e.g. its model providers
+    # (KNIGHT_EGRESS_BASE_HOSTS).
+    baseHosts:
+      - openrouter.ai
+      - api.anthropic.com
+
 # Egress NetworkPolicy the operator creates for each mission's knights. The NATS
 # rule is derived from the mission's NATS URL (namespace and port); TCP 443 is
-# allowed to anywhere. Set enabled=false on clusters without NetworkPolicy
+# allowed to anywhere. Not created when isolation.egress.mode is "deny": each
+# mission knight then gets its own default-deny policy. Set enabled=false on clusters without NetworkPolicy
 # support or that manage their own policies. The nats and dns peers below also
 # apply to the egress policy of knights with spec.egress (enabled does not).
 missionNetworkPolicy:
@@ -378,7 +402,8 @@ planner:
     - shared
   concurrency: 1
   taskTimeoutSeconds: 600
-  # RuntimeClass for the planner pod (for example gvisor). Empty = cluster default.
+  # RuntimeClass for the planner pod. Empty = the operator default
+  # (isolation.runtimeClassName).
   runtimeClassName: ""
   arsenal:
     repo: https://github.com/roundtable-k8s/arsenal.git

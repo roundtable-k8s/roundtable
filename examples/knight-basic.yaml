@@ -15,6 +15,13 @@ spec:
     resultsStream: fleet_a_results
     subjects:
       - "fleet-a.tasks.security.>"
+  # Isolated by default (#387): gVisor plus default-deny egress. The baseline
+  # (DNS, NATS, Kubernetes API, model providers, arsenal) is always allowed;
+  # threat-intel lookups need these hosts on top.
+  egress:
+    allowedHosts:
+      - services.nvd.nist.gov
+      - cveawg.mitre.org
   concurrency: 2
   taskTimeoutSeconds: 300
   workspace:
