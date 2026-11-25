@@ -133,8 +133,6 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// 2. Health Aggregation
 	var readyCount int32
 	knightSummaries := make([]aiv1alpha1.RoundTableKnightSummary, 0, len(knights))
-	var totalTasksCompleted int64
-	var totalCost float64
 
 	for _, k := range knights {
 		summary := aiv1alpha1.RoundTableKnightSummary{
@@ -146,12 +144,13 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if k.Status.Ready {
 			readyCount++
 		}
-		totalTasksCompleted += k.Status.TasksCompleted
-		if k.Status.TotalCost != "" {
-			if cost, err := strconv.ParseFloat(k.Status.TotalCost, 64); err == nil {
-				totalCost += cost
-			}
-		}
+	}
+
+	// Cost and task totals come from Chains and Missions; the Knight status
+	// fields are not written by anything (#547).
+	totalTasksCompleted, totalCost, usageErr := r.tableUsage(ctx, rt)
+	if usageErr != nil {
+		log.Error(usageErr, "Failed to compute table usage")
 	}
 
 	total := int32(len(knights))
@@ -312,6 +311,59 @@ func (r *RoundTableReconciler) computePhase(rt *aiv1alpha1.RoundTable, readyCoun
 	return aiv1alpha1.RoundTablePhaseDegraded
 }
 
+// tableUsage sums the tasks completed and cost of the table's work: the
+// runsCompleted and current-run costUSD of its Chains, plus the totalCost of
+// its Missions. A mission-scoped chain's cost is already inside its mission's
+// totalCost, so only its runs are counted. Chain cost is the current (or most
+// recent) run's; use roundtable_chain_step_cost_usd_total for lifetime spend.
+func (r *RoundTableReconciler) tableUsage(ctx context.Context, rt *aiv1alpha1.RoundTable) (int64, float64, error) {
+	missions := &aiv1alpha1.MissionList{}
+	if err := r.List(ctx, missions, client.InNamespace(rt.Namespace)); err != nil {
+		return 0, 0, fmt.Errorf("failed to list missions: %w", err)
+	}
+	chains := &aiv1alpha1.ChainList{}
+	if err := r.List(ctx, chains, client.InNamespace(rt.Namespace)); err != nil {
+		return 0, 0, fmt.Errorf("failed to list chains: %w", err)
+	}
+
+	var tasks int64
+	var cost float64
+	missionTables := map[string]string{}
+	for i := range missions.Items {
+		m := &missions.Items[i]
+		table := missionTable(m)
+		missionTables[m.Name] = table
+		if table == rt.Name {
+			cost += parseCost(m.Status.TotalCost)
+		}
+	}
+	for i := range chains.Items {
+		c := &chains.Items[i]
+		if mission := aiv1alpha1.RefName(c.Spec.MissionRef); mission != "" {
+			if missionTables[mission] == rt.Name {
+				tasks += c.Status.RunsCompleted
+			}
+			continue
+		}
+		if aiv1alpha1.RefName(c.Spec.RoundTableRef) == rt.Name {
+			tasks += c.Status.RunsCompleted
+			cost += parseCost(c.Status.CostUSD)
+		}
+	}
+	return tasks, cost, nil
+}
+
+func parseCost(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
 // countActiveMissions counts missions referencing this RoundTable that are in active phases.
 func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1alpha1.RoundTable) (int32, error) {
 	missionList := &aiv1alpha1.MissionList{}
@@ -470,7 +522,5 @@ func (r *RoundTableReconciler) updateMetrics(ctx context.Context, rt *aiv1alpha1
 		}
 	}
 
-	if totalCost > 0 {
-		rtmetrics.TableCostUSD.WithLabelValues(rt.Name).Set(totalCost)
-	}
+	rtmetrics.TableCostUSD.WithLabelValues(rt.Name).Set(totalCost)
 }

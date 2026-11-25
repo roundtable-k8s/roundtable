@@ -64,3 +64,36 @@ var _ = Describe("RoundTable metrics", func() {
 		Expect(rtmetrics.Knights.DeleteLabelValues("metrics-table", "Degraded")).To(BeFalse(), "stale Degraded series")
 	})
 })
+
+var _ = Describe("RoundTable usage totals", func() {
+	It("sums chain and mission cost and chain runs for the table", func() {
+		ctx := context.Background()
+		s := k8sruntime.NewScheme()
+		Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+		ref := func(n string) *corev1.LocalObjectReference { return &corev1.LocalObjectReference{Name: n} }
+		chain := func(name, table, cost string, runs int64) *aiv1alpha1.Chain {
+			return &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec:       aiv1alpha1.ChainSpec{RoundTableRef: ref(table)},
+				Status:     aiv1alpha1.ChainStatus{CostUSD: cost, RunsCompleted: runs},
+			}
+		}
+		missionChain := chain("mc", "", "0.5000", 1)
+		missionChain.Spec.RoundTableRef = nil
+		missionChain.Spec.MissionRef = ref("m1")
+		mission := &aiv1alpha1.Mission{
+			ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
+			Spec:       aiv1alpha1.MissionSpec{RoundTableRef: ref("usage-table")},
+			Status:     aiv1alpha1.MissionStatus{TotalCost: "0.5000"},
+		}
+		r := &RoundTableReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithObjects(
+			chain("a", "usage-table", "0.2500", 3), chain("b", "usage-table", "1.0000", 2),
+			chain("x", "other", "9.0000", 7), missionChain, mission).Build()}
+		rt := &aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: "usage-table", Namespace: "default"}}
+
+		tasks, cost, err := r.tableUsage(ctx, rt)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tasks).To(Equal(int64(6)))
+		Expect(cost).To(BeNumerically("~", 1.75, 1e-9))
+	})
+})
