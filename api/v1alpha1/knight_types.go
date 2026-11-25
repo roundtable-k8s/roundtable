@@ -321,7 +321,9 @@ type KnightCardSkill struct {
 	Examples []string `json:"examples,omitempty"`
 }
 
-// KnightArsenal configures the git-sync sidecar for the skill arsenal.
+// KnightArsenal configures one skill arsenal: either a git-sync sidecar (the
+// default) or, with oci set, a read-only OCI image volume.
+// +kubebuilder:validation:XValidation:rule="!has(self.oci) || !has(self.repo)",message="oci and repo are mutually exclusive"
 type KnightArsenal struct {
 	// name identifies this arsenal: it becomes the sync path /arsenal/<name>
 	// and the sidecar name git-sync-<name>. Defaults to the repo's basename;
@@ -331,8 +333,9 @@ type KnightArsenal struct {
 	// +optional
 	Name string `json:"name,omitempty"`
 
-	// repo is the git repository URL containing skills.
-	// +kubebuilder:default="https://github.com/roundtable-k8s/arsenal"
+	// repo is the git repository URL containing skills. Defaults to
+	// https://github.com/roundtable-k8s/arsenal (applied by the operator, so
+	// it stays unset for an oci arsenal); mutually exclusive with oci.
 	// +optional
 	Repo string `json:"repo,omitempty"`
 
@@ -351,6 +354,28 @@ type KnightArsenal struct {
 	// +kubebuilder:default="registry.k8s.io/git-sync/git-sync:v4.4.0"
 	// +optional
 	Image string `json:"image,omitempty"`
+
+	// oci loads the arsenal from an OCI image mounted read-only as an image
+	// volume at /arsenal/<name> instead of syncing a git repo. No git-sync
+	// sidecar is added; repo, ref, periodSeconds and image are ignored.
+	// +optional
+	OCI *KnightArsenalOCI `json:"oci,omitempty"`
+}
+
+// KnightArsenalOCI references an arsenal published as an OCI image.
+type KnightArsenalOCI struct {
+	// reference is the image reference, pinned by digest
+	// (e.g. registry.example.com/arsenal@sha256:...).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`@sha256:[a-f0-9]{64}$`
+	Reference string `json:"reference"`
+
+	// pullPolicy is the image volume pull policy.
+	// +kubebuilder:validation:Enum=Always;IfNotPresent;Never
+	// +kubebuilder:default=IfNotPresent
+	// +optional
+	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
 }
 
 // Workspace modes for KnightWorkspace.Mode.

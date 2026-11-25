@@ -286,6 +286,56 @@ var _ = Describe("PodBuilder", func() {
 		})
 	})
 
+	Describe("OCI arsenals", func() {
+		const ref = "registry.example.com/skills/arsenal@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+		It("mounts an OCI-only arsenal as a read-only image volume with no git-sync", func() {
+			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref}}
+			builder.WithArsenal().WithGitSync().WithSkillFilter()
+
+			Expect(builder.sidecars).To(HaveLen(1))
+			Expect(builder.sidecars[0].Name).To(Equal("skill-filter"))
+			var found bool
+			for _, v := range builder.volumes {
+				if v.Name == "arsenal-oci-arsenal" {
+					found = true
+					Expect(v.Image).NotTo(BeNil())
+					Expect(v.Image.Reference).To(Equal(ref))
+					Expect(v.Image.PullPolicy).To(Equal(corev1.PullIfNotPresent))
+				}
+			}
+			Expect(found).To(BeTrue())
+			want := corev1.VolumeMount{Name: "arsenal-oci-arsenal", MountPath: "/arsenal-oci/arsenal", ReadOnly: true}
+			Expect(builder.mounts).To(ContainElement(want))
+			Expect(builder.sidecars[0].VolumeMounts).To(ContainElement(want))
+		})
+
+		It("supports a git + OCI pair with distinct names", func() {
+			knight.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
+			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
+				{Name: "personal", OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref, PullPolicy: corev1.PullAlways}},
+			}
+			builder.WithArsenal().WithGitSync().WithSkillFilter()
+
+			Expect(builder.sidecars).To(HaveLen(2))
+			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[1].Name).To(Equal("skill-filter"))
+			var imgs int
+			for _, v := range builder.volumes {
+				if v.Image != nil {
+					imgs++
+					Expect(v.Name).To(Equal("arsenal-oci-personal"))
+					Expect(v.Image.PullPolicy).To(Equal(corev1.PullAlways))
+				}
+			}
+			Expect(imgs).To(Equal(1))
+			Expect(builder.mounts).To(ContainElement(
+				corev1.VolumeMount{Name: "arsenal-oci-personal", MountPath: "/arsenal-oci/personal", ReadOnly: true}))
+			// skill-filter lists both arsenals in merge order (git, then OCI).
+			Expect(builder.sidecars[1].Args[0]).To(ContainSubstring(`ARSENALS="/arsenal/arsenal /arsenal-oci/personal"`))
+		})
+	})
+
 	Describe("WithGitSync", func() {
 		It("does nothing when arsenal not configured", func() {
 			builder.WithGitSync()
