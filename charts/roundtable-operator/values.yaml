@@ -114,7 +114,8 @@ toolsImage:
 # Egress NetworkPolicy the operator creates for each mission's knights. The NATS
 # rule is derived from the mission's NATS URL (namespace and port); TCP 443 is
 # allowed to anywhere. Set enabled=false on clusters without NetworkPolicy
-# support or that manage their own policies.
+# support or that manage their own policies. The nats and dns peers below also
+# apply to the egress policy of knights with spec.egress (enabled does not).
 missionNetworkPolicy:
   enabled: true
   nats:

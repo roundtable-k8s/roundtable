@@ -634,6 +634,43 @@ spec:
                             Used for NATS subject routing and skill filtering.
                           minLength: 1
                           type: string
+                        egress:
+                          description: |-
+                            egress restricts the knight's outbound traffic to DNS, its NATS server
+                            and an allowlist of hostnames. The operator renders it as a
+                            CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
+                            cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
+                            allows the allowed ports to any destination and reports
+                            EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
+                            policy is rendered.
+                          properties:
+                            allowedHosts:
+                              description: |-
+                                allowedHosts are the hostnames the knight may reach, each an exact host
+                                ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                                matches subdomains of github.com but not github.com itself). Empty
+                                allows only DNS and NATS.
+                              items:
+                                maxLength: 253
+                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-type: set
+                            allowedPorts:
+                              default:
+                              - 443
+                              description: allowedPorts are the TCP ports allowed
+                                to the allowed hosts.
+                              items:
+                                format: int32
+                                maximum: 65535
+                                minimum: 1
+                                type: integer
+                              maxItems: 16
+                              type: array
+                              x-kubernetes-list-type: set
+                          type: object
                         env:
                           description: env defines additional environment variables
                             for the knight container.
@@ -1694,6 +1731,43 @@ spec:
                             Used for NATS subject routing and skill filtering.
                           minLength: 1
                           type: string
+                        egress:
+                          description: |-
+                            egress restricts the knight's outbound traffic to DNS, its NATS server
+                            and an allowlist of hostnames. The operator renders it as a
+                            CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
+                            cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
+                            allows the allowed ports to any destination and reports
+                            EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
+                            policy is rendered.
+                          properties:
+                            allowedHosts:
+                              description: |-
+                                allowedHosts are the hostnames the knight may reach, each an exact host
+                                ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                                matches subdomains of github.com but not github.com itself). Empty
+                                allows only DNS and NATS.
+                              items:
+                                maxLength: 253
+                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-type: set
+                            allowedPorts:
+                              default:
+                              - 443
+                              description: allowedPorts are the TCP ports allowed
+                                to the allowed hosts.
+                              items:
+                                format: int32
+                                maximum: 65535
+                                minimum: 1
+                                type: integer
+                              maxItems: 16
+                              type: array
+                              x-kubernetes-list-type: set
+                          type: object
                         env:
                           description: env defines additional environment variables
                             for the knight container.
@@ -2474,6 +2548,43 @@ spec:
                             Used for NATS subject routing and skill filtering.
                           minLength: 1
                           type: string
+                        egress:
+                          description: |-
+                            egress restricts the knight's outbound traffic to DNS, its NATS server
+                            and an allowlist of hostnames. The operator renders it as a
+                            CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
+                            cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
+                            allows the allowed ports to any destination and reports
+                            EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
+                            policy is rendered.
+                          properties:
+                            allowedHosts:
+                              description: |-
+                                allowedHosts are the hostnames the knight may reach, each an exact host
+                                ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                                matches subdomains of github.com but not github.com itself). Empty
+                                allows only DNS and NATS.
+                              items:
+                                maxLength: 253
+                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-type: set
+                            allowedPorts:
+                              default:
+                              - 443
+                              description: allowedPorts are the TCP ports allowed
+                                to the allowed hosts.
+                              items:
+                                format: int32
+                                maximum: 65535
+                                minimum: 1
+                                type: integer
+                              maxItems: 16
+                              type: array
+                              x-kubernetes-list-type: set
+                          type: object
                         env:
                           description: env defines additional environment variables
                             for the knight container.
@@ -3610,6 +3721,43 @@ spec:
                           Used for NATS subject routing and skill filtering.
                         minLength: 1
                         type: string
+                      egress:
+                        description: |-
+                          egress restricts the knight's outbound traffic to DNS, its NATS server
+                          and an allowlist of hostnames. The operator renders it as a
+                          CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
+                          cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
+                          allows the allowed ports to any destination and reports
+                          EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
+                          policy is rendered.
+                        properties:
+                          allowedHosts:
+                            description: |-
+                              allowedHosts are the hostnames the knight may reach, each an exact host
+                              ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                              matches subdomains of github.com but not github.com itself). Empty
+                              allows only DNS and NATS.
+                            items:
+                              maxLength: 253
+                              pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            maxItems: 64
+                            type: array
+                            x-kubernetes-list-type: set
+                          allowedPorts:
+                            default:
+                            - 443
+                            description: allowedPorts are the TCP ports allowed to
+                              the allowed hosts.
+                            items:
+                              format: int32
+                              maximum: 65535
+                              minimum: 1
+                              type: integer
+                            maxItems: 16
+                            type: array
+                            x-kubernetes-list-type: set
+                        type: object
                       env:
                         description: env defines additional environment variables
                           for the knight container.

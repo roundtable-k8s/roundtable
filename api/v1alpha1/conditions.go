@@ -66,6 +66,14 @@ const (
 	// spec.tools or the builder and the operator retries.
 	ConditionKnightToolsImageReady = "ToolsImageReady"
 
+	// ConditionKnightEgressRestricted reports whether the knight's
+	// spec.egress allowlist is enforced. Only set on knights with spec.egress.
+	// Status=True means a CiliumNetworkPolicy limits egress to DNS, NATS and
+	// the allowed hosts. Status=False means the hostname allowlist can't be
+	// enforced (FQDNPolicyUnavailable: a NetworkPolicy allows the allowed
+	// ports to any destination) or the policy failed to apply.
+	ConditionKnightEgressRestricted = "EgressRestricted"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
@@ -180,6 +188,18 @@ const (
 
 	// ReasonWithinPlanCap indicates the knight got all the replicas it asked for.
 	ReasonWithinPlanCap = "WithinPlanCap"
+
+	// ReasonFQDNPolicyApplied indicates the CiliumNetworkPolicy enforcing the
+	// hostname allowlist is applied.
+	ReasonFQDNPolicyApplied = "FQDNPolicyApplied"
+
+	// ReasonFQDNPolicyUnavailable indicates the cilium.io/v2
+	// CiliumNetworkPolicy API isn't served, so the operator rendered a
+	// NetworkPolicy without hostname rules.
+	ReasonFQDNPolicyUnavailable = "FQDNPolicyUnavailable"
+
+	// ReasonEgressPolicyFailed indicates the egress policy could not be applied.
+	ReasonEgressPolicyFailed = "EgressPolicyFailed"
 
 	// ===== RoundTable Condition Reasons =====
 

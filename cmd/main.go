@@ -232,6 +232,15 @@ func main() {
 			"reason", kedaReason+"; knights asking for autoscaling run spec.replicas pods and report Autoscaled=False")
 	}
 
+	// Cilium FQDN policy for knights with spec.egress: probe once. Without it
+	// the operator renders a NetworkPolicy without hostname rules.
+	ciliumEnabled, err := rtruntime.CiliumNetworkPolicyAPIServed(discoveryClient)
+	if err != nil {
+		setupLog.Error(err, "Failed to detect the CiliumNetworkPolicy API")
+		os.Exit(1)
+	}
+	setupLog.Info("Knight egress policy backend", "ciliumNetworkPolicy", ciliumEnabled)
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		// Secrets are read uncached (no cluster-wide Secret informer).
@@ -289,6 +298,7 @@ func main() {
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
 	knightSecurity := knightpkg.PodSecurityFromEnv()
+	egressNetPol := mission.NetPolSettingsFromEnv()
 	// Note: GetEventRecorderFor is deprecated (SA1019); GetEventRecorder returns a different
 	// events API type and needs controller changes, so the migration is deferred.
 	knightReconciler := &controller.KnightReconciler{
@@ -302,6 +312,8 @@ func main() {
 		KEDAEnabled:            kedaEnabled,
 		NATSMonitoringEndpoint: natsMonitoringEndpoint,
 		NATS:                   natsProvider,
+		CiliumEnabled:          ciliumEnabled,
+		EgressNetPol:           &egressNetPol,
 	}
 
 	// Create runtime backends

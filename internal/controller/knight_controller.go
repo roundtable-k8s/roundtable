@@ -26,12 +26,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -45,6 +47,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
@@ -99,6 +102,17 @@ type KnightReconciler struct {
 	// When false the operator never touches ScaledObjects, and knights that
 	// ask for autoscaling run spec.replicas pods with Autoscaled=False.
 	KEDAEnabled bool
+
+	// CiliumEnabled reports whether cilium.io/v2 CiliumNetworkPolicy is
+	// served. Knights with spec.egress then get a CiliumNetworkPolicy with
+	// hostname rules; otherwise a NetworkPolicy without them and
+	// EgressRestricted=False (FQDNPolicyUnavailable).
+	CiliumEnabled bool
+
+	// EgressNetPol configures the DNS and NATS peers of knight egress
+	// policies (the chart's missionNetworkPolicy values, shared with mission
+	// NetworkPolicies). Nil uses the defaults.
+	EgressNetPol *missionpkg.NetPolSettings
 
 	// NATSMonitoringEndpoint overrides the NATS HTTP monitoring endpoint
 	// (host:port) written into ScaledObject triggers. Empty derives it from
@@ -262,6 +276,13 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		log.Error(err, "Failed to reconcile Nix tools")
 	} else {
 		nixRequeue = d
+	}
+
+	// 2c. Egress policy from spec.egress, ahead of the runtime so new pods
+	//     start restricted.
+	if err := r.reconcileEgress(ctx, knight); err != nil {
+		reconcileErr = err
+		log.Error(err, "Failed to reconcile egress policy")
 	}
 
 	// 3. Runtime (Deployment or Sandbox, depending on knight.Spec.Runtime).
@@ -892,6 +913,7 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
+		Owns(&networkingv1.NetworkPolicy{}).
 		// Plan-task cap: a knight's share depends on its table and siblings.
 		Watches(&aiv1alpha1.RoundTable{},
 			handler.EnqueueRequestsFromMapFunc(r.roundTableKnightRequests),
@@ -901,6 +923,11 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	if r.SandboxEnabled {
 		b = b.Owns(&sandboxv1alpha1.Sandbox{})
+	}
+	if r.CiliumEnabled {
+		cnp := &unstructured.Unstructured{}
+		cnp.SetGroupVersionKind(rtruntime.CiliumNetworkPolicyGVK)
+		b = b.Owns(cnp)
 	}
 	return b.Named("knight").Complete(r)
 }
