@@ -200,6 +200,54 @@ queue decision rests on the git diff.
 The watcher has no Actions write access, so it does not re-run a flaky job
 itself; a re-queue by the lead or a manual re-run does that.
 
+## Engines
+
+`spec.prFeedback.engine` selects what watches the pull requests:
+
+- `builtin` (the default): the watcher described above.
+- `trigger`: the controller generates one [Trigger](triggers.md#pr-feedback-on-a-trigger)
+  per author, `<table>-pr-feedback-<author>` (owned by the RoundTable), with a
+  github source built from these fields, and its own poller does not run for
+  the table. The Trigger's [pull request state](triggers.md#pull-request-state)
+  selectors find conflicts, failed checks (minus `ignoreChecks`) and merge
+  queue rejections of the author's open pull requests; each failure (failure
+  kind and head commit) fires once, and a pull request's fix rounds are runs
+  of one Chain copy, capped by `maxAttempts`, after which it is labelled
+  `escalationLabel` with the same comment. Removing the label resets the
+  rounds. The author knight and its run are traced as above, and the feedback
+  Chain gets the same input (`attempt`, `log`, ...).
+
+Like every github-source Trigger, the trigger engine needs the table's events
+stream (`spec.nats.createStreams: true`, see
+[Delivery](triggers.md#delivery-nats-webhook-and-github-sources)); check the
+Triggers' `Ready` and `GitHubReady` conditions after switching.
+
+Differences on the trigger engine:
+
+- **No flake issues.** A check whose latest attempt failed starts a fix round
+  even if it passed earlier on the same commit, and nothing is reported after
+  a failure clears without a push. `status.prFeedback.conditions` has
+  `FlakeReportingSkipped` (True, reason `TriggerEngine`) while it is in use.
+- **Runs are Chain copies** (`<feedback chain>-<trigger>-<hash>`, one per pull
+  request, started again per failure) instead of runs of the feedback Chain
+  itself; `status.prFeedback.pullRequests` and `activeRun` stay empty, the
+  Triggers' `status.recentFirings`, events and `GitHubReady` show the work.
+  One fix round runs at a time per author.
+- **Attempts live on the run** and start over once its finished run is
+  deleted, 7 days after the last round. Attempts the builtin engine counted
+  are not carried over when switching.
+
+Switch a table with:
+
+```bash
+kubectl -n roundtable patch roundtable roundtable-dev --type merge \
+  -p '{"spec":{"prFeedback":{"engine":"trigger"}}}'
+```
+
+and back with `"engine":"builtin"` (or by removing the field): that deletes the
+generated Triggers and their runs, so switch back while no fix round runs.
+`status.prFeedback.engine` and `.triggers` show the engine in use.
+
 ## Status
 
 ```bash
@@ -228,7 +276,8 @@ status:
 ```
 
 Only PRs with a failure history are recorded (at most 200); merged and closed
-PRs are dropped. Events `PRFeedbackDetected`, `PRFeedbackDispatched` and
+PRs are dropped. `engine`, `triggers` and `conditions` are described under
+[Engines](#engines). Events `PRFeedbackDetected`, `PRFeedbackDispatched` and
 `PRFeedbackEscalated` are recorded on the RoundTable.
 
 ## Limits

@@ -621,7 +621,35 @@ var _ = Describe("Trigger GitHub source", func() {
 
 		t = base("v-gh-nolabels")
 		t.Spec.Source.GitHub.Query.Labels = nil
-		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("spec.source.github.query.labels")))
+		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("set query.labels, or a state selector")))
+
+		t = base("v-gh-state-issue")
+		t.Spec.Source.GitHub.Checks = aiv1alpha1.TriggerGitHubChecksFailing
+		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("checks, mergeable and mergeQueue need kind: pullRequest")))
+
+		t = base("v-gh-state-closed")
+		t.Spec.Source.GitHub.Kind = aiv1alpha1.TriggerGitHubKindPullRequest
+		t.Spec.Source.GitHub.Mergeable = aiv1alpha1.TriggerGitHubMergeableConflicting
+		t.Spec.Source.GitHub.Query.State = aiv1alpha1.TriggerGitHubStateClosed
+		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("leave query.state open")))
+
+		t = base("v-gh-maxruns")
+		t.Spec.Source.GitHub.Kind = aiv1alpha1.TriggerGitHubKindPullRequest
+		t.Spec.Source.GitHub.Checks = aiv1alpha1.TriggerGitHubChecksFailing
+		t.Spec.Source.GitHub.MaxRunsPerItem = 3
+		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("maxRunsPerItem needs a state selector and onMaxRuns.addLabels")))
+
+		t = base("v-gh-ignore")
+		t.Spec.Source.GitHub.IgnoreChecks = []string{"merge-guard"}
+		Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("ignoreChecks needs checks or mergeQueue")))
+
+		t = base("v-gh-state-ok")
+		t.Spec.Source.GitHub.Query.Labels = nil
+		t.Spec.Source.GitHub.Kind = aiv1alpha1.TriggerGitHubKindPullRequest
+		t.Spec.Source.GitHub.Checks = aiv1alpha1.TriggerGitHubChecksFailing
+		t.Spec.Source.GitHub.MaxRunsPerItem = 3
+		t.Spec.Source.GitHub.OnMaxRuns = &aiv1alpha1.TriggerGitHubHandBack{AddLabels: []string{"needs-human"}}
+		Expect(k8sClient.Create(ctx, t)).To(Succeed())
 
 		t = base("v-gh-ok")
 		Expect(k8sClient.Create(ctx, t)).To(Succeed())

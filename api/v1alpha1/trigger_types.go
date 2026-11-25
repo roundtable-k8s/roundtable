@@ -53,6 +53,17 @@ const (
 	// twice and an item selected again after its run finished is a re-run.
 	AnnotationTriggerClaimed = "ai.roundtable.io/trigger-claimed"
 
+	// AnnotationTriggerItemRuns counts the runs a github source with a
+	// state selector (checks, mergeable, mergeQueue) started for an item:
+	// one per failure, compared with maxRunsPerItem.
+	AnnotationTriggerItemRuns = "ai.roundtable.io/trigger-item-runs"
+
+	// AnnotationTriggerHandedBack is set on an item's run to the event key
+	// for which source.github.onMaxRuns was applied. The next time the item
+	// is selected (a human removed the hand-back label) its run count starts
+	// over.
+	AnnotationTriggerHandedBack = "ai.roundtable.io/trigger-handed-back"
+
 	// TriggerMaxRecentFirings bounds status.recentFirings.
 	TriggerMaxRecentFirings = 10
 )
@@ -124,9 +135,53 @@ const (
 	TriggerGitHubStateAll TriggerGitHubState = "all"
 )
 
+// TriggerGitHubChecks selects pull requests by the checks on their head
+// commit.
+// +kubebuilder:validation:Enum=failing
+type TriggerGitHubChecks string
+
+const (
+	// TriggerGitHubChecksFailing selects pull requests whose head commit has
+	// a check whose latest attempt failed or timed out.
+	TriggerGitHubChecksFailing TriggerGitHubChecks = "failing"
+)
+
+// TriggerGitHubMergeable selects pull requests by their merge state.
+// +kubebuilder:validation:Enum=conflicting
+type TriggerGitHubMergeable string
+
+const (
+	// TriggerGitHubMergeableConflicting selects pull requests with merge
+	// conflicts with their base branch (GitHub mergeable_state "dirty").
+	TriggerGitHubMergeableConflicting TriggerGitHubMergeable = "conflicting"
+)
+
+// TriggerGitHubMergeQueue selects pull requests by their latest merge queue
+// attempt.
+// +kubebuilder:validation:Enum=rejected
+type TriggerGitHubMergeQueue string
+
+const (
+	// TriggerGitHubMergeQueueRejected selects pull requests whose newest
+	// merge group has a failed workflow run.
+	TriggerGitHubMergeQueueRejected TriggerGitHubMergeQueue = "rejected"
+)
+
 // TriggerGitHubSource polls GitHub's REST API with the RoundTable's token
 // (spec.github.tokenSecretRef of roundTableRef). Each matching item is one
 // event whose default dedupe key is "<owner/name>#<number>".
+//
+// With a state selector (checks, mergeable or mergeQueue) the source selects
+// open pull requests with a failure instead, and fires once per failure: the
+// event key is "<owner/name>#<number>@<kind>:<head sha>" (kind is conflict,
+// ci or merge-queue; a merge-queue key ends with ":<merge group sha>"), so a
+// failure fires once and a new push can fire again. Each pull request has
+// one run, started again for each new failure once it finished.
+// +kubebuilder:validation:XValidation:rule="(has(self.query.labels) && size(self.query.labels) > 0) || has(self.checks) || has(self.mergeable) || has(self.mergeQueue)",message="set query.labels, or a state selector (checks, mergeable, mergeQueue)"
+// +kubebuilder:validation:XValidation:rule="!(has(self.checks) || has(self.mergeable) || has(self.mergeQueue)) || (has(self.kind) && self.kind == 'pullRequest')",message="checks, mergeable and mergeQueue need kind: pullRequest"
+// +kubebuilder:validation:XValidation:rule="!(has(self.checks) || has(self.mergeable) || has(self.mergeQueue)) || !has(self.query.state) || self.query.state == 'open'",message="checks, mergeable and mergeQueue select open pull requests: leave query.state open"
+// +kubebuilder:validation:XValidation:rule="!has(self.maxRunsPerItem) || self.maxRunsPerItem == 0 || ((has(self.checks) || has(self.mergeable) || has(self.mergeQueue)) && has(self.onMaxRuns) && has(self.onMaxRuns.addLabels) && size(self.onMaxRuns.addLabels) > 0)",message="maxRunsPerItem needs a state selector and onMaxRuns.addLabels"
+// +kubebuilder:validation:XValidation:rule="!has(self.ignoreChecks) || has(self.checks) || has(self.mergeQueue)",message="ignoreChecks needs checks or mergeQueue"
 type TriggerGitHubSource struct {
 	// repositories are the repositories polled, as "owner/name".
 	// +kubebuilder:validation:MinItems=1
@@ -183,6 +238,57 @@ type TriggerGitHubSource struct {
 	// handBack.addLabels label.
 	// +optional
 	SkipIfBodyMatches *TriggerGitHubSkip `json:"skipIfBodyMatches,omitempty"`
+
+	// author selects items opened by this GitHub login (REST form, e.g.
+	// "dunce-bot[bot]" for a GitHub App), compared case-insensitively.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=100
+	// +optional
+	Author string `json:"author,omitempty"`
+
+	// checks: failing selects pull requests (kind: pullRequest) whose head
+	// commit has a check whose latest attempt failed or timed out. The
+	// event's failedChecks lists them.
+	// +optional
+	Checks TriggerGitHubChecks `json:"checks,omitempty"`
+
+	// ignoreChecks are check (and merge queue workflow) names that never
+	// count as failed, for example a policy check that fails until a human
+	// acts.
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:MaxLength=100
+	// +listType=set
+	// +optional
+	IgnoreChecks []string `json:"ignoreChecks,omitempty"`
+
+	// mergeable: conflicting selects pull requests (kind: pullRequest) with
+	// merge conflicts with their base branch. A conflict fires before failed
+	// checks: the pull request cannot merge until it is rebased.
+	// +optional
+	Mergeable TriggerGitHubMergeable `json:"mergeable,omitempty"`
+
+	// mergeQueue: rejected selects pull requests (kind: pullRequest) whose
+	// newest merge queue attempt (merge_group workflow runs) failed. Failed
+	// checks on the head commit fire first.
+	// +optional
+	MergeQueue TriggerGitHubMergeQueue `json:"mergeQueue,omitempty"`
+
+	// maxRunsPerItem caps the runs started for one pull request (one per
+	// failure) while its run is kept (ttlSecondsAfterFinished). The next
+	// failure after the last run applies onMaxRuns instead. 0 means no cap.
+	// Needs a state selector.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxRunsPerItem int32 `json:"maxRunsPerItem,omitempty"`
+
+	// onMaxRuns is applied to a pull request whose runs ran out
+	// (maxRunsPerItem). Items carrying one of its addLabels are not
+	// selected; when a human removes the label the item's run count starts
+	// over. Its comment also sees .Run (.Run.Name, .Run.Attempt: the runs
+	// started).
+	// +optional
+	OnMaxRuns *TriggerGitHubHandBack `json:"onMaxRuns,omitempty"`
 }
 
 // TriggerGitHubSkip selects items to hand back instead of starting a run.
@@ -231,14 +337,14 @@ type TriggerGitHubHandBack struct {
 // TriggerGitHubQuery is what GitHub's "list repository issues" endpoint can
 // filter on.
 type TriggerGitHubQuery struct {
-	// labels an item must all carry.
-	// +kubebuilder:validation:MinItems=1
+	// labels an item must all carry. Required unless a state selector
+	// (checks, mergeable, mergeQueue) is set.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=50
 	// +listType=set
-	// +required
-	Labels []string `json:"labels"`
+	// +optional
+	Labels []string `json:"labels,omitempty"`
 
 	// state is open, closed or all. Defaults to open.
 	// +kubebuilder:default=open

@@ -61,16 +61,7 @@ func pickupTriggerName(rt *aiv1alpha1.RoundTable) string {
 // labelled with LabelPickupRoundTable and controlled by that RoundTable), or
 // "".
 func pickupTable(trg *aiv1alpha1.Trigger) string {
-	table := trg.Labels[aiv1alpha1.LabelPickupRoundTable]
-	if table == "" {
-		return ""
-	}
-	ref := metav1.GetControllerOf(trg)
-	if ref == nil || ref.Kind != "RoundTable" || ref.Name != table ||
-		!strings.HasPrefix(ref.APIVersion, aiv1alpha1.GroupVersion.Group+"/") {
-		return ""
-	}
-	return table
+	return controllingTable(trg, aiv1alpha1.LabelPickupRoundTable)
 }
 
 // templateLiteral returns s for use inside a Trigger template: as is, or as

@@ -105,24 +105,42 @@ type PRFeedbackReconciler struct {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=chains,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile polls GitHub for one RoundTable when its poll interval is due.
+// With engine: trigger it keeps the generated Triggers in line with the spec
+// instead.
 func (r *PRFeedbackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, req.NamespacedName, rt); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Before anything else, so a switch of engine takes effect at once and
+	// disabling PR feedback removes the Triggers.
+	triggers, triggerErr := r.reconcileFeedbackTriggers(ctx, rt)
+	if triggerErr != nil {
+		r.Recorder.Eventf(rt, corev1.EventTypeWarning, "PRFeedbackFailed", "%v", triggerErr)
+	}
 	cfg := rt.Spec.PRFeedback
 	if cfg == nil || !cfg.Enabled || rt.Spec.Ephemeral {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, triggerErr
 	}
 	interval := time.Duration(prFeedbackInterval(cfg)) * time.Second
+	if prFeedbackEngine(cfg) == aiv1alpha1.PRFeedbackEngineTrigger {
+		if err := r.patchEngineStatus(ctx, rt, triggers, triggerErr); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: interval}, triggerErr
+	}
 	now := r.now()
 	if st := rt.Status.PRFeedback; st != nil && st.LastPollTime != nil {
 		if wait := interval - now.Sub(st.LastPollTime.Time); wait > time.Second {
+			if err := r.patchEngineStatus(ctx, rt, nil, nil); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
@@ -138,7 +156,7 @@ func (r *PRFeedbackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	save := func(ctx context.Context) error {
 		return r.Status().Patch(ctx, rt.DeepCopy(), client.MergeFrom(orig))
 	}
-	pollErr := r.poll(ctx, rt, cfg, st, save)
+	pollErr := errors.Join(r.poll(ctx, rt, cfg, st, save), triggerErr)
 	t := metav1.NewTime(now)
 	st.LastPollTime = &t
 	st.LastError = ""
@@ -146,6 +164,7 @@ func (r *PRFeedbackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		st.LastError = truncateUTF8(pollErr.Error(), 1024)
 		log.Info("PR feedback poll had errors", "error", pollErr.Error())
 	}
+	setPRFeedbackEngineStatus(rt, st, nil)
 	if err := r.Status().Patch(ctx, rt, client.MergeFrom(orig)); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -532,7 +551,7 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 		}
 
 		if rec == nil {
-			author, running, err := r.traceAuthor(ctx, rt.Namespace, feedbackChainName(cfg), repo, pr.Number)
+			author, running, err := traceAuthor(ctx, r.Client, rt.Namespace, feedbackChainName(cfg), repo, pr.Number)
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -668,16 +687,17 @@ type prAuthor struct {
 
 // traceAuthor finds the chain step whose output names the pull request
 // (the implement step replies with the PR URL; forEach items carry their own
-// runId). running reports that the chain is still on its run.
-func (r *PRFeedbackReconciler) traceAuthor(ctx context.Context, namespace, feedbackChain, repo string, number int) (prAuthor, bool, error) {
+// runId). running reports that the chain is still on its run. The feedback
+// Chain and its run copies (trigger engine) are not authors.
+func traceAuthor(ctx context.Context, c client.Reader, namespace, feedbackChain, repo string, number int) (prAuthor, bool, error) {
 	chains := &aiv1alpha1.ChainList{}
-	if err := r.List(ctx, chains, client.InNamespace(namespace)); err != nil {
+	if err := c.List(ctx, chains, client.InNamespace(namespace)); err != nil {
 		return prAuthor{}, false, err
 	}
 	re := prMatcher{repo: repo, number: number}
 	for i := range chains.Items {
 		ch := &chains.Items[i]
-		if ch.Name == feedbackChain || ch.Status.RunID == "" {
+		if ch.Name == feedbackChain || ch.Annotations[aiv1alpha1.AnnotationRunTemplate] == feedbackChain || ch.Status.RunID == "" {
 			continue
 		}
 		if a, ok := authorInChain(ch, re); ok {
@@ -813,7 +833,7 @@ func (r *PRFeedbackReconciler) dispatchNext(ctx context.Context, gh *github.Clie
 	}
 	if next.FailureKind != failureKindConflict {
 		// A conflict has no failed job: no log to fetch.
-		input["log"] = r.failureLog(ctx, gh, next)
+		input["log"] = failureLog(ctx, gh, next)
 	}
 	if next.Issue > 0 {
 		input["issue"] = next.Issue
@@ -911,8 +931,8 @@ func failureJobs(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedb
 // failureLog returns trimmed logs of up to prFeedbackMaxJobs failed jobs,
 // fenced as untrusted data (see fenceUntrusted). Errors become part of the
 // excerpt: the knight can fetch the log itself.
-func (r *PRFeedbackReconciler) failureLog(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedbackPullRequest) string {
-	return fenceUntrusted(r.rawFailureLog(ctx, gh, rec))
+func failureLog(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedbackPullRequest) string {
+	return fenceUntrusted(rawFailureLog(ctx, gh, rec))
 }
 
 // fenceUntrusted wraps CI output, which the PR's code controls, in a
@@ -973,7 +993,7 @@ func sanitizeCheckName(name string) string {
 	return truncateUTF8(name, maxCheckNameLen)
 }
 
-func (r *PRFeedbackReconciler) rawFailureLog(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedbackPullRequest) string {
+func rawFailureLog(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedbackPullRequest) string {
 	jobs, err := failureJobs(ctx, gh, rec)
 	if err != nil {
 		return sanitizeLog(fmt.Sprintf("(failed jobs unavailable: %v; see %s)\n", err, rec.FailureURL))

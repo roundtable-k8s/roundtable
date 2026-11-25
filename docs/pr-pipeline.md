@@ -142,7 +142,13 @@ review lists the PRs to work on).
 closed or blocked by a failing required check. Its output has one line per PR
 and the number of fix rounds. A merge-queue rejection or a red CI run after
 the pipeline ended goes back to the PR's author through the feedback Chain
-([pr-feedback.md](pr-feedback.md)).
+([pr-feedback.md](pr-feedback.md)). Like issue pickup, PR feedback runs on one
+of two engines, chosen per table with `spec.prFeedback.engine`: `builtin` (the
+default, the operator's own poller) or `trigger` (generated Triggers
+`<table>-pr-feedback-<author>` with a [github source](triggers.md#pr-feedback-on-a-trigger)
+that selects pull requests by checks and merge state; same input, attempt cap
+and escalation, no flaky-test issues). See
+[pr-feedback.md](pr-feedback.md#engines).
 
 **Escalate.** With `onExhausted: continue` an exhausted loop succeeds with
 outcome `Exhausted`, `escalate` labels the issue and PRs `needs-human` and
