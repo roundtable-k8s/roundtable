@@ -82,11 +82,13 @@ Anything described here as **target** is not on `main` yet. The linked issue tra
 
 *Round Table does what only it does. Purpose-built components do the rest.*
 
-**What it means in practice.** Where a component the cluster already runs, or can run, does the job, Round Table integrates with it instead of reimplementing it. Scheduling runs as native Kubernetes CronJobs the operator owns ([#565](https://github.com/roundtable-k8s/roundtable/issues/565)), scaling is KEDA, network isolation is Cilium policy and a RuntimeClass, sandboxes are Agent Sandbox, metrics and traces are Prometheus and OpenTelemetry, skills are Git repos or OCI images, and credentials come from the cluster's own secret store. The platform does not manage which tools a knight can reach. MCP servers are listed directly on a knight. Hosting, cataloguing and governing MCP servers, and deciding which tools a knight may call, belong to a gateway such as Envoy AI Gateway ([#173](https://github.com/roundtable-k8s/roundtable/issues/173)). Round Table does not bake in features it should get from such a component.
+**What it means in practice.** Where a component the cluster already runs, or can run, does the job, Round Table integrates with it instead of reimplementing it. Scaling is KEDA, network isolation is Cilium policy and a RuntimeClass, sandboxes are Agent Sandbox, metrics are Prometheus, skills are Git repos, and credentials come from the cluster's own secret store. The platform does not manage which tools a knight can reach. MCP servers are listed directly on a knight. Hosting, cataloguing and governing MCP servers, and deciding which tools a knight may call, belong to a gateway such as Envoy AI Gateway ([#173](https://github.com/roundtable-k8s/roundtable/issues/173)), not to Round Table. Round Table does not bake in features it should get from such a component.
+
+**Target.** The same rule applies to these, which are not on `main` yet: scheduling as native Kubernetes CronJobs the operator owns ([#565](https://github.com/roundtable-k8s/roundtable/issues/565)), skills as OCI images ([#178](https://github.com/roundtable-k8s/roundtable/issues/178)), and traces through OpenTelemetry ([#153](https://github.com/roundtable-k8s/roundtable/issues/153)).
 
 **How to apply it.** For a new feature, ask whether a component the cluster already runs, or can run, does the job. If it does, integrate with that component or leave the gap. Build the feature into Round Table only when it is about fleets of agents as such.
 
-**See:** [contributing](../CONTRIBUTING.md#what-to-work-on), [runtime backends ADR](design/runtime-backends-adr.md), [gateway](gateway.md).
+**See:** [contributing](../CONTRIBUTING.md#what-to-work-on), [runtime backends ADR](design/runtime-backends-adr.md), [Envoy AI Gateway](https://github.com/roundtable-k8s/roundtable/issues/173).
 
 ## Three rungs of work
 
