@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 
@@ -37,6 +39,10 @@ import (
 const (
 	// snapshotKnightLabel labels VolumeSnapshots with their knight's name.
 	snapshotKnightLabel = "roundtable.io/knight"
+	// snapshotRequestLabel records (as a hash) the annotation value a snapshot
+	// served, so a lost status.workspace.lastSnapshotRequest cannot cause a
+	// second snapshot for the same request.
+	snapshotRequestLabel = "roundtable.io/snapshot-request"
 	// defaultSnapshotKeep is the retention when spec.workspace.snapshots.keep is unset.
 	defaultSnapshotKeep = 3
 )
@@ -96,16 +102,22 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		return err
 	}
 
-	if requested && value != ws.LastSnapshotRequest {
-		if err := r.createSnapshot(ctx, knight); err != nil {
-			return fail(err)
-		}
-		ws.LastSnapshotRequest = value
-	}
-
 	snaps, err := r.listSnapshots(ctx, knight)
 	if err != nil {
 		return fail(err)
+	}
+	if requested && value != ws.LastSnapshotRequest {
+		if !snapshotServed(snaps, value) {
+			if err := r.createSnapshot(ctx, knight, value); err != nil {
+				return fail(err)
+			}
+			// The new snapshot may not be visible in the cache yet; the
+			// request label keeps the next reconcile from duplicating it.
+			if snaps, err = r.listSnapshots(ctx, knight); err != nil {
+				return fail(err)
+			}
+		}
+		ws.LastSnapshotRequest = value
 	}
 	keep := int32(defaultSnapshotKeep)
 	if s := knight.Spec.Workspace; s != nil && s.Snapshots != nil && s.Snapshots.Keep != nil {
@@ -138,15 +150,33 @@ func snapshotReady(s *unstructured.Unstructured) bool {
 	return ready
 }
 
+// snapshotRequestHash is the label value identifying an annotation value.
+func snapshotRequestHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:8])
+}
+
+// snapshotServed reports whether a snapshot already exists for the request value.
+func snapshotServed(snaps []*unstructured.Unstructured, value string) bool {
+	h := snapshotRequestHash(value)
+	for _, s := range snaps {
+		if s.GetLabels()[snapshotRequestLabel] == h {
+			return true
+		}
+	}
+	return false
+}
+
 // createSnapshot creates <knight>-ws-<unix-ts> for the workspace PVC. An
 // existing snapshot of that name (same second) counts as created.
-func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha1.Knight) error {
+func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha1.Knight, request string) error {
 	vs := &unstructured.Unstructured{}
 	vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
 	vs.SetName(fmt.Sprintf("%s-ws-%d", knight.Name, r.now().Unix()))
 	vs.SetNamespace(knight.Namespace)
 	vs.SetLabels(map[string]string{
 		snapshotKnightLabel:            knight.Name,
+		snapshotRequestLabel:           snapshotRequestHash(request),
 		"app.kubernetes.io/managed-by": "roundtable-operator",
 	})
 	spec := map[string]any{
@@ -166,7 +196,9 @@ func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha
 	return nil
 }
 
-// listSnapshots returns the knight's VolumeSnapshots, oldest first.
+// listSnapshots returns the VolumeSnapshots labelled for and controlled by the
+// knight, oldest first. Hand-made snapshots that merely carry the label are
+// ignored so retention never deletes them.
 func (r *KnightReconciler) listSnapshots(ctx context.Context, knight *aiv1alpha1.Knight) ([]*unstructured.Unstructured, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK.GroupVersion().WithKind("VolumeSnapshotList"))
@@ -176,6 +208,9 @@ func (r *KnightReconciler) listSnapshots(ctx context.Context, knight *aiv1alpha1
 	}
 	out := make([]*unstructured.Unstructured, 0, len(list.Items))
 	for i := range list.Items {
+		if !metav1.IsControlledBy(&list.Items[i], knight) {
+			continue
+		}
 		out = append(out, &list.Items[i])
 	}
 	sort.SliceStable(out, func(i, j int) bool {

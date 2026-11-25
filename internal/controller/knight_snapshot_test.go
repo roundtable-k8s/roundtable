@@ -143,6 +143,56 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 			Expect(snapshotsOf(k)).To(HaveLen(1))
 		})
 
+		It("does not duplicate a snapshot when lastSnapshotRequest is lost", func() {
+			k := pvcKnight("snap-lost", nil)
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			defer deleteKnight(k)
+			r, _ := snapReconciler(true)
+
+			annotateSnapshot(k, "a")
+			reconcileKnight(r, k)
+			Expect(snapshotsOf(k)).To(HaveLen(1))
+
+			got := getKnight(k)
+			got.Status.Workspace = nil
+			Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+			r.Now = func() time.Time { return time.Unix(1_700_000_001, 0) }
+			reconcileKnight(r, k)
+			Expect(snapshotsOf(k)).To(HaveLen(1))
+			Expect(getKnight(k).Status.Workspace.LastSnapshotRequest).To(Equal("a"))
+		})
+
+		It("never prunes snapshots the knight does not own", func() {
+			k := pvcKnight("snap-foreign", new(int32(1)))
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			defer deleteKnight(k)
+			r, _ := snapReconciler(true)
+
+			foreign := &unstructured.Unstructured{}
+			foreign.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
+			foreign.SetName("snap-foreign-manual")
+			foreign.SetNamespace("default")
+			foreign.SetLabels(map[string]string{snapshotKnightLabel: k.Name})
+			foreign.Object["spec"] = map[string]any{"source": map[string]any{"persistentVolumeClaimName": "x"}}
+			Expect(k8sClient.Create(ctx, foreign)).To(Succeed())
+
+			for i := 1; i <= 2; i++ {
+				ts := time.Unix(1_700_000_000+int64(i), 0)
+				r.Now = func() time.Time { return ts }
+				annotateSnapshot(k, fmt.Sprint(i))
+				reconcileKnight(r, k)
+				markSnapshotsReady(k)
+				reconcileKnight(r, k)
+			}
+			owned := snapshotsOf(k)
+			names := make([]string, 0, len(owned))
+			for _, s := range owned {
+				names = append(names, s.GetName())
+			}
+			Expect(names).To(ContainElement("snap-foreign-manual"))
+			Expect(names).To(HaveLen(2)) // foreign + newest owned (keep=1)
+		})
+
 		It("keeps only `keep` snapshots once the newest is ready", func() {
 			k := pvcKnight("snap-keep", new(int32(2)))
 			Expect(k8sClient.Create(ctx, k)).To(Succeed())
