@@ -403,6 +403,7 @@ var _ = Describe("PodBuilder", func() {
 			Expect(attrs).To(ContainSubstring("deployment.environment=prod"))
 			Expect(attrs).To(ContainSubstring("roundtable.knight=test-knight"))
 			Expect(attrs).To(ContainSubstring("roundtable.table=camelot"))
+			Expect(attrs).To(ContainSubstring("roundtable.knight.runtime=pi"))
 			Expect(attrs).To(ContainSubstring("k8s.namespace.name=$(POD_NAMESPACE)"))
 			Expect(attrs).To(ContainSubstring("k8s.pod.name=$(POD_NAME)"))
 			Expect(attrs).To(ContainSubstring("k8s.node.name=$(NODE_NAME)"))
@@ -410,10 +411,17 @@ var _ = Describe("PodBuilder", func() {
 			Expect(env["POD_NAME"].ValueFrom).NotTo(BeNil())
 		})
 
+		It("reports the claude runtime for claude-knight images", func() {
+			knight.Spec.Image = "ghcr.io/roundtable-k8s/claude-knight:latest"
+			builder.WithTelemetry(tel)
+			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.knight.runtime=claude"))
+		})
+
 		It("adds the mission for mission knights", func() {
 			knight.Labels = map[string]string{aiv1alpha1.LabelMission: "m1"}
 			builder.WithTelemetry(tel)
 			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.mission=m1"))
+			Expect(appEnv()["OTEL_RESOURCE_ATTRIBUTES"].Value).To(ContainSubstring("roundtable.table=none"))
 		})
 
 		It("sets only OTEL_SDK_DISABLED=true without an endpoint", func() {

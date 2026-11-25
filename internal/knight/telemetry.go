@@ -80,9 +80,11 @@ func (t Telemetry) Env(k *aiv1alpha1.Knight, image string) []corev1.EnvVar {
 	if rt := telemetryRuntime(image); rt != "" {
 		attrs = append(attrs, "roundtable.knight.runtime="+rt)
 	}
-	if table := KnightTable(k); table != "" {
-		attrs = append(attrs, "roundtable.table="+table)
+	table := KnightTable(k)
+	if table == "" {
+		table = "none"
 	}
+	attrs = append(attrs, "roundtable.table="+table)
 	if m := k.Labels[aiv1alpha1.LabelMission]; m != "" {
 		attrs = append(attrs, "roundtable.mission="+m)
 	}
@@ -125,8 +127,9 @@ func telemetryRuntime(image string) string {
 	return ""
 }
 
-// mergeMissingEnv appends the vars from add whose names are not already
-// present in env, so a knight's own spec.env wins over operator defaults.
+// mergeMissingEnv appends the vars from add whose names are not set in
+// userEnv (the knight's spec.env and builder extra env), so those win over
+// operator defaults. Names already in env are not checked.
 func mergeMissingEnv(env, add, userEnv []corev1.EnvVar) []corev1.EnvVar {
 	have := map[string]bool{}
 	for _, e := range userEnv {
