@@ -391,11 +391,11 @@ var _ = Describe("IssuePickup controller", func() {
 		srv = httptest.NewServer(gh)
 		clock = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
 		r = &IssuePickupReconciler{
-			Client:       k8sClient,
-			Scheme:       k8sClient.Scheme(),
-			Recorder:     record.NewFakeRecorder(100),
-			GitHubAPIURL: srv.URL,
-			Now:          func() time.Time { return clock },
+			Client:   k8sClient,
+			Scheme:   k8sClient.Scheme(),
+			Recorder: record.NewFakeRecorder(100),
+			GitHub:   github.NewClientFactory(srv.URL),
+			Now:      func() time.Time { return clock },
 		}
 
 		Expect(k8sClient.Create(ctx, &corev1.Secret{

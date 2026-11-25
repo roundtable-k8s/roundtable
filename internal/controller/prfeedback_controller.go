@@ -96,8 +96,8 @@ var mergeQueueBranch = regexp.MustCompile(`^gh-readonly-queue/.+/pr-(\d+)-[0-9a-
 type PRFeedbackReconciler struct {
 	client.Client
 	Recorder record.EventRecorder
-	// GitHubBaseURL overrides the GitHub API URL (tests, GitHub Enterprise).
-	GitHubBaseURL string
+	// GitHub builds GitHub clients; nil means api.github.com.
+	GitHub *github.ClientFactory
 	// Now returns the current time (tests).
 	Now func() time.Time
 }
@@ -181,37 +181,18 @@ func feedbackChainName(cfg *aiv1alpha1.PRFeedbackSpec) string {
 	return prFeedbackDefaultChain
 }
 
-// githubToken reads the token from spec.prFeedback.tokenSecretRef, else the
-// table's spec.github.tokenSecretRef.
-func (r *PRFeedbackReconciler) githubToken(ctx context.Context, rt *aiv1alpha1.RoundTable) (string, error) {
-	ref := rt.Spec.PRFeedback.TokenSecretRef
-	if ref == nil && rt.Spec.GitHub != nil {
-		ref = rt.Spec.GitHub.TokenSecretRef
-	}
-	if ref == nil || ref.Name == "" {
-		return "", errors.New("no GitHub token: set spec.prFeedback.tokenSecretRef or spec.github.tokenSecretRef")
-	}
-	name, key := ref.Name, ref.Key
-	key = orDefault(key, "token")
-	sec := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: rt.Namespace, Name: name}, sec); err != nil {
-		return "", fmt.Errorf("GitHub token Secret %s: %w", name, err)
-	}
-	tok := strings.TrimSpace(string(sec.Data[key]))
-	if tok == "" {
-		return "", fmt.Errorf("GitHub token Secret %s has no key %q", name, key)
-	}
-	return tok, nil
-}
-
 // poll runs one watcher pass: finish the active feedback run, detect new
 // failures, escalate or report flakes, and start the next feedback run.
 func (r *PRFeedbackReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTable, cfg *aiv1alpha1.PRFeedbackSpec, st *aiv1alpha1.PRFeedbackStatus, save func(context.Context) error) error {
-	token, err := r.githubToken(ctx, rt)
+	ref := github.ResolveTokenRef(rt.Spec.PRFeedback.TokenSecretRef, github.TableTokenRef(rt))
+	if ref == nil {
+		return errors.New("no GitHub token: set spec.prFeedback.tokenSecretRef or spec.github.tokenSecretRef")
+	}
+	token, err := github.ReadToken(ctx, r.Client, rt.Namespace, ref)
 	if err != nil {
 		return err
 	}
-	gh := github.NewClient(r.GitHubBaseURL, token)
+	gh := r.GitHub.New(token)
 
 	chain := &aiv1alpha1.Chain{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: rt.Namespace, Name: feedbackChainName(cfg)}, chain); err != nil {

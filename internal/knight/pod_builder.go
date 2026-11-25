@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	ghpkg "github.com/roundtable-k8s/roundtable/internal/github"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -350,8 +351,6 @@ const (
 	// GitHubTokenFile is the token file inside GitHubTokenDir, exported to the
 	// knight as GITHUB_TOKEN_FILE.
 	GitHubTokenFile = GitHubTokenDir + "/token"
-	// defaultGitHubTokenKey is the Secret key used when tokenSecretRef.key is empty.
-	defaultGitHubTokenKey = "token"
 	// legacyTableLabel is the older knight-to-table label (read
 	// alongside aiv1alpha1.LabelRoundTable by findTable, KnightTable and the
 	// planner prompt).
@@ -378,22 +377,17 @@ const LegacyTableLabel = legacyTableLabel
 // ai.roundtable.io/table label). Returns nil when neither is set. An empty
 // key falls back to "token".
 func ResolveGitHubTokenSecretRef(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) *corev1.SecretKeySelector {
-	ref := githubTokenRef(k.Spec.GitHub)
-	if ref == nil {
-		if rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
-			return githubTokenRef(rt.Spec.GitHub) != nil
-		}); rt != nil {
-			ref = githubTokenRef(rt.Spec.GitHub)
-		}
+	var own *corev1.SecretKeySelector
+	if k.Spec.GitHub != nil {
+		own = k.Spec.GitHub.TokenSecretRef
 	}
-	if ref == nil {
-		return nil
+	if ref := ghpkg.ResolveTokenRef(own); ref != nil {
+		return ref
 	}
-	out := ref.DeepCopy()
-	if out.Key == "" {
-		out.Key = defaultGitHubTokenKey
-	}
-	return out
+	rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool {
+		return ghpkg.ResolveTokenRef(ghpkg.TableTokenRef(rt)) != nil
+	})
+	return ghpkg.ResolveTokenRef(ghpkg.TableTokenRef(rt))
 }
 
 // findTable looks up the RoundTable a knight belongs to via the
@@ -552,13 +546,6 @@ func (b *PodBuilder) WithTableSecrets(ctx context.Context) *PodBuilder {
 		})
 	}
 	return b
-}
-
-func githubTokenRef(g *aiv1alpha1.GitHubConfig) *corev1.SecretKeySelector {
-	if g == nil || g.TokenSecretRef == nil || g.TokenSecretRef.Name == "" {
-		return nil
-	}
-	return g.TokenSecretRef
 }
 
 // WithGitHubToken mounts the knight's GitHub token Secret (see
