@@ -72,7 +72,7 @@ var contentAttrs = []string{
 // redactSecrets, or the collector's redaction processor.
 var redactionMarkers = []string{"[REDACTED]", "****"}
 
-var _ = Describe("Chain trace", Ordered, func() {
+var _ = Describe("Chain trace", Ordered, Label(tierTrace), func() {
 	BeforeAll(func() {
 		By("deploying NATS with JetStream")
 		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", traceNATS))
