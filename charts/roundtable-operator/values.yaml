@@ -361,6 +361,19 @@ gateway:
   auth:
     existingSecret: ""
     secretKey: token
+  # In-cluster callers authenticate with their own Kubernetes ServiceAccount
+  # token (a projected token with this audience), so a CronJob or sync job
+  # needs no stored credential. The gateway validates a bearer token that is
+  # not a static token with a TokenReview and records the caller as
+  # <namespace>/<name>. This first version lets any allowed ServiceAccount use
+  # the whole gateway API; the NetworkPolicy below stays the outer control.
+  # When enabled, the gateway gets create on tokenreviews.authentication.k8s.io
+  # (a ClusterRole). See docs/gateway.md#calling-from-a-workload.
+  serviceAccountAuth:
+    enabled: true
+    audience: roundtable-gateway
+    # Namespaces whose ServiceAccounts may call ("*" = any, an empty list too).
+    allowedNamespaces: ["*"]
   service:
     type: ClusterIP
     port: 80

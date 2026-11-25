@@ -349,7 +349,7 @@ target chain's `roundTableRef`.
 |---|---|---|
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
-| `roundtable_gateway_requests_total` | counter | `table`, `route`, `code` |
+| `roundtable_gateway_requests_total` | counter | `table`, `route`, `code`, `caller_kind` (`serviceaccount`, `token`, `none`) |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` |
 
 `outcome` is `started` (a run started), `deduped` (its run already exists),

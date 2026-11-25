@@ -297,7 +297,7 @@ The invoke gateway serves its own metrics (`--metrics-listen`, chart: `metrics.e
 
 | Metric | Type | Labels |
 |---|---|---|
-| `roundtable_gateway_requests_total` | counter | `route` (registered route template, `unmatched` otherwise), `code`, `table` (`none` when the request names no knight, chain or Trigger) |
+| `roundtable_gateway_requests_total` | counter | `route` (registered route template, `unmatched` otherwise), `code`, `table` (`none` when the request names no knight, chain or Trigger), `caller_kind` (`serviceaccount`, `token`, or `none` for refused and webhook requests; never the caller's name) |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` |
 
 A Trigger's `table` is its target chain's `roundTableRef` (the Trigger's own, then `none`, if unset).

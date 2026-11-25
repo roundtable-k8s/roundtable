@@ -238,7 +238,7 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 
 	task := &TaskRecord{
 		TaskID: newID, RunID: payload.RunID, Knight: knightName, Namespace: ns, RoundTable: t.RoundTable,
-		Status: TaskPending, RequestedModel: payload.Model, CreatedAt: s.now().UTC(),
+		Status: TaskPending, Caller: callerName(ctx), RequestedModel: payload.Model, CreatedAt: s.now().UTC(),
 		ResultSubject: natspkg.ResultSubject(t.SubjectPrefix, newID), ResultsStream: t.ResultsStream,
 	}
 	fail := func(cause error) error {

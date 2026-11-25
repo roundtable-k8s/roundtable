@@ -25,10 +25,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
 // maxBodyBytes bounds request bodies (the task plus a little JSON).
@@ -53,7 +56,7 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	}
 	api.Handle("/mcp", MCPHandler(svc))
 	mux.Handle("/", auth.Wrap(api))
-	return instrument(mux)
+	return instrument(mux, svc.Log)
 }
 
 // route is one entry of the gateway's HTTP route table. The table is the
@@ -383,20 +386,44 @@ func writeError(w http.ResponseWriter, err error) {
 
 // TokenAuth checks "Authorization: Bearer <token>" against the tokens in a
 // file (one per line, so a Secret can hold the old and new token during a
-// rotation). The file is re-read at most every refresh interval, so a
-// rotated Secret takes effect without a restart.
+// rotation). A line is "<token>" or "<name> <token>"; the name (default
+// "token") is the caller recorded for requests with that token. The file is
+// re-read at most every refresh interval, so a rotated Secret takes effect
+// without a restart.
+//
+// With ServiceAccounts set, a bearer token that is not a static token is
+// checked as a Kubernetes ServiceAccount token instead.
 type TokenAuth struct {
 	path    string
 	refresh time.Duration
 
+	// ServiceAccounts authenticates in-cluster callers by their
+	// ServiceAccount token. nil accepts static tokens only.
+	ServiceAccounts *ServiceAccountAuth
+	// Log records refused ServiceAccount tokens.
+	Log logr.Logger
+
 	mu       sync.Mutex
-	hashes   [][32]byte
+	tokens   []staticToken
 	loadedAt time.Time
 }
 
+// staticToken is one line of the token file.
+type staticToken struct {
+	hash [32]byte
+	name string
+}
+
+// defaultTokenName is the caller of a static token whose line has no name.
+const defaultTokenName = "token"
+
+// tokenNameRE is what a static token's name may look like: no "/", so it
+// cannot be confused with a ServiceAccount caller.
+var tokenNameRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$`)
+
 // NewTokenAuth loads the token file and fails if it holds no usable token.
 func NewTokenAuth(path string, refresh time.Duration) (*TokenAuth, error) {
-	a := &TokenAuth{path: path, refresh: refresh}
+	a := &TokenAuth{path: path, refresh: refresh, Log: logr.Discard()}
 	if err := a.load(); err != nil {
 		return nil, err
 	}
@@ -408,26 +435,36 @@ func (a *TokenAuth) load() error {
 	if err != nil {
 		return fmt.Errorf("read token file: %w", err)
 	}
-	var hashes [][32]byte
+	var tokens []staticToken
 	for line := range strings.SplitSeq(string(data), "\n") {
-		tok := strings.TrimSpace(line)
-		if tok == "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
+		}
+		name, tok := defaultTokenName, line
+		if fields := strings.Fields(line); len(fields) == 2 {
+			name, tok = fields[0], fields[1]
+			if !tokenNameRE.MatchString(name) {
+				return fmt.Errorf("token file %s: token names are letters, digits, '.', '_' and '-' (at most 63)", a.path)
+			}
+		} else if len(fields) > 2 {
+			return fmt.Errorf("token file %s: a line is \"<token>\" or \"<name> <token>\"", a.path)
 		}
 		if len(tok) < minTokenLength {
 			return fmt.Errorf("token file %s: tokens must be at least %d characters", a.path, minTokenLength)
 		}
-		hashes = append(hashes, sha256.Sum256([]byte(tok)))
+		tokens = append(tokens, staticToken{hash: sha256.Sum256([]byte(tok)), name: name})
 	}
-	if len(hashes) == 0 {
+	if len(tokens) == 0 {
 		return fmt.Errorf("token file %s holds no token", a.path)
 	}
-	a.hashes = hashes
+	a.tokens = tokens
 	a.loadedAt = time.Now()
 	return nil
 }
 
-func (a *TokenAuth) valid(tok string) bool {
+// match returns the name of the static token tok, if it is one.
+func (a *TokenAuth) match(tok string) (string, bool) {
 	a.mu.Lock()
 	if time.Since(a.loadedAt) > a.refresh {
 		// Keep the last good tokens if the file is briefly unreadable or
@@ -436,27 +473,68 @@ func (a *TokenAuth) valid(tok string) bool {
 			a.loadedAt = time.Now()
 		}
 	}
-	hashes := a.hashes
+	tokens := a.tokens
 	a.mu.Unlock()
 
-	// Compare fixed-size hashes in constant time.
+	// Compare fixed-size hashes in constant time, always against every token.
 	h := sha256.Sum256([]byte(tok))
-	ok := 0
-	for i := range hashes {
-		ok |= subtle.ConstantTimeCompare(h[:], hashes[i][:])
+	name, found := "", false
+	for i := range tokens {
+		if subtle.ConstantTimeCompare(h[:], tokens[i].hash[:]) == 1 && !found {
+			name, found = tokens[i].name, true
+		}
 	}
-	return ok == 1
+	return name, found
 }
 
-// Wrap rejects requests without a valid bearer token.
+func (a *TokenAuth) valid(tok string) bool {
+	_, ok := a.match(tok)
+	return ok
+}
+
+// authenticate returns the caller presenting tok.
+func (a *TokenAuth) authenticate(r *http.Request, tok string) (Caller, error) {
+	if name, ok := a.match(tok); ok {
+		return Caller{Kind: CallerToken, Name: name}, nil
+	}
+	if a.ServiceAccounts == nil || tok == "" {
+		return Caller{}, unauthenticated("unknown token")
+	}
+	return a.ServiceAccounts.Authenticate(r.Context(), tok)
+}
+
+// Wrap rejects requests without a valid bearer token (401), with a
+// ServiceAccount token that is not allowed (403), or when the TokenReview
+// fails (503), and records the caller on the request.
 func (a *TokenAuth) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		scheme, tok, found := strings.Cut(r.Header.Get("Authorization"), " ")
-		if !found || !strings.EqualFold(scheme, "Bearer") || !a.valid(strings.TrimSpace(tok)) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="roundtable-gateway"`)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		var caller Caller
+		err := unauthenticated("no bearer token")
+		if found && strings.EqualFold(scheme, "Bearer") {
+			caller, err = a.authenticate(r, strings.TrimSpace(tok))
+		}
+		if err != nil {
+			code := authStatus(err)
+			switch code {
+			case http.StatusUnauthorized:
+				a.Log.V(1).Info("Refused request: not authenticated", "reason", err.Error(), "path", r.URL.Path)
+				w.Header().Set("WWW-Authenticate", `Bearer realm="roundtable-gateway"`)
+				writeJSON(w, code, map[string]string{"error": "unauthorized"})
+			case http.StatusForbidden:
+				a.Log.Info("Refused request: caller not allowed", "reason", err.Error(), "path", r.URL.Path)
+				writeJSON(w, code, map[string]string{"error": "forbidden: " + err.Error()})
+			default:
+				a.Log.Error(err, "Cannot authenticate request", "path", r.URL.Path)
+				writeJSON(w, code, map[string]string{"error": "authentication unavailable"})
+			}
 			return
 		}
-		next.ServeHTTP(w, r)
+		setRequestCaller(r.Context(), caller)
+		inner := r.WithContext(WithCaller(r.Context(), caller))
+		next.ServeHTTP(w, inner)
+		// The API mux records the matched route on the copy; hand it back to
+		// the metrics middleware, which reads it from r.
+		r.Pattern = inner.Pattern
 	})
 }

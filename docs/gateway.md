@@ -72,6 +72,29 @@ credential instead, see [Webhooks](#webhooks)) requires
   the Secret, switch the callers, then remove the old one. Changes take effect
   within a minute without a restart.
 - Tokens are compared as SHA-256 digests in constant time.
+- A line may name its token: `<name> <token>` (letters, digits, `.`, `_`,
+  `-`). The name is the caller recorded for requests with that token; a line
+  without a name records `token`. Keep the chart-generated token unnamed: the
+  dashboard sends the whole line.
+
+In-cluster workloads can instead send their own Kubernetes ServiceAccount
+token (`gateway.serviceAccountAuth`, on by default), see
+[Calling from a workload](#calling-from-a-workload).
+
+### Who called
+
+The gateway records the caller of every authenticated request:
+`<namespace>/<name>` for a ServiceAccount, the token's name for a static
+token. It is in:
+
+- the request log (one `Request` line per request with `caller`,
+  `callerKind`, `route`, `code` and `table`; `/healthz` is not logged),
+- the task record (`caller` in `GET /v1/tasks/{taskId}` and the MCP tools),
+- the `ai.roundtable.io/caller` annotation on chain runs and missions the
+  gateway starts (and `caller` in their records),
+- the `caller_kind` label (`serviceaccount`, `token` or `none`) of
+  `roundtable_gateway_requests_total`. The caller's name is not a label: one
+  series per ServiceAccount would grow without bound.
 
 The chart also creates a NetworkPolicy (`gateway.networkPolicy`). By default it
 allows ingress only from pods in the release namespace. Add peers for your
@@ -110,6 +133,113 @@ gateway with `gateway.enabled=false`.
 kubectl -n roundtable create secret generic roundtable-gateway-token \
   --from-literal=token="$(openssl rand -hex 32)"
 ```
+
+## Calling from a workload
+
+A pod in the cluster can call the gateway with its own ServiceAccount token,
+so a CronJob or sync job needs no stored credential. Mount a projected
+ServiceAccount token with the gateway's audience (`roundtable-gateway`,
+`gateway.serviceAccountAuth.audience`) and send it as the bearer token. The
+kubelet refreshes the file before the token expires; read it on every
+request.
+
+When a bearer token is not one of the static tokens, the gateway sends it to
+a `TokenReview` with its audience. It accepts the request when the API server
+authenticates the token for that audience as
+`system:serviceaccount:<namespace>:<name>` and the namespace is in
+`gateway.serviceAccountAuth.allowedNamespaces` (default `["*"]`, any). The
+caller is recorded as `<namespace>/<name>`.
+
+| Token | Response |
+|-------|----------|
+| Unknown, expired, or issued for another audience | `401` |
+| Authenticated, but not a ServiceAccount, or its namespace is not allowed | `403` |
+| The `TokenReview` itself failed (API server unreachable) | `503`, retry |
+
+A success is cached in memory until 30 seconds before the token expires and
+at most 5 minutes, so a deleted pod's or ServiceAccount's token stops working
+within that time. A refusal is cached for 5 seconds. The cache is bounded
+(4096 tokens).
+
+> **This first version grants the whole gateway API to any allowed
+> ServiceAccount**: it can invoke any knight, run any invokable chain and
+> start missions in the namespaces the gateway serves. Limit who can reach
+> the gateway with `gateway.networkPolicy` and which namespaces' ServiceAccounts
+> are accepted with `gateway.serviceAccountAuth.allowedNamespaces`. Per-table
+> and per-chain grants come later.
+
+The gateway needs `create` on `tokenreviews.authentication.k8s.io`; the chart
+grants it (ClusterRole `<fullname>-gateway-sa-auth`) only when
+`gateway.serviceAccountAuth.enabled` is true. With it off (`--service-account-auth=false`),
+only static tokens are accepted. The calling pod's namespace must also be let
+through `gateway.networkPolicy.from`.
+
+### Example: a CronJob that runs a chain by name and waits
+
+The ServiceAccount needs no RBAC of its own; the projected token only proves
+who it is. The same manifest is in
+[`examples/gateway-serviceaccount-cronjob.yaml`](../examples/gateway-serviceaccount-cronjob.yaml).
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nightly-digest
+  namespace: roundtable
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-digest
+  namespace: roundtable
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: nightly-digest
+          # Only the projected token below is mounted, not the default one.
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          containers:
+            - name: run
+              image: curlimages/curl:8.11.0
+              env:
+                - name: GW
+                  value: http://roundtable-roundtable-operator-gateway.roundtable.svc
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  TOKEN=$(cat /var/run/secrets/roundtable-gateway/token)
+                  # Run the invokable chain "digest" and wait up to 25 minutes.
+                  code=$(curl -sS --max-time 1560 -o /tmp/run.json -w '%{http_code}' \
+                    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+                    "$GW/v1/chains/digest/runs" \
+                    -d '{"input": {"date": "'"$(date +%F)"'"}, "waitSeconds": 1500}')
+                  cat /tmp/run.json
+                  # 200 = finished; 202 = still running after 1500 s.
+                  [ "$code" = 200 ] && grep -q '"phase":"Succeeded"' /tmp/run.json
+              volumeMounts:
+                - name: gateway-token
+                  mountPath: /var/run/secrets/roundtable-gateway
+                  readOnly: true
+          volumes:
+            - name: gateway-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      # Must equal gateway.serviceAccountAuth.audience.
+                      audience: roundtable-gateway
+                      expirationSeconds: 3600
+                      path: token
+```
+
+The run copy carries `ai.roundtable.io/caller: roundtable/nightly-digest`, and
+`GET /v1/runs/{namespace}/{run}` returns `"caller": "roundtable/nightly-digest"`.
 
 ## HTTP API
 
@@ -599,6 +729,9 @@ spec:
                   [ "$code" = 200 ] && grep -q '"phase":"Succeeded"' /tmp/run.json
 ```
 
+Without a stored token, the same CronJob can authenticate with its own
+ServiceAccount: see [Calling from a workload](#calling-from-a-workload).
+
 Moving a kagent caller to these endpoints, with a Python helper: [Migrating from kagent](migrating-from-kagent.md).
 
 ### Example: run, then poll
@@ -707,6 +840,10 @@ claude mcp add --transport http roundtable \
   http://roundtable-roundtable-operator-gateway.roundtable.svc/mcp \
   --header "Authorization: Bearer $TOKEN"
 ```
+
+`/mcp` takes the same bearer tokens as the HTTP API: a static token or, from
+a pod, its projected ServiceAccount token (see
+[Calling from a workload](#calling-from-a-workload)).
 
 Some MCP clients cut tool calls off after a fixed time. If yours does, pass a
 `timeoutSeconds` (or `waitSeconds`) below that limit and poll `get_task` (or

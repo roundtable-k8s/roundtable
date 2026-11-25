@@ -103,6 +103,9 @@ type RunRecord struct {
 	Namespace string `json:"namespace"`
 	RunID     string `json:"runId,omitempty"`
 	Phase     string `json:"phase"`
+	// Caller is who started the run through the gateway (the
+	// ai.roundtable.io/caller annotation).
+	Caller string `json:"caller,omitempty"`
 	// Done is true once the run reached a terminal phase.
 	Done        bool       `json:"done"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -246,6 +249,10 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if req.IdempotencyKey != "" {
 		suffix = idempotencyHash(ns, chainName, req.IdempotencyKey)[:8]
 	}
+	annotations := map[string]string{annotationRunOf: tmpl.Name}
+	if c := callerName(ctx); c != "" {
+		annotations[aiv1alpha1.AnnotationCaller] = c
+	}
 	run, err := chainrun.Start(ctx, s.Runs, s.Runs.Scheme(), tmpl, chainrun.StartOptions{
 		Name:        chainrun.Name(tmpl.Name, "gw", suffix),
 		Namespace:   ns,
@@ -253,7 +260,7 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 		Trigger:     "gateway-" + suffix,
 		Source:      chainrun.SourceGateway,
 		Labels:      map[string]string{aiv1alpha1.LabelCreatedBy: aiv1alpha1.CreatedByGateway},
-		Annotations: map[string]string{annotationRunOf: tmpl.Name},
+		Annotations: annotations,
 	})
 	if err != nil {
 		if req.IdempotencyKey != "" && apierrors.IsAlreadyExists(err) {
@@ -262,7 +269,8 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 		}
 		return nil, k8sError("create chain run", err)
 	}
-	s.Log.Info("Started chain run", "chain", tmpl.Name, "run", run.Name, "namespace", ns, "inputBytes", len(input))
+	s.Log.Info("Started chain run", "chain", tmpl.Name, "run", run.Name, "namespace", ns, "inputBytes", len(input),
+		"caller", callerName(ctx))
 	if wait > 0 {
 		return s.waitRun(ctx, ns, run.Name, wait)
 	}
@@ -520,6 +528,7 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 		Chain:       c.Annotations[annotationRunOf],
 		Namespace:   c.Namespace,
 		Phase:       string(st.Phase),
+		Caller:      c.Annotations[aiv1alpha1.AnnotationCaller],
 		Done:        runDone(c),
 		CreatedAt:   c.CreationTimestamp.UTC(),
 		StartedAt:   timePtr(st.StartedAt),

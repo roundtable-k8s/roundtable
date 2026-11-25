@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-logr/logr"
+
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
@@ -33,19 +35,31 @@ const (
 	// unmatchedRoute is the route label of a request no route matched, so a
 	// scanner's paths cannot grow the label set.
 	unmatchedRoute = "unmatched"
+	// healthRoute is not logged: probes would drown the request log.
+	healthRoute = "GET /healthz"
 )
 
-type requestTableKey struct{}
+type requestInfoKey struct{}
 
-// requestTable carries the table a request turned out to address from the
-// handlers back to the metrics middleware.
-type requestTable struct{ name atomic.Pointer[string] }
+// requestInfo carries what the handlers learn about a request (its table,
+// its caller) back to the metrics and logging middleware.
+type requestInfo struct {
+	table  atomic.Pointer[string]
+	caller atomic.Pointer[Caller]
+}
 
 // setRequestTable records the RoundTable the request in ctx addresses. An
 // empty name is ignored.
 func setRequestTable(ctx context.Context, table string) {
-	if rt, ok := ctx.Value(requestTableKey{}).(*requestTable); ok && table != "" {
-		rt.name.Store(&table)
+	if ri, ok := ctx.Value(requestInfoKey{}).(*requestInfo); ok && table != "" {
+		ri.table.Store(&table)
+	}
+}
+
+// setRequestCaller records the authenticated caller of the request in ctx.
+func setRequestCaller(ctx context.Context, c Caller) {
+	if ri, ok := ctx.Value(requestInfoKey{}).(*requestInfo); ok {
+		ri.caller.Store(&c)
 	}
 }
 
@@ -80,12 +94,13 @@ func (s *statusRecorder) Flush() {
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // instrument counts and times each request by route template (the matched
-// ServeMux pattern, never the raw path), status code and table.
-func instrument(next http.Handler) http.Handler {
+// ServeMux pattern, never the raw path), status code, table and caller kind,
+// and logs it with its caller (except health probes).
+func instrument(next http.Handler, log logr.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rt := &requestTable{}
-		r = r.WithContext(context.WithValue(r.Context(), requestTableKey{}, rt))
+		ri := &requestInfo{}
+		r = r.WithContext(context.WithValue(r.Context(), requestInfoKey{}, ri))
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 
@@ -101,10 +116,19 @@ func instrument(next http.Handler) http.Handler {
 			code = http.StatusOK
 		}
 		table := noTable
-		if t := rt.name.Load(); t != nil {
+		if t := ri.table.Load(); t != nil {
 			table = *t
 		}
-		metrics.GatewayRequestsTotal.WithLabelValues(route, strconv.Itoa(code), table).Inc()
-		metrics.GatewayRequestDurationSeconds.WithLabelValues(route).Observe(time.Since(start).Seconds())
+		kind, caller := callerNone, ""
+		if c := ri.caller.Load(); c != nil {
+			kind, caller = c.Kind, c.String()
+		}
+		elapsed := time.Since(start)
+		metrics.GatewayRequestsTotal.WithLabelValues(route, strconv.Itoa(code), table, kind).Inc()
+		metrics.GatewayRequestDurationSeconds.WithLabelValues(route).Observe(elapsed.Seconds())
+		if route != healthRoute {
+			log.Info("Request", "method", r.Method, "route", route, "code", code, "durationMs", elapsed.Milliseconds(),
+				"caller", caller, "callerKind", kind, "table", table)
+		}
 	})
 }

@@ -50,12 +50,24 @@ func envOr(key, def string) string {
 	return def
 }
 
+// splitList splits a comma-separated flag, dropping empty items.
+func splitList(v string) []string {
+	var out []string
+	for item := range strings.SplitSeq(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func main() {
 	var (
 		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
 		defaultTimeout, maxTimeout, taskTTL, runTTL                                                     time.Duration
 		maxInFlight, maxStreams                                                                         int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled                                bool
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
+		saAudience, saNamespaces                                                                        string
 		maxBudgetUSD, hookRate                                                                          float64
 		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
 		hookMaxBody                                                                                     int64
@@ -96,6 +108,13 @@ func main() {
 	flag.Int64Var(&hookMaxBody, "hook-max-body-bytes", 1<<20, "Largest webhook body accepted.")
 	flag.Float64Var(&hookRate, "hook-rate", 2, "Webhook deliveries per second each Trigger accepts on average.")
 	flag.IntVar(&hookBurst, "hook-burst", 20, "Webhook deliveries each Trigger accepts at once.")
+	flag.BoolVar(&saAuth, "service-account-auth", false,
+		"Also accept Kubernetes ServiceAccount tokens, validated with a TokenReview (needs create on "+
+			"tokenreviews.authentication.k8s.io).")
+	flag.StringVar(&saAudience, "service-account-audience", gateway.DefaultServiceAccountAudience,
+		"Audience a ServiceAccount token must be issued for.")
+	flag.StringVar(&saNamespaces, "service-account-namespaces", "*",
+		"Comma-separated namespaces whose ServiceAccounts may call the gateway (\"*\" for any).")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -108,6 +127,7 @@ func main() {
 		log.Error(err, "Bearer token is required; refusing to start without one")
 		os.Exit(1)
 	}
+	auth.Log = log.WithName("auth")
 
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
@@ -122,6 +142,14 @@ func main() {
 	if err != nil {
 		log.Error(err, "Unable to create Kubernetes client")
 		os.Exit(1)
+	}
+
+	if saAuth {
+		auth.ServiceAccounts = &gateway.ServiceAccountAuth{
+			Reviewer:          gateway.KubeTokenReviewer{Client: k8s},
+			Audience:          saAudience,
+			AllowedNamespaces: splitList(saNamespaces),
+		}
 	}
 
 	nc, err := nats.Connect(natsURL,
@@ -142,12 +170,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var allowedNS []string
-	for ns := range strings.SplitSeq(allowed, ",") {
-		if ns = strings.TrimSpace(ns); ns != "" {
-			allowedNS = append(allowedNS, ns)
-		}
-	}
+	allowedNS := splitList(allowed)
 	svc := gateway.NewService(&gateway.Resolver{Client: k8s}, bus, gateway.Options{
 		Namespace:          namespace,
 		AllowedNamespaces:  allowedNS,
@@ -232,6 +255,7 @@ func main() {
 	}()
 
 	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled, "hooks", hooksEnabled,
+		"serviceAccountAuth", saAuth, "serviceAccountAudience", saAudience,
 		"namespace", namespace, "nats", natsURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "Gateway server failed")
