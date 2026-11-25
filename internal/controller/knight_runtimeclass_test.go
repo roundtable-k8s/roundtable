@@ -139,3 +139,23 @@ var _ = Describe("Knight runtimeClassName", func() {
 		Expect(sandboxPodSpec(sb).RuntimeClassName).To(HaveValue(Equal("gvisor")))
 	})
 })
+
+var _ = Describe("Knight table identity on pods", func() {
+	ctx := context.Background()
+
+	It("labels the pod template with the table but leaves the selector alone", func() {
+		r := &KnightReconciler{}
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: "tbl-knight", Namespace: "default"},
+			Spec:       aiv1alpha1.KnightSpec{Domain: "d"},
+		}
+		without := r.BuildDeploymentSpec(ctx, k)
+		Expect(without.Template.Labels).NotTo(HaveKey(aiv1alpha1.LabelRoundTable))
+
+		k.Labels = map[string]string{aiv1alpha1.LabelRoundTable: "x"}
+		with := r.BuildDeploymentSpec(ctx, k)
+		Expect(with.Template.Labels).To(HaveKeyWithValue(aiv1alpha1.LabelRoundTable, "x"))
+		Expect(with.Selector.MatchLabels).To(Equal(without.Selector.MatchLabels))
+		Expect(with.Selector.MatchLabels).NotTo(HaveKey(aiv1alpha1.LabelRoundTable))
+	})
+})

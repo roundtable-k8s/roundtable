@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -159,6 +160,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+	if table := knightpkg.KnightTable(knight); table != "" {
+		log = log.WithValues("table", table)
+		ctx = logf.IntoContext(ctx, log)
 	}
 
 	// Handle deletion via finalizer
@@ -717,6 +722,11 @@ func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1
 	labels := knightLabels(knight)
 	replicas := r.scalingOrFallback(ctx, knight).InitialReplicas()
 	strategy := knightpkg.RolloutStrategy(knight)
+	// The table label goes on the pod template only: the selector is immutable.
+	podLabels := maps.Clone(labels)
+	if table := knightpkg.KnightTable(knight); table != "" {
+		podLabels[aiv1alpha1.LabelRoundTable] = table
+	}
 	return appsv1.DeploymentSpec{
 		Replicas: &replicas,
 		Strategy: strategy,
@@ -725,7 +735,7 @@ func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1
 		},
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: labels,
+				Labels: podLabels,
 			},
 			Spec: r.BuildDrainablePodSpec(ctx, knight),
 		},
@@ -898,16 +908,6 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	}
 	knight.Status.NATSConsumer = consumerName
 	knight.Status.ObservedGeneration = knight.Generation
-
-	// Update Prometheus metrics
-	tableName := knight.Labels[aiv1alpha1.LabelRoundTable]
-	if tableName == "" {
-		tableName = "none"
-	}
-	// Note: KnightsTotal is a gauge. In a real aggregation, we'd track all knights,
-	// but for now we set 1 for this knight's current phase. A separate aggregator
-	// or the RoundTable controller should reset/recompute totals.
-	rtmetrics.KnightsTotal.WithLabelValues(string(knight.Status.Phase), tableName).Set(1)
 
 	if err := r.Status().Update(ctx, knight); err != nil {
 		return err
