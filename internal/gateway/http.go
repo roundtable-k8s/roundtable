@@ -54,6 +54,11 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 			api.HandleFunc(rt.pattern, rt.handler)
 		}
 	}
+	if svc.SchedulesEnabled() {
+		api.HandleFunc("GET /v1/schedules", svc.handleListSchedules)
+		api.HandleFunc("GET /v1/schedules/{namespace}/{name}", svc.handleGetSchedule)
+		api.HandleFunc("GET /v1/schedules/{namespace}/{name}/manifest", svc.handleScheduleManifest)
+	}
 	api.Handle("/mcp", MCPHandler(svc))
 	mux.Handle("/", auth.Wrap(api))
 	return instrument(mux, svc.Log)
@@ -340,6 +345,36 @@ func (s *Service) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	schedules, err := s.ListSchedules(r.Context(), ScheduleFilter{Namespace: q.Get("namespace"), Table: q.Get("table")})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schedules": schedules})
+}
+
+func (s *Service) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
+	v, err := s.GetSchedule(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Service) handleScheduleManifest(w http.ResponseWriter, r *http.Request) {
+	b, err := s.ScheduleManifest(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
 }
 
 // queryInt parses an optional integer query parameter.

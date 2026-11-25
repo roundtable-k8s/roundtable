@@ -66,7 +66,7 @@ func main() {
 		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
 		defaultTimeout, maxTimeout, taskTTL, runTTL                                                     time.Duration
 		maxInFlight, maxStreams                                                                         int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth, schedulesEnabled      bool
 		saAudience, saNamespaces                                                                        string
 		maxBudgetUSD, hookRate                                                                          float64
 		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
@@ -102,6 +102,8 @@ func main() {
 	flag.BoolVar(&runsEnabled, "runs", true,
 		"Serve the chain-run endpoints (needs RBAC to create, read and delete Chains).")
 	flag.DurationVar(&runTTL, "run-ttl", 24*time.Hour, "How long a finished chain run started by the gateway is kept.")
+	flag.BoolVar(&schedulesEnabled, "schedules", true,
+		"Serve the schedule endpoints (needs RBAC to get, list and watch Triggers).")
 	flag.BoolVar(&hooksEnabled, "hooks", true,
 		"Serve POST /v1/hooks/{namespace}/{trigger} for webhook Triggers (needs RBAC to get Triggers and "+
 			"Secrets labelled ai.roundtable.io/webhook-secret=true).")
@@ -195,6 +197,9 @@ func main() {
 	if runsEnabled {
 		svc.Runs = k8s
 	}
+	if schedulesEnabled {
+		svc.Schedules = k8s
+	}
 	if hooksEnabled {
 		svc.Hooks = k8s
 	}
@@ -256,6 +261,7 @@ func main() {
 
 	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled, "hooks", hooksEnabled,
 		"serviceAccountAuth", saAuth, "serviceAccountAudience", saAudience,
+		"schedules", schedulesEnabled,
 		"namespace", namespace, "nats", natsURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "Gateway server failed")
