@@ -30,6 +30,7 @@ helm install roundtable charts/roundtable-operator \
 | `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1beta1` Sandbox is served), `true`, or `false`. Supports agent-sandbox v1.0.0 or later (developed against v1.0.12) |
 | `keda` | string | `auto` | KEDA autoscaling for knights with `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`: `auto` (enable only if `keda.sh/v1alpha1` ScaledObject is served), `true`, or `false` |
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |
+| `cards.bucket` | string | `roundtable-cards` | NATS KV bucket of the [agent cards](agent-cards.md) (`CARDS_KV_BUCKET`; knight pods get `KNIGHT_CARDS_BUCKET`) |
 | `extraArgs` | list | `[]` | Additional args for the manager binary (e.g. `--github-api-url=https://ghe.example.com/api/v3` for [issue pickup](issue-pickup.md)) |
 
 ### Metrics
@@ -195,6 +196,25 @@ RuntimeClass such as `gvisor`. Knights in a RoundTable also inherit
 `RoundTable.spec.defaults.runtimeClassName` when unset. See
 [runtime-isolation.md](runtime-isolation.md).
 
+Set `knights.<name>.memory` to give a knight a persistent memory volume,
+separate from its `/data` workspace, that every replica mounts read-write at
+`/memory/<name>` (`KNIGHT_MEMORY_DIR`; `KNIGHT_MEMORY_ROOT=/memory`). Without
+`existingClaim` the operator creates the ReadWriteMany PVC `<name>-memory`
+(`size`, default `1Gi`, and `storageClassName`), owned by the Knight and
+deleted with it. With `existingClaim` the shared claim is mounted read-only at
+`/memory` and its `<name>` sub-directory read-write at `/memory/<name>`; the
+operator never creates or deletes that claim. Knights in a RoundTable inherit
+`spec.defaults.memory` (including `existingClaim`) when unset.
+
+```yaml
+knights:
+  galahad:
+    memory:
+      size: 1Gi
+      storageClassName: cephfs     # must support ReadWriteMany for replicas > 1
+      # existingClaim: table-memory  # shared RWX claim instead of <name>-memory
+```
+
 Define knights inline in values to deploy them with the operator:
 
 ```yaml
@@ -283,6 +303,32 @@ inherits it from `spec.roundTableRef`.
 | `nodeSelector` | object | `{}` | Node selector for operator pod |
 | `tolerations` | list | `[]` | Tolerations for operator pod |
 | `affinity` | object | `{}` | Affinity rules for operator pod |
+
+### Alerts
+
+Opt-in `PrometheusRule` (`templates/prometheusrule.yaml`). Rendered only when
+`alerts.enabled=true` and the cluster serves `monitoring.coreos.com/v1`.
+Knight rules use the `roundtable_knight_*` metrics (they only match once
+knights emit those names) and keep `table` in every aggregation. Pod and
+scaling rules are scoped to the release namespace.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `alerts.enabled` | bool | `false` | Render the `PrometheusRule` |
+| `alerts.costSpikeUSDPer24h` | number | `15` | `KnightLLMCostSpike` threshold: USD per table over 24h |
+| `alerts.taskFailuresPerHour` | number | `2` | `KnightTaskFailures` threshold: failed tasks per knight per hour |
+| `alerts.chainStepSlowSeconds` | number | `1800` | `RoundtableChainStepsSlow` threshold: p95 step duration over 1h, from `roundtable_chain_step_duration_seconds` |
+| `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
+| `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
+
+Groups: `roundtable.knights` (task failures, NATS disconnected, metrics absent,
+lost tasks, cost spike, slow chain steps), `roundtable.pods` (restarts,
+OOMKilled, Evicted, PVC almost full) and `roundtable.scaling`. A chain that
+never finishes a step produces no step observation, so detecting a wholly
+stuck run needs a started-runs or in-flight metric (follow-up).
+
+`scripts/check-prometheusrule.sh` (part of `make helm-check`) renders the rules
+and runs `promtool check rules` on them.
 
 ## Operator metrics
 

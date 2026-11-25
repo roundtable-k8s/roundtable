@@ -25,6 +25,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -50,7 +51,26 @@ type Bus interface {
 	GetRecord(taskID string) (*TaskRecord, error)
 	// ListRecords returns every stored task record.
 	ListRecords() ([]*TaskRecord, error)
+
+	// DeadLetterRecords returns the state of every dead-letter entry.
+	DeadLetterRecords() ([]DeadLetterRecord, error)
+	// DeadLetterEntry returns the entry body stored at a record's subject,
+	// or nil when it has aged out of the dead-letter stream.
+	DeadLetterEntry(subject string) (*deadletter.Entry, error)
+	// UpdateDeadLetterRecord stores rec if the key is still at revision;
+	// errStaleRevision when somebody else changed it first.
+	UpdateDeadLetterRecord(key string, rec deadletter.Record, revision uint64) error
 }
+
+// DeadLetterRecord is a dead-letter entry's KV state with its key and revision.
+type DeadLetterRecord struct {
+	Key      string
+	Revision uint64
+	deadletter.Record
+}
+
+// errStaleRevision is a lost compare-and-set on a dead-letter record.
+var errStaleRevision = errors.New("dead-letter record changed")
 
 // ResultWatch waits for messages on one subject.
 type ResultWatch interface {
@@ -222,4 +242,94 @@ func (b *NATSBus) ListRecords() ([]*TaskRecord, error) {
 		out = append(out, rec)
 	}
 	return out, nil
+}
+
+// deadLetterKV binds the operator's dead-letter state bucket; nil when the
+// operator hasn't created it yet (no table has dead-lettering).
+func (b *NATSBus) deadLetterKV() (nats.KeyValue, error) {
+	kv, err := b.js.KeyValue(deadletter.KVBucket)
+	if errors.Is(err, nats.ErrBucketNotFound) {
+		return nil, nil
+	}
+	return kv, err
+}
+
+// DeadLetterRecords implements Bus.
+func (b *NATSBus) DeadLetterRecords() ([]DeadLetterRecord, error) {
+	kv, err := b.deadLetterKV()
+	if err != nil || kv == nil {
+		return nil, err
+	}
+	keys, err := kv.Keys()
+	if err != nil {
+		if errors.Is(err, nats.ErrNoKeysFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]DeadLetterRecord, 0, len(keys))
+	for _, k := range keys {
+		ent, err := kv.Get(k)
+		if err != nil {
+			if errors.Is(err, nats.ErrKeyNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if op := ent.Operation(); op == nats.KeyValueDelete || op == nats.KeyValuePurge {
+			continue
+		}
+		rec := DeadLetterRecord{Key: k, Revision: ent.Revision()}
+		if err := json.Unmarshal(ent.Value(), &rec.Record); err != nil {
+			continue // not a record we understand
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// DeadLetterEntry implements Bus.
+func (b *NATSBus) DeadLetterEntry(subject string) (*deadletter.Entry, error) {
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		if errors.Is(err, nats.ErrStreamNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	msg, err := b.js.GetLastMsg(stream, subject)
+	if err != nil {
+		if errors.Is(err, nats.ErrMsgNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var e deadletter.Entry
+	if err := json.Unmarshal(msg.Data, &e); err != nil {
+		return nil, fmt.Errorf("decode dead-letter entry %s: %w", subject, err)
+	}
+	return &e, nil
+}
+
+// UpdateDeadLetterRecord implements Bus.
+func (b *NATSBus) UpdateDeadLetterRecord(key string, rec deadletter.Record, revision uint64) error {
+	kv, err := b.deadLetterKV()
+	if err != nil {
+		return err
+	}
+	if kv == nil {
+		return ErrNotFound
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	if _, err := kv.Update(key, data, revision); err != nil {
+		var api *nats.APIError
+		if errors.Is(err, nats.ErrKeyExists) || (errors.As(err, &api) && api.ErrorCode == nats.JSErrCodeStreamWrongLastSequence) {
+			return errStaleRevision
+		}
+		return err
+	}
+	return nil
 }

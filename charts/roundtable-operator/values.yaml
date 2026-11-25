@@ -59,6 +59,13 @@ extraArgs: []
 notify:
   allowedURLPrefixes: []
 
+# Agent cards (docs/agent-cards.md): the RoundTable controller keeps one card
+# per knight in this NATS KV bucket, key <table>.<knight>
+# (CARDS_KV_BUCKET; knight pods get it as KNIGHT_CARDS_BUCKET). The bucket is
+# created if missing (history 1, no TTL).
+cards:
+  bucket: roundtable-cards
+
 # Global image settings for managed components — pinned to git SHAs of each
 # repo's main; bump here (with a chart version bump), then update the chart
 # version in dapper-cluster
@@ -395,3 +402,22 @@ metrics:
   podMonitor:
     # PodMonitor for knight pods (port 3000, container "app").
     enabled: false
+
+# PrometheusRule with the Round Table alerts (#332). Off by default; needs the
+# monitoring.coreos.com/v1 API (prometheus-operator). Knight alerts use the
+# roundtable_knight_* metrics and keep `table` in every aggregation.
+alerts:
+  enabled: false
+  # LLM spend per table over 24h above which KnightLLMCostSpike fires (USD).
+  costSpikeUSDPer24h: 15
+  # Failed tasks per knight per hour above which KnightTaskFailures fires.
+  taskFailuresPerHour: 2
+  # p95 chain step duration (seconds, over 1h) above which
+  # RoundtableChainStepsSlow fires. Step histogram buckets stop at ~34min.
+  chainStepSlowSeconds: 1800
+  # Extra labels on every rule; `severity` here overrides the default "warning".
+  labels: {}
+  scaling:
+    # roundtable.scaling group (KEDA scaler errors, HPA ScalingActive=false).
+    # Needs KEDA's and kube-state-metrics' metrics; disable if you have neither.
+    enabled: true

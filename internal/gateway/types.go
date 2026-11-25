@@ -109,4 +109,19 @@ var (
 	ErrUnavailable = errors.New("unavailable")
 	ErrBusy        = errors.New("too many in-flight invocations")
 	ErrForbidden   = errors.New("forbidden")
+	// ErrConflict maps to 409; see ConflictError.
+	ErrConflict = errors.New("conflict")
+	// ErrUnprocessable maps to 422.
+	ErrUnprocessable = errors.New("unprocessable")
 )
+
+// ConflictError is a 409 that carries the dead-letter entry's current state.
+type ConflictError struct {
+	State  string
+	Reason string
+}
+
+func (e *ConflictError) Error() string { return "conflict: " + e.Reason }
+
+// Is makes errors.Is(err, ErrConflict) true.
+func (e *ConflictError) Is(target error) bool { return target == ErrConflict }

@@ -619,6 +619,64 @@ spec:
                                 When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                               type: boolean
                           type: object
+                        card:
+                          description: |-
+                            card overrides fields of the knight's agent card, which the RoundTable
+                            controller generates from this spec and keeps in the cards KV bucket
+                            (key <table>.<knight>, see docs/agent-cards.md).
+                          properties:
+                            description:
+                              description: |-
+                                description is the card description. When unset it is the first
+                                paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                              maxLength: 1024
+                              type: string
+                            skills:
+                              description: |-
+                                skills are merged over the generated skills by id: set fields replace
+                                the generated ones, and an id that is not generated adds a skill.
+                              items:
+                                description: KnightCardSkill overrides one skill on
+                                  a knight's agent card.
+                                properties:
+                                  description:
+                                    description: description replaces the skill description.
+                                    maxLength: 1024
+                                    type: string
+                                  examples:
+                                    description: examples replace the skill examples
+                                      (sample prompts).
+                                    items:
+                                      type: string
+                                    type: array
+                                  id:
+                                    description: |-
+                                      id is the skill id: the skill name a running knight reports, or a
+                                      spec.skills category before the knight has run.
+                                    maxLength: 128
+                                    minLength: 1
+                                    type: string
+                                  tags:
+                                    description: tags replace the skill tags.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - id
+                                type: object
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - id
+                              x-kubernetes-list-type: map
+                            tags:
+                              description: tags label the knight as a whole (card
+                                roundtable.tags).
+                              items:
+                                type: string
+                              maxItems: 32
+                              type: array
+                          type: object
                         concurrency:
                           description: |-
                             concurrency is the maximum number of concurrent tasks the knight can process.
@@ -995,6 +1053,34 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        memory:
+                          description: |-
+                            memory gives the knight a persistent memory volume, separate from the
+                            /data workspace, that every replica mounts read-write at
+                            /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+                          properties:
+                            existingClaim:
+                              description: |-
+                                existingClaim is a ReadWriteMany PVC shared by several knights (for
+                                example a whole table) instead of a per-knight claim. Each knight writes
+                                only its own <knight> sub-directory and reads everyone else's.
+                              type: string
+                            size:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: |-
+                                size is the storage request of the PVC the operator creates.
+                                Defaults to 1Gi. Ignored with existingClaim.
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            storageClassName:
+                              description: |-
+                                storageClassName is the StorageClass of the PVC the operator creates;
+                                empty uses the cluster default. It must support ReadWriteMany when the
+                                knight runs more than one pod. Ignored with existingClaim.
+                              type: string
+                          type: object
                         model:
                           description: |-
                             model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
@@ -1717,6 +1803,64 @@ spec:
                                 When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                               type: boolean
                           type: object
+                        card:
+                          description: |-
+                            card overrides fields of the knight's agent card, which the RoundTable
+                            controller generates from this spec and keeps in the cards KV bucket
+                            (key <table>.<knight>, see docs/agent-cards.md).
+                          properties:
+                            description:
+                              description: |-
+                                description is the card description. When unset it is the first
+                                paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                              maxLength: 1024
+                              type: string
+                            skills:
+                              description: |-
+                                skills are merged over the generated skills by id: set fields replace
+                                the generated ones, and an id that is not generated adds a skill.
+                              items:
+                                description: KnightCardSkill overrides one skill on
+                                  a knight's agent card.
+                                properties:
+                                  description:
+                                    description: description replaces the skill description.
+                                    maxLength: 1024
+                                    type: string
+                                  examples:
+                                    description: examples replace the skill examples
+                                      (sample prompts).
+                                    items:
+                                      type: string
+                                    type: array
+                                  id:
+                                    description: |-
+                                      id is the skill id: the skill name a running knight reports, or a
+                                      spec.skills category before the knight has run.
+                                    maxLength: 128
+                                    minLength: 1
+                                    type: string
+                                  tags:
+                                    description: tags replace the skill tags.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - id
+                                type: object
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - id
+                              x-kubernetes-list-type: map
+                            tags:
+                              description: tags label the knight as a whole (card
+                                roundtable.tags).
+                              items:
+                                type: string
+                              maxItems: 32
+                              type: array
+                          type: object
                         concurrency:
                           description: |-
                             concurrency is the maximum number of concurrent tasks the knight can process.
@@ -2093,6 +2237,34 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        memory:
+                          description: |-
+                            memory gives the knight a persistent memory volume, separate from the
+                            /data workspace, that every replica mounts read-write at
+                            /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+                          properties:
+                            existingClaim:
+                              description: |-
+                                existingClaim is a ReadWriteMany PVC shared by several knights (for
+                                example a whole table) instead of a per-knight claim. Each knight writes
+                                only its own <knight> sub-directory and reads everyone else's.
+                              type: string
+                            size:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: |-
+                                size is the storage request of the PVC the operator creates.
+                                Defaults to 1Gi. Ignored with existingClaim.
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            storageClassName:
+                              description: |-
+                                storageClassName is the StorageClass of the PVC the operator creates;
+                                empty uses the cluster default. It must support ReadWriteMany when the
+                                knight runs more than one pod. Ignored with existingClaim.
+                              type: string
+                          type: object
                         model:
                           description: |-
                             model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
@@ -2535,6 +2707,64 @@ spec:
                                 When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                               type: boolean
                           type: object
+                        card:
+                          description: |-
+                            card overrides fields of the knight's agent card, which the RoundTable
+                            controller generates from this spec and keeps in the cards KV bucket
+                            (key <table>.<knight>, see docs/agent-cards.md).
+                          properties:
+                            description:
+                              description: |-
+                                description is the card description. When unset it is the first
+                                paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                              maxLength: 1024
+                              type: string
+                            skills:
+                              description: |-
+                                skills are merged over the generated skills by id: set fields replace
+                                the generated ones, and an id that is not generated adds a skill.
+                              items:
+                                description: KnightCardSkill overrides one skill on
+                                  a knight's agent card.
+                                properties:
+                                  description:
+                                    description: description replaces the skill description.
+                                    maxLength: 1024
+                                    type: string
+                                  examples:
+                                    description: examples replace the skill examples
+                                      (sample prompts).
+                                    items:
+                                      type: string
+                                    type: array
+                                  id:
+                                    description: |-
+                                      id is the skill id: the skill name a running knight reports, or a
+                                      spec.skills category before the knight has run.
+                                    maxLength: 128
+                                    minLength: 1
+                                    type: string
+                                  tags:
+                                    description: tags replace the skill tags.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - id
+                                type: object
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - id
+                              x-kubernetes-list-type: map
+                            tags:
+                              description: tags label the knight as a whole (card
+                                roundtable.tags).
+                              items:
+                                type: string
+                              maxItems: 32
+                              type: array
+                          type: object
                         concurrency:
                           description: |-
                             concurrency is the maximum number of concurrent tasks the knight can process.
@@ -2911,6 +3141,34 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        memory:
+                          description: |-
+                            memory gives the knight a persistent memory volume, separate from the
+                            /data workspace, that every replica mounts read-write at
+                            /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+                          properties:
+                            existingClaim:
+                              description: |-
+                                existingClaim is a ReadWriteMany PVC shared by several knights (for
+                                example a whole table) instead of a per-knight claim. Each knight writes
+                                only its own <knight> sub-directory and reads everyone else's.
+                              type: string
+                            size:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: |-
+                                size is the storage request of the PVC the operator creates.
+                                Defaults to 1Gi. Ignored with existingClaim.
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            storageClassName:
+                              description: |-
+                                storageClassName is the StorageClass of the PVC the operator creates;
+                                empty uses the cluster default. It must support ReadWriteMany when the
+                                knight runs more than one pod. Ignored with existingClaim.
+                              type: string
+                          type: object
                         model:
                           description: |-
                             model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
@@ -3709,6 +3967,63 @@ spec:
                               When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                             type: boolean
                         type: object
+                      card:
+                        description: |-
+                          card overrides fields of the knight's agent card, which the RoundTable
+                          controller generates from this spec and keeps in the cards KV bucket
+                          (key <table>.<knight>, see docs/agent-cards.md).
+                        properties:
+                          description:
+                            description: |-
+                              description is the card description. When unset it is the first
+                              paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                            maxLength: 1024
+                            type: string
+                          skills:
+                            description: |-
+                              skills are merged over the generated skills by id: set fields replace
+                              the generated ones, and an id that is not generated adds a skill.
+                            items:
+                              description: KnightCardSkill overrides one skill on
+                                a knight's agent card.
+                              properties:
+                                description:
+                                  description: description replaces the skill description.
+                                  maxLength: 1024
+                                  type: string
+                                examples:
+                                  description: examples replace the skill examples
+                                    (sample prompts).
+                                  items:
+                                    type: string
+                                  type: array
+                                id:
+                                  description: |-
+                                    id is the skill id: the skill name a running knight reports, or a
+                                    spec.skills category before the knight has run.
+                                  maxLength: 128
+                                  minLength: 1
+                                  type: string
+                                tags:
+                                  description: tags replace the skill tags.
+                                  items:
+                                    type: string
+                                  type: array
+                              required:
+                              - id
+                              type: object
+                            maxItems: 64
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - id
+                            x-kubernetes-list-type: map
+                          tags:
+                            description: tags label the knight as a whole (card roundtable.tags).
+                            items:
+                              type: string
+                            maxItems: 32
+                            type: array
+                        type: object
                       concurrency:
                         description: |-
                           concurrency is the maximum number of concurrent tasks the knight can process.
@@ -4085,6 +4400,34 @@ spec:
                         maximum: 50
                         minimum: 1
                         type: integer
+                      memory:
+                        description: |-
+                          memory gives the knight a persistent memory volume, separate from the
+                          /data workspace, that every replica mounts read-write at
+                          /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+                        properties:
+                          existingClaim:
+                            description: |-
+                              existingClaim is a ReadWriteMany PVC shared by several knights (for
+                              example a whole table) instead of a per-knight claim. Each knight writes
+                              only its own <knight> sub-directory and reads everyone else's.
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              size is the storage request of the PVC the operator creates.
+                              Defaults to 1Gi. Ignored with existingClaim.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: |-
+                              storageClassName is the StorageClass of the PVC the operator creates;
+                              empty uses the cluster default. It must support ReadWriteMany when the
+                              knight runs more than one pod. Ignored with existingClaim.
+                            type: string
+                        type: object
                       model:
                         description: |-
                           model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
@@ -4585,6 +4928,36 @@ spec:
                           A knight that sets its own spec.image keeps it; with neither set the
                           operator's DEFAULT_KNIGHT_IMAGE applies.
                         type: string
+                      memory:
+                        description: |-
+                          memory is the default persistent memory volume for the table's
+                          standing knights. A knight that sets its own spec.memory keeps it.
+                          Unlike workspace, existingClaim is inherited: point it at one
+                          ReadWriteMany claim to give the table's knights shared memory, each
+                          writing only its own sub-directory.
+                        properties:
+                          existingClaim:
+                            description: |-
+                              existingClaim is a ReadWriteMany PVC shared by several knights (for
+                              example a whole table) instead of a per-knight claim. Each knight writes
+                              only its own <knight> sub-directory and reads everyone else's.
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              size is the storage request of the PVC the operator creates.
+                              Defaults to 1Gi. Ignored with existingClaim.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: |-
+                              storageClassName is the StorageClass of the PVC the operator creates;
+                              empty uses the cluster default. It must support ReadWriteMany when the
+                              knight runs more than one pod. Ignored with existingClaim.
+                            type: string
+                        type: object
                       model:
                         description: |-
                           model is the default AI model for the table's standing knights (those

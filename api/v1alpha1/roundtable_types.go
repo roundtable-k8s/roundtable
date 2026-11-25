@@ -224,6 +224,14 @@ type RoundTableDefaults struct {
 	// +optional
 	Workspace *KnightWorkspace `json:"workspace,omitempty"`
 
+	// memory is the default persistent memory volume for the table's
+	// standing knights. A knight that sets its own spec.memory keeps it.
+	// Unlike workspace, existingClaim is inherited: point it at one
+	// ReadWriteMany claim to give the table's knights shared memory, each
+	// writing only its own sub-directory.
+	// +optional
+	Memory *KnightMemory `json:"memory,omitempty"`
+
 	// arsenal configures the default skill arsenal for knights.
 	// +optional
 	Arsenal *KnightArsenal `json:"arsenal,omitempty"`

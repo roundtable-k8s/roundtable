@@ -111,6 +111,8 @@ type Record struct {
 	Attempt   int       `json:"attempt"`
 	Subject   string    `json:"subject"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// RetriedAs is the task ID the retry API published (state retried).
+	RetriedAs string `json:"retriedAs,omitempty"`
 }
 
 // AdvisoriesStreamName is the stream storing the tasks stream's max-deliveries advisories.

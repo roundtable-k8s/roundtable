@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -476,8 +477,18 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 				var knightList aiv1alpha1.KnightList
 				if err := p.Client.List(ctx, &knightList,
 					client.InNamespace(mission.Namespace),
-					client.MatchingLabels{"ai.roundtable.io/table": rt.Name},
-				); err == nil && len(knightList.Items) > 0 {
+				); err == nil {
+					// Match either the current or the legacy table label;
+					// filtering in code avoids duplicates for knights with both.
+					matched := knightList.Items[:0]
+					for _, k := range knightList.Items {
+						if k.Labels[aiv1alpha1.LabelRoundTable] == rt.Name || k.Labels[knightpkg.LegacyTableLabel] == rt.Name {
+							matched = append(matched, k)
+						}
+					}
+					knightList.Items = matched
+				}
+				if len(knightList.Items) > 0 {
 					if !existingFound {
 						sb.WriteString("Existing Knights Available (use ephemeral=false to recruit these):\n")
 						existingFound = true
