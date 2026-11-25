@@ -1,0 +1,47 @@
+# cluster-triage: step 1 gathers facts about the alert, step 2 writes a short
+# finding with a suggested fix. Started by trigger.yaml, which sets the input
+# (alert name, severity, namespace, summary and the raw alerts).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: cluster-triage
+  namespace: roundtable
+spec:
+  description: "Homelab alert triage: gather facts, then write a short finding with a suggested fix"
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 900
+  input: "No alert supplied. Report that and stop."
+
+  steps:
+    - name: gather
+      knightRef: {name: homelab-triage}
+      timeoutSeconds: 450
+      task: |
+        An alert fired in the homelab cluster:
+
+        {{ .Input }}
+
+        Gather facts with read-only commands only (kubectl get, describe,
+        logs, events; never apply, delete, patch, exec or scale). Cover:
+        the state of the affected workload or node, recent events, recent
+        restarts, the last lines of the relevant logs and anything that
+        changed lately (rollouts, HelmRelease or Kustomization status).
+        Report what you saw as a short list. Do not guess at causes yet.
+
+    - name: finding
+      dependsOn: [gather]
+      knightRef: {name: homelab-triage}
+      timeoutSeconds: 300
+      task: |
+        Write a finding for this alert, at most 12 lines:
+
+        Alert:
+        {{ .Input }}
+
+        Facts gathered:
+        {{ .Steps.gather.Output }}
+
+        Format: one line on what is wrong, the most likely cause and how sure
+        you are, then a suggested fix as commands or a manifest change for a
+        human to apply. You cannot apply it yourself. If the facts show the
+        alert already resolved, say so.

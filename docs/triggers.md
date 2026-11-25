@@ -100,6 +100,8 @@ curl -X POST http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/alerts
 The same request with the gateway's own API token gets **401**: a hook URL
 accepts only its Trigger's credential.
 
+A complete, copyable version (read-only knight, triage chain, Alertmanager receiver, test steps) is the [homelab watch recipe](../examples/recipes/homelab-watch/README.md).
+
 ### Credentials
 
 `source.webhook.auth` sets exactly one of:

@@ -1,0 +1,12 @@
+# Recipes
+
+A recipe is a fleet packaged as a directory you can copy: the Knights, Chains
+and Triggers, plus a README with how to install and test it and what the
+knights may and may not do. Each recipe is applied on top of a RoundTable (see
+[`../roundtable-fleet.yaml`](../roundtable-fleet.yaml)).
+
+| Recipe | What it does |
+|---|---|
+| [`homelab-watch/`](homelab-watch/) | An Alertmanager webhook Trigger starts a read-only triage chain on a knight ([triggers docs](../../docs/triggers.md#webhook-source)) |
+
+More recipes (the dev factory, a personal fleet) follow.
