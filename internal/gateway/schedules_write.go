@@ -451,7 +451,7 @@ func validateCron(expr, tz string) error {
 		return fieldErr(field, "set the time zone with spec.source.schedule.timeZone instead of a TZ= prefix")
 	}
 	if tz == "" {
-		tz = "UTC"
+		tz = defaultScheduleTimeZone
 	}
 	if _, err := cron.ParseStandard("CRON_TZ=" + tz + " " + expr); err != nil {
 		return fieldErr(field, "%q is not a valid cron expression: %v", expr, err)
