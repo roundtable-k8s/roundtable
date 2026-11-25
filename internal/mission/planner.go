@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -492,9 +493,12 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 						sb.WriteString("Existing Knights Available (use ephemeral=false to recruit these):\n")
 						existingFound = true
 					}
+					if rt.Spec.Description != "" {
+						sb.WriteString(fmt.Sprintf("Table %q: %s\n", rt.Name, rt.Spec.Description))
+					}
 					for _, k := range knightList.Items {
-						sb.WriteString(fmt.Sprintf("- %s (domain: %s, skills: %v)\n",
-							k.Name, k.Spec.Domain, k.Spec.Skills))
+						sb.WriteString(fmt.Sprintf("- %s (domain: %s, model: %s, skills: %v)\n",
+							k.Name, k.Spec.Domain, k.Spec.Model, k.Spec.Skills))
 					}
 				}
 			}
@@ -504,6 +508,30 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 			sb.WriteString("\n**IMPORTANT: When recruitExisting=true, prefer using existing knights with ephemeral=false. ")
 			sb.WriteString("Only create ephemeral knights if the existing ones don't cover the needed domains.**\n")
 		}
+	}
+
+	// Existing chains the planner may schedule
+	existingChains := p.listTemplateChains(ctx, mission)
+	if len(existingChains) > 0 {
+		sb.WriteString("\nExisting Chains (reusable; schedule these via \"existingChains\" instead of generating a new chain):\n")
+		for _, c := range existingChains {
+			sb.WriteString(fmt.Sprintf("- %s", c.Name))
+			if c.Spec.Description != "" {
+				sb.WriteString(": " + c.Spec.Description)
+			}
+			sb.WriteString("\n")
+			steps := make([]string, 0, len(c.Spec.Steps))
+			for _, st := range c.Spec.Steps {
+				steps = append(steps, fmt.Sprintf("%s (knight: %s)", st.Name, st.KnightRef.Name))
+			}
+			sb.WriteString("  steps: " + strings.Join(steps, ", ") + "\n")
+			if c.Spec.Input != "" {
+				sb.WriteString("  example input: " + truncateString(c.Spec.Input, maxChainInputExample) + "\n")
+			}
+		}
+	}
+	if rtName := aiv1alpha1.RefName(mission.Spec.RoundTableRef); rtName != "" {
+		sb.WriteString(fmt.Sprintf("\nGenerated and existing chains run on the subject prefix of RoundTable %q, so only knights of that table can be recruited.\n", rtName))
 	}
 
 	sb.WriteString("\n")
@@ -576,6 +604,13 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
       ],
       "timeoutSeconds": 1800
     }
+  ],
+  "existingChains": [
+    {
+      "name": "existing-chain-name",
+      "input": "mission-specific input for this chain",
+      "phase": "Active"
+    }
   ]
 }
 `)
@@ -584,7 +619,7 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	sb.WriteString("**Important Guidelines:**\n")
 	sb.WriteString("1. Every chain step's knightRef.name must match a knight name in the knights array\n")
 	sb.WriteString("2. When recruitExisting=true, prefer ephemeral=false to use existing knights when they fit the task\n")
-	sb.WriteString("3. For ephemeral knights, ALWAYS use templateName=\"base\" and customize via specOverrides\n")
+	sb.WriteString(p.ephemeralGuideline(ctx, mission))
 	sb.WriteString("3b. Do NOT set specOverrides.model unless the task truly needs a stronger model — omitting it inherits the base template's cheap default\n")
 	sb.WriteString("4. Design each ephemeral knight's tools.nix for its specific role — pick the right nixpkgs (e.g. go, python3, nmap, gh, nodejs_22, ripgrep, gopls, golangci-lint, kubectl, terraform)\n")
 	sb.WriteString("5. Chain phases can be: Setup, Active, or Teardown\n")
@@ -593,7 +628,8 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	sb.WriteString("8. Use hyphens (not underscores) in KNIGHT NAMES — they become Kubernetes resource names (RFC 1123 DNS labels)\n")
 	sb.WriteString("9. Ensure step dependencies (dependsOn) form a valid DAG (no cycles)\n")
 	sb.WriteString("10. Keep task descriptions clear and actionable\n")
-	sb.WriteString("11. Return ONLY the JSON plan, no other text or explanation\n\n")
+	sb.WriteString("11. Prefer an existing chain (\"existingChains\") when one fits; generate a new chain only for work no existing chain covers. Only chains listed above may be used; their knights are recruited automatically\n")
+	sb.WriteString("12. Return ONLY the JSON plan, no other text or explanation\n\n")
 
 	sb.WriteString("Generate the plan now:")
 
@@ -734,7 +770,7 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 		return fmt.Errorf("metadata.objective is required")
 	}
 
-	if len(plan.Chains) == 0 && len(plan.Knights) == 0 {
+	if len(plan.Chains) == 0 && len(plan.Knights) == 0 && len(plan.ExistingChains) == 0 {
 		return fmt.Errorf("plan must contain at least one chain or knight")
 	}
 
@@ -742,8 +778,8 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 	if maxChains == 0 {
 		maxChains = 5
 	}
-	if int32(len(plan.Chains)) > maxChains {
-		return fmt.Errorf("too many chains: %d > %d", len(plan.Chains), maxChains)
+	if total := len(plan.Chains) + len(plan.ExistingChains); int32(total) > maxChains {
+		return fmt.Errorf("too many chains: %d > %d", total, maxChains)
 	}
 
 	maxKnights := mission.Spec.Planner.MaxKnights
@@ -831,9 +867,14 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 			}
 			log.Info("Auto-sanitized chain name", "original", chain.Name, "sanitized", sanitized)
 			plan.Chains[i].Name = sanitized
+			// Register the sanitized name too, so existingChains cannot collide with it.
+			if chainNames[sanitized] {
+				return fmt.Errorf("duplicate chain name: %s", sanitized)
+			}
+			chainNames[sanitized] = true
 		}
 
-		if chain.Phase != "" && chain.Phase != "Setup" && chain.Phase != "Active" && chain.Phase != "Teardown" {
+		if !validChainPhase(chain.Phase) {
 			return fmt.Errorf("chain %q: invalid phase %q (must be Setup, Active, or Teardown)", chain.Name, chain.Phase)
 		}
 
@@ -872,6 +913,10 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 		if err := util.ValidateDAG(nodes); err != nil {
 			return fmt.Errorf("chain %q: %w", chain.Name, err)
 		}
+	}
+
+	if err := p.validateExistingChains(ctx, mission, plan, chainNames); err != nil {
+		return err
 	}
 
 	skillNames := make(map[string]bool)
@@ -1051,6 +1096,14 @@ func (p *Planner) applyPlan(ctx context.Context, mission *aiv1alpha1.Mission, pl
 		})
 	}
 
+	for _, ec := range plan.ExistingChains {
+		mission.Spec.Chains = append(mission.Spec.Chains, aiv1alpha1.MissionChainRef{
+			Name:          ec.Name,
+			InputOverride: ec.Input,
+			Phase:         ec.Phase,
+		})
+	}
+
 	if len(plan.Skills) > 0 {
 		if err := p.createSkillConfigMaps(ctx, mission, plan.Skills); err != nil {
 			log.Error(err, "Failed to create skill ConfigMaps (non-fatal)")
@@ -1120,4 +1173,166 @@ func (p *Planner) resolveRoundTable(ctx context.Context, mission *aiv1alpha1.Mis
 	}
 
 	return rt, nil
+}
+
+const (
+	// maxPlannerChains caps how many existing Chains are offered to the planner.
+	maxPlannerChains = 30
+	// maxChainInputExample caps the example input shown per existing Chain.
+	maxChainInputExample = 500
+)
+
+func truncateString(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
+}
+
+// listTemplateChains returns the table's existing Chains that are templates
+// (not mission copies, issue-pickup chains or planner-generated chains and not
+// bound to another table), sorted by name and capped at maxPlannerChains.
+// It returns nothing when the mission has no roundTableRef.
+func (p *Planner) listTemplateChains(ctx context.Context, mission *aiv1alpha1.Mission) []aiv1alpha1.Chain {
+	rtName := aiv1alpha1.RefName(mission.Spec.RoundTableRef)
+	if rtName == "" {
+		return nil
+	}
+	var list aiv1alpha1.ChainList
+	if err := p.Client.List(ctx, &list, client.InNamespace(mission.Namespace)); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list chains for planning prompt")
+		return nil
+	}
+	var out []aiv1alpha1.Chain
+	for _, c := range list.Items {
+		if _, ok := c.Labels[aiv1alpha1.LabelMission]; ok {
+			continue
+		}
+		if _, ok := c.Labels[aiv1alpha1.LabelPickupRoundTable]; ok {
+			continue
+		}
+		if _, ok := c.Labels["ai.roundtable.io/generated-by"]; ok {
+			continue
+		}
+		if ref := aiv1alpha1.RefName(c.Spec.RoundTableRef); ref != "" && ref != rtName {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	if len(out) > maxPlannerChains {
+		out = out[:maxPlannerChains]
+	}
+	return out
+}
+
+// ephemeralGuideline returns guideline 3: which template ephemeral knights
+// should use, depending on what templates are actually available.
+func (p *Planner) ephemeralGuideline(ctx context.Context, mission *aiv1alpha1.Mission) string {
+	names := map[string]bool{}
+	for _, t := range mission.Spec.KnightTemplates {
+		names[t.Name] = true
+	}
+	if rt, err := p.resolveRoundTable(ctx, mission); err == nil {
+		for n := range rt.Spec.KnightTemplates {
+			names[n] = true
+		}
+	}
+	if names["base"] {
+		return "3. For ephemeral knights, ALWAYS use templateName=\"base\" and customize via specOverrides\n"
+	}
+	if len(names) == 0 {
+		return "3. Ephemeral knights are not available (no knight templates exist): use only existing knights with ephemeral=false\n"
+	}
+	sorted := make([]string, 0, len(names))
+	for n := range names {
+		sorted = append(sorted, n)
+	}
+	sort.Strings(sorted)
+	return fmt.Sprintf("3. For ephemeral knights, use templateName set to one of: %s (there is no \"base\" template) and customize via specOverrides\n", strings.Join(sorted, ", "))
+}
+
+// validateExistingChains checks the plan's existingChains: each must be a
+// listed template Chain, its name must not collide with a generated chain, and
+// the standing knights its steps use are recruited into the plan implicitly.
+func (p *Planner) validateExistingChains(ctx context.Context, mission *aiv1alpha1.Mission, plan *PlannerOutput, chainNames map[string]bool) error {
+	if len(plan.ExistingChains) == 0 {
+		return nil
+	}
+	templates := map[string]aiv1alpha1.Chain{}
+	for _, c := range p.listTemplateChains(ctx, mission) {
+		templates[c.Name] = c
+	}
+	seen := map[string]bool{}
+	// standing knights already recruited by the plan
+	recruited := map[string]bool{}
+	for _, k := range plan.Knights {
+		if !k.Ephemeral {
+			recruited[k.Name] = true
+		}
+	}
+	for i, ec := range plan.ExistingChains {
+		if ec.Name == "" {
+			return fmt.Errorf("existingChains[%d]: name is required", i)
+		}
+		if seen[ec.Name] || chainNames[ec.Name] {
+			return fmt.Errorf("duplicate chain name: %s", ec.Name)
+		}
+		seen[ec.Name] = true
+		if !validChainPhase(ec.Phase) {
+			return fmt.Errorf("existing chain %q: invalid phase %q (must be Setup, Active, or Teardown)", ec.Name, ec.Phase)
+		}
+		c, ok := templates[ec.Name]
+		if !ok {
+			return fmt.Errorf("existing chain %q not found among the table's reusable chains", ec.Name)
+		}
+		var used []string
+		for _, st := range c.Spec.Steps {
+			if st.KnightRef.Name != "" {
+				used = append(used, st.KnightRef.Name)
+			}
+			if st.Loop != nil {
+				for _, ls := range st.Loop.Steps {
+					used = append(used, ls.KnightRef.Name)
+				}
+			}
+		}
+		for _, kn := range used {
+			if recruited[kn] {
+				continue
+			}
+			knight := &aiv1alpha1.Knight{}
+			if err := p.Client.Get(ctx, types.NamespacedName{Name: kn, Namespace: mission.Namespace}, knight); err != nil {
+				return fmt.Errorf("existing chain %q: knight %q not found: %w", ec.Name, kn, err)
+			}
+			if c.Spec.RoundTableRef == nil || aiv1alpha1.RefName(c.Spec.RoundTableRef) == "" {
+				// Unbound chain: its knights must belong to the mission's table.
+				if rt := aiv1alpha1.RefName(mission.Spec.RoundTableRef); rt != "" {
+					if kt := knightpkg.KnightTable(knight); kt != "" && kt != rt {
+						return fmt.Errorf("existing chain %q: knight %q belongs to table %q, not %q", ec.Name, kn, kt, rt)
+					}
+				}
+			}
+			recruited[kn] = true
+			plan.Knights = append(plan.Knights, PlannerKnight{
+				Name:      kn,
+				Role:      fmt.Sprintf("used by existing chain %s", ec.Name),
+				Ephemeral: false,
+			})
+		}
+	}
+	maxKnights := mission.Spec.Planner.MaxKnights
+	if maxKnights == 0 {
+		maxKnights = 10
+	}
+	if int32(len(plan.Knights)) > maxKnights {
+		return fmt.Errorf("too many knights: %d > %d (including knights recruited by existing chains)", len(plan.Knights), maxKnights)
+	}
+	return nil
+}
+
+// validChainPhase reports whether phase is empty or a known mission phase.
+func validChainPhase(phase string) bool {
+	return phase == "" || phase == "Setup" || phase == "Active" || phase == "Teardown"
 }

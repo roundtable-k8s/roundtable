@@ -9,8 +9,10 @@ type PlannerOutput struct {
 	PlanVersion string          `json:"planVersion"`
 	Metadata    PlannerMetadata `json:"metadata"`
 	Chains      []PlannerChain  `json:"chains,omitempty"`
-	Knights     []PlannerKnight `json:"knights,omitempty"`
-	Skills      []PlannerSkill  `json:"skills,omitempty"`
+	// ExistingChains schedules Chains that already exist on the table.
+	ExistingChains []PlannerExistingChain `json:"existingChains,omitempty"`
+	Knights        []PlannerKnight        `json:"knights,omitempty"`
+	Skills         []PlannerSkill         `json:"skills,omitempty"`
 }
 
 type PlannerMetadata struct {
@@ -28,6 +30,14 @@ type PlannerChain struct {
 	Input          string                       `json:"input,omitempty"`
 	TimeoutSeconds *int32                       `json:"timeoutSeconds,omitempty"`
 	RetryPolicy    *aiv1alpha1.ChainRetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// PlannerExistingChain references an existing template Chain to run, as a
+// mission-scoped copy, with the given input.
+type PlannerExistingChain struct {
+	Name  string `json:"name"`
+	Input string `json:"input,omitempty"`
+	Phase string `json:"phase,omitempty"`
 }
 
 type PlannerKnight struct {
