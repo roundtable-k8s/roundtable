@@ -820,6 +820,84 @@ Git: no `status`, `managedFields`, `resourceVersion`, `uid`, `generation`,
 curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/manifest" > morning-digest.yaml
 ```
 
+## Schedule run history
+
+A schedule is a Trigger with a `source.schedule` ([triggers.md](triggers.md)).
+These routes read back what its firings did. A Trigger with another source is
+a **404**. Served when `gateway.scheduleRuns.enabled` is true (the default).
+
+### `GET /v1/schedules/{namespace}/{name}/runs?limit=`
+
+`{"runs": [...]}`, newest first (`limit` defaults to 20, at most 200). Each
+entry:
+
+| Field | Meaning |
+|---|---|
+| `time` | When the firing was handled |
+| `outcome` | `succeeded`, `failed`, `partiallySucceeded`, `lost`, `skipped`, `pending`, `running`, or `unknown` (the run is gone and its outcome was not recorded) |
+| `reason` | Why a firing was `skipped` (from `status.recentFirings[].skipReason`) |
+| `durationSeconds`, `costUSD` | Once the run finished, when known |
+| `run` | What to fetch the result with: the Chain run's name (a knight target: the task ID). Empty for a skipped firing |
+| `resultAvailable` | The result can still be fetched |
+| `key` | The firing's dedupe key |
+
+History is built from the Chains the Trigger started (found by their
+`ai.roundtable.io/trigger` label and owner), so it goes back as far as results
+are retained, not only the 10 entries of `status.recentFirings`. Those add
+the skipped firings and the outcome of runs whose Chain is already deleted.
+
+### `GET /v1/schedules/{namespace}/{name}/runs/{run}`
+
+The run's result: its `phase`, `steps` and, for a chain target, `output`, the
+run's final output (the one step no other step depends on; with several,
+read the steps). A run that does not belong to the schedule, or that was
+deleted, is a **404**. A knight target (task result) and a mission target
+(report) are not served yet and answer **422**; they are the extension points
+in `ScheduleRunResult` in `internal/gateway/schedule_runs.go`.
+
+```bash
+GW=http://roundtable-operator-gateway.roundtable.svc:8080
+AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
+# The last failed firing of the morning digest and its output.
+run=$(curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/runs?limit=50" \
+  | jq -r '[.runs[] | select(.outcome=="failed")][0].run')
+curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/runs/$run" | jq -r '.phase, .output'
+```
+
+Example `GET .../runs?limit=3`:
+
+```json
+{"runs": [
+  {"run": "morning-digest-1795600000", "time": "2026-11-25T07:00:00Z", "outcome": "succeeded",
+   "durationSeconds": 212.4, "costUSD": "0.41", "resultAvailable": true,
+   "key": "2026-11-25T07:00:00Z"},
+  {"time": "2026-11-24T07:00:00Z", "outcome": "skipped",
+   "reason": "missed schedule time 2026-11-24T07:00:00Z by more than startingDeadlineSeconds", "resultAvailable": false},
+  {"run": "morning-digest-1795427200", "time": "2026-11-23T07:00:00Z", "outcome": "failed",
+   "durationSeconds": 31, "resultAvailable": true}
+]}
+```
+
+### How long results stay readable
+
+`gateway.scheduleRuns.resultRetention` (default `720h`, 30 days) maps to the
+two places a schedule's results are stored today:
+
+- **Chain runs** are Chains owned by the Trigger and deleted by the operator
+  `ttlSecondsAfterFinished` after they finish (default 1 day). For a schedule
+  source the operator keeps them at least `resultRetention`
+  (`--schedule-result-retention`): the longer of the two applies.
+  `ttlSecondsAfterFinished: 0` still keeps them forever.
+- **Knight-target tasks** are records in the task KV bucket
+  (`gateway.taskBucket`), whose TTL is `gateway.taskTTL`. The gateway and the
+  operator create the bucket with the longer of `taskTTL` and
+  `resultRetention`. **A bucket that already exists keeps its TTL**: raise it
+  with `nats kv update roundtable_gateway_tasks --ttl 720h`, or delete the
+  bucket (this drops its records) and restart the gateway.
+
+Raising the retention raises the task bucket TTL for all tasks, not only
+schedule runs.
+
 ## Webhooks
 
 `POST /v1/hooks/{namespace}/{trigger}` is the ingress for

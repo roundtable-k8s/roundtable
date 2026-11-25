@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func openAPIService(t *testing.T, missions, runs, hooks bool) *Service {
+func openAPIService(t *testing.T, missions, runs, hooks bool, schedules ...bool) *Service {
 	t.Helper()
 	svc := NewService(&Resolver{}, nil, Options{Namespace: testNS, Version: "9.9.9"}, logr.Discard())
 	k8s := fake.NewClientBuilder().Build()
@@ -46,6 +46,9 @@ func openAPIService(t *testing.T, missions, runs, hooks bool) *Service {
 	}
 	if hooks {
 		svc.Hooks = k8s
+	}
+	if len(schedules) > 0 && schedules[0] {
+		svc.ScheduleReader = k8s
 	}
 	return svc
 }
@@ -82,7 +85,7 @@ func roundTrip(t *testing.T, svc *Service) map[string]any {
 }
 
 func TestOpenAPIRoutesInSync(t *testing.T) {
-	svc := openAPIService(t, true, true, true)
+	svc := openAPIService(t, true, true, true, true)
 	routes := svc.routes()
 	served := make([]string, 0, len(routes))
 	for _, rt := range routes {
@@ -112,7 +115,7 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 		return false
 	}
 	off := roundTrip(t, openAPIService(t, false, false, false))
-	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks"} {
+	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules"} {
 		if has(off, p) {
 			t.Errorf("%s documented although its feature is disabled", p)
 		}
@@ -122,8 +125,8 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 			t.Errorf("%s missing from the document", p)
 		}
 	}
-	on := roundTrip(t, openAPIService(t, true, true, true))
-	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks"} {
+	on := roundTrip(t, openAPIService(t, true, true, true, true))
+	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules"} {
 		if !has(on, p) {
 			t.Errorf("%s missing although its feature is enabled", p)
 		}

@@ -6,6 +6,7 @@
 {{- $hooks := $gw.hooks | default dict }}
 {{- $saAuth := $gw.serviceAccountAuth | default dict }}
 {{- $schedules := $gw.schedules | default dict }}
+{{- $scheduleRuns := $gw.scheduleRuns | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -54,8 +55,9 @@ rules:
   - apiGroups: ["ai.roundtable.io"]
     resources: ["knights", "roundtables", "chains"]
     verbs: ["get", "list"]
-  {{- if $hooks.enabled }}
-  # Webhook Triggers: looked up by name per delivery.
+  {{- if or $hooks.enabled $scheduleRuns.enabled }}
+  # Webhook Triggers are looked up by name per delivery; schedule run history
+  # reads a schedule Trigger by name (the Chains it started are listed above).
   - apiGroups: ["ai.roundtable.io"]
     resources: ["triggers"]
     verbs: ["get"]
@@ -312,6 +314,8 @@ spec:
             - --max-streams={{ $gw.maxStreams | default 0 }}
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
+            - --schedule-runs={{ $scheduleRuns.enabled | default false }}
+            - --schedule-result-retention={{ $scheduleRuns.resultRetention | default "720h" }}
             - --token-file=/var/run/secrets/roundtable/gateway/token
             - --service-account-auth={{ $saAuth.enabled | default false }}
             {{- if $saAuth.enabled }}
