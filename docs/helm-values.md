@@ -349,22 +349,53 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 
 ### Planner
 
+Every RoundTable owns its planner knight, `<table>-planner`, on the table's NATS
+names, credentials and defaults, scaled to zero when idle; RoundTable
+`spec.planner` configures or disables it (see
+[crd-design.md](crd-design.md#mission-controller), "Planner"). `planner.model`,
+`planner.skills`, `planner.arsenals`, `planner.prompt`, `planner.concurrency` and
+`planner.taskTimeoutSeconds` are the install-wide defaults those table planners
+inherit (passed to the operator as `TABLE_PLANNER_DEFAULTS`). The table's
+`spec.planner`, then its `spec.defaults.model` / `spec.defaults.arsenals`, win
+over `planner.model` / `planner.arsenals`. The remaining keys only configure the
+old install-wide planner Knight `<release>-roundtable-operator-planner`, which
+is rendered only with `planner.enabled: true`.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `planner.enabled` | bool | `true` | Deploy the built-in planner knight |
-| `planner.domain` | string | `operator` | Planner domain |
-| `planner.model` | string | `claude-sonnet-4-20250514` | Planner model |
-| `planner.skills` | list | `[operator, shared]` | Planner skills |
-| `planner.concurrency` | int | `1` | Max concurrent tasks |
-| `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds |
-| `planner.nodeSelector` | map | `{}` | Planner knight `spec.nodeSelector` |
-| `planner.affinity` | object | `{}` | Planner knight `spec.affinity` |
-| `planner.tolerations` | list | `[]` | Planner knight `spec.tolerations` |
-| `planner.topologySpreadConstraints` | list | `[]` | Planner knight `spec.topologySpreadConstraints` |
-| `planner.priorityClassName` | string | `""` | Planner knight `spec.priorityClassName` |
-| `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Empty = the default platform arsenal |
-| `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). The planner belongs to no RoundTable, so it is configured here |
+| `planner.enabled` | bool | `false` | Deploy the old install-wide planner knight (no table, `<natsPrefix>.tasks.operator.>`). Deprecated: missions fall back to it only when their table has no planner |
+| `planner.domain` | string | `operator` | Install-wide planner domain (table planners use `planner`) |
+| `planner.natsPrefix` | string | `fleet-a` | Install-wide planner subject prefix |
+| `planner.model` | string | `claude-sonnet-4-20250514` | Planner model; default for table planners |
+| `planner.skills` | list | `[operator, shared]` | Planner skills; default for table planners |
+| `planner.prompt` | object | `{}` | Prompt overrides (`identity`, `instructions`, `configMapRef`) for table planners |
+| `planner.concurrency` | int | `1` | Max concurrent tasks; default for table planners |
+| `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds; default for table planners |
+| `planner.runtimeClassName` | string | `""` | Install-wide planner `spec.runtimeClassName` (table planners: `spec.planner.runtimeClassName`, then the table's defaults) |
+| `planner.nodeSelector` | map | `{}` | Install-wide planner knight `spec.nodeSelector` |
+| `planner.affinity` | object | `{}` | Install-wide planner knight `spec.affinity` |
+| `planner.tolerations` | list | `[]` | Install-wide planner knight `spec.tolerations` |
+| `planner.topologySpreadConstraints` | list | `[]` | Install-wide planner knight `spec.topologySpreadConstraints` |
+| `planner.priorityClassName` | string | `""` | Install-wide planner knight `spec.priorityClassName` |
+| `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Default for table planners |
+| `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token for the install-wide planner, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). Table planners use their table's `spec.github` |
 | `planner.github.tokenSecretRef.key` | string | required | Key within that Secret (`corev1.SecretKeySelector`; `optional` is honoured too) |
+
+#### Upgrade note: table planners (#566)
+
+`planner.enabled` now defaults to `false`. After upgrading:
+
+- Every non-ephemeral RoundTable gets a Knight `<table>-planner` (scaled to zero
+  when idle). A meta-mission that names no planner is planned by its table's
+  planner.
+- The install-wide `<release>-roundtable-operator-planner` Knight is removed
+  unless you set `planner.enabled: true`. Missions that set
+  `spec.planner.knightRef: {name: roundtable-operator-planner}` must drop it
+  (to use the table's planner) or keep `planner.enabled: true`.
+- If a Knight named `<table>-planner` already exists and is not owned by the
+  table, the table reports a `PlannerFailed` warning event and leaves it alone:
+  rename it, or point the table at it with `spec.planner.knightRef`.
+- To keep a table without a planner, set `spec.planner.enabled: false` on it.
 
 ### GitHub token file
 

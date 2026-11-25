@@ -4255,6 +4255,294 @@ spec:
                 - subjectPrefix
                 - tasksStream
                 type: object
+              planner:
+                description: |-
+                  planner configures the table's planner knight, which plans the table's
+                  meta-missions that name no planner of their own. Unset gives the table a
+                  default planner: a Knight <table>-planner owned by the table.
+                properties:
+                  arsenals:
+                    description: |-
+                      arsenals are the table-owned planner's skill arsenals. Unset:
+                      spec.defaults.arsenals, then the operator's planner arsenals.
+                    items:
+                      description: |-
+                        KnightArsenal configures one skill arsenal: either a git-sync sidecar (the
+                        default) or, with oci set, a read-only OCI image volume.
+                      properties:
+                        image:
+                          default: registry.k8s.io/git-sync/git-sync:v4.4.0
+                          description: image overrides the git-sync container image.
+                          type: string
+                        name:
+                          description: |-
+                            name identifies this arsenal: it becomes the sync path /arsenal/<name>
+                            and the sidecar name git-sync-<name>. Defaults to the repo's basename;
+                            a name already taken by an earlier arsenal gets a "-2", "-3"... suffix.
+                          maxLength: 40
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        oci:
+                          description: |-
+                            oci loads the arsenal from an OCI image mounted read-only as an image
+                            volume at /arsenal/<name> instead of syncing a git repo. No git-sync
+                            sidecar is added; repo, ref, periodSeconds and image are ignored.
+                          properties:
+                            pullPolicy:
+                              default: IfNotPresent
+                              description: pullPolicy is the image volume pull policy.
+                              enum:
+                              - Always
+                              - IfNotPresent
+                              - Never
+                              type: string
+                            reference:
+                              description: |-
+                                reference is the image reference, pinned by digest
+                                (e.g. registry.example.com/arsenal@sha256:...).
+                              maxLength: 512
+                              minLength: 1
+                              pattern: '@sha256:[a-f0-9]{64}$'
+                              type: string
+                          required:
+                          - reference
+                          type: object
+                        periodSeconds:
+                          default: 300
+                          description: periodSeconds is how often git-sync pulls the
+                            repo, in seconds.
+                          format: int32
+                          minimum: 1
+                          type: integer
+                        ref:
+                          default: main
+                          description: ref is the git ref to sync.
+                          type: string
+                        repo:
+                          description: |-
+                            repo is the git repository URL containing skills. Defaults to
+                            https://github.com/roundtable-k8s/arsenal (applied by the operator, so
+                            it stays unset for an oci arsenal); mutually exclusive with oci.
+                          type: string
+                      type: object
+                      x-kubernetes-validations:
+                      - message: oci and repo are mutually exclusive
+                        rule: '!has(self.oci) || !has(self.repo)'
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  egress:
+                    description: |-
+                      egress allowlist for the table-owned planner. Unset:
+                      spec.defaults.egress, then the operator's isolation default.
+                    properties:
+                      allowedHosts:
+                        description: |-
+                          allowedHosts are the hostnames the knight may reach, each an exact host
+                          ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                          matches subdomains of github.com but not github.com itself). An entry
+                          is either a string (allowed on allowedPorts) or an object
+                          {host, ports} (allowed on its own ports only). Empty allows only DNS
+                          and NATS.
+                        items:
+                          description: |-
+                            EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                            the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                            EgressHost.
+
+                            The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                            the items open, because a schema cannot express a string-or-object union.
+                            The operator validates the entries when it renders the policy
+                            (ParseEgressHosts), drops the invalid ones and reports them on the
+                            EgressRestricted condition. Decoding never fails and the original JSON is
+                            written back unchanged, so one malformed entry can't break listing or
+                            caching Knights.
+                          x-kubernetes-preserve-unknown-fields: true
+                        maxItems: 64
+                        type: array
+                      allowedPorts:
+                        default:
+                        - 443
+                        description: allowedPorts are the TCP ports allowed to the
+                          allowed hosts.
+                        items:
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        maxItems: 16
+                        type: array
+                        x-kubernetes-list-type: set
+                      allowedServices:
+                        description: |-
+                          allowedServices are in-cluster Services the knight may reach, each on
+                          its own ports. A "*.svc.cluster.local" name under allowedHosts does not
+                          open a Service: FQDN rules only match addresses outside the cluster.
+                          The policy selects the Service's pods (its namespace and pod selector),
+                          so a Service without a selector, or one that does not exist, is left out
+                          and reported on the EgressRestricted condition.
+                        items:
+                          description: EgressService is an in-cluster Service a knight
+                            may reach on the listed ports.
+                          properties:
+                            name:
+                              description: name is the Service's name.
+                              maxLength: 63
+                              minLength: 1
+                              pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            namespace:
+                              description: namespace is the Service's namespace. Empty
+                                means the knight's namespace.
+                              maxLength: 63
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            ports:
+                              description: |-
+                                ports are the Service ports the knight dials. The policy allows each
+                                port's targetPort on the Service's pods (policies apply after the
+                                Service address is translated to a pod); a port the Service does not
+                                expose is allowed as a pod port as-is.
+                              items:
+                                format: int32
+                                maximum: 65535
+                                minimum: 1
+                                type: integer
+                              maxItems: 8
+                              minItems: 1
+                              type: array
+                              x-kubernetes-list-type: set
+                          required:
+                          - name
+                          - ports
+                          type: object
+                        maxItems: 32
+                        type: array
+                        x-kubernetes-list-type: atomic
+                    type: object
+                  enabled:
+                    description: |-
+                      enabled gives the table a planner. Unset means true; false removes the
+                      table-owned planner knight, and the table's missions must name their
+                      own planner.
+                    type: boolean
+                  knightRef:
+                    description: |-
+                      knightRef names an existing Knight in the table's namespace to use as
+                      the table's planner instead of a table-owned one.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  model:
+                    description: |-
+                      model is the table-owned planner's model id (modelAliases are not
+                      resolved here). Unset: spec.defaults.model, then the operator's planner
+                      model.
+                    type: string
+                  prompt:
+                    description: |-
+                      prompt overrides the table-owned planner's prompt. Unset: the
+                      operator's planner prompt.
+                    properties:
+                      configMapRef:
+                        description: |-
+                          configMapRef references a ConfigMap containing prompt overrides.
+                          Keys: "AGENTS.md", "TOOLS.md", "SOUL.md"
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      identity:
+                        description: identity overrides the knight's identity/persona
+                          description.
+                        type: string
+                      instructions:
+                        description: instructions provides additional instructions
+                          appended to the system prompt.
+                        type: string
+                    type: object
+                  resources:
+                    description: 'resources for the table-owned planner. Unset: spec.defaults.resources.'
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  runtimeClassName:
+                    description: |-
+                      runtimeClassName for the table-owned planner. Unset:
+                      spec.defaults.runtimeClassName, then the operator's isolation default.
+                    type: string
+                type: object
               policies:
                 description: policies defines fleet-level operational policies.
                 properties:
@@ -4805,6 +5093,12 @@ spec:
                 - Degraded
                 - Suspended
                 - OverBudget
+                type: string
+              plannerKnight:
+                description: |-
+                  plannerKnight is the knight that plans this table's missions (the
+                  table-owned <table>-planner or spec.planner.knightRef); empty when the
+                  table has no planner.
                 type: string
               prFeedback:
                 description: prFeedback is the state of the PR feedback watcher (spec.prFeedback).

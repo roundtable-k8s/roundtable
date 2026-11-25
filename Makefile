@@ -131,6 +131,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml) and chec
 	scripts/check-observability-doc.sh
 	HELM="$(HELM)" scripts/check-isolation-env.sh
 	HELM="$(HELM)" scripts/check-minimal-values.sh
+	HELM="$(HELM)" scripts/check-planner.sh
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration

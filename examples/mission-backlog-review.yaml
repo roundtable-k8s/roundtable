@@ -1,5 +1,5 @@
 # Mission showcase (#409): a read-only backlog review on the roundtable-dev
-# table, planned by the built-in planner and run by two standing knights.
+# table, planned by the table's planner and run by two standing knights.
 #
 # Recorded run, 2026-11-25 (backlog-review-2026-11-25-b): Succeeded in about
 # 5 minutes for $1.58 (planning took 8 s). The plan recruited rt-operator and
@@ -14,8 +14,9 @@
 # output is rejected. Expect a lower cost than the recorded run.
 #
 # This manifest is reconstructed from the settings recorded in #409 (goal A,
-# $5 budget, 3600 s timeout, 7200 s TTL, 3 chains, 3 knights). The planner is
-# named explicitly; see #531 for using the role-labelled planner by default.
+# $5 budget, 3600 s timeout, 7200 s TTL, 3 chains, 3 knights). The run used
+# the old install-wide planner; since #566 the mission names no planner knight
+# and is planned by its table's own planner, roundtable-dev-planner.
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Mission
 metadata:
@@ -39,7 +40,6 @@ spec:
   recruitExisting: true
 
   planner:
-    knightRef: {name: roundtable-operator-planner}
     timeoutSeconds: 300
     maxChains: 3
     maxKnights: 3

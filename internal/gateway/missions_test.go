@@ -164,7 +164,7 @@ func TestStartMissionCreatesRestrictedMission(t *testing.T) {
 func TestStartMissionDefaults(t *testing.T) {
 	e := newMissionEnv(t, Options{Missions: MissionOptions{MaxTTLSeconds: 1200}}, true)
 
-	// planner {} picks the knight labelled role=planner; ttl/timeout default,
+	// planner {} picks the table's planner (#566); ttl/timeout default,
 	// capped by the gateway maximum.
 	body := validMission()
 	body["planner"] = map[string]any{}
@@ -174,7 +174,7 @@ func TestStartMissionDefaults(t *testing.T) {
 		t.Fatalf("status %d: %v", resp.StatusCode, out)
 	}
 	m := e.mission(t, out["name"].(string))
-	if aiv1alpha1.RefName(m.Spec.Planner.KnightRef) != "planner" || !m.Spec.MetaMission {
+	if aiv1alpha1.RefName(m.Spec.Planner.KnightRef) != "dev-planner" || !m.Spec.MetaMission {
 		t.Errorf("planner: %+v", m.Spec.Planner)
 	}
 	if m.Spec.TTLSeconds != 1200 || m.Spec.TimeoutSeconds != defaultMissionTimeout || m.Spec.CostBudgetUSD != "0.25" {
@@ -260,8 +260,43 @@ func TestStartMissionRejects(t *testing.T) {
 	}
 }
 
+// disableTablePlanner turns off the planner of the test table "dev".
+func disableTablePlanner(t *testing.T, e *missionEnv) {
+	t.Helper()
+	rt := &aiv1alpha1.RoundTable{}
+	if err := e.k8s.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "dev"}, rt); err != nil {
+		t.Fatal(err)
+	}
+	rt.Spec.Planner = &aiv1alpha1.RoundTablePlanner{Enabled: new(bool)}
+	if err := e.k8s.Update(context.Background(), rt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestStartMissionRoleLabelledPlanner: with the table's planner disabled,
+// planner {} falls back to the knight labelled role=planner, skipping
+// another table's planner.
+func TestStartMissionRoleLabelledPlanner(t *testing.T) {
+	other := knight("a-other-planner", "planning", "", false)
+	other.Labels[plannerRoleLabel] = "planner"
+	other.Labels[aiv1alpha1.LabelRoundTable] = "other"
+	e := newMissionEnv(t, Options{}, true, other)
+	disableTablePlanner(t, e)
+
+	body := validMission()
+	body["planner"] = map[string]any{}
+	resp, out := e.do(t, http.MethodPost, "/v1/missions", testToken, body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d: %v", resp.StatusCode, out)
+	}
+	if m := e.mission(t, out["name"].(string)); aiv1alpha1.RefName(m.Spec.Planner.KnightRef) != "planner" {
+		t.Errorf("planner: %+v", m.Spec.Planner)
+	}
+}
+
 func TestStartMissionNoDefaultPlanner(t *testing.T) {
 	e := newMissionEnv(t, Options{}, true)
+	disableTablePlanner(t, e)
 	p := &aiv1alpha1.Knight{}
 	_ = e.k8s.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "planner"}, p)
 	delete(p.Labels, plannerRoleLabel)

@@ -472,7 +472,7 @@ ClusterRole if that list holds `"*"`).
 | `costBudgetUSD` | Required JSON number, greater than 0 and at most `gateway.missions.maxBudgetUSD` (default 10). |
 | `ttlSeconds` | Optional. Seconds until cleanup: 60 up to `gateway.missions.maxTTLSeconds`. Defaults to 3600 (or the cap if lower). |
 | `timeoutSeconds` | Optional. Seconds the mission may run: 60 up to `gateway.missions.maxTimeoutSeconds`. Defaults to 1800. |
-| `planner` | Optional. Makes this a meta-mission. `knight` is an existing Knight; omit it to use the knight labelled `ai.roundtable.io/role=planner`. `context` (max 64 KiB), `maxChains` (1-20), `maxKnights` (1-50), `allowSkillGeneration` (see above). |
+| `planner` | Optional. Makes this a meta-mission. `knight` is an existing Knight; omit it to use the RoundTable's planner (`spec.planner`, by default the table-owned `<table>-planner`), else (deprecated) the knight labelled `ai.roundtable.io/role=planner`. `context` (max 64 KiB), `maxChains` (1-20), `maxKnights` (1-50), `allowSkillGeneration` (see above). |
 | `recruitExisting` | Optional. Lets the planner use standing knights. |
 | `knights` | Optional. Names of existing Knights taking part (at most 50). |
 | `chains` | Optional. Existing Chains to run, each with an optional `input` (max 64 KiB, at most 20 chains). Without a `planner`, at least one chain is required. |

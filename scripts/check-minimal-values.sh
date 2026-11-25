@@ -25,5 +25,7 @@ has "$out" '--enable-sandbox-backend=false' "sandbox backend not disabled"
 lacks "$out" 'name: rt-roundtable-operator-gateway$' "gateway rendered"
 lacks "$out" 'roundtable-vault' "vault volume rendered"
 lacks "$out" '^[^#]*gvisor' "gVisor RuntimeClass still the default"
-has "$out" 'name: rt-roundtable-operator-planner' "planner missing"
+# Each RoundTable owns its planner (#566); the install-wide one is off.
+lacks "$out" 'name: rt-roundtable-operator-planner$' "install-wide planner rendered"
+has "$out" 'name: TABLE_PLANNER_DEFAULTS' "table planner defaults missing"
 echo "minimal values OK"

@@ -127,6 +127,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Install-wide defaults for table-owned planner knights (#566), as the JSON the
+operator reads from TABLE_PLANNER_DEFAULTS.
+*/}}
+{{- define "roundtable-operator.plannerDefaults" -}}
+{{- $p := .Values.planner | default dict -}}
+{{- $d := dict -}}
+{{- with $p.model }}{{ $_ := set $d "model" . }}{{ end -}}
+{{- with $p.skills }}{{ $_ := set $d "skills" . }}{{ end -}}
+{{- with $p.arsenals }}{{ $_ := set $d "arsenals" . }}{{ end -}}
+{{- with $p.prompt }}{{ $_ := set $d "prompt" . }}{{ end -}}
+{{- with $p.concurrency }}{{ $_ := set $d "concurrency" (int .) }}{{ end -}}
+{{- with $p.taskTimeoutSeconds }}{{ $_ := set $d "taskTimeoutSeconds" (int .) }}{{ end -}}
+{{- toJson $d -}}
+{{- end }}
+
+{{/*
 Pod-spec scheduling fields shared by every component: nodeSelector,
 affinity, tolerations, priorityClassName and imagePullSecrets. The component's
 own nodeSelector/affinity/tolerations, when non-empty, replace the global

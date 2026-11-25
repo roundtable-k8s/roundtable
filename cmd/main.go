@@ -433,13 +433,19 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Chain")
 		os.Exit(1)
 	}
+	plannerDefaults, err := controller.PlannerDefaultsFromEnv()
+	if err != nil {
+		setupLog.Error(err, "Invalid table planner defaults")
+		os.Exit(1)
+	}
 	if err := (&controller.RoundTableReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
-		NATS:        natsProvider,
-		DeadLetters: deadLetters,
-		CardsBucket: cardsBucket,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
+		NATS:            natsProvider,
+		DeadLetters:     deadLetters,
+		CardsBucket:     cardsBucket,
+		PlannerDefaults: plannerDefaults,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
@@ -481,9 +487,10 @@ func main() {
 		os.Exit(1)
 	}
 	missionPlanner := &mission.Planner{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		NATS:   natsProvider,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		NATS:     natsProvider,
+		Recorder: mgr.GetEventRecorderFor("mission-controller"), //nolint:staticcheck // SA1019: see note above
 	}
 	if err := (&controller.MissionReconciler{
 		Client:   mgr.GetClient(),

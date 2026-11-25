@@ -154,6 +154,8 @@ var _ = Describe("RoundTable health with knights at rest", func() {
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS:           aiv1alpha1.RoundTableNATS{SubjectPrefix: "idle", TasksStream: "idle_tasks", ResultsStream: "idle_results"},
 				KnightSelector: &metav1.LabelSelector{MatchLabels: member},
+				// No owned planner: these specs count exactly the knights they create.
+				Planner: &aiv1alpha1.RoundTablePlanner{Enabled: new(false)},
 			},
 		})).To(Succeed())
 	})

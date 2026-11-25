@@ -96,6 +96,12 @@ type RoundTableSpec struct {
 	// +optional
 	ModelAliases map[string]string `json:"modelAliases,omitempty"`
 
+	// planner configures the table's planner knight, which plans the table's
+	// meta-missions that name no planner of their own. Unset gives the table a
+	// default planner: a Knight <table>-planner owned by the table.
+	// +optional
+	Planner *RoundTablePlanner `json:"planner,omitempty"`
+
 	// prFeedback watches knight-authored pull requests for a red CI run or a
 	// merge-queue rejection and feeds the failure back to the PR's author
 	// knight through a feedback Chain. Off unless enabled.
@@ -117,6 +123,90 @@ type RoundTableSpec struct {
 	// by the mission controller.
 	// +optional
 	MissionRef *corev1.LocalObjectReference `json:"missionRef,omitempty"`
+}
+
+// RoundTablePlanner configures a table's planner knight for missions.
+// With knightRef set the named knight plans and no knight is created; else
+// the table owns a Knight <table>-planner built from the fields below. Unset
+// fields come from the table's spec.defaults, then from the operator's
+// planner defaults (Helm planner.*).
+type RoundTablePlanner struct {
+	// enabled gives the table a planner. Unset means true; false removes the
+	// table-owned planner knight, and the table's missions must name their
+	// own planner.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// knightRef names an existing Knight in the table's namespace to use as
+	// the table's planner instead of a table-owned one.
+	// +optional
+	KnightRef *corev1.LocalObjectReference `json:"knightRef,omitempty"`
+
+	// model is the table-owned planner's model id (modelAliases are not
+	// resolved here). Unset: spec.defaults.model, then the operator's planner
+	// model.
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// arsenals are the table-owned planner's skill arsenals. Unset:
+	// spec.defaults.arsenals, then the operator's planner arsenals.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=8
+	Arsenals []KnightArsenal `json:"arsenals,omitempty"`
+
+	// prompt overrides the table-owned planner's prompt. Unset: the
+	// operator's planner prompt.
+	// +optional
+	Prompt *KnightPrompt `json:"prompt,omitempty"`
+
+	// resources for the table-owned planner. Unset: spec.defaults.resources.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// runtimeClassName for the table-owned planner. Unset:
+	// spec.defaults.runtimeClassName, then the operator's isolation default.
+	// +optional
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
+	// egress allowlist for the table-owned planner. Unset:
+	// spec.defaults.egress, then the operator's isolation default.
+	// +optional
+	Egress *KnightEgress `json:"egress,omitempty"`
+}
+
+// PlannerEnabled reports whether the table has a planner: spec.planner is
+// unset or its enabled is not false. Ephemeral (mission-owned) tables have
+// none.
+func (rt *RoundTable) PlannerEnabled() bool {
+	if rt.Spec.Ephemeral {
+		return false
+	}
+	p := rt.Spec.Planner
+	return p == nil || p.Enabled == nil || *p.Enabled
+}
+
+// OwnedPlannerName is the name of the Knight a table owns as its planner.
+func (rt *RoundTable) OwnedPlannerName() string {
+	return rt.Name + "-planner"
+}
+
+// PlannerKnightName is the knight that plans the table's missions: the
+// spec.planner.knightRef, else the table-owned <table>-planner. Empty when
+// the table has no planner.
+func (rt *RoundTable) PlannerKnightName() string {
+	if !rt.PlannerEnabled() {
+		return ""
+	}
+	if p := rt.Spec.Planner; p != nil && RefName(p.KnightRef) != "" {
+		return RefName(p.KnightRef)
+	}
+	return rt.OwnedPlannerName()
+}
+
+// OwnsPlanner reports whether the table creates its own planner knight.
+func (rt *RoundTable) OwnsPlanner() bool {
+	return rt.PlannerEnabled() && (rt.Spec.Planner == nil || RefName(rt.Spec.Planner.KnightRef) == "")
 }
 
 // SharedWorkspaceConfig configures a shared RWX volume for collaborative knight work.
@@ -458,6 +548,12 @@ type RoundTableStatus struct {
 	// activeMissions is the number of currently active missions under this table.
 	// +optional
 	ActiveMissions int32 `json:"activeMissions,omitempty"`
+
+	// plannerKnight is the knight that plans this table's missions (the
+	// table-owned <table>-planner or spec.planner.knightRef); empty when the
+	// table has no planner.
+	// +optional
+	PlannerKnight string `json:"plannerKnight,omitempty"`
 
 	// issuePickup is the observed state of spec.issuePickup.
 	// +optional

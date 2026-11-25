@@ -382,7 +382,7 @@ var openAPISchemas = obj{
 		"ttlSeconds":      integer("Seconds until the mission is cleaned up (min 60, capped; default 3600)."),
 		"timeoutSeconds":  integer("Seconds the mission may run before it fails (min 60, capped; default 1800)."),
 		"planner": object(nil, obj{
-			"knight":               str("Existing knight to plan with; omit for the namespace's planner knight."),
+			"knight":               str("Existing knight to plan with; omit for the table's planner knight."),
 			"context":              str("Extra information for the planner (max 64 KiB)."),
 			"maxChains":            integer("Most chains the planner may generate (1-20)."),
 			"maxKnights":           integer("Most ephemeral knights the planner may generate (1-50)."),

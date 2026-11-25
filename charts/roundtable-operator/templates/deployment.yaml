@@ -164,6 +164,9 @@ spec:
             - name: NOTIFY_ALLOWED_URL_PREFIXES
               value: "{{ join "," .Values.notify.allowedURLPrefixes }}"
             {{- end }}
+            # Defaults for the table-owned planner knights (#566).
+            - name: TABLE_PLANNER_DEFAULTS
+              value: {{ include "roundtable-operator.plannerDefaults" . | quote }}
             # Agent cards KV bucket (#393).
             - name: CARDS_KV_BUCKET
               value: {{ (.Values.cards | default dict).bucket | default "roundtable-cards" | quote }}

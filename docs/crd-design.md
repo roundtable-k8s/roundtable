@@ -135,6 +135,54 @@ Every Pending/Running step becomes `Failed` with `error: "cancelled: <reason>"`,
 - NATS consumers for mission-scoped subjects
 - ConfigMap with mission context
 
+**Planner (#566):**
+
+A meta-mission (`spec.metaMission: true`) is planned by one knight, picked in
+this order:
+
+1. The mission's own `spec.planner` (`knightRef`, `templateName` or
+   `ephemeralSpec`).
+2. The planner of the mission's RoundTable (`spec.roundTableRef`): its
+   `spec.planner.knightRef`, else the Knight `<table>-planner` the table owns.
+   Planning waits (up to the planning timeout) for a table planner that is not
+   created yet.
+3. Deprecated: a knight labelled `ai.roundtable.io/role=planner` that carries
+   no other table's `ai.roundtable.io/round-table` label (the old install-wide
+   planner, Helm `planner.enabled=true`). The mission gets a
+   `DeprecatedPlanner` warning event.
+
+A mission is never planned by another table's planner. The gateway's
+`POST /v1/missions` uses the same order when `planner.knight` is omitted.
+
+Every non-ephemeral RoundTable gets a planner unless `spec.planner.enabled` is
+false:
+
+```yaml
+spec:
+  planner:
+    # enabled: true               # default; false deletes <table>-planner
+    # knightRef: {name: my-planner}  # use an existing knight, create none
+    model: opus                   # else spec.defaults.model, else Helm planner.model
+    arsenals: [...]               # else spec.defaults.arsenals, else Helm planner.arsenals
+    prompt: {instructions: "..."} # else Helm planner.prompt
+    resources: {...}              # else spec.defaults.resources
+    runtimeClassName: gvisor      # else spec.defaults.runtimeClassName, else the isolation default
+    egress: {...}                 # else spec.defaults.egress, else the isolation default
+```
+
+The table-owned planner `<table>-planner` has an owner reference to the table
+(deleted with it), the labels `ai.roundtable.io/round-table=<table>` and
+`ai.roundtable.io/role=planner`, domain `planner` and the subject
+`<prefix>.tasks.planner.>` on the table's tasks and results streams. Like any
+knight labelled with the table it inherits the table's `spec.defaults`,
+`spec.secrets`, `spec.github` and vault, runs under the isolation defaults and
+has an agent card. It uses `lifecycle.suspendPolicy: auto`, so it scales to
+zero when idle (with KEDA) and wakes when a planning task is queued; the
+mission controller dispatches to a planner that is asleep this way instead of
+waiting for it to be Ready. `skills`, `concurrency` and `taskTimeoutSeconds`
+come from Helm `planner.*`. `status.plannerKnight` on the table names its
+planner.
+
 **Mission knights and the sandbox runtime (#483):**
 
 Each mission knight is created as `<mission>-<knight>` with an owner
@@ -225,7 +273,10 @@ the operator does not commit results to git.
 
 **Created Resources:**
 - JetStream streams (if `createStreams=true`)
-- No direct Knight ownership (uses selector, like a Service)
+- The table's planner Knight `<table>-planner` (ownerRef → RoundTable), unless
+  `spec.planner` disables it or names a `knightRef` (#566; see the Mission
+  Controller's Planner section)
+- Other Knights are not owned (uses selector, like a Service)
 
 ### Issue pickup (#224)
 
