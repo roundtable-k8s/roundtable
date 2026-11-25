@@ -361,6 +361,11 @@ stays bounded by the number of templates. Look up a single run's cost in its
 `unknown` when it reports none. Subscription-billed models report a notional
 cost; filter on `billing` to separate real spend.
 
+`roundtable_table_cost_usd{table}` is a gauge set from `RoundTable.status.totalCost`:
+the table's Missions' `totalCost` plus its Chains' current (or most recent) run
+`costUSD`. It drops when a chain or mission is deleted or a chain starts a new
+run, so trust the `*_cost_usd_total` counters above for spend over time.
+
 ```promql
 # cost per job (chain) per day
 sum by (chain) (increase(roundtable_chain_step_cost_usd_total[1d]))

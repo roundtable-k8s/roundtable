@@ -2513,8 +2513,11 @@ spec:
                 - minReplicas
                 type: object
               tasksCompleted:
-                description: tasksCompleted is the total number of tasks completed
-                  since creation.
+                description: |-
+                  tasksCompleted is the total number of tasks completed since creation.
+
+                  This field is deprecated and unused: nothing writes this field. Use the chain and mission status
+                  and the roundtable_chain_step_* metrics instead.
                 format: int64
                 type: integer
               tasksFailed:
@@ -2529,8 +2532,11 @@ spec:
                   image the knight's pod mounts.
                 type: string
               totalCost:
-                description: totalCost is the cumulative cost in USD of all tasks
-                  processed.
+                description: |-
+                  totalCost is the cumulative cost in USD of all tasks processed.
+
+                  This field is deprecated and unused: nothing writes this field. Use Chain status.costUSD,
+                  Mission status.totalCost and roundtable_chain_step_cost_usd_total.
                 type: string
               workspace:
                 description: workspace reports workspace snapshots.

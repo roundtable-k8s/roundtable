@@ -949,6 +949,9 @@ type KnightStatus struct {
 	Ready bool `json:"ready,omitempty"`
 
 	// tasksCompleted is the total number of tasks completed since creation.
+	//
+	// This field is deprecated and unused: nothing writes this field. Use the chain and mission status
+	// and the roundtable_chain_step_* metrics instead.
 	// +optional
 	TasksCompleted int64 `json:"tasksCompleted,omitempty"`
 
@@ -961,6 +964,9 @@ type KnightStatus struct {
 	LastTaskAt *metav1.Time `json:"lastTaskAt,omitempty"`
 
 	// totalCost is the cumulative cost in USD of all tasks processed.
+	//
+	// This field is deprecated and unused: nothing writes this field. Use Chain status.costUSD,
+	// Mission status.totalCost and roundtable_chain_step_cost_usd_total.
 	// +optional
 	TotalCost string `json:"totalCost,omitempty"`
 

@@ -199,8 +199,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (table) (roundtable_table_cost_usd{namespace=~\"$namespace\", table=~\"$table\"})",
-          "legendFormat": "{{table}} (RoundTable status total)"
+          "expr": "sum by (table) (increase(roundtable_chain_step_cost_usd_total{namespace=~\"$namespace\", table=~\"$table\"}[$__range]))",
+          "legendFormat": "{{table}} (step cost counters)"
         }
       ],
       "fieldConfig": {
