@@ -797,12 +797,13 @@ RoundTable. Each schedule:
 - `timeZone` is `UTC` when the Trigger sets none.
 - `description` is the cron in words; an expression it cannot put in words
   comes back as `cron <expression>`.
-- `target.kind` is `chain` today; `summary` is a one-line description of
+- `target.kind` is `chain` or `knight`; `summary` is a one-line description of
   the target.
 - `nextRunAt` and `lastRunAt` are `status.nextScheduledAt` and
   `status.lastFiredAt`. `lastResult` is the newest of `status.recentFirings`:
-  `outcome` is `started` (with the `run`) or `skipped` (with the
-  `skipReason`).
+  `outcome` is `started` (with the `run`), `skipped` (with the
+  `skipReason`) or, for knight targets once the task has ended, `succeeded`,
+  `failed` or `lost`.
 
 ### `GET /v1/schedules/{namespace}/{name}`
 

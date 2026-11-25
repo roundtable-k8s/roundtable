@@ -123,7 +123,9 @@ type ScheduleTarget struct {
 // ScheduleFiring is one firing of a schedule.
 type ScheduleFiring struct {
 	Time time.Time `json:"time"`
-	// Outcome is "started" when the firing started a run, "skipped" otherwise.
+	// Outcome is "started" when the firing started a run, "skipped" when it
+	// did not, and, for knight targets once the task has ended, the final
+	// result: "succeeded", "failed" or "lost".
 	Outcome    string `json:"outcome"`
 	Run        string `json:"run,omitempty"`
 	SkipReason string `json:"skipReason,omitempty"`
@@ -272,6 +274,9 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *Schedul
 		r := &ScheduleFiring{Time: f.Time.UTC(), Run: f.Run, SkipReason: f.SkipReason, Outcome: "started"}
 		if f.SkipReason != "" || f.Run == "" {
 			r.Outcome = "skipped"
+		}
+		if f.Outcome != "" {
+			r.Outcome = string(f.Outcome)
 		}
 		v.LastResult = r
 	}

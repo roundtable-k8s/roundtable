@@ -326,3 +326,17 @@ func TestScheduleViewKnightTarget(t *testing.T) {
 		t.Errorf("table = %q, want empty for a knight target without roundTableRef", v.Table)
 	}
 }
+
+func TestScheduleViewKnightFiringOutcome(t *testing.T) {
+	for _, o := range []aiv1alpha1.TriggerFiringOutcome{
+		aiv1alpha1.TriggerFiringSucceeded, aiv1alpha1.TriggerFiringFailed, aiv1alpha1.TriggerFiringLost,
+	} {
+		tr := scheduleTrigger(testNS, "ping", "*/5 * * * *", "")
+		tr.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "ping"}}
+		tr.Status.RecentFirings = []aiv1alpha1.TriggerFiring{{Time: metav1.Now(), Run: "task-1", Outcome: o}}
+		v := scheduleView(tr, nil)
+		if v.LastResult == nil || v.LastResult.Outcome != string(o) {
+			t.Errorf("lastResult = %+v, want outcome %q", v.LastResult, o)
+		}
+	}
+}
