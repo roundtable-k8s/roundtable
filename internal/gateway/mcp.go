@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -52,6 +53,11 @@ type GetTaskInput struct {
 // ListTasksOutput is the output of the list_tasks tool.
 type ListTasksOutput struct {
 	Tasks []*TaskRecord `json:"tasks"`
+}
+
+// ListDeadLettersOutput is the output of the list_dead_letters tool.
+type ListDeadLettersOutput struct {
+	DeadLetters []*DeadLetterView `json:"deadLetters"`
 }
 
 // GetMissionInput is the input of the get_mission tool.
@@ -112,6 +118,31 @@ func NewMCPServer(svc *Service) *mcp.Server {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TaskFilter) (*mcp.CallToolResult, ListTasksOutput, error) {
 		tasks, err := svc.ListTasks(ctx, in)
 		return nil, ListTasksOutput{Tasks: tasks}, err
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_dead_letters",
+		Description: "List dead-lettered tasks (lost or failed knight tasks), newest first, with their state: open, retried or resolved. " +
+			"Retry an open one with retry_task.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeadLetterFilter) (*mcp.CallToolResult, ListDeadLettersOutput, error) {
+		out, err := svc.ListDeadLetters(ctx, in)
+		return nil, ListDeadLettersOutput{DeadLetters: out}, err
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "retry_task",
+		Description: "Retry an open dead-lettered task: republish it to the same knight as a new task with attempt number + 1, " +
+			"so the knight checks for partial work. Poll the returned taskId with get_task. A task already retried or resolved, " +
+			"or one owned by a chain (unless force is set), is refused.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RetryRequest) (*mcp.CallToolResult, *RetryResult, error) {
+		res, err := svc.RetryDeadLetter(ctx, in)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: fmt.Sprintf("Retrying %s as %s (attempt %d) on knight %s. Call get_task with taskId %s.",
+				res.RetryOf, res.TaskID, res.Attempt, res.Knight, res.TaskID)}}}, res, nil
 	})
 	if svc.MissionsEnabled() {
 		addMissionTools(s, svc)

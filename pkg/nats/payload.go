@@ -47,6 +47,11 @@ type TaskPayload struct {
 
 	// RetryOf is the task ID this task retries (optional, set by a manual retry).
 	RetryOf string `json:"retryOf,omitempty"`
+
+	// PreviousFailure is why the attempt being retried was dead-lettered
+	// (optional, set by a manual retry, at most 2 KB). A knight reads it to
+	// know what went wrong and checks for partial work before starting over.
+	PreviousFailure string `json:"previousFailure,omitempty"`
 }
 
 // TaskResult is the JSON payload received from NATS for a completed task.

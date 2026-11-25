@@ -173,6 +173,37 @@ checks the results stream for the result and records it if found.
 Lists recent gateway tasks, newest first. The default limit is 20 and the
 maximum is 200.
 
+### `GET /v1/dead-letters?knight=&reason=&state=&limit=`
+
+Lists dead-lettered tasks (see the task contract's dead-letter section), newest
+first, each with its `state` (`open`, `retried` or `resolved`). The limit
+defaults to and is capped at 100. The list omits the original task payload.
+
+### `GET /v1/dead-letters/{taskId}`
+
+Returns one entry, including `task`, the original payload. Add `?table=` if the
+same task ID is dead-lettered in more than one RoundTable.
+
+### `POST /v1/dead-letters/{taskId}/retry`
+
+A deliberate retry (nothing retries automatically). It republishes the original
+task to the same knight as a new task `<taskId>-r<attempt>` with `attempt` set
+to the original attempt + 1, `retryOf` set to the original task ID and
+`previousFailure` set to the dead-letter reason (2 KB at most), so the knight
+can look for partial work. The new task is recorded like an invoke, so
+`GET /v1/tasks/{id}` works, and the entry becomes `retried` with `retriedAs`
+set. The state change is a compare-and-set, so two concurrent retries publish
+one task.
+
+Optional body: `{"force": true, "namespace": "...", "table": "..."}`.
+
+| Status | When |
+|--------|------|
+| `202` | Published. Body: `{taskId, retryOf, attempt, knight}`. |
+| `404` | No such entry. |
+| `409` | The entry isn't `open` (body has the current `state`), or it belongs to a chain: rerun the chain or let its `retryPolicy` handle it. `force` retries the chain step on its own; the chain doesn't continue. |
+| `422` | The entry has no original task payload. |
+
 ### `GET /v1/knights?namespace=`
 
 Lists knights with their name, domain, model, agent runtime, phase, readiness
@@ -321,6 +352,8 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `invoke_knight` | `knight`, `task`, `runId?`, `model?`, `timeoutSeconds?`, `namespace?` | Text content is the knight's output. Structured content is the task record. A failed task is returned as a tool error. A pending task returns a note to call `get_task`. |
 | `get_task` | `taskId` | The task record (same text/error conventions) |
 | `list_tasks` | `knight?`, `runId?`, `status?`, `limit?` | `{tasks: [...]}` |
+| `list_dead_letters` | `knight?`, `reason?`, `state?`, `limit?` | `{deadLetters: [...]}` |
+| `retry_task` | `taskId`, `force?`, `table?`, `namespace?` | Same semantics as the retry endpoint. A refused retry is a tool error. Poll the returned `taskId` with `get_task`. |
 | `start_mission` | The `POST /v1/missions` body | Text content is the result once done, else a note to call `get_mission`. Structured content is the mission projection. A failed or expired mission is a tool error. Unknown arguments fail the input schema. |
 | `get_mission` | `name`, `namespace?`, `waitSeconds?` | The mission projection (same text/error conventions) |
 | `list_missions` | `namespace?`, `phase?`, `limit?` | `{missions: [...]}` |

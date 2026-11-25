@@ -45,6 +45,9 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	api.HandleFunc("POST /v1/knights/{name}/invoke", svc.handleInvoke)
 	api.HandleFunc("GET /v1/tasks", svc.handleListTasks)
 	api.HandleFunc("GET /v1/tasks/{taskId}", svc.handleGetTask)
+	api.HandleFunc("GET /v1/dead-letters", svc.handleListDeadLetters)
+	api.HandleFunc("GET /v1/dead-letters/{taskId}", svc.handleGetDeadLetter)
+	api.HandleFunc("POST /v1/dead-letters/{taskId}/retry", svc.handleRetryDeadLetter)
 	if svc.MissionsEnabled() {
 		api.HandleFunc("POST /v1/missions", svc.handleStartMission)
 		api.HandleFunc("GET /v1/missions", svc.handleListMissions)
@@ -209,7 +212,13 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeError(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
+	var conflict *ConflictError
 	switch {
+	case errors.As(err, &conflict):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "state": conflict.State})
+		return
+	case errors.Is(err, ErrUnprocessable):
+		code = http.StatusUnprocessableEntity
 	case errors.Is(err, ErrInvalid):
 		code = http.StatusBadRequest
 	case errors.Is(err, ErrForbidden):
