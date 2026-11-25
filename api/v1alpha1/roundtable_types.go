@@ -298,9 +298,12 @@ type RoundTableDefaults struct {
 	// +optional
 	Memory *KnightMemory `json:"memory,omitempty"`
 
-	// arsenal configures the default skill arsenal for knights.
+	// arsenals is the default ordered skill arsenal list for knights that set
+	// none of their own (first = base, later entries override per skill).
 	// +optional
-	Arsenal *KnightArsenal `json:"arsenal,omitempty"`
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=8
+	Arsenals []KnightArsenal `json:"arsenals,omitempty"`
 }
 
 // RoundTablePolicies defines fleet-level operational policies.

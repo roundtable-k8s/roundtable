@@ -16,8 +16,9 @@ spec:
   # <category>/<skill> clash). roundtable-k8s/arsenal provides the platform
   # tiers (shared, project, watch, coding); domain packs like security/ come
   # from your own skills repo.
-  arsenal: {}                     # roundtable-k8s/arsenal (default)
-  arsenals:
+  arsenals:                       # ordered: first = base, later entries win
+    - name: platform
+      repo: https://github.com/roundtable-k8s/arsenal
     - name: personal
       repo: https://github.com/<you>/<your-skills-repo>
 

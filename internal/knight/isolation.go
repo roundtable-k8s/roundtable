@@ -124,16 +124,13 @@ type GitHost struct {
 }
 
 // ArsenalGitHosts returns the hosts (and ports) of the knight's arsenal repos
-// (spec.arsenal and spec.arsenals; an arsenal without repo uses the default
+// (spec.arsenals, or the default platform arsenal when empty; an arsenal without repo uses the default
 // arsenal repo), sorted and deduplicated. The git-sync sidecars share the
 // pod's network, so the egress policy must allow them.
 func ArsenalGitHosts(k *aiv1alpha1.Knight) []GitHost {
 	var repos []string
 	// OCI arsenals are image volumes pulled by the kubelet: no git egress.
-	if k.Spec.Arsenal != nil && k.Spec.Arsenal.OCI == nil {
-		repos = append(repos, k.Spec.Arsenal.Repo)
-	}
-	for _, a := range k.Spec.Arsenals {
+	for _, a := range effectiveArsenals(k.Spec.Arsenals) {
 		if a.OCI == nil {
 			repos = append(repos, a.Repo)
 		}

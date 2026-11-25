@@ -66,7 +66,7 @@ Anything described here as **target** is not on `main` yet. The linked issue tra
 
 **Target.** Skills as Agent Skills spec packages delivered as OCI image volumes: [#178](https://github.com/roundtable-k8s/roundtable/issues/178).
 
-**See:** [`knight_types.go`](../api/v1alpha1/knight_types.go) (`arsenal`, `arsenals`), [Helm values](helm-values.md), [`charts/roundtable-operator/values.yaml`](../charts/roundtable-operator/values.yaml) (`nixpkgs`, `toolsImage`).
+**See:** [`knight_types.go`](../api/v1alpha1/knight_types.go) (`arsenals`), [Helm values](helm-values.md), [`charts/roundtable-operator/values.yaml`](../charts/roundtable-operator/values.yaml) (`nixpkgs`, `toolsImage`).
 
 ### 8. You can watch everything
 

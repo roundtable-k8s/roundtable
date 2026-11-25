@@ -433,12 +433,13 @@ planner:
   # RuntimeClass for the planner pod. Empty = the operator default
   # (isolation.runtimeClassName).
   runtimeClassName: ""
-  arsenal:
-    repo: https://github.com/roundtable-k8s/arsenal.git
-    ref: main
-    periodSeconds: 300
-  # Extra skill repos merged into /skills after `arsenal` (per skill; later wins).
-  # arsenals:
+  # Ordered skill sources merged into /skills (first = base, later entries
+  # override per skill). One git-sync-<name> sidecar per git entry.
+  arsenals:
+    - name: platform
+      repo: https://github.com/roundtable-k8s/arsenal.git
+      ref: main
+      periodSeconds: 300
   #   - name: personal
   #     repo: https://github.com/<you>/<your-skills>.git
   # GitHub token Secret mounted read-only at

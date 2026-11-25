@@ -288,8 +288,9 @@ knights:
     taskTimeoutSeconds: 300
     # Platform skills from roundtable-k8s/arsenal, domain packs from your own repo.
     # Merged per skill into /skills; later arsenals win on a clash.
-    arsenal: {}
     arsenals:
+      - name: platform
+        repo: https://github.com/roundtable-k8s/arsenal
       - name: personal
         repo: https://github.com/<you>/<your-skills>
     # Mount a refreshing GitHub token file instead of a frozen env token.
@@ -333,8 +334,7 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `planner.skills` | list | `[operator, shared]` | Planner skills |
 | `planner.concurrency` | int | `1` | Max concurrent tasks |
 | `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds |
-| `planner.arsenal.repo` | string | `https://github.com/roundtable-k8s/arsenal.git` | Skills git repo |
-| `planner.arsenals` | list | `[]` | Extra skill repos merged after `arsenal` (`name`, `repo`, `ref`, `periodSeconds`; per-skill merge, later wins) |
+| `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Empty = the default platform arsenal |
 | `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). The planner belongs to no RoundTable, so it is configured here |
 | `planner.github.tokenSecretRef.key` | string | required | Key within that Secret (`corev1.SecretKeySelector`; `optional` is honoured too) |
 

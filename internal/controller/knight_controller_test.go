@@ -159,10 +159,11 @@ var _ = Describe("Knight Controller", func() {
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, deploy)).To(Succeed())
 
-			// Should have 2 containers: knight + skill-filter
-			Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(2))
+			// Should have 3 containers: knight + skill-filter + the default platform git-sync
+			Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(3))
 			Expect(deploy.Spec.Template.Spec.Containers[0].Name).To(Equal("app"))
 			Expect(deploy.Spec.Template.Spec.Containers[1].Name).To(Equal("skill-filter"))
+			Expect(deploy.Spec.Template.Spec.Containers[2].Name).To(Equal("git-sync-platform"))
 
 			// Check labels
 			Expect(deploy.Labels["roundtable.io/domain"]).To(Equal("security"))

@@ -183,6 +183,9 @@ var _ = Describe("Knight egress allowlist (#348)", func() {
 
 		It("renders a CiliumNetworkPolicy and deletes it when egress is removed", func() {
 			k := egressKnight("egress-cilium", allow)
+			// An OCI arsenal needs no git egress, keeping the rule list to the allowlist.
+			k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{OCI: &aiv1alpha1.KnightArsenalOCI{
+				Reference: "registry.example.com/arsenal@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}}
 			Expect(k8sClient.Create(ctx, k)).To(Succeed())
 			DeferCleanup(deleteKnight, k)
 			r := ciliumReconciler()

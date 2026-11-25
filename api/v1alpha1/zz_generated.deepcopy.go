@@ -1123,11 +1123,6 @@ func (in *KnightSpec) DeepCopyInto(out *KnightSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Arsenal != nil {
-		in, out := &in.Arsenal, &out.Arsenal
-		*out = new(KnightArsenal)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.Arsenals != nil {
 		in, out := &in.Arsenals, &out.Arsenals
 		*out = make([]KnightArsenal, len(*in))
@@ -1946,10 +1941,12 @@ func (in *RoundTableDefaults) DeepCopyInto(out *RoundTableDefaults) {
 		*out = new(KnightMemory)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Arsenal != nil {
-		in, out := &in.Arsenal, &out.Arsenal
-		*out = new(KnightArsenal)
-		(*in).DeepCopyInto(*out)
+	if in.Arsenals != nil {
+		in, out := &in.Arsenals, &out.Arsenals
+		*out = make([]KnightArsenal, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 

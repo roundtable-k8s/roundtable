@@ -194,6 +194,7 @@ the operator does not commit results to git.
    | `spec.resources` | `spec.defaults.resources` | none |
    | `spec.workspace` | `spec.defaults.workspace` (never `existingClaim`) | PVC |
    | `spec.memory` | `spec.defaults.memory` (including `existingClaim`) | no memory volume |
+   | `spec.arsenals` | `spec.defaults.arsenals` (when the knight sets none) | one `platform` arsenal (`roundtable-k8s/arsenal`) |
    | `spec.runtimeClassName` | `spec.defaults.runtimeClassName` | cluster default |
    | `spec.vault` | `spec.vault` | no vault |
 

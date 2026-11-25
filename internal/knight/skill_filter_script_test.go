@@ -80,8 +80,7 @@ func TestSkillFilterMergesArsenalsPerSkill(t *testing.T) {
 
 	k := &aiv1alpha1.Knight{}
 	k.Spec.Skills = []string{"shared", "coding", "security"}
-	k.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
-	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "personal", Repo: "https://github.com/x/roundtable-arsenal"}}
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "arsenal"}, {Name: "personal", Repo: "https://github.com/x/roundtable-arsenal"}}
 
 	runSkillFilter(t, k, root)
 
@@ -141,7 +140,7 @@ func TestSkillFilterReplacesLegacyCategoryLink(t *testing.T) {
 
 	k := &aiv1alpha1.Knight{}
 	k.Spec.Skills = []string{"shared"}
-	k.Spec.Arsenal = &aiv1alpha1.KnightArsenal{}
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "arsenal"}}
 	runSkillFilter(t, k, root)
 
 	fi, err := os.Lstat(filepath.Join(skills, "shared"))
