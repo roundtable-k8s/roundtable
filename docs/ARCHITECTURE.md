@@ -83,7 +83,7 @@ type RuntimeBackend interface {
 - **DeploymentBackend** — Standard Kubernetes Deployment. Always running. Good for persistent knights.
 - **SandboxBackend** — Uses the `agents.x-k8s.io/v1beta1` Sandbox CRD (agent-sandbox v1.0.0 or later). Suspends and resumes through `spec.operatingMode`. Good for cost optimization.
 
-Selected per-knight via `spec.runtime: deployment|sandbox`.
+Selected per-knight via `spec.runtime: deployment|sandbox`. Why two backends, how gVisor, KEDA and egress fit each, and what was rejected: [design/runtime-backends-adr.md](design/runtime-backends-adr.md).
 
 ## NATS Communication
 
