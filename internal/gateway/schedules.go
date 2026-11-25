@@ -60,6 +60,9 @@ const (
 	// ScheduleTargetChain is the target kind of a schedule that starts a
 	// Chain run.
 	ScheduleTargetChain = "chain"
+	// ScheduleTargetKnight is the target kind of a schedule that sends one
+	// task to a knight.
+	ScheduleTargetKnight = "knight"
 )
 
 // ScheduleManagedBy reports who manages a Trigger: git when it carries Flux
@@ -106,12 +109,15 @@ type ScheduleView struct {
 
 // ScheduleTarget is what a schedule starts.
 type ScheduleTarget struct {
-	// Kind is "chain" today (a knight task and a mission come later).
+	// Kind is "chain" or "knight" (a mission comes later).
 	Kind string `json:"kind"`
-	// Summary is a short description of the target: the chain's name.
+	// Summary is a short description of the target: the chain's or the
+	// knight's name.
 	Summary string `json:"summary"`
 	// Chain is the target Chain (kind chain).
 	Chain string `json:"chain,omitempty"`
+	// Knight is the target Knight (kind knight).
+	Knight string `json:"knight,omitempty"`
 }
 
 // ScheduleFiring is one firing of a schedule.
@@ -226,7 +232,16 @@ func (s *Service) chainTables(ctx context.Context, ns string) map[string]string 
 
 func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *ScheduleView {
 	src := t.Spec.Source.Schedule
-	chain := t.Spec.Target.ChainRef.Name
+	var target ScheduleTarget
+	var chain string
+	switch {
+	case t.Spec.Target.ChainRef != nil:
+		chain = t.Spec.Target.ChainRef.Name
+		target = ScheduleTarget{Kind: ScheduleTargetChain, Summary: "chain " + chain, Chain: chain}
+	case t.Spec.Target.Knight != nil:
+		k := t.Spec.Target.Knight.Name
+		target = ScheduleTarget{Kind: ScheduleTargetKnight, Summary: "knight " + k, Knight: k}
+	}
 	v := &ScheduleView{
 		Name:        t.Name,
 		Namespace:   t.Namespace,
@@ -234,11 +249,11 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *Schedul
 		Cron:        src.Cron,
 		TimeZone:    src.TimeZone,
 		Description: DescribeCron(src.Cron),
-		Target:      ScheduleTarget{Kind: ScheduleTargetChain, Summary: "chain " + chain, Chain: chain},
+		Target:      target,
 		Suspended:   t.Spec.Suspend,
 		ManagedBy:   ScheduleManagedBy(t),
 	}
-	if v.Table == "" {
+	if v.Table == "" && chain != "" {
 		v.Table = chainTables[chain]
 	}
 	if v.TimeZone == "" {

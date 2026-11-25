@@ -44,7 +44,7 @@ func scheduleTrigger(ns, name, cron, chain string) *aiv1alpha1.Trigger {
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: aiv1alpha1.TriggerSpec{
 			Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: cron}},
-			Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: chain}},
+			Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: chain}},
 		},
 	}
 }
@@ -91,7 +91,7 @@ func newScheduleEnv(t *testing.T, enabled bool) *env {
 		ObjectMeta: metav1.ObjectMeta{Name: "hook", Namespace: testNS},
 		Spec: aiv1alpha1.TriggerSpec{
 			Source:        aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: "fleet-a.events.x"}},
-			Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: "digest"}},
+			Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "digest"}},
 			RoundTableRef: aiv1alpha1.LocalRef("fleet-a"),
 		},
 	}
@@ -311,5 +311,18 @@ func TestDescribeCron(t *testing.T) {
 		if got := DescribeCron(expr); got != want {
 			t.Errorf("DescribeCron(%q) = %q, want %q", expr, got, want)
 		}
+	}
+}
+
+func TestScheduleViewKnightTarget(t *testing.T) {
+	tr := scheduleTrigger(testNS, "ping", "*/5 * * * *", "")
+	tr.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "ping"}}
+	v := scheduleView(tr, map[string]string{"": "fleet-a"})
+	want := ScheduleTarget{Kind: ScheduleTargetKnight, Summary: "knight galahad", Knight: "galahad"}
+	if v.Target != want {
+		t.Errorf("target = %+v, want %+v", v.Target, want)
+	}
+	if v.Table != "" {
+		t.Errorf("table = %q, want empty for a knight target without roundTableRef", v.Table)
 	}
 }
