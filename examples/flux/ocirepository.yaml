@@ -1,0 +1,19 @@
+# Flux source for the Round Table Helm chart, published as an OCI artifact.
+# The layerSelector extracts the chart tarball layer so helm-controller can
+# load the artifact as a chart. Requires Flux v2.3+.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: roundtable-operator
+  namespace: roundtable
+spec:
+  interval: 10m
+  url: oci://ghcr.io/roundtable-k8s/charts/roundtable-operator
+  ref:
+    # For 0.x versions ^0.22.0 means >=0.22.0 <0.23.0, so patch releases
+    # only. Widen the range to take later 0.x minor releases, which may
+    # change CRDs.
+    semver: "^0.22.0"
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy

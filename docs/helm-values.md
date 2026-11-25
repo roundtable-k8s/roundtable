@@ -12,6 +12,8 @@ helm install roundtable charts/roundtable-operator \
   --namespace roundtable --create-namespace
 ```
 
+For Flux (`OCIRepository` + `HelmRelease`) and CRD upgrade notes, see [installing Round Table](install.md).
+
 ## Values Reference
 
 ### Operator

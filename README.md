@@ -265,10 +265,12 @@ For an existing cluster (Kubernetes 1.28+, NATS with JetStream, a model API key)
 install the chart (it installs the CRDs, the operator and the [dashboard](#ecosystem)):
 
 ```bash
-helm install roundtable-operator \
+helm install roundtable \
   oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --namespace roundtable --create-namespace
 ```
+
+For Flux (`OCIRepository` + `HelmRelease`) and CRD upgrade notes, see [installing Round Table](docs/install.md).
 
 ### Install from source
 
