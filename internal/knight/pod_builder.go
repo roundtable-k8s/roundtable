@@ -233,20 +233,10 @@ func (b *PodBuilder) WithSharedWorkspace(ctx context.Context) *PodBuilder {
 		return b
 	}
 
-	tableName, ok := b.knight.Labels["ai.roundtable.io/table"]
-	if !ok {
-		return b
-	}
-
-	rt := &aiv1alpha1.RoundTable{}
-	if err := b.reader.Get(ctx, types.NamespacedName{
-		Name:      tableName,
-		Namespace: b.knight.Namespace,
-	}, rt); err != nil {
-		return b
-	}
-
-	if rt.Spec.SharedWorkspace == nil {
+	rt := findTable(ctx, b.reader, b.knight, func(rt *aiv1alpha1.RoundTable) bool {
+		return rt.Spec.SharedWorkspace != nil
+	})
+	if rt == nil {
 		return b
 	}
 
@@ -295,8 +285,9 @@ const (
 	GitHubTokenFile = GitHubTokenDir + "/token"
 	// defaultGitHubTokenKey is the Secret key used when tokenSecretRef.key is empty.
 	defaultGitHubTokenKey = "token"
-	// legacyTableLabel is the older knight-to-table label (still read by
-	// WithSharedWorkspace and the planner prompt).
+	// legacyTableLabel is the older knight-to-table label (read
+	// alongside aiv1alpha1.LabelRoundTable by findTable, KnightTable and the
+	// planner prompt).
 	legacyTableLabel = "ai.roundtable.io/table"
 )
 
