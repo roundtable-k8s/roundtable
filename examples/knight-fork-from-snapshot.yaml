@@ -5,7 +5,8 @@
 #   kubectl get volumesnapshots -l roundtable.io/knight=galahad
 # then put the VolumeSnapshot name in fromSnapshot. The PVC is only created
 # once the snapshot is readyToUse (condition WorkspaceReady=False,
-# SnapshotNotReady until then); an existing PVC is never replaced.
+# SnapshotNotReady until then), so the pod stays Pending until the snapshot is
+# ready; an existing PVC is never replaced.
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Knight
 metadata:

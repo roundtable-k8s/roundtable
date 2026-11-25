@@ -794,7 +794,7 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 		}
 		logf.FromContext(ctx).Info("PVC created", "name", pvcName, "fromSnapshot", fromSnapshot)
 		if fromSnapshot != "" {
-			r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonWorkspaceFromSnapshot,
+			r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonRestoredFromSnapshot,
 				fmt.Sprintf("workspace PVC created from VolumeSnapshot %q", fromSnapshot))
 		} else {
 			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceReady)
@@ -809,7 +809,7 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 	case fromSnapshot == "":
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceReady)
 	case ds != nil && ds.Kind == rtruntime.VolumeSnapshotGVK.Kind && ds.Name == fromSnapshot:
-		r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonWorkspaceFromSnapshot,
+		r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonRestoredFromSnapshot,
 			fmt.Sprintf("workspace PVC created from VolumeSnapshot %q", fromSnapshot))
 	default:
 		r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonFromSnapshotIgnored,

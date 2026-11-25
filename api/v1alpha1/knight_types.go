@@ -395,7 +395,9 @@ type KnightWorkspace struct {
 	// PVC is created: an existing PVC is left alone. The PVC is not created
 	// until the snapshot exists and is readyToUse. The PVC size is the larger
 	// of size and the snapshot's restoreSize. Not allowed with existingClaim
-	// or mode: ephemeral. Needs the snapshot.storage.k8s.io/v1 API.
+	// or mode: ephemeral (an empty existingClaim set alongside it is rejected
+	// too). Not inherited from RoundTable defaults. Needs the
+	// snapshot.storage.k8s.io/v1 API.
 	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	FromSnapshot string `json:"fromSnapshot,omitempty"`

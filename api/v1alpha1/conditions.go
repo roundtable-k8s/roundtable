@@ -95,6 +95,7 @@ const (
 	// ConditionKnightWorkspaceReady reports the workspace PVC when
 	// spec.workspace.fromSnapshot is set. False (SnapshotNotReady,
 	// SnapshotAPIUnavailable) while the PVC can't be created yet; True
+	// (RestoredFromSnapshot) when the PVC was created from the snapshot; True
 	// (FromSnapshotIgnored) when the PVC already existed, so fromSnapshot
 	// didn't apply. Absent otherwise.
 	ConditionKnightWorkspaceReady = "WorkspaceReady"
@@ -292,9 +293,9 @@ const (
 	// spec.workspace.fromSnapshot was not applied.
 	ReasonFromSnapshotIgnored = "FromSnapshotIgnored"
 
-	// ReasonWorkspaceFromSnapshot indicates the workspace PVC was created from
+	// ReasonRestoredFromSnapshot indicates the workspace PVC was created from
 	// spec.workspace.fromSnapshot.
-	ReasonWorkspaceFromSnapshot = "RestoredFromSnapshot"
+	ReasonRestoredFromSnapshot = "RestoredFromSnapshot"
 
 	// ReasonSnapshotsReady indicates the workspace snapshots are in order.
 	ReasonSnapshotsReady = "SnapshotsReady"

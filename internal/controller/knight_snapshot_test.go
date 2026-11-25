@@ -315,7 +315,7 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 		Expect(ds.Name).To(Equal("fork-src-big"))
 		got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
 		Expect(got.Cmp(resource.MustParse("5Gi"))).To(Equal(0))
-		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonWorkspaceFromSnapshot))
+		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonRestoredFromSnapshot))
 
 		// spec.workspace.size wins when it is larger than restoreSize.
 		newSnapshot("fork-src-small", true, 1<<30)
