@@ -63,6 +63,7 @@ type fakeKnight struct {
 	stopped bool
 	seen    map[string]natspkg.TaskPayload // by subject's knight token
 	last    natspkg.TaskPayload
+	count   int // tasks received
 }
 
 func startFakeKnight(t *testing.T, url string) *fakeKnight {
@@ -90,6 +91,7 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 		}
 		k.mu.Lock()
 		k.last = p
+		k.count++
 		k.seen[m.Subject()] = p
 		if k.stopped {
 			k.mu.Unlock()
@@ -153,6 +155,12 @@ func (k *fakeKnight) answer(js jetstream.JetStream, p natspkg.TaskPayload) {
 	if _, err := js.Publish(context.Background(), natspkg.ResultSubject(prefix, p.TaskID), data); err != nil {
 		k.t.Errorf("fake knight: publish result: %v", err)
 	}
+}
+
+func (k *fakeKnight) received() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.count
 }
 
 func (k *fakeKnight) lastPayload() natspkg.TaskPayload {
@@ -676,4 +684,83 @@ func TestMCP(t *testing.T) {
 	if res.IsError || len(sc["tasks"].([]any)) != 1 {
 		t.Fatalf("list_tasks failed: %q %v", text(res), sc)
 	}
+}
+
+// doKey is do with an Idempotency-Key header.
+func (e *env) doKey(t *testing.T, path, key string, body any) (*http.Response, map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(b))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out := map[string]any{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp, out
+}
+
+func TestInvokeIdempotencyKey(t *testing.T) {
+	e := newEnv(t, Options{})
+	path := "/v1/knights/operator/invoke"
+
+	r1, b1 := e.doKey(t, path, "k-1", InvokeRequest{Task: "hello"})
+	if r1.StatusCode != http.StatusOK || r1.Header.Get("Idempotent-Replay") != "" {
+		t.Fatalf("first: %d %v replay=%q", r1.StatusCode, b1, r1.Header.Get("Idempotent-Replay"))
+	}
+	r2, b2 := e.doKey(t, path, "k-1", InvokeRequest{Task: "hello"})
+	if r2.StatusCode != http.StatusOK || r2.Header.Get("Idempotent-Replay") != "true" {
+		t.Fatalf("replay: %d %v replay=%q", r2.StatusCode, b2, r2.Header.Get("Idempotent-Replay"))
+	}
+	if b1["taskId"] != b2["taskId"] || b2["output"] != b1["output"] {
+		t.Fatalf("replay differs: %v vs %v", b1, b2)
+	}
+	if n := e.knight.received(); n != 1 {
+		t.Fatalf("published %d tasks, want 1", n)
+	}
+
+	// Same key, different task: 422 and nothing published.
+	r3, b3 := e.doKey(t, path, "k-1", InvokeRequest{Task: "other"})
+	if r3.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("different body: %d %v", r3.StatusCode, b3)
+	}
+	if n := e.knight.received(); n != 1 {
+		t.Fatalf("published %d tasks after 422, want 1", n)
+	}
+
+	// Another key, or none, runs again; the key is scoped to the knight.
+	_, b4 := e.doKey(t, path, "k-2", InvokeRequest{Task: "hello"})
+	_, b5 := e.doKey(t, path, "", InvokeRequest{Task: "hello"})
+	_, b6 := e.doKey(t, "/v1/knights/reviewer/invoke", "k-1", InvokeRequest{Task: "hello"})
+	if b4["taskId"] == b1["taskId"] || b5["taskId"] == b1["taskId"] || b6["taskId"] == b1["taskId"] {
+		t.Fatalf("new key/none/other knight must make a new task")
+	}
+	if n := e.knight.received(); n != 4 {
+		t.Fatalf("published %d tasks, want 4", n)
+	}
+
+	// Invalid keys are 400.
+	for _, k := range []string{strings.Repeat("a", 256), "caf\u00e9"} {
+		if r, b := e.doKey(t, path, k, InvokeRequest{Task: "hello"}); r.StatusCode != http.StatusBadRequest {
+			t.Fatalf("key %q: %d %v", k, r.StatusCode, b)
+		}
+	}
+}
+
+func TestInvokeIdempotencyKeyReplayPending(t *testing.T) {
+	e := newEnv(t, Options{})
+	zero := 0
+	path := "/v1/knights/operator/invoke"
+	r1, b1 := e.doKey(t, path, "p", InvokeRequest{Task: "hold", TimeoutSeconds: &zero})
+	r2, b2 := e.doKey(t, path, "p", InvokeRequest{Task: "hold", TimeoutSeconds: &zero})
+	if r1.StatusCode != http.StatusAccepted || r2.StatusCode != http.StatusAccepted ||
+		r2.Header.Get("Idempotent-Replay") != "true" || b1["taskId"] != b2["taskId"] {
+		t.Fatalf("pending replay: %d/%d %v %v", r1.StatusCode, r2.StatusCode, b1, b2)
+	}
+	close(e.knight.release)
 }

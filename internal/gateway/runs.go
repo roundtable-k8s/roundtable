@@ -90,6 +90,9 @@ type RunChainRequest struct {
 	// WaitSeconds waits for the run to finish (capped by the gateway's
 	// maximum). 0 returns once the run is created.
 	WaitSeconds *int `json:"waitSeconds,omitempty"`
+	// IdempotencyKey, from the Idempotency-Key header, names the run after
+	// the key so a retry returns the existing run. Not part of the JSON body.
+	IdempotencyKey string `json:"-"`
 }
 
 // RunRecord is what the gateway returns for a chain run.
@@ -111,6 +114,9 @@ type RunRecord struct {
 	// on. Omitted when there are several such steps (read steps instead).
 	Output          string `json:"output,omitempty"`
 	OutputTruncated bool   `json:"outputTruncated,omitempty"`
+	// Replayed marks a record returned for a repeated Idempotency-Key. Not
+	// serialized.
+	Replayed bool `json:"-"`
 }
 
 // RunStep is one step of a run.
@@ -205,6 +211,9 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if !s.RunsEnabled() {
 		return nil, errRunsDisabled
 	}
+	if err := validIdempotencyKey(req.IdempotencyKey); err != nil {
+		return nil, err
+	}
 	ns, err := s.namespace(req.Namespace)
 	if err != nil {
 		return nil, err
@@ -233,6 +242,9 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	}
 
 	suffix := randomHex()
+	if req.IdempotencyKey != "" {
+		suffix = idempotencyHash(ns, chainName, req.IdempotencyKey)[:8]
+	}
 	run, err := chainrun.Start(ctx, s.Runs, s.Runs.Scheme(), tmpl, chainrun.StartOptions{
 		Name:        chainrun.Name(tmpl.Name, "gw", suffix),
 		Namespace:   ns,
@@ -243,6 +255,10 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 		Annotations: map[string]string{annotationRunOf: tmpl.Name},
 	})
 	if err != nil {
+		if req.IdempotencyKey != "" && apierrors.IsAlreadyExists(err) {
+			// The run name comes from the key, so the name clash is the dedupe.
+			return s.replayRun(ctx, ns, chainrun.Name(tmpl.Name, "gw", suffix), wait)
+		}
 		return nil, k8sError("create chain run", err)
 	}
 	s.Log.Info("Started chain run", "chain", tmpl.Name, "run", run.Name, "namespace", ns, "inputBytes", len(input))
@@ -250,6 +266,25 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 		return s.waitRun(ctx, ns, run.Name, wait)
 	}
 	return runRecord(run, true), nil
+}
+
+// replayRun returns the run an earlier request with the same key started.
+func (s *Service) replayRun(ctx context.Context, ns, name string, wait time.Duration) (*RunRecord, error) {
+	var rec *RunRecord
+	var err error
+	if wait > 0 {
+		rec, err = s.waitRun(ctx, ns, name, wait)
+	} else {
+		var c *aiv1alpha1.Chain
+		if c, err = s.fetchRun(ctx, ns, name); err == nil {
+			rec = runRecord(c, true)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	rec.Replayed = true
+	return rec, nil
 }
 
 // runInput turns the request's input into spec.input. ok is false when the

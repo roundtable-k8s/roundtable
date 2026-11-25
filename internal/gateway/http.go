@@ -85,6 +85,11 @@ func (s *Service) handleListKnights(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"knights": knights})
 }
 
+const (
+	idempotencyHeader      = "Idempotency-Key"
+	idempotentReplayHeader = "Idempotent-Replay"
+)
+
 func (s *Service) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	var req InvokeRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
@@ -93,10 +98,14 @@ func (s *Service) handleInvoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
 		return
 	}
+	req.IdempotencyKey = r.Header.Get(idempotencyHeader)
 	rec, err := s.Invoke(r.Context(), r.PathValue("name"), req)
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	if rec.Replayed {
+		w.Header().Set(idempotentReplayHeader, "true")
 	}
 	code := http.StatusOK
 	if !rec.Done() {
@@ -224,10 +233,14 @@ func (s *Service) handleRunChain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid))
 		return
 	}
+	req.IdempotencyKey = r.Header.Get(idempotencyHeader)
 	rec, err := s.RunChain(r.Context(), r.PathValue("name"), req)
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	if rec.Replayed {
+		w.Header().Set(idempotentReplayHeader, "true")
 	}
 	writeRun(w, rec)
 }
