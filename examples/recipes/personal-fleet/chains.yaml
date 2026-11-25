@@ -62,7 +62,7 @@ spec:
   steps:
     - name: summarize
       knightRef: {name: editor}
-      outputPath: "Briefings/{{ .Date }}-summary.md"
+      outputPath: "Briefings/{{ .Date }}-{{ .Chain }}.md"
       task: |
         Summarize the text below in at most five bullet points. Say so if it
         is empty or unreadable.

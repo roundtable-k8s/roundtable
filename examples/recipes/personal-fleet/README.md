@@ -12,7 +12,7 @@ volume: each knight writes only its own directory and reads everyone else's.
    infrastructure (steward) ┘
 
 POST /v1/chains/summarize-note/runs   Chain summarize-note (on demand)
-   summarize (editor) --> Briefings/<date>-summary.md
+   summarize (editor) --> Briefings/<date>-<run>.md
 ```
 
 | File | What |
@@ -39,7 +39,7 @@ kubectl apply -f roundtable.yaml -f knights.yaml -f chains.yaml
 ```
 
 Run the briefing once without waiting for 06:30; any new annotation value
-starts a fresh run (see [Scheduled briefing](../../README.md#scheduled-briefing)):
+starts a fresh run (see [Run the Chain](../../../docs/getting-started.md#4-run-the-chain)):
 
 ```bash
 kubectl annotate chain morning-briefing -n roundtable \
@@ -68,7 +68,7 @@ kubectl -n roundtable run curl --rm -it --restart=Never --image=curlimages/curl 
 `input` is the run's input (`{{ .Input }}` in the step). With `waitSeconds`
 the answer is **200** with the run record once it finishes, its `output`
 being the summary; without it, or if the wait runs out, **202** with a
-`Location` to poll (`GET /v1/runs/roundtable/<run>`). Each call runs a copy of
+`Location` to poll (`GET /v1/runs/roundtable/<run>`). The summary is also kept in `Briefings/<date>-<run>.md`, so runs on one day do not overwrite each other. Each call runs a copy of
 the Chain named `summarize-note-gw-<8 hex>`, which the gateway deletes a day
 after it finishes.
 
@@ -79,7 +79,7 @@ after it finishes.
 | Reads the notes volume | all of it | all of it | all of it |
 | Writes the notes volume | `Research/` only | `Infrastructure/` only | `Briefings/` only |
 | Network | baseline plus a few news and wiki hosts | baseline only | baseline only |
-| Cluster | none | read-only (`view`: no Secrets, no writes, no `exec`) | none |
+| Cluster | none | read-only (`view`: no Secrets, no writes, no `exec`), with `kubectl` from `tools.nix` | none |
 | Model | `sonnet` | `sonnet` | `haiku` |
 
 - Every knight is isolated under the defaults (gVisor, default-deny egress).

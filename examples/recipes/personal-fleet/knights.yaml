@@ -55,7 +55,11 @@ spec:
     mode: ephemeral
     size: 1Gi
   # No allowedHosts: only the baseline (DNS, NATS, the Kubernetes API and the
-  # model providers). Tools come from the image, so nothing is downloaded.
+  # model providers). kubectl comes from a Nix tools image the operator builds
+  # and mounts read-only at /nix, so nothing is downloaded when the pod starts.
+  tools:
+    nix:
+      - kubectl
   vault:
     claimName: personal-notes
     readOnly: true
