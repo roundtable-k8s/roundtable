@@ -1,5 +1,7 @@
 # Phase 3: Dynamic Mission Tables
 
+> **Historical design document.** It records a past design and may not match the code. For how the system runs today, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Author:** Tim the Enchanter 🔥  
 **Date:** 2026-03-10  
 **Status:** Design  
