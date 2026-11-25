@@ -30,6 +30,7 @@ helm install roundtable charts/roundtable-operator \
 | `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1beta1` Sandbox is served), `true`, or `false`. Supports agent-sandbox v1.0.0 or later (developed against v1.0.12) |
 | `keda` | string | `auto` | KEDA autoscaling for knights with `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`: `auto` (enable only if `keda.sh/v1alpha1` ScaledObject is served), `true`, or `false` |
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |
+| `cards.bucket` | string | `roundtable-cards` | NATS KV bucket of the [agent cards](agent-cards.md) (`CARDS_KV_BUCKET`; knight pods get `KNIGHT_CARDS_BUCKET`) |
 | `extraArgs` | list | `[]` | Additional args for the manager binary (e.g. `--github-api-url=https://ghe.example.com/api/v3` for [issue pickup](issue-pickup.md)) |
 
 ### Mission NetworkPolicy

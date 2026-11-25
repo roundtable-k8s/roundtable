@@ -72,6 +72,11 @@ type KnightReconciler struct {
 	// value falls back to DefaultPodSecurity.
 	KnightSecurity knightpkg.PodSecurity
 
+	// CardsBucket is the agent cards KV bucket (#393): passed to knight pods
+	// as KNIGHT_CARDS_BUCKET and cleaned up when a knight is deleted. Empty
+	// means natspkg.DefaultCardsBucket.
+	CardsBucket string
+
 	// NATS is the shared NATS provider used to read task consumer backlog for
 	// the Waking status. Optional; without it scaled-to-zero knights report
 	// ScaledToZero only.
@@ -171,6 +176,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if controllerutil.ContainsFinalizer(knight, knightFinalizer) {
 			log.Info("Cleaning up knight resources", "knight", knight.Name)
 			// NATS consumer cleanup would go here (future: NATS admin API call)
+			// Best effort: the RoundTable reconcile also drops the card (#393).
+			if err := deleteKnightCards(ctx, r.Client, r.NATS, r.CardsBucket, knight); err != nil {
+				log.Error(err, "Failed to delete agent cards")
+			}
 			controllerutil.RemoveFinalizer(knight, knightFinalizer)
 			if err := r.Update(ctx, knight); err != nil {
 				return ctrl.Result{}, err
@@ -757,6 +766,7 @@ func (r *KnightReconciler) BuildPodSpec(ctx context.Context, k *aiv1alpha1.Knigh
 
 	builder := knightpkg.NewPodBuilder(k, r.DefaultImage).
 		WithSecurity(r.KnightSecurity).
+		WithCardsBucket(r.CardsBucket).
 		WithReader(r.Client).
 		WithWorkspace().
 		WithConfig(configMapName).

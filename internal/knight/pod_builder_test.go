@@ -391,6 +391,15 @@ var _ = Describe("PodBuilder", func() {
 		It("is empty when the knight has no table", func() {
 			Expect(envOf()).To(HaveKeyWithValue("ROUNDTABLE_TABLE", ""))
 		})
+
+		It("sets KNIGHT_CARDS_BUCKET to the default cards bucket", func() {
+			Expect(envOf()).To(HaveKeyWithValue("KNIGHT_CARDS_BUCKET", "roundtable-cards"))
+		})
+
+		It("sets KNIGHT_CARDS_BUCKET to the configured cards bucket", func() {
+			builder.WithCardsBucket("my-cards")
+			Expect(envOf()).To(HaveKeyWithValue("KNIGHT_CARDS_BUCKET", "my-cards"))
+		})
 	})
 
 	Describe("Build", func() {

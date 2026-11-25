@@ -233,6 +233,56 @@ type KnightSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
+
+	// card overrides fields of the knight's agent card, which the RoundTable
+	// controller generates from this spec and keeps in the cards KV bucket
+	// (key <table>.<knight>, see docs/agent-cards.md).
+	// +optional
+	Card *KnightCard `json:"card,omitempty"`
+}
+
+// KnightCard holds overrides for a knight's generated agent card.
+type KnightCard struct {
+	// description is the card description. When unset it is the first
+	// paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// tags label the knight as a whole (card roundtable.tags).
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Tags []string `json:"tags,omitempty"`
+
+	// skills are merged over the generated skills by id: set fields replace
+	// the generated ones, and an id that is not generated adds a skill.
+	// +listType=map
+	// +listMapKey=id
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Skills []KnightCardSkill `json:"skills,omitempty"`
+}
+
+// KnightCardSkill overrides one skill on a knight's agent card.
+type KnightCardSkill struct {
+	// id is the skill id: the skill name a running knight reports, or a
+	// spec.skills category before the knight has run.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	ID string `json:"id"`
+
+	// description replaces the skill description.
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// tags replace the skill tags.
+	// +optional
+	Tags []string `json:"tags,omitempty"`
+
+	// examples replace the skill examples (sample prompts).
+	// +optional
+	Examples []string `json:"examples,omitempty"`
 }
 
 // KnightArsenal configures the git-sync sidecar for the skill arsenal.

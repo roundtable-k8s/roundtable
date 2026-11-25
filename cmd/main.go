@@ -311,6 +311,7 @@ func main() {
 	defer deadLetters.StopAll()
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
+	cardsBucket := natspkg.CardsBucketFromEnv()
 	knightSecurity := knightpkg.PodSecurityFromEnv()
 	egressNetPol := mission.NetPolSettingsFromEnv()
 	// Note: GetEventRecorderFor is deprecated (SA1019); GetEventRecorder returns a different
@@ -321,6 +322,7 @@ func main() {
 		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: see note above
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
+		CardsBucket:    cardsBucket,
 		SandboxEnabled: sandboxEnabled,
 
 		KEDAEnabled:            kedaEnabled,
@@ -369,6 +371,7 @@ func main() {
 		Recorder:    mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:        natsProvider,
 		DeadLetters: deadLetters,
+		CardsBucket: cardsBucket,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)

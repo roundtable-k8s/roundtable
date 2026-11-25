@@ -594,6 +594,63 @@ spec:
                             When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                           type: boolean
                       type: object
+                    card:
+                      description: |-
+                        card overrides fields of the knight's agent card, which the RoundTable
+                        controller generates from this spec and keeps in the cards KV bucket
+                        (key <table>.<knight>, see docs/agent-cards.md).
+                      properties:
+                        description:
+                          description: |-
+                            description is the card description. When unset it is the first
+                            paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                          maxLength: 1024
+                          type: string
+                        skills:
+                          description: |-
+                            skills are merged over the generated skills by id: set fields replace
+                            the generated ones, and an id that is not generated adds a skill.
+                          items:
+                            description: KnightCardSkill overrides one skill on a
+                              knight's agent card.
+                            properties:
+                              description:
+                                description: description replaces the skill description.
+                                maxLength: 1024
+                                type: string
+                              examples:
+                                description: examples replace the skill examples (sample
+                                  prompts).
+                                items:
+                                  type: string
+                                type: array
+                              id:
+                                description: |-
+                                  id is the skill id: the skill name a running knight reports, or a
+                                  spec.skills category before the knight has run.
+                                maxLength: 128
+                                minLength: 1
+                                type: string
+                              tags:
+                                description: tags replace the skill tags.
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                            - id
+                            type: object
+                          maxItems: 64
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - id
+                          x-kubernetes-list-type: map
+                        tags:
+                          description: tags label the knight as a whole (card roundtable.tags).
+                          items:
+                            type: string
+                          maxItems: 32
+                          type: array
+                      type: object
                     concurrency:
                       description: |-
                         concurrency is the maximum number of concurrent tasks the knight can process.
@@ -1756,6 +1813,63 @@ spec:
                               browser enables a headless Chrome sidecar with agent-browser CLI for web automation.
                               When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
                             type: boolean
+                        type: object
+                      card:
+                        description: |-
+                          card overrides fields of the knight's agent card, which the RoundTable
+                          controller generates from this spec and keeps in the cards KV bucket
+                          (key <table>.<knight>, see docs/agent-cards.md).
+                        properties:
+                          description:
+                            description: |-
+                              description is the card description. When unset it is the first
+                              paragraph of spec.prompt.identity, else "<Name>, <domain> knight".
+                            maxLength: 1024
+                            type: string
+                          skills:
+                            description: |-
+                              skills are merged over the generated skills by id: set fields replace
+                              the generated ones, and an id that is not generated adds a skill.
+                            items:
+                              description: KnightCardSkill overrides one skill on
+                                a knight's agent card.
+                              properties:
+                                description:
+                                  description: description replaces the skill description.
+                                  maxLength: 1024
+                                  type: string
+                                examples:
+                                  description: examples replace the skill examples
+                                    (sample prompts).
+                                  items:
+                                    type: string
+                                  type: array
+                                id:
+                                  description: |-
+                                    id is the skill id: the skill name a running knight reports, or a
+                                    spec.skills category before the knight has run.
+                                  maxLength: 128
+                                  minLength: 1
+                                  type: string
+                                tags:
+                                  description: tags replace the skill tags.
+                                  items:
+                                    type: string
+                                  type: array
+                              required:
+                              - id
+                              type: object
+                            maxItems: 64
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - id
+                            x-kubernetes-list-type: map
+                          tags:
+                            description: tags label the knight as a whole (card roundtable.tags).
+                            items:
+                              type: string
+                            maxItems: 32
+                            type: array
                         type: object
                       concurrency:
                         description: |-

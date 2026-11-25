@@ -113,6 +113,9 @@ spec:
             - name: NOTIFY_ALLOWED_URL_PREFIXES
               value: "{{ join "," .Values.notify.allowedURLPrefixes }}"
             {{- end }}
+            # Agent cards KV bucket (#393).
+            - name: CARDS_KV_BUCKET
+              value: {{ (.Values.cards | default dict).bucket | default "roundtable-cards" | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
