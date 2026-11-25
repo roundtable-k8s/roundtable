@@ -14,6 +14,9 @@ helm install roundtable charts/roundtable-operator \
 
 For Flux (`OCIRepository` + `HelmRelease`) and CRD upgrade notes, see [installing Round Table](install.md).
 
+Optional add-ons (KEDA, agent-sandbox, a tools-image registry, gVisor) and the minimal
+install file `values-minimal.yaml` are described in [dependencies.md](dependencies.md).
+
 ## Values Reference
 
 ### Operator

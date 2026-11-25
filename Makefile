@@ -117,7 +117,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	"$(GOLANGCI_LINT)" run --fix
 
 .PHONY: helm-check
-helm-check: helm ## Lint the Helm chart and check examples/chain-pr-pipeline.yaml equals its rendered PR pipeline.
+helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml) and check examples/chain-pr-pipeline.yaml equals its rendered PR pipeline.
 	HELM="$(HELM)" scripts/check-pr-pipeline-example.sh
 	HELM="$(HELM)" scripts/check-dashboard-rbac.sh
 	HELM="$(HELM)" scripts/check-gateway-default.sh
@@ -129,6 +129,7 @@ helm-check: helm ## Lint the Helm chart and check examples/chain-pr-pipeline.yam
 	HELM="$(HELM)" scripts/check-observability-example.sh
 	scripts/check-observability-doc.sh
 	HELM="$(HELM)" scripts/check-isolation-env.sh
+	HELM="$(HELM)" scripts/check-minimal-values.sh
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
