@@ -10,7 +10,9 @@ set -euo pipefail
 
 HELM="${HELM:-helm}"
 chart="$(cd "$(dirname "$0")/.." && pwd)/charts/roundtable-operator"
-render() { "$HELM" template rt "$chart" "$@"; }
+# Pin the release namespace: helm otherwise takes it from the kubeconfig (or
+# "default" in CI), and the Service URL assertions below name it.
+render() { "$HELM" template rt "$chart" --namespace roundtable "$@"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 has() { grep -q -- "$2" <<<"$1" || fail "$3"; }
 lacks() { ! grep -q -- "$2" <<<"$1" || fail "$3"; }
