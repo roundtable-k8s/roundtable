@@ -97,3 +97,73 @@ func TestExamplesDecodeStrictly(t *testing.T) {
 		t.Fatal("no Round Table objects decoded")
 	}
 }
+
+// TestBacklogGroomingRecipe pins the backlog-grooming recipe's policy: its
+// prompts carry the three binding rules, the file step is gated on the
+// survey, and nothing names a real repository.
+func TestBacklogGroomingRecipe(t *testing.T) {
+	dir := "../../examples/recipes/backlog-grooming"
+	data, err := os.ReadFile(filepath.Join(dir, "chain.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chain Chain
+	if err := yaml.UnmarshalStrict(data, &chain); err != nil {
+		t.Fatal(err)
+	}
+	steps := map[string]ChainStep{}
+	for _, s := range chain.Spec.Steps {
+		steps[s.Name] = s
+	}
+	for _, name := range []string{"survey", "file"} {
+		step, ok := steps[name]
+		if !ok {
+			t.Fatalf("step %q missing", name)
+		}
+		for _, rule := range []string{
+			"Never add the label rt:ready",
+			"Never touch an issue labelled humanLabel",
+			"File at most maxIssuesPerRun issues per run",
+		} {
+			if !strings.Contains(step.Task, rule) {
+				t.Errorf("step %s: prompt lacks rule %q", name, rule)
+			}
+		}
+	}
+	if steps["file"].When == "" || !strings.Contains(steps["file"].When, "steps.survey.output") {
+		t.Errorf("file step must be gated with when on survey output, got %q", steps["file"].When)
+	}
+
+	var trig Trigger
+	tdata, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.UnmarshalStrict(tdata, &trig); err != nil {
+		t.Fatal(err)
+	}
+	if trig.Spec.Source.Schedule == nil {
+		t.Error("trigger must use a schedule source")
+	}
+	var in map[string]any
+	if err := yaml.Unmarshal([]byte(trig.Spec.Input), &in); err != nil {
+		t.Fatalf("trigger input is not JSON: %v", err)
+	}
+	for _, k := range []string{"repo", "epicLabel", "issueLabel", "humanLabel", "maxIssuesPerRun", "maxOpenGroomed"} {
+		if _, ok := in[k]; !ok {
+			t.Errorf("trigger input lacks %q", k)
+		}
+	}
+	if in["repo"] != "OWNER/REPO" {
+		t.Errorf("repo must be a placeholder, got %v", in["repo"])
+	}
+	for _, f := range []string{"knight.yaml", "chain.yaml", "trigger.yaml", "README.md"} {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "roundtable-k8s") || strings.Contains(string(b), "dapperdivers") {
+			t.Errorf("%s names a real org", f)
+		}
+	}
+}
