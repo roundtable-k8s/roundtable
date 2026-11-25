@@ -136,6 +136,8 @@ func (k *fakeKnight) answer(js jetstream.JetStream, p natspkg.TaskPayload) {
 	switch {
 	case strings.Contains(p.Task, "fail"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Error: "boom", Model: model}
+	case strings.Contains(p.Task, "quota"):
+		res = natspkg.TaskResult{TaskID: p.TaskID, Error: "usage limit reached", UsageLimited: true, Model: model}
 	case strings.Contains(p.Task, "structured"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "reviewed", Model: model, Verdict: "needs_changes",
 			PRs: []natspkg.PRRef{{Repo: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Action: "updated"}}}
@@ -429,6 +431,23 @@ func TestKnightFailure(t *testing.T) {
 	}
 }
 
+func TestKnightUsageLimited(t *testing.T) {
+	e := newEnv(t, Options{})
+	resp, body := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "over quota"})
+	if resp.StatusCode != http.StatusOK || body["status"] != string(TaskFailed) || body["usageLimited"] != true {
+		t.Fatalf("invoke: got %d %v", resp.StatusCode, body)
+	}
+	resp, got := e.do(t, "GET", "/v1/tasks/"+body["taskId"].(string), testToken, nil)
+	if resp.StatusCode != http.StatusOK || got["status"] != string(TaskFailed) || got["usageLimited"] != true {
+		t.Fatalf("get: got %d %v", resp.StatusCode, got)
+	}
+	// An ordinary failure carries no usageLimited key.
+	_, plain := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "please fail"})
+	if _, ok := plain["usageLimited"]; ok {
+		t.Fatalf("plain failure has usageLimited: %v", plain)
+	}
+}
+
 func TestInvokeErrors(t *testing.T) {
 	e := newEnv(t, Options{})
 	cases := []struct {
@@ -639,6 +658,10 @@ func TestMCP(t *testing.T) {
 	res, _ = call("invoke_knight", map[string]any{"knight": "operator", "task": "fail now"})
 	if !res.IsError || !strings.Contains(text(res), "boom") {
 		t.Fatalf("failed task: %q", text(res))
+	}
+	res, _ = call("invoke_knight", map[string]any{"knight": "operator", "task": "over quota"})
+	if !res.IsError || !strings.HasPrefix(text(res), "usage limited: ") {
+		t.Fatalf("usage-limited task: %q", text(res))
 	}
 	res, _ = call("invoke_knight", map[string]any{"knight": "nobody", "task": "x"})
 	if !res.IsError || !strings.Contains(text(res), "not found") {

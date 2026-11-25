@@ -332,8 +332,12 @@ func taskResult(rec *TaskRecord) *mcp.CallToolResult {
 	case TaskSucceeded:
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: rec.Output}}}
 	case TaskFailed:
+		prefix := ""
+		if rec.UsageLimited {
+			prefix = "usage limited: "
+		}
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
-			Text: "knight " + rec.Knight + " failed task " + rec.TaskID + ": " + rec.Error}}}
+			Text: prefix + "knight " + rec.Knight + " failed task " + rec.TaskID + ": " + rec.Error}}}
 	default:
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
 			Text: "Task " + rec.TaskID + " is still running on knight " + rec.Knight +

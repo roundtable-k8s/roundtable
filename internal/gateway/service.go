@@ -365,6 +365,7 @@ func (s *Service) complete(ctx context.Context, rec *TaskRecord, data []byte) {
 		default:
 			rec.Status = TaskSucceeded
 		}
+		rec.UsageLimited = res.UsageLimited && rec.Status == TaskFailed
 	}
 	done := s.now().UTC()
 	rec.CompletedAt = &done

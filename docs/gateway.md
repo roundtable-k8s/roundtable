@@ -134,7 +134,10 @@ Request body fields:
 Responses:
 
 - **200**: the task finished. `status` is `succeeded` or `failed`. A failed task
-  is still a 200; read `status` and `error`.
+  is still a 200; read `status` and `error`. When the knight refused because
+  its plan quota is used up, the record also has `"usageLimited": true`
+  (absent on other failures): back off instead of retrying. The gateway does
+  not retry or defer the task itself.
 - **202**: still running when the wait ended. The `Location` header is
   `/v1/tasks/{taskId}`.
 - **400**: bad request, bad model, or a namespace that isn't allowed.
@@ -161,6 +164,9 @@ Both 200 and 202 return the task record:
   "resultsStream": "rt_dev_results"
 }
 ```
+
+A quota refusal is `"status": "failed"` with `"usageLimited": true` and the
+knight's message in `error`.
 
 Empty output counts as a failure, as it does in the task contract.
 
@@ -566,7 +572,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | Tool | Input | Returns |
 |------|-------|---------|
 | `list_knights` | `namespace?` | `{knights: [...]}` |
-| `invoke_knight` | `knight`, `task`, `runId?`, `model?`, `timeoutSeconds?`, `namespace?` | Text content is the knight's output. Structured content is the task record. A failed task is returned as a tool error. A pending task returns a note to call `get_task`. |
+| `invoke_knight` | `knight`, `task`, `runId?`, `model?`, `timeoutSeconds?`, `namespace?` | Text content is the knight's output. Structured content is the task record. A failed task is returned as a tool error; a plan-quota refusal starts with `usage limited:`. A pending task returns a note to call `get_task`. |
 | `get_task` | `taskId` | The task record (same text/error conventions) |
 | `list_tasks` | `knight?`, `runId?`, `status?`, `limit?` | `{tasks: [...]}` |
 | `list_dead_letters` | `knight?`, `reason?`, `state?`, `limit?` | `{deadLetters: [...]}` |
