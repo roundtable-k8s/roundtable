@@ -141,3 +141,69 @@ operator reads from TABLE_PLANNER_DEFAULTS.
 {{- with $p.taskTimeoutSeconds }}{{ $_ := set $d "taskTimeoutSeconds" (int .) }}{{ end -}}
 {{- toJson $d -}}
 {{- end }}
+
+{{/*
+Pod-spec scheduling fields shared by every component: nodeSelector,
+affinity, tolerations, priorityClassName and imagePullSecrets. The component's
+own nodeSelector/affinity/tolerations, when non-empty, replace the global
+value. Call with (dict "root" . "component" <values block>) and indent the
+result to the pod spec.
+*/}}
+{{- define "roundtable-operator.podScheduling" -}}
+{{- $v := .root.Values -}}
+{{- $c := .component | default dict -}}
+{{- with (or $c.nodeSelector $v.nodeSelector) }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with (or $c.affinity $v.affinity) }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with (or $c.tolerations $v.tolerations) }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $v.priorityClassName }}
+priorityClassName: {{ . | quote }}
+{{- end }}
+{{- with $v.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+PodDisruptionBudget for a replicated component. Call with
+(dict "root" . "name" <deployment name> "component" <values block>
+"app" <app.kubernetes.io/name> "label" <component label>). Renders only when
+podDisruptionBudget.enabled and the component runs more than one replica.
+*/}}
+{{- define "roundtable-operator.pdb" -}}
+{{- $v := .root.Values -}}
+{{- if and $v.podDisruptionBudget.enabled (gt (int .component.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .name }}
+  namespace: {{ .root.Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: {{ .label }}
+spec:
+  {{- $maxu := $v.podDisruptionBudget.maxUnavailable }}
+  {{- $mina := $v.podDisruptionBudget.minAvailable }}
+  {{- if not (or (kindIs "invalid" $maxu) (eq (toString $maxu) "")) }}
+  maxUnavailable: {{ $maxu }}
+  {{- else if not (or (kindIs "invalid" $mina) (eq (toString $mina) "")) }}
+  minAvailable: {{ $mina }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .app }}
+      app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- end }}
+{{- end }}

@@ -2,7 +2,8 @@
 # The header value lives in a Secret in the knight's namespace; the operator adds
 # it to the pod as env var MCP_VAULT_AUTHORIZATION (valueFrom: secretKeyRef) and
 # writes only the placeholder "${MCP_VAULT_AUTHORIZATION}" into MCP_SERVERS_JSON.
-# Use one token per MCP server, and put the server's host on spec.egress.
+# Use one token per MCP server. The operator allows the server's URL in the knight's
+# egress policy by itself (status.derivedEgress), so it is not listed under spec.egress.
 # Rotate: update the Secret, then restart the knight
 # (kubectl rollout restart deployment/vault-reader -n roundtable).
 apiVersion: v1
@@ -41,6 +42,3 @@ spec:
             secretKeyRef:
               name: vault-reader-mcp
               key: authorization
-  egress:
-    allowedHosts:
-      - "vault-mcp.example.com"

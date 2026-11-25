@@ -1,0 +1,94 @@
+# backlog-grooming: step 1 surveys a repository's open epics and picks the
+# work to file, step 2 files it. Step 2 only runs when step 1 found work.
+# Started by trigger.yaml, whose input is a JSON object (repo, labels, caps).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: backlog-grooming
+  namespace: roundtable
+spec:
+  description: "Groom a repository's backlog: survey open epics, then file loop-ready sub-issues"
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 1800
+  input: '{"repo": "OWNER/REPO", "epicLabel": "epic", "issueLabel": "groomed", "humanLabel": "needs-human", "maxIssuesPerRun": 3, "maxOpenGroomed": 10}'
+
+  steps:
+    - name: survey
+      knightRef: {name: groomer}
+      timeoutSeconds: 900
+      task: |
+        You are grooming a GitHub backlog. The settings (JSON):
+
+        {{ .Input }}
+
+        Use `repo`, `epicLabel`, `issueLabel`, `humanLabel`,
+        `maxIssuesPerRun` and `maxOpenGroomed` from it. This step only reads;
+        it files nothing.
+
+        Rules, all of them binding:
+        - Never add the label rt:ready.
+        - Never touch an issue labelled humanLabel: do not read it for work,
+          comment on it, edit it or file under it.
+        - File at most maxIssuesPerRun issues per run.
+
+        Do this with the gh CLI:
+        1. Count the open issues labelled issueLabel
+           (`gh issue list --repo <repo> --label <issueLabel> --state open`).
+           If the count is maxOpenGroomed or more, stop and end your reply
+           with the single line `CANDIDATES: none`.
+        2. List the open issues labelled epicLabel. Skip any epic, and any
+           sub-issue, labelled humanLabel or rt:ready.
+        3. For each remaining epic read its body (the task list) and the open
+           issues already linked to it (match by title and by the text
+           `Part of #<epic>` in the body). Work that already has an open
+           issue is not a candidate.
+        4. Choose at most maxIssuesPerRun candidates, and fewer if the cap
+           of maxOpenGroomed open groomed issues would be exceeded. Each must
+           be one pull request in size and name the real files it touches
+           (read the repository to check; `gh api` and `gh search code` work).
+
+        End your reply with either the single line `CANDIDATES: none`, or
+        the line `CANDIDATES: <n>` followed by one block per candidate: the
+        epic number, a proposed title, and the files and work involved.
+
+    - name: file
+      dependsOn: [survey]
+      when: '!steps.survey.output.contains("CANDIDATES: none")'
+      knightRef: {name: groomer}
+      timeoutSeconds: 900
+      task: |
+        Settings (JSON):
+
+        {{ .Input }}
+
+        Candidates found by the survey:
+        {{ .Steps.survey.Output }}
+
+        File one GitHub issue per candidate with
+        `gh issue create --repo <repo> --title ... --label <issueLabel> --body-file ...`.
+
+        Rules, all of them binding:
+        - Never add the label rt:ready. The only label an issue carries is
+          issueLabel.
+        - Never touch an issue labelled humanLabel.
+        - File at most maxIssuesPerRun issues per run.
+        - Never edit, comment on or close an existing issue.
+        - Before filing each one, search the open issues once more for the
+          same title or the same `Part of #<epic>` work; if it exists, skip it.
+        - If issueLabel does not exist in the repository, create it first
+          (`gh label create`).
+
+        Every issue body uses these sections, in this order:
+
+        Part of #<epic>
+
+        ## Goal
+        ## Context
+        (real file paths, existing functions and docs it relies on)
+        ## Tasks
+        (a checklist, one pull request of work)
+        ## Acceptance criteria
+        ## Out of scope
+
+        End your reply with one line per issue filed, `#<number> <title>`,
+        and nothing else. If you filed nothing, reply `none filed`.

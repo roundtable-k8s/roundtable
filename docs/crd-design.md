@@ -677,6 +677,11 @@ user's server wins). On any other runtime nothing is rendered and the Knight
 gets `Degraded=True` with reason `MCPServersUnsupported`. No
 `toolFilter.include`.
 
+Under default-deny egress the operator allows each server's URL itself (an
+in-cluster Service URL as an `allowedServices` entry, any other host as an
+`allowedHosts` entry on the URL's port), so it need not be listed again under
+`spec.egress`; see [egress.md](egress.md#mcp-servers-listing-the-server-is-enough).
+
 ### Auth headers: `headersFrom`
 
 A server that needs an auth header takes it from a Secret key in the knight's
@@ -685,7 +690,7 @@ namespace (credentials stay in the pod, as narrow as possible; #359):
 ```yaml
 mcpServers:
   - name: vault
-    url: https://vault-mcp.example.com/mcp   # host on spec.egress.allowedHosts
+    url: https://vault-mcp.example.com/mcp   # the egress allowance is derived from the URL
     headersFrom:
       - name: Authorization            # HTTP header name, unique per server
         valueFrom:

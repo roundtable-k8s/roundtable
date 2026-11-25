@@ -27,6 +27,13 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 | `image.repository` | string | `ghcr.io/roundtable-k8s/roundtable` | Operator image |
 | `image.tag` | string | `latest` | Operator image tag |
 | `image.pullPolicy` | string | `Always` | Image pull policy |
+| `nodeSelector` / `affinity` / `tolerations` | map / object / list | `{}` / `{}` / `[]` | Scheduling for the operator, gateway, dashboard and collector pods. `gateway.*`, `dashboard.*` and `telemetry.collector.*` take their own and, when non-empty, replace the global value |
+| `priorityClassName` | string | `""` | `priorityClassName` of the operator, gateway, dashboard and collector pods |
+| `imagePullSecrets` | list | `[]` | Pull secrets (`[{name: regcred}]`) for the operator, gateway, dashboard and collector pods |
+| `podAnnotations` / `podLabels` | map | `{}` | Extra annotations/labels on the operator, gateway and dashboard pods |
+| `podDisruptionBudget.enabled` | bool | `false` | PodDisruptionBudget for the gateway and dashboard, each only when its `replicas` is above 1. The operator has none |
+| `podDisruptionBudget.minAvailable` | int/string | `1` | `minAvailable` (ignored when `maxUnavailable` is set) |
+| `podDisruptionBudget.maxUnavailable` | int/string | `""` | `maxUnavailable` |
 | `leaderElect` | bool | `true` | Enable leader election for HA |
 | `leaderElection.enabled` | bool | `true` | Set `false` to turn leader election off. Requires `replicaCount: 1` (the chart fails otherwise) and switches the Deployment to `Recreate`, because a rolling update would otherwise run a second operator concurrently with the old one. Trade-off: updates have a short gap with no operator running |
 | `leaderElection.leaseDuration` | duration | `60s` | How long a non-leader waits before taking over an unrenewed lease |
@@ -183,9 +190,9 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 |-----|------|---------|-------------|
 | `dashboard.enabled` | bool | `true` | Deploy the Round Table dashboard |
 | `dashboard.replicas` | int | `1` | Dashboard replicas |
-| `dashboard.nodeSelector` | map | `{}` | Dashboard pod `nodeSelector` |
-| `dashboard.affinity` | object | `{}` | Dashboard pod `affinity` |
-| `dashboard.tolerations` | list | `[]` | Dashboard pod `tolerations` |
+| `dashboard.nodeSelector` | map | `{}` | Dashboard pod `nodeSelector` (replaces the global value when set) |
+| `dashboard.affinity` | object | `{}` | Dashboard pod `affinity` (replaces the global value when set) |
+| `dashboard.tolerations` | list | `[]` | Dashboard pod `tolerations` (replaces the global value when set) |
 | `dashboard.ingress.enabled` | bool | `false` | Enable ingress for dashboard |
 | `dashboard.ingress.className` | string | `""` | Ingress class name |
 | `dashboard.ingress.host` | string | `""` | Dashboard hostname |
@@ -209,6 +216,7 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 |-----|------|---------|-------------|
 | `gateway.enabled` | bool | `true` | Deploy the invoke gateway |
 | `gateway.replicas` | int | `1` | Gateway replicas (stateless; task records live in NATS KV) |
+| `gateway.nodeSelector` / `.affinity` / `.tolerations` | map / object / list | `{}` / `{}` / `[]` | Gateway pod scheduling; each replaces the global value when set |
 | `gateway.image.repository` / `.tag` | string | `""` | Image; defaults to the operator image (`/gateway` binary) |
 | `gateway.natsURL` | string | `nats://nats.database.svc:4222` | NATS server URL |
 | `gateway.namespace` | string | `""` | Default namespace for knights (empty = release namespace) |
@@ -469,6 +477,7 @@ in #385.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `telemetry.collector.enabled` | bool | `false` | Render the collector Deployment, Service and ConfigMap |
+| `telemetry.collector.nodeSelector` / `.affinity` / `.tolerations` | map / object / list | `{}` / `{}` / `[]` | Collector pod scheduling; each replaces the global value when set |
 | `telemetry.collector.image.repository` / `.tag` | string | `otel/opentelemetry-collector-contrib` / pinned release | Must be a contrib build (`redactionprocessor`) |
 | `telemetry.collector.resources` | object | `{}` | Container resources |
 | `telemetry.collector.redaction.enabled` | bool | `true` | Add the `redaction` processor to every pipeline |

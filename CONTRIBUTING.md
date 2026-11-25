@@ -84,6 +84,7 @@ helm upgrade roundtable charts/roundtable-operator \
 - Check [open issues](https://github.com/roundtable-k8s/roundtable/issues) — look for `good first issue` labels
 - Bug fixes are always welcome
 - Feature ideas? Open an issue first to discuss
+- Proposing a new built-in capability? Say in the issue which existing component you considered and why it does not fit (see [principles](docs/principles.md#9-dont-rebuild-the-wheel))
 
 ## Code Style
 

@@ -22,6 +22,13 @@ spec:
     metadata:
       labels:
         {{- include "roundtable-operator.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "roundtable-operator.serviceAccountName" . }}
       securityContext:
@@ -30,17 +37,8 @@ spec:
           type: RuntimeDefault
       automountServiceAccountToken: true
       terminationGracePeriodSeconds: 10
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" dict) }}
+      {{- . | nindent 6 }}
       {{- end }}
       containers:
         - name: manager
