@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -668,9 +669,17 @@ func (r *KnightReconciler) resolveEgressServices(ctx context.Context, k *aiv1alp
 			return nil, nil, err
 		}
 		if hostNet {
-			peer.HostNetwork = true
-			peer.Addresses = addrs
-			peer.Ports = hostNetworkPorts(svc, ref.Ports, slicePorts)
+			if ports := hostNetworkPorts(svc, ref.Ports, slicePorts); len(ports) > 0 {
+				peer.HostNetwork = true
+				peer.Addresses = addrs
+				peer.Ports = ports
+			} else {
+				// A host-network rule with no ports would allow every port on
+				// the nodes: keep the pod selector rule instead.
+				missing = append(missing, fmt.Sprintf("allowed Service %s/%s uses the host network but its "+
+					"target ports could not be resolved to numbers; its egress rule stays a pod selector rule "+
+					"and will not reach host-network pods", ref.Namespace, ref.Name))
+			}
 		}
 		peers = append(peers, peer)
 	}
@@ -704,7 +713,7 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 			if ep.TargetRef == nil || ep.TargetRef.Kind != "Pod" {
 				return false, nil, nil, nil
 			}
-			key := types.NamespacedName{Namespace: cmpOr(ep.TargetRef.Namespace, svc.Namespace), Name: ep.TargetRef.Name}
+			key := types.NamespacedName{Namespace: cmp.Or(ep.TargetRef.Namespace, svc.Namespace), Name: ep.TargetRef.Name}
 			isHost, seen := podHost[key]
 			if !seen {
 				pod := &corev1.Pod{}
@@ -731,13 +740,6 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 	}
 	slices.Sort(addrs)
 	return true, slices.Compact(addrs), ports, nil
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // hostNetworkPorts returns the numeric ports to allow on the nodes for a

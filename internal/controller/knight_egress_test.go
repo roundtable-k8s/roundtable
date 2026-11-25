@@ -555,8 +555,43 @@ func TestResolveEgressHostNetwork(t *testing.T) {
 	assert.False(t, resolve(svc, pod("a", true), pod("b", false), slice("a", "b")).HostNetwork)
 	assert.False(t, resolve(svc).HostNetwork)
 
-	// The Service moves back to a pod-network pod: re-rendered as toEndpoints.
+	// A pod-network pod resolves to the pod selector rule with the named port kept.
 	assert.Equal(t, intstr.FromString("web"), resolve(svc, pod("b", false), slice("b")).Ports[0].Port)
+}
+
+func TestResolveEgressHostNetworkUnresolvedPort(t *testing.T) {
+	sch := k8sruntime.NewScheme()
+	require.NoError(t, scheme.AddToScheme(sch))
+	require.NoError(t, aiv1alpha1.AddToScheme(sch))
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "hass"},
+			Ports:    []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromString("web")}},
+		},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "a"}, Spec: corev1.PodSpec{HostNetwork: true}}
+	// Host-network pod without container ports: the slice has no port for "http".
+	es := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass-x", Labels: map[string]string{discoveryv1.LabelServiceName: "hass"}},
+		Endpoints: []discoveryv1.Endpoint{{
+			Addresses:  []string{"10.0.0.1"},
+			Conditions: discoveryv1.EndpointConditions{Ready: new(true)},
+			TargetRef:  &corev1.ObjectReference{Kind: "Pod", Namespace: "ha", Name: "a"},
+		}},
+	}
+	k := testEgressKnight("")
+	k.Spec.Egress.AllowedServices = []aiv1alpha1.EgressService{{Name: "hass", Namespace: "ha", Ports: []int32{80}}}
+	r := &KnightReconciler{Client: fake.NewClientBuilder().WithScheme(sch).WithObjects(svc, pod, es).Build()}
+	peers, missing, err := r.resolveEgressServices(context.Background(), k)
+	require.NoError(t, err)
+	require.Len(t, peers, 1)
+	// Never a host-network rule without ports: fall back to the pod selector rule.
+	assert.False(t, peers[0].HostNetwork)
+	assert.Empty(t, peers[0].Addresses)
+	assert.Equal(t, []EgressServicePort{{Port: intstr.FromString("web"), Protocol: corev1.ProtocolTCP}}, peers[0].Ports)
+	require.Len(t, missing, 1)
+	assert.Contains(t, missing[0], "ha/hass")
 }
 
 func TestEgressEndpointSliceChangedPredicate(t *testing.T) {
