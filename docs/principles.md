@@ -76,7 +76,7 @@ Anything described here as **target** is not on `main` yet. The linked issue tra
 
 **Target.** OpenTelemetry across the whole stack: [#153](https://github.com/roundtable-k8s/roundtable/issues/153).
 
-**See:** [roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui), [task activity events](design/task-activity-events.md), [`pkg/metrics`](../pkg/metrics).
+**See:** [roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui), [task activity events](design/task-activity-events.md), [telemetry conventions](design/telemetry-conventions.md), [`pkg/metrics`](../pkg/metrics).
 
 ## Three rungs of work
 

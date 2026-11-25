@@ -28,6 +28,7 @@ The operator injects via the downward API; knights read these instead of
 | `POD_NAME` | `metadata.name` | `pod` |
 | `POD_NAMESPACE` | `metadata.namespace` | (not in events) |
 | `NODE_NAME` | `spec.nodeName` | `node` |
+| `ROUNDTABLE_TABLE` | operator, from the Knight's table label | `table` |
 
 User-defined `spec.env` is applied after these and can override them.
 
@@ -39,6 +40,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `type` | string | See types below. |
 | `ts` | string | RFC 3339 UTC with milliseconds. |
 | `knight` | string | `KNIGHT_NAME`. |
+| `table` | string | Optional (additive, stays `v: 1`). `ROUNDTABLE_TABLE`; `none` when the knight has no table. |
 | `pod` | string | `POD_NAME`. |
 | `node` | string | `NODE_NAME`; omitted if unset. |
 | `taskId` | string | Task id (`roundtable.task_id`). |
@@ -48,7 +50,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `seq` | int | Per-task, starts at 1, +1 per event published (including heartbeats). A gap means loss. |
 | `truncated` | bool | `true` if any text field was cut to its limit (omitted otherwise). |
 
-Names follow the OTel attribute names from #154. When trace context lands
+Names follow the attribute names in [telemetry conventions](telemetry-conventions.md) (#154). When trace context lands
 (#155) `traceId` is added as an optional field (additive).
 
 ## Types
@@ -83,7 +85,7 @@ secret mounts. Run every `argsSummary`, `outputPreview` and `preview` through th
 shared secret patterns (pi-knight `redactSecrets`; claude-knight shares the same
 pattern list). Previews can be switched off per knight with
 `activityContent: none|preview` (default `preview`; follows the content-capture
-policy in #154). With `none`, previews and `argsSummary` are omitted; tool names,
+policy in [telemetry conventions](telemetry-conventions.md#content-capture)). With `none`, previews and `argsSummary` are omitted; tool names,
 durations and counters are still sent. The CRD field (`spec.telemetry`) is a
 follow-up; until it exists knights default to `preview`.
 
