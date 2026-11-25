@@ -70,7 +70,7 @@ else
   CHART_ARGS=()
 fi
 echo "==> Round Table operator ($CHART ${CHART_VERSION:+$CHART_VERSION})"
-helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART" "${CHART_ARGS[@]}" \
+helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART" ${CHART_ARGS[@]+"${CHART_ARGS[@]}"} \
   --namespace "$NAMESPACE" --create-namespace \
   --set-string isolation.runtimeClassName="" \
   --set isolation.egress.mode=off \
