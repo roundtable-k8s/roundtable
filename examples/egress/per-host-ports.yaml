@@ -1,0 +1,16 @@
+# Most hosts on 443 only; one API listens on 8443 and another on 443 and 9443.
+# The string entries use allowedPorts (443); object entries use only their ports.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: per-host-ports
+spec:
+  skills: []
+  egress:
+    allowedHosts:
+      - api.github.com
+      - "*.githubusercontent.com"
+      - host: api.example.com
+        ports: [8443]
+      - host: metrics.example.com
+        ports: [443, 9443]

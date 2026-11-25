@@ -145,7 +145,7 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 
 	Describe("egress", func() {
 		tableEgress := func() *aiv1alpha1.KnightEgress {
-			return &aiv1alpha1.KnightEgress{AllowedHosts: []string{"github.com", "*.githubusercontent.com"}, AllowedPorts: []int32{443}}
+			return &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("github.com", "*.githubusercontent.com"), AllowedPorts: []int32{443}}
 		}
 		withEgress := func() *aiv1alpha1.RoundTable {
 			rt := table()
@@ -178,7 +178,7 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 		})
 
 		It("keeps the knight's own egress without merging", func() {
-			own := &aiv1alpha1.KnightEgress{AllowedHosts: []string{"api.anthropic.com"}}
+			own := &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("api.anthropic.com")}
 			k := newKnight(aiv1alpha1.LabelRoundTable, func(s *aiv1alpha1.KnightSpec) { s.Egress = own.DeepCopy() })
 			ApplyTableDefaults(ctx, reader(withEgress()), k)
 			Expect(k.Spec.Egress).To(Equal(own))
@@ -211,8 +211,8 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 			rt := withEgress()
 			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
 			ApplyTableDefaults(ctx, reader(rt), k)
-			k.Spec.Egress.AllowedHosts[0] = "changed.example"
-			Expect(rt.Spec.Defaults.Egress.AllowedHosts[0]).To(Equal("github.com"))
+			k.Spec.Egress.AllowedHosts[0].Host = "changed.example"
+			Expect(rt.Spec.Defaults.Egress.AllowedHosts[0].Host).To(Equal("github.com"))
 		})
 
 		It("leaves egress unset without a table default", func() {

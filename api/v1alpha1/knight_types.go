@@ -17,6 +17,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"regexp"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -614,14 +619,14 @@ func (i *KnightIsolation) EgressOptedOut() bool {
 type KnightEgress struct {
 	// allowedHosts are the hostnames the knight may reach, each an exact host
 	// ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-	// matches subdomains of github.com but not github.com itself). Empty
-	// allows only DNS and NATS.
-	// +kubebuilder:validation:MaxItems=64
-	// +kubebuilder:validation:items:MaxLength=253
-	// +kubebuilder:validation:items:Pattern=`^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	// +listType=set
+	// matches subdomains of github.com but not github.com itself). An entry
+	// is either a string (allowed on allowedPorts) or an object
+	// {host, ports} (allowed on its own ports only). Empty allows only DNS
+	// and NATS.
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:XPreserveUnknownFields
 	// +optional
-	AllowedHosts []string `json:"allowedHosts,omitempty"`
+	AllowedHosts []EgressHost `json:"allowedHosts,omitempty"`
 
 	// allowedPorts are the TCP ports allowed to the allowed hosts.
 	// +kubebuilder:default={443}
@@ -642,6 +647,70 @@ type KnightEgress struct {
 	// +listType=atomic
 	// +optional
 	AllowedServices []EgressService `json:"allowedServices,omitempty"`
+}
+
+// EgressHost is an allowedHosts entry: a host name, optionally with its own
+// ports. In JSON it is a string (the host, on the allowed ports) or an object
+// {host, ports}.
+//
+// The CRD schema for allowedHosts is open because a schema cannot express a
+// string-or-object union (and CEL rules need a typed schema), so the operator
+// validates the entries when it renders the policy (ValidateEgressHosts) and
+// reports a bad one on the EgressRestricted condition.
+type EgressHost struct {
+	// Host is an exact host name or a "*." wildcard prefix.
+	Host string `json:"host"`
+	// Ports are the TCP ports allowed to Host. Empty uses the knight's
+	// allowedPorts.
+	Ports []int32 `json:"ports,omitempty"`
+}
+
+// MarshalJSON writes an entry without ports as a plain string, so the string
+// form round-trips unchanged.
+func (h EgressHost) MarshalJSON() ([]byte, error) {
+	if len(h.Ports) == 0 {
+		return json.Marshal(h.Host)
+	}
+	type plain EgressHost
+	return json.Marshal(plain(h))
+}
+
+// UnmarshalJSON accepts a string or a {host, ports} object.
+func (h *EgressHost) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*h = EgressHost{Host: s}
+		return nil
+	}
+	type plain EgressHost
+	var p plain
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		return fmt.Errorf("allowedHosts entry must be a string or an object with host and ports: %w", err)
+	}
+	*h = EgressHost(p)
+	return nil
+}
+
+var egressHostPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// ValidateEgressHost checks an allowedHosts entry the way the CRD schema
+// checks a plain host: a lower-case host name (optionally "*." prefixed) of
+// at most 253 characters, and at most 16 ports in 1-65535.
+func ValidateEgressHost(h EgressHost) error {
+	if len(h.Host) == 0 || len(h.Host) > 253 || !egressHostPattern.MatchString(h.Host) {
+		return fmt.Errorf("allowedHosts entry %q is not a valid host name", h.Host)
+	}
+	if len(h.Ports) > 16 {
+		return fmt.Errorf("allowedHosts entry %q has more than 16 ports", h.Host)
+	}
+	for _, p := range h.Ports {
+		if p < 1 || p > 65535 {
+			return fmt.Errorf("allowedHosts entry %q has port %d outside 1-65535", h.Host, p)
+		}
+	}
+	return nil
 }
 
 // EgressService is an in-cluster Service a knight may reach on the listed ports.
@@ -1039,4 +1108,28 @@ type KnightMCPToolFilter struct {
 	// the Claude Code harness exposes a bound server whole).
 	// +optional
 	Exclude []string `json:"exclude,omitempty"`
+}
+
+// ValidateEgressHosts checks the allowedHosts list: at most 64 entries, each
+// valid per ValidateEgressHost.
+func ValidateEgressHosts(hosts []EgressHost) error {
+	if len(hosts) > 64 {
+		return fmt.Errorf("allowedHosts has %d entries, at most 64 are allowed", len(hosts))
+	}
+	for _, h := range hosts {
+		if err := ValidateEgressHost(h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EgressHostNames returns plain allowedHosts entries (no ports of their own)
+// for names.
+func EgressHostNames(names ...string) []EgressHost {
+	out := make([]EgressHost, 0, len(names))
+	for _, n := range names {
+		out = append(out, EgressHost{Host: n})
+	}
+	return out
 }

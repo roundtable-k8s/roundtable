@@ -110,7 +110,7 @@ func TestApplyIsolationDefaults(t *testing.T) {
 		k := isolationTestKnight()
 		k.Spec.Isolation = &aiv1alpha1.KnightIsolation{Egress: "unrestricted", Reason: "crawls arbitrary sites"}
 		k, rc := effective(t, k, &aiv1alpha1.RoundTableDefaults{
-			Egress: &aiv1alpha1.KnightEgress{AllowedHosts: []string{"a.example.com"}},
+			Egress: &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("a.example.com")},
 		}, def)
 		assert.Nil(t, k.Spec.Egress)
 		assert.Equal(t, str("gvisor"), rc, "runtime stays isolated")
@@ -118,21 +118,21 @@ func TestApplyIsolationDefaults(t *testing.T) {
 	t.Run("the knight's values beat the table and the operator default", func(t *testing.T) {
 		k := isolationTestKnight()
 		k.Spec.RuntimeClassName = str("kata")
-		k.Spec.Egress = &aiv1alpha1.KnightEgress{AllowedHosts: []string{"k.example.com"}}
+		k.Spec.Egress = &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("k.example.com")}
 		k, rc := effective(t, k, &aiv1alpha1.RoundTableDefaults{
 			RuntimeClassName: str("other"),
-			Egress:           &aiv1alpha1.KnightEgress{AllowedHosts: []string{"t.example.com"}},
+			Egress:           &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("t.example.com")},
 		}, def)
 		assert.Equal(t, str("kata"), rc)
-		assert.Equal(t, []string{"k.example.com"}, k.Spec.Egress.AllowedHosts)
+		assert.Equal(t, aiv1alpha1.EgressHostNames("k.example.com"), k.Spec.Egress.AllowedHosts)
 	})
 	t.Run("the table's values beat the operator default", func(t *testing.T) {
 		k, rc := effective(t, isolationTestKnight(), &aiv1alpha1.RoundTableDefaults{
 			RuntimeClassName: str("kata"),
-			Egress:           &aiv1alpha1.KnightEgress{AllowedHosts: []string{"t.example.com"}},
+			Egress:           &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("t.example.com")},
 		}, def)
 		assert.Equal(t, str("kata"), rc)
-		assert.Equal(t, []string{"t.example.com"}, k.Spec.Egress.AllowedHosts)
+		assert.Equal(t, aiv1alpha1.EgressHostNames("t.example.com"), k.Spec.Egress.AllowedHosts)
 	})
 	t.Run("a table runtimeClassName of empty string keeps the cluster default", func(t *testing.T) {
 		_, rc := effective(t, isolationTestKnight(), &aiv1alpha1.RoundTableDefaults{RuntimeClassName: str("")}, def)

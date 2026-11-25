@@ -154,15 +154,11 @@ spec:
                         description: |-
                           allowedHosts are the hostnames the knight may reach, each an exact host
                           ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                          matches subdomains of github.com but not github.com itself). Empty
-                          allows only DNS and NATS.
-                        items:
-                          maxLength: 253
-                          pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                          type: string
-                        maxItems: 64
-                        type: array
-                        x-kubernetes-list-type: set
+                          matches subdomains of github.com but not github.com itself). An entry
+                          is either a string (allowed on allowedPorts) or an object
+                          {host, ports} (allowed on its own ports only). Empty allows only DNS
+                          and NATS.
+                        x-kubernetes-preserve-unknown-fields: true
                       allowedPorts:
                         default:
                         - 443
@@ -902,15 +898,11 @@ spec:
                           description: |-
                             allowedHosts are the hostnames the knight may reach, each an exact host
                             ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                            matches subdomains of github.com but not github.com itself). Empty
-                            allows only DNS and NATS.
-                          items:
-                            maxLength: 253
-                            pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                            type: string
-                          maxItems: 64
-                          type: array
-                          x-kubernetes-list-type: set
+                            matches subdomains of github.com but not github.com itself). An entry
+                            is either a string (allowed on allowedPorts) or an object
+                            {host, ports} (allowed on its own ports only). Empty allows only DNS
+                            and NATS.
+                          x-kubernetes-preserve-unknown-fields: true
                         allowedPorts:
                           default:
                           - 443
