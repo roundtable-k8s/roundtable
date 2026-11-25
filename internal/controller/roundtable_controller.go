@@ -40,6 +40,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	"github.com/roundtable-k8s/roundtable/internal/github"
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -592,9 +593,7 @@ func (r *RoundTableReconciler) createWarmKnight(ctx context.Context, rt *aiv1alp
 	}
 
 	// Inherit the table's GitHub token Secret unless the template sets one
-	if (spec.GitHub == nil || spec.GitHub.TokenSecretRef == nil) && rt.Spec.GitHub != nil {
-		spec.GitHub = rt.Spec.GitHub.DeepCopy()
-	}
+	github.InheritGitHub(spec, rt)
 
 	// Set domain to warm-pool if not specified in template
 	if spec.Domain == "" {

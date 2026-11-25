@@ -52,6 +52,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/controller"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	"github.com/roundtable-k8s/roundtable/internal/github"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/mission"
 	notifypkg "github.com/roundtable-k8s/roundtable/internal/notify"
@@ -394,20 +395,21 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
 	}
+	githubFactory := github.NewClientFactory(githubAPIURL)
 	// Issue pickup (#224) only acts on RoundTables that set spec.issuePickup.
 	if err := (&controller.IssuePickupReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		Recorder:     mgr.GetEventRecorderFor("issuepickup-controller"), //nolint:staticcheck // SA1019: see note above
-		GitHubAPIURL: githubAPIURL,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("issuepickup-controller"), //nolint:staticcheck // SA1019: see note above
+		GitHub:   githubFactory,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "IssuePickup")
 		os.Exit(1)
 	}
 	if err := (&controller.PRFeedbackReconciler{
-		Client:        mgr.GetClient(),
-		Recorder:      mgr.GetEventRecorderFor("prfeedback-controller"), //nolint:staticcheck // SA1019: see note above
-		GitHubBaseURL: githubAPIURL,
+		Client:   mgr.GetClient(),
+		Recorder: mgr.GetEventRecorderFor("prfeedback-controller"), //nolint:staticcheck // SA1019: see note above
+		GitHub:   githubFactory,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "PRFeedback")
 		os.Exit(1)

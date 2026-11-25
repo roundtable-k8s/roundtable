@@ -67,8 +67,8 @@ type IssuePickupReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// GitHubAPIURL is the GitHub REST endpoint; "" means api.github.com.
-	GitHubAPIURL string
+	// GitHub builds GitHub clients; nil means api.github.com.
+	GitHub *github.ClientFactory
 
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
@@ -179,12 +179,17 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		res.fail("%v", err)
 		return res
 	}
-	token, err := r.githubToken(ctx, rt)
+	ref := github.ResolveTokenRef(github.TableTokenRef(rt))
+	if ref == nil {
+		res.fail("issuePickup needs spec.github.tokenSecretRef")
+		return res
+	}
+	token, err := github.ReadToken(ctx, r.Client, rt.Namespace, ref)
 	if err != nil {
 		res.fail("%v", err)
 		return res
 	}
-	gh := github.NewClient(r.GitHubAPIURL, token)
+	gh := r.GitHub.New(token)
 
 	labels := pickupLabels(spec)
 	for _, c := range byName {
@@ -404,28 +409,6 @@ func handBack(ctx context.Context, gh *github.Client, repo string, issue *github
 		return err
 	}
 	return gh.RemoveLabel(ctx, repo, issue.Number, labels.ready)
-}
-
-// githubToken reads the RoundTable's GitHub token Secret on every poll, so a
-// rotated installation token is picked up without a restart.
-func (r *IssuePickupReconciler) githubToken(ctx context.Context, rt *aiv1alpha1.RoundTable) (string, error) {
-	if rt.Spec.GitHub == nil || rt.Spec.GitHub.TokenSecretRef == nil || rt.Spec.GitHub.TokenSecretRef.Name == "" {
-		return "", errors.New("issuePickup needs spec.github.tokenSecretRef")
-	}
-	ref := rt.Spec.GitHub.TokenSecretRef
-	key := ref.Key
-	if key == "" {
-		key = "token"
-	}
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: rt.Namespace, Name: ref.Name}, secret); err != nil {
-		return "", fmt.Errorf("read GitHub token secret %q: %w", ref.Name, err)
-	}
-	token := strings.TrimSpace(string(secret.Data[key]))
-	if token == "" {
-		return "", fmt.Errorf("GitHub token secret %q has no key %q", ref.Name, key)
-	}
-	return token, nil
 }
 
 func (r *IssuePickupReconciler) now() time.Time {

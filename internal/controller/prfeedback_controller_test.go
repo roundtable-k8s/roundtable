@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/github"
 )
 
 // fakePRGitHub serves the REST endpoints the PR feedback watcher uses for one
@@ -188,7 +189,7 @@ var _ = Describe("PR feedback watcher", func() {
 		gh = newFakePRGitHub()
 		srv = httptest.NewServer(gh)
 		now = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
-		r = &PRFeedbackReconciler{Client: k8sClient, Recorder: record.NewFakeRecorder(100), GitHubBaseURL: srv.URL, Now: func() time.Time { return now }}
+		r = &PRFeedbackReconciler{Client: k8sClient, Recorder: record.NewFakeRecorder(100), GitHub: github.NewClientFactory(srv.URL), Now: func() time.Time { return now }}
 
 		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "fb-gh", Namespace: ns},

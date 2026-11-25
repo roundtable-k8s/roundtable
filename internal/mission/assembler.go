@@ -19,6 +19,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/internal/github"
 	"github.com/roundtable-k8s/roundtable/internal/status"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -501,9 +502,7 @@ func (a *KnightAssembler) buildEphemeralKnight(
 
 	// Inherit the table's GitHub token Secret unless the template/inline
 	// spec names its own.
-	if (spec.GitHub == nil || spec.GitHub.TokenSecretRef == nil) && rt.Spec.GitHub != nil {
-		spec.GitHub = rt.Spec.GitHub.DeepCopy()
-	}
+	github.InheritGitHub(spec, rt)
 
 	// Ephemeral knights don't get persistent workspace
 	spec.Workspace = nil
