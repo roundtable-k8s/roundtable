@@ -404,7 +404,6 @@ Reconcile(mission):
           defaults: (from roundTableTemplate or parent RT defaults)
           policies:
             costBudgetUSD: mission.Spec.CostBudgetUSD
-            maxKnights: len(mission.Spec.Knights)
     
     - Wait for RoundTable phase == Ready (streams created)
     - Record stream names in mission status

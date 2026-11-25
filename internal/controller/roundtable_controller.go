@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -233,7 +234,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Message:            fmt.Sprintf("Cost %.4f exceeds budget %s", totalCost, rt.Spec.Policies.CostBudgetUSD),
 			ObservedGeneration: rt.Generation,
 		})
-		r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded, suspending knights")
+		r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded")
 	default:
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
@@ -243,6 +244,8 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			ObservedGeneration: rt.Generation,
 		})
 	}
+
+	r.setDeprecatedFieldsCondition(rt)
 
 	rt.Status.ObservedGeneration = rt.Generation
 
@@ -254,6 +257,42 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	return ctrl.Result{RequeueAfter: RequeueVerySlow}, nil
+}
+
+// setDeprecatedFieldsCondition reports unenforced policies on a standing
+// table: policies.costResetSchedule, a non-zero policies.maxConcurrentTasks
+// and a non-zero policies.maxKnights. It sets DeprecatedFieldsUsed=True naming
+// the fields and records one Warning event per generation. The condition is
+// removed when none is set; ephemeral tables (mission-owned) never get it.
+func (r *RoundTableReconciler) setDeprecatedFieldsCondition(rt *aiv1alpha1.RoundTable) {
+	var used []string
+	if p := rt.Spec.Policies; p != nil && !rt.Spec.Ephemeral {
+		if p.CostResetSchedule != "" { //nolint:staticcheck // reading the deprecated field to report it
+			used = append(used, "policies.costResetSchedule (not enforced: nothing resets the cost counter, reported cost is cumulative)")
+		}
+		if p.MaxConcurrentTasks != 0 { //nolint:staticcheck // reading the deprecated field to report it
+			used = append(used, "policies.maxConcurrentTasks (not enforced: use policies.maxConcurrentPlanTasks or knight concurrency)")
+		}
+		if p.MaxKnights != 0 { //nolint:staticcheck // reading the deprecated field to report it
+			used = append(used, "policies.maxKnights (not enforced: use a ResourceQuota with count/knights.ai.roundtable.io)")
+		}
+	}
+	if len(used) == 0 {
+		meta.RemoveStatusCondition(&rt.Status.Conditions, aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed)
+		return
+	}
+	msg := "deprecated and ignored: " + strings.Join(used, "; ")
+	prev := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed)
+	if prev == nil || prev.ObservedGeneration != rt.Generation {
+		r.Recorder.Event(rt, corev1.EventTypeWarning, aiv1alpha1.ReasonRoundTableDeprecatedFieldsUsed, msg)
+	}
+	meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonRoundTableDeprecatedFieldsUsed,
+		Message:            msg,
+		ObservedGeneration: rt.Generation,
+	})
 }
 
 // discoverKnights lists Knight CRs matching the RoundTable's knightSelector.

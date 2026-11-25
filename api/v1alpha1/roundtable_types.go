@@ -430,6 +430,9 @@ type RoundTableDefaults struct {
 type RoundTablePolicies struct {
 	// maxConcurrentTasks is the maximum total concurrent tasks across all knights in this table.
 	// 0 means unlimited.
+	//
+	// Deprecated: not enforced. The operator never limits concurrent tasks
+	// per table; use maxConcurrentPlanTasks or each knight's concurrency.
 	// +kubebuilder:default=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -455,11 +458,17 @@ type RoundTablePolicies struct {
 	CostBudgetUSD string `json:"costBudgetUSD,omitempty"`
 
 	// costResetSchedule is a cron expression for resetting the cost counter (e.g., "0 0 1 * *" for monthly).
+	//
+	// Deprecated: not enforced. Nothing resets the cost counter; the cost
+	// reported in status is cumulative.
 	// +optional
 	CostResetSchedule string `json:"costResetSchedule,omitempty"`
 
 	// maxKnights is the maximum number of knights allowed in this table.
 	// 0 means unlimited.
+	//
+	// Deprecated: not enforced. To cap knights in a namespace use a
+	// ResourceQuota with count/knights.ai.roundtable.io.
 	// +kubebuilder:default=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional

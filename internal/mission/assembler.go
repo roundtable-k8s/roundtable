@@ -664,13 +664,6 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 		rt.Spec.Policies.CostBudgetUSD = mission.Spec.CostBudgetUSD
 	}
 
-	// Set max knights to mission knight count
-	if rt.Spec.Policies == nil {
-		rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{}
-	}
-	knightCount := int32(len(mission.Spec.Knights))
-	rt.Spec.Policies.MaxKnights = knightCount
-
 	return rt
 }
 
