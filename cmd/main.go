@@ -49,7 +49,6 @@ import (
 	notifypkg "github.com/roundtable-k8s/roundtable/internal/notify"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -97,7 +96,8 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&sandboxBackendMode, "enable-sandbox-backend", string(rtruntime.SandboxModeAuto),
-		"Enable the agent-sandbox runtime backend: auto (only if agents.x-k8s.io/v1alpha1 Sandbox is served), "+
+		"Enable the agent-sandbox runtime backend: auto (only if agents.x-k8s.io/v1beta1 Sandbox is served, "+
+			"i.e. agent-sandbox v1.0.0 or later), "+
 			"true or false. When disabled, knights with runtime: sandbox report RuntimeAvailable=False.")
 	flag.StringVar(&kedaMode, "enable-keda", string(rtruntime.KEDAModeAuto),
 		"Render KEDA ScaledObjects for autoscaled knights (maxReplicas > 1 or suspendPolicy: auto): "+
@@ -196,7 +196,7 @@ func main() {
 
 	restConfig := ctrl.GetConfigOrDie()
 
-	// The sandbox backend watches agents.x-k8s.io/v1alpha1 Sandbox objects. If
+	// The sandbox backend watches agents.x-k8s.io/v1beta1 Sandbox objects. If
 	// that kind isn't served, the watch never syncs and the manager exits after
 	// the cache-sync timeout, taking every Knight down with it (#186). Probe
 	// discovery once at startup and only wire the backend in when it's served.
@@ -211,7 +211,6 @@ func main() {
 		os.Exit(1)
 	}
 	if sandboxEnabled {
-		utilruntime.Must(sandboxv1alpha1.AddToScheme(scheme))
 		setupLog.Info("Runtime backends enabled", "backends", []string{"deployment", "sandbox"}, "reason", sandboxReason)
 	} else {
 		setupLog.Info("Runtime backends enabled", "backends", []string{"deployment"},

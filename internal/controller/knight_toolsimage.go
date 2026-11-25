@@ -29,13 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
+	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
 
 const (
@@ -267,7 +267,7 @@ func (r *KnightReconciler) holdRollout(ctx context.Context, knight *aiv1alpha1.K
 	nn := types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}
 	var obj client.Object = &appsv1.Deployment{}
 	if knight.Spec.Runtime == runtimeSandbox {
-		obj = &sandboxv1alpha1.Sandbox{}
+		obj = rtruntime.NewSandboxObject(knight.Name, knight.Namespace)
 	}
 	if err := r.Get(ctx, nn, obj); err != nil {
 		if apierrors.IsNotFound(err) {

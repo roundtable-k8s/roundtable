@@ -47,7 +47,6 @@ import (
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
 
 const (
@@ -79,7 +78,7 @@ type KnightReconciler struct {
 	// If nil or the key is missing, falls back to RuntimeBackend.
 	RuntimeBackends map[string]rtruntime.RuntimeBackend
 
-	// SandboxEnabled reports whether the agent-sandbox v1alpha1 API is served
+	// SandboxEnabled reports whether the agent-sandbox v1beta1 API is served
 	// and the sandbox backend is registered. When false, the controller does
 	// not watch Sandbox objects (the watch would never sync and the manager
 	// would exit, see #186) and knights with runtime: sandbox are parked with
@@ -324,7 +323,7 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 	} else if r.SandboxEnabled {
 		// Deployment runtime (default) — clean up any stale Sandbox. Skipped
 		// when the Sandbox API isn't served: there can be nothing to clean up.
-		sandbox := &sandboxv1alpha1.Sandbox{}
+		sandbox := rtruntime.NewSandboxObject(knight.Name, knight.Namespace)
 		if err := r.Get(ctx, nn, sandbox); err == nil {
 			log.Info("Runtime transition: deleting stale Sandbox for deployment knight",
 				"knight", knight.Name)
@@ -338,13 +337,13 @@ func (r *KnightReconciler) cleanupStaleRuntime(ctx context.Context, knight *aiv1
 }
 
 // reconcileRuntimeUnavailable marks a knight whose runtime backend is not
-// enabled (runtime: sandbox without the agent-sandbox v1alpha1 API) and
+// enabled (runtime: sandbox without the agent-sandbox v1beta1 API) and
 // requeues slowly. The status is only written when it changes.
 func (r *KnightReconciler) reconcileRuntimeUnavailable(ctx context.Context, knight *aiv1alpha1.Knight) (ctrl.Result, error) {
 	msg := fmt.Sprintf("Knight requests runtime %q, but the operator started without the sandbox backend: "+
 		"%s Sandbox is not served by the API server (or --enable-sandbox-backend=false). "+
-		"Install agent-sandbox with the v1alpha1 CRDs and restart the operator, or set spec.runtime to \"deployment\".",
-		knight.Spec.Runtime, sandboxv1alpha1.GroupVersion)
+		"Install agent-sandbox v1.0.0 or later and restart the operator, or set spec.runtime to \"deployment\".",
+		knight.Spec.Runtime, rtruntime.SandboxGVK.GroupVersion())
 
 	return r.parkKnight(ctx, knight, aiv1alpha1.ReasonSandboxUnavailable, msg)
 }
@@ -835,7 +834,7 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.planSiblingRequests),
 			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	if r.SandboxEnabled {
-		b = b.Owns(&sandboxv1alpha1.Sandbox{})
+		b = b.Owns(rtruntime.NewSandboxObject("", ""))
 	}
 	return b.Named("knight").Complete(r)
 }

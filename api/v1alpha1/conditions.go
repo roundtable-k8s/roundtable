@@ -42,7 +42,7 @@ const (
 	// ConditionKnightRuntimeAvailable indicates whether the runtime backend
 	// selected by spec.runtime is enabled in this operator.
 	// Status=False means the knight cannot be scheduled until the backend is
-	// available (e.g. runtime: sandbox without the agent-sandbox v1alpha1 API).
+	// available (e.g. runtime: sandbox without the agent-sandbox v1beta1 API).
 	ConditionKnightRuntimeAvailable = "RuntimeAvailable"
 
 	// ConditionKnightAutoscaled reports whether a KEDA ScaledObject scales

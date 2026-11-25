@@ -33,8 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
-
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
@@ -133,12 +131,11 @@ var _ = Describe("Knight runtimeClassName", func() {
 
 		s := k8sruntime.NewScheme()
 		Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
-		Expect(sandboxv1alpha1.AddToScheme(s)).To(Succeed())
 		c := fake.NewClientBuilder().WithScheme(s).Build()
 		backend := rtruntime.NewSandboxBackend(c, s, "", reconciler.BuildPodSpec)
 		Expect(backend.Reconcile(ctx, k)).To(Succeed())
-		sb := &sandboxv1alpha1.Sandbox{}
+		sb := rtruntime.NewSandboxObject("", "")
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(k), sb)).To(Succeed())
-		Expect(sb.Spec.PodTemplate.Spec.RuntimeClassName).To(HaveValue(Equal("gvisor")))
+		Expect(sandboxPodSpec(sb).RuntimeClassName).To(HaveValue(Equal("gvisor")))
 	})
 })

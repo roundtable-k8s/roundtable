@@ -50,7 +50,8 @@ const (
 type KnightSpec struct {
 	// runtime selects the backend for managing this knight's pod.
 	// "deployment" uses a standard Kubernetes Deployment (default).
-	// "sandbox" uses Agent Sandbox (agents.x-k8s.io) for lifecycle management.
+	// "sandbox" uses an Agent Sandbox (agents.x-k8s.io/v1beta1 Sandbox,
+	// agent-sandbox v1.0.0 or later) for lifecycle management.
 	// +kubebuilder:validation:Enum=deployment;sandbox
 	// +kubebuilder:default="deployment"
 	// +optional

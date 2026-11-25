@@ -28,7 +28,8 @@ tolerations: []
 affinity: {}
 
 # agent-sandbox runtime backend (Knight spec.runtime: sandbox).
-#   auto  - enable only if the cluster serves agents.x-k8s.io/v1alpha1 Sandbox
+#   auto  - enable only if the cluster serves agents.x-k8s.io/v1beta1 Sandbox
+#           (agent-sandbox v1.0.0 or later; developed against v1.0.12)
 #   true  - always enable (the operator won't start if the API isn't served)
 #   false - never enable; sandbox knights report RuntimeAvailable=False
 sandboxBackend: auto

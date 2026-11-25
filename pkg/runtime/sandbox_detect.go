@@ -21,16 +21,21 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
+
+// SandboxGVK is the agent-sandbox Sandbox kind the sandbox backend manages.
+// agent-sandbox v1.0.0 and later serve only v1beta1. The operator handles it
+// as unstructured, so agent-sandbox is not a build dependency.
+var SandboxGVK = schema.GroupVersionKind{Group: "agents.x-k8s.io", Version: "v1beta1", Kind: "Sandbox"}
 
 // SandboxMode controls whether the sandbox runtime backend is enabled.
 type SandboxMode string
 
 const (
 	// SandboxModeAuto enables the sandbox backend only when the API server
-	// serves agents.x-k8s.io/v1alpha1 Sandbox.
+	// serves agents.x-k8s.io/v1beta1 Sandbox.
 	SandboxModeAuto SandboxMode = "auto"
 	// SandboxModeEnabled forces the sandbox backend on without probing.
 	SandboxModeEnabled SandboxMode = "true"
@@ -49,22 +54,23 @@ func ParseSandboxMode(s string) (SandboxMode, error) {
 }
 
 // SandboxAPIServed reports whether the API server serves the Sandbox kind at
-// the agent-sandbox version this operator is built against (v1alpha1).
-// A group/version that isn't served at all (agent-sandbox not installed, or
-// agent-sandbox >= v1.0 which only serves v1beta1) returns false, nil.
+// the version this operator manages (SandboxGVK, v1beta1). A group/version
+// that isn't served at all (agent-sandbox not installed, or a pre-v1.0
+// agent-sandbox that only serves v1alpha1) returns false, nil.
 func SandboxAPIServed(dc discovery.DiscoveryInterface) (bool, error) {
-	list, err := dc.ServerResourcesForGroupVersion(sandboxv1alpha1.GroupVersion.String())
+	gv := SandboxGVK.GroupVersion().String()
+	list, err := dc.ServerResourcesForGroupVersion(gv)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("discovering %s: %w", sandboxv1alpha1.GroupVersion, err)
+		return false, fmt.Errorf("discovering %s: %w", gv, err)
 	}
 	if list == nil {
 		return false, nil
 	}
 	for _, r := range list.APIResources {
-		if r.Kind == "Sandbox" && !strings.Contains(r.Name, "/") {
+		if r.Kind == SandboxGVK.Kind && !strings.Contains(r.Name, "/") {
 			return true, nil
 		}
 	}
@@ -84,8 +90,9 @@ func ResolveSandboxBackend(mode SandboxMode, dc discovery.DiscoveryInterface) (b
 	if err != nil {
 		return false, "", err
 	}
+	gv := SandboxGVK.GroupVersion().String()
 	if served {
-		return true, fmt.Sprintf("%s Sandbox is served", sandboxv1alpha1.GroupVersion), nil
+		return true, fmt.Sprintf("%s Sandbox is served", gv), nil
 	}
-	return false, fmt.Sprintf("%s Sandbox is not served by the API server", sandboxv1alpha1.GroupVersion), nil
+	return false, fmt.Sprintf("%s Sandbox is not served by the API server", gv), nil
 }
