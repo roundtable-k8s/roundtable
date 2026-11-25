@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -52,6 +53,9 @@ func main() {
 		listen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
 		defaultTimeout, maxTimeout, taskTTL                                  time.Duration
 		maxInFlight                                                          int
+		missionsEnabled, allowSkillGeneration                                bool
+		maxBudgetUSD                                                         float64
+		maxMissionTTL, maxMissionTimeout                                     int
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
 	flag.StringVar(&natsURL, "nats-url", envOr("NATS_URL", "nats://nats.database.svc:4222"), "NATS server URL.")
@@ -68,6 +72,13 @@ func main() {
 	flag.IntVar(&maxInFlight, "max-in-flight", 64, "Maximum concurrently waiting invocations (0 = unlimited).")
 	flag.StringVar(&defaultImage, "default-knight-image", os.Getenv("DEFAULT_KNIGHT_IMAGE"),
 		"The operator's DEFAULT_KNIGHT_IMAGE, used to infer knight runtimes for model validation.")
+	flag.BoolVar(&missionsEnabled, "missions", true,
+		"Serve the mission endpoints (needs RBAC to create, read and delete Missions).")
+	flag.Float64Var(&maxBudgetUSD, "mission-max-budget-usd", 10, "Upper bound on a mission's costBudgetUSD.")
+	flag.IntVar(&maxMissionTTL, "mission-max-ttl-seconds", 86400, "Upper bound on a mission's ttlSeconds.")
+	flag.IntVar(&maxMissionTimeout, "mission-max-timeout-seconds", 21600, "Upper bound on a mission's timeoutSeconds.")
+	flag.BoolVar(&allowSkillGeneration, "mission-allow-skill-generation", false,
+		"Let callers set planner.allowSkillGeneration on missions.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -125,7 +136,16 @@ func main() {
 		MaxTimeout:         maxTimeout,
 		MaxInFlight:        maxInFlight,
 		DefaultKnightImage: defaultImage,
+		Missions: gateway.MissionOptions{
+			MaxBudgetUSD:         maxBudgetUSD,
+			MaxTTLSeconds:        int32(max(min(maxMissionTTL, math.MaxInt32), 0)),
+			MaxTimeoutSeconds:    int32(max(min(maxMissionTimeout, math.MaxInt32), 0)),
+			AllowSkillGeneration: allowSkillGeneration,
+		},
 	}, log)
+	if missionsEnabled {
+		svc.Missions = k8s
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
@@ -153,7 +173,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("Starting gateway", "listen", listen, "namespace", namespace, "nats", natsURL)
+	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "namespace", namespace, "nats", natsURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "Gateway server failed")
 		os.Exit(1)
