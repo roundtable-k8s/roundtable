@@ -92,6 +92,14 @@ const (
 	// that supports ReadWriteMany.
 	ConditionKnightMemoryShared = "MemoryShared"
 
+	// ConditionKnightWorkspaceReady reports the workspace PVC when
+	// spec.workspace.fromSnapshot is set. False (SnapshotNotReady,
+	// SnapshotAPIUnavailable) while the PVC can't be created yet; True
+	// (RestoredFromSnapshot) when the PVC was created from the snapshot; True
+	// (FromSnapshotIgnored) when the PVC already existed, so fromSnapshot
+	// didn't apply. Absent otherwise.
+	ConditionKnightWorkspaceReady = "WorkspaceReady"
+
 	// ConditionKnightWorkspaceSnapshots reports the outcome of the
 	// ai.roundtable.io/snapshot annotation. Absent while the annotation is
 	// unused and the knight has no snapshots. False when snapshots can't be
@@ -275,6 +283,19 @@ const (
 
 	// ReasonSnapshotFailed indicates creating or pruning VolumeSnapshots failed.
 	ReasonSnapshotFailed = "SnapshotFailed"
+
+	// ReasonSnapshotNotReady indicates spec.workspace.fromSnapshot names a
+	// VolumeSnapshot that doesn't exist or isn't readyToUse, so the workspace
+	// PVC isn't created yet.
+	ReasonSnapshotNotReady = "SnapshotNotReady"
+
+	// ReasonFromSnapshotIgnored indicates the workspace PVC already existed, so
+	// spec.workspace.fromSnapshot was not applied.
+	ReasonFromSnapshotIgnored = "FromSnapshotIgnored"
+
+	// ReasonRestoredFromSnapshot indicates the workspace PVC was created from
+	// spec.workspace.fromSnapshot.
+	ReasonRestoredFromSnapshot = "RestoredFromSnapshot"
 
 	// ReasonSnapshotsReady indicates the workspace snapshots are in order.
 	ReasonSnapshotsReady = "SnapshotsReady"

@@ -22,10 +22,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -251,5 +255,151 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotAPIUnavailable))
 		Expect(getKnight(k).Status.Workspace).To(BeNil())
+	})
+})
+
+var _ = Describe("Knight workspace from a snapshot (#341)", func() {
+	newSnapshot := func(name string, ready bool, restoreSize int64) {
+		vs := &unstructured.Unstructured{}
+		vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
+		vs.SetName(name)
+		vs.SetNamespace("default")
+		Expect(unstructured.SetNestedField(vs.Object, "src", "spec", "source", "persistentVolumeClaimName")).To(Succeed())
+		Expect(k8sClient.Create(ctx, vs)).To(Succeed())
+		if ready {
+			Expect(unstructured.SetNestedField(vs.Object, true, "status", "readyToUse")).To(Succeed())
+			Expect(unstructured.SetNestedField(vs.Object, restoreSize, "status", "restoreSize")).To(Succeed())
+			Expect(k8sClient.Update(ctx, vs)).To(Succeed())
+		}
+	}
+	forkKnight := func(name, snap, size string) *aiv1alpha1.Knight {
+		return scalingKnight("default", name, func(s *aiv1alpha1.KnightSpec) {
+			q := resource.MustParse(size)
+			s.Workspace = &aiv1alpha1.KnightWorkspace{FromSnapshot: snap, Size: &q}
+		})
+	}
+	getPVC := func(name string) (*corev1.PersistentVolumeClaim, error) {
+		pvc := &corev1.PersistentVolumeClaim{}
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, pvc)
+		return pvc, err
+	}
+	ready := func(k *aiv1alpha1.Knight) *metav1.Condition {
+		return meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceReady)
+	}
+	fork := func() *KnightReconciler {
+		r := newScalingReconciler(false)
+		r.SnapshotsEnabled = true
+		return r
+	}
+
+	BeforeEach(func() {
+		_, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+			CRDs: []*apiextensionsv1.CustomResourceDefinition{volumeSnapshotCRD()},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("creates the PVC with the snapshot data source and the larger size", func() {
+		newSnapshot("fork-src-big", true, 5<<30)
+		k := forkKnight("fork-big", "fork-src-big", "1Gi")
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+		reconcileKnight(fork(), k)
+
+		pvc, err := getPVC("fork-big")
+		Expect(err).NotTo(HaveOccurred())
+		ds := pvc.Spec.DataSourceRef
+		Expect(ds).NotTo(BeNil())
+		Expect(*ds.APIGroup).To(Equal("snapshot.storage.k8s.io"))
+		Expect(ds.Kind).To(Equal("VolumeSnapshot"))
+		Expect(ds.Name).To(Equal("fork-src-big"))
+		got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		Expect(got.Cmp(resource.MustParse("5Gi"))).To(Equal(0))
+		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonRestoredFromSnapshot))
+
+		// spec.workspace.size wins when it is larger than restoreSize.
+		newSnapshot("fork-src-small", true, 1<<30)
+		k2 := forkKnight("fork-small", "fork-src-small", "3Gi")
+		Expect(k8sClient.Create(ctx, k2)).To(Succeed())
+		defer deleteKnight(k2)
+		reconcileKnight(fork(), k2)
+		pvc, err = getPVC("fork-small")
+		Expect(err).NotTo(HaveOccurred())
+		got = pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		Expect(got.Cmp(resource.MustParse("3Gi"))).To(Equal(0))
+	})
+
+	It("creates no PVC while the snapshot is missing or not ready, then creates it", func() {
+		k := forkKnight("fork-wait", "fork-src-wait", "1Gi")
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+		r := fork()
+
+		reconcileKnight(r, k)
+		_, err := getPVC("fork-wait")
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		c := ready(k)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotNotReady))
+
+		newSnapshot("fork-src-wait", false, 0)
+		reconcileKnight(r, k)
+		_, err = getPVC("fork-wait")
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonSnapshotNotReady))
+
+		vs := &unstructured.Unstructured{}
+		vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "fork-src-wait", Namespace: "default"}, vs)).To(Succeed())
+		Expect(unstructured.SetNestedField(vs.Object, true, "status", "readyToUse")).To(Succeed())
+		Expect(k8sClient.Update(ctx, vs)).To(Succeed())
+		reconcileKnight(r, k)
+		_, err = getPVC("fork-wait")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready(k).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("leaves an existing PVC untouched and says fromSnapshot was ignored", func() {
+		existing := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "fork-exists", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("2Gi")},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, existing)).To(Succeed())
+		k := forkKnight("fork-exists", "fork-src-none", "1Gi")
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+		reconcileKnight(fork(), k)
+
+		pvc, err := getPVC("fork-exists")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvc.Spec.DataSourceRef).To(BeNil())
+		got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		Expect(got.Cmp(resource.MustParse("2Gi"))).To(Equal(0))
+		c := ready(k)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonFromSnapshotIgnored))
+	})
+
+	It("rejects fromSnapshot with existingClaim or ephemeral mode", func() {
+		k := scalingKnight("default", "fork-bad-claim", func(s *aiv1alpha1.KnightSpec) {
+			s.Workspace = &aiv1alpha1.KnightWorkspace{FromSnapshot: "x", ExistingClaim: "y"}
+		})
+		err := k8sClient.Create(ctx, k)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("fromSnapshot cannot be combined with workspace.existingClaim"))
+
+		k = scalingKnight("default", "fork-bad-eph", func(s *aiv1alpha1.KnightSpec) {
+			s.Workspace = &aiv1alpha1.KnightWorkspace{FromSnapshot: "x", Mode: aiv1alpha1.WorkspaceModeEphemeral}
+		})
+		err = k8sClient.Create(ctx, k)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("fromSnapshot cannot be combined with workspace.mode: ephemeral"))
 	})
 })

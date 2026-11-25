@@ -912,6 +912,26 @@ var _ = Describe("Knight memory volume (#388)", func() {
 			Expect(memoryVolumes(build(k))[0].PersistentVolumeClaim.ClaimName).To(Equal("merlin-memory"))
 		})
 
+		It("clears the table workspace's existingClaim and fromSnapshot for knights without a workspace", func() {
+			s := runtime.NewScheme()
+			Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+			rt := &aiv1alpha1.RoundTable{
+				ObjectMeta: metav1.ObjectMeta{Name: "mem-table", Namespace: "default"},
+				Spec: aiv1alpha1.RoundTableSpec{Defaults: &aiv1alpha1.RoundTableDefaults{
+					Workspace: &aiv1alpha1.KnightWorkspace{
+						ExistingClaim: "table-claim",
+						FromSnapshot:  "table-snap",
+					},
+				}},
+			}
+			k := newKnight(nil)
+			ApplyTableDefaults(ctx, fake.NewClientBuilder().WithScheme(s).WithObjects(rt).Build(), k)
+
+			Expect(k.Spec.Workspace).NotTo(BeNil())
+			Expect(k.Spec.Workspace.ExistingClaim).To(BeEmpty())
+			Expect(k.Spec.Workspace.FromSnapshot).To(BeEmpty())
+		})
+
 		It("adds no memory when neither the knight nor the table sets it", func() {
 			k := newKnight(nil)
 			ApplyTableDefaults(ctx, reader(nil).Build(), k)

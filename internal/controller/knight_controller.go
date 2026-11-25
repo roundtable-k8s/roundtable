@@ -316,9 +316,12 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// 2. PVC (persistent workspace)
-	if err := r.reconcilePVC(ctx, knight); err != nil {
+	var pvcRequeue time.Duration
+	if d, err := r.reconcilePVC(ctx, knight); err != nil {
 		reconcileErr = err
 		log.Error(err, "Failed to reconcile PVC")
+	} else {
+		pvcRequeue = d
 	}
 
 	// 2a. Memory PVC (spec.memory) and the MemoryShared condition.
@@ -409,6 +412,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if (mcpHeadersPending || consumerErr != nil) && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
 		nixRequeue = RequeueSlow
+	}
+
+	if pvcRequeue > 0 && (nixRequeue == 0 || pvcRequeue < nixRequeue) {
+		nixRequeue = pvcRequeue
 	}
 
 	if nixRequeue > 0 {
@@ -711,28 +718,51 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 //
 // Nix tooling has no PVC: knights mount their tools image read-only (see
 // PodBuilder.WithNixStore).
-func (r *KnightReconciler) reconcilePVC(ctx context.Context, knight *aiv1alpha1.Knight) error {
+func (r *KnightReconciler) reconcilePVC(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
 	if knightpkg.EphemeralWorkspace(knight) {
-		return nil
+		return 0, nil
 	}
 	// Workspace PVC — skip if using an existing claim (migration mode)
 	if knight.Spec.Workspace != nil && knight.Spec.Workspace.ExistingClaim != "" {
 		logf.FromContext(ctx).Info("Using existing PVC", "claim", knight.Spec.Workspace.ExistingClaim)
-		return nil
+		return 0, nil
 	}
 	return r.ensureWorkspacePVC(ctx, knight)
 }
 
-// ensureWorkspacePVC creates a new workspace PVC if one doesn't exist.
-func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1alpha1.Knight) error {
+// ensureWorkspacePVC creates a new workspace PVC if one doesn't exist. With
+// spec.workspace.fromSnapshot the PVC is cloned from that VolumeSnapshot, and
+// isn't created until the snapshot is ready (the returned duration is how
+// long to wait before looking again).
+func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
 	pvcName := knight.Name
 	pvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: knight.Namespace}, pvc)
+	fromSnapshot := ""
+	if w := knight.Spec.Workspace; w != nil {
+		fromSnapshot = w.FromSnapshot
+	}
 
 	if apierrors.IsNotFound(err) {
 		storageSize := resource.MustParse("1Gi")
 		if knight.Spec.Workspace != nil && knight.Spec.Workspace.Size != nil && !knight.Spec.Workspace.Size.IsZero() {
 			storageSize = knight.Spec.Workspace.Size.DeepCopy()
+		}
+
+		var dataSource *corev1.TypedObjectReference
+		if fromSnapshot != "" {
+			restoreSize, wait, err := r.checkWorkspaceSnapshot(ctx, knight, fromSnapshot)
+			if err != nil {
+				return 0, err
+			}
+			if wait {
+				return RequeueSlow, nil
+			}
+			if restoreSize != nil && restoreSize.Cmp(storageSize) > 0 {
+				storageSize = restoreSize.DeepCopy()
+			}
+			apiGroup := rtruntime.VolumeSnapshotGVK.Group
+			dataSource = &corev1.TypedObjectReference{APIGroup: &apiGroup, Kind: rtruntime.VolumeSnapshotGVK.Kind, Name: fromSnapshot}
 		}
 
 		pvc = &corev1.PersistentVolumeClaim{
@@ -753,19 +783,39 @@ func (r *KnightReconciler) ensureWorkspacePVC(ctx context.Context, knight *aiv1a
 						corev1.ResourceStorage: storageSize,
 					},
 				},
+				DataSourceRef: dataSource,
 			},
 		}
 		if err := controllerutil.SetControllerReference(knight, pvc, r.Scheme); err != nil {
-			return err
+			return 0, err
 		}
 		if err := r.Create(ctx, pvc); err != nil {
-			return fmt.Errorf("PVC create failed: %w", err)
+			return 0, fmt.Errorf("PVC create failed: %w", err)
 		}
-		logf.FromContext(ctx).Info("PVC created", "name", pvcName)
+		logf.FromContext(ctx).Info("PVC created", "name", pvcName, "fromSnapshot", fromSnapshot)
+		if fromSnapshot != "" {
+			r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonRestoredFromSnapshot,
+				fmt.Sprintf("workspace PVC created from VolumeSnapshot %q", fromSnapshot))
+		} else {
+			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceReady)
+		}
+		return 0, nil
 	} else if err != nil {
-		return fmt.Errorf("PVC get failed: %w", err)
+		return 0, fmt.Errorf("PVC get failed: %w", err)
 	}
-	return nil
+
+	// The PVC exists; a data source only applies at creation.
+	switch ds := pvc.Spec.DataSourceRef; {
+	case fromSnapshot == "":
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceReady)
+	case ds != nil && ds.Kind == rtruntime.VolumeSnapshotGVK.Kind && ds.Name == fromSnapshot:
+		r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonRestoredFromSnapshot,
+			fmt.Sprintf("workspace PVC created from VolumeSnapshot %q", fromSnapshot))
+	default:
+		r.setWorkspaceReady(knight, metav1.ConditionTrue, aiv1alpha1.ReasonFromSnapshotIgnored,
+			fmt.Sprintf("workspace PVC %q already exists; fromSnapshot %q only applies when the PVC is created", pvcName, fromSnapshot))
+	}
+	return 0, nil
 }
 
 // reconcileDeployment creates/updates the knight's Deployment when no

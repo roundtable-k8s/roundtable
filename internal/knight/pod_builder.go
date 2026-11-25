@@ -509,6 +509,8 @@ func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
 	if k.Spec.Workspace == nil && d.Workspace != nil {
 		ws := d.Workspace.DeepCopy()
 		ws.ExistingClaim = ""
+		// A table-wide snapshot would make every knight clone one snapshot.
+		ws.FromSnapshot = ""
 		k.Spec.Workspace = ws
 	}
 	if k.Spec.Memory == nil && d.Memory != nil {
