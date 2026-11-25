@@ -60,19 +60,19 @@ func TestSandboxAPIServed(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, served)
 	})
-	t.Run("only v1beta1 served (agent-sandbox >= v1.0)", func(t *testing.T) {
-		served, err := SandboxAPIServed(newFakeDiscovery(sandboxResourceList("agents.x-k8s.io/v1beta1")))
+	t.Run("only v1alpha1 served (agent-sandbox < v1.0)", func(t *testing.T) {
+		served, err := SandboxAPIServed(newFakeDiscovery(sandboxResourceList(SandboxGVK.Group + "/v1alpha1")))
 		require.NoError(t, err)
 		assert.False(t, served)
 	})
-	t.Run("v1alpha1 served", func(t *testing.T) {
-		served, err := SandboxAPIServed(newFakeDiscovery(sandboxResourceList("agents.x-k8s.io/v1alpha1")))
+	t.Run("v1beta1 served", func(t *testing.T) {
+		served, err := SandboxAPIServed(newFakeDiscovery(sandboxResourceList("agents.x-k8s.io/v1beta1")))
 		require.NoError(t, err)
 		assert.True(t, served)
 	})
 	t.Run("group served without Sandbox kind", func(t *testing.T) {
 		served, err := SandboxAPIServed(newFakeDiscovery(&metav1.APIResourceList{
-			GroupVersion: "agents.x-k8s.io/v1alpha1",
+			GroupVersion: "agents.x-k8s.io/v1beta1",
 			APIResources: []metav1.APIResource{{Name: "sandboxtemplates", Kind: "SandboxTemplate"}},
 		}))
 		require.NoError(t, err)
@@ -90,7 +90,8 @@ func TestSandboxAPIServed(t *testing.T) {
 
 func TestResolveSandboxBackend(t *testing.T) {
 	absent := newFakeDiscovery()
-	present := newFakeDiscovery(sandboxResourceList("agents.x-k8s.io/v1alpha1"))
+	present := newFakeDiscovery(sandboxResourceList("agents.x-k8s.io/v1beta1"))
+	legacy := newFakeDiscovery(sandboxResourceList(SandboxGVK.Group + "/v1alpha1"))
 
 	cases := []struct {
 		name string
@@ -100,6 +101,7 @@ func TestResolveSandboxBackend(t *testing.T) {
 	}{
 		{"auto, absent", SandboxModeAuto, absent, false},
 		{"auto, present", SandboxModeAuto, present, true},
+		{"auto, only v1alpha1", SandboxModeAuto, legacy, false},
 		{"forced on, absent", SandboxModeEnabled, absent, true},
 		{"forced off, present", SandboxModeDisabled, present, false},
 	}

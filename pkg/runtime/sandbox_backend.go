@@ -19,12 +19,12 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,12 +32,34 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
 
+// Sandbox spec.operatingMode values (agents.x-k8s.io/v1beta1). A Suspended
+// Sandbox keeps its object and volumes but has no pod; switching back to
+// Running creates a new pod from the current spec.podTemplate.
+const (
+	SandboxOperatingModeRunning   = "Running"
+	SandboxOperatingModeSuspended = "Suspended"
+)
+
+// sandboxConditionReady is the status condition agent-sandbox sets when the
+// Sandbox's pod is ready.
+const sandboxConditionReady = "Ready"
+
+// NewSandboxObject returns an empty unstructured Sandbox (SandboxGVK) with the
+// given name and namespace, ready for Get, Delete or CreateOrUpdate.
+func NewSandboxObject(name, namespace string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(SandboxGVK)
+	u.SetName(name)
+	u.SetNamespace(namespace)
+	return u
+}
+
 // SandboxBackend implements RuntimeBackend using Kubernetes Agent Sandbox CRs.
-// Each Knight is backed by a Sandbox (agents.x-k8s.io/v1alpha1) instead of a Deployment.
-// This provides lifecycle management (pause/resume/hibernate) and strong isolation.
+// Each Knight is backed by a Sandbox (agents.x-k8s.io/v1beta1) instead of a
+// Deployment. Sandboxes are handled as unstructured objects, so agent-sandbox
+// is not a build dependency.
 type SandboxBackend struct {
 	Client       client.Client
 	Scheme       *k8sruntime.Scheme
@@ -61,63 +83,67 @@ func NewSandboxBackend(
 	}
 }
 
-// Reconcile creates or updates the Sandbox CR for the Knight.
+// sandboxLabels are the labels on the Sandbox and its pod template. They match
+// the Deployment backend, so NetworkPolicies, PodMonitors and the dashboard
+// select sandbox pods too.
+func sandboxLabels(knight *aiv1alpha1.Knight) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":       "knight",
+		"app.kubernetes.io/instance":   knight.Name,
+		"app.kubernetes.io/managed-by": "roundtable-operator",
+		"roundtable.io/domain":         knight.Spec.Domain,
+	}
+}
+
+// sandboxPodAnnotations are the pod annotations the Deployment backend sets.
+func sandboxPodAnnotations(knight *aiv1alpha1.Knight) map[string]string {
+	return map[string]string{
+		"roundtable.io/model":  knight.Spec.Model,
+		"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
+		"roundtable.io/domain": knight.Spec.Domain,
+	}
+}
+
+// Reconcile creates or updates the Sandbox CR for the Knight and sets it to
+// Running. spec.replicas does not exist in v1beta1, and spec.service is left
+// unset: knights need no Service.
 func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
 
 	podSpec := b.BuildPodSpec(ctx, knight)
-
-	sandbox := &sandboxv1alpha1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      knight.Name,
-			Namespace: knight.Namespace,
-		},
+	podSpecMap, err := k8sruntime.DefaultUnstructuredConverter.ToUnstructured(&podSpec)
+	if err != nil {
+		return fmt.Errorf("converting sandbox pod spec: %w", err)
 	}
+	labels := sandboxLabels(knight)
 
+	sandbox := NewSandboxObject(knight.Name, knight.Namespace)
 	op, err := controllerutil.CreateOrUpdate(ctx, b.Client, sandbox, func() error {
 		// Set owner reference so Sandbox is garbage-collected with Knight
 		if err := controllerutil.SetControllerReference(knight, sandbox, b.Scheme); err != nil {
 			return err
 		}
 
-		// Labels for identification
-		if sandbox.Labels == nil {
-			sandbox.Labels = make(map[string]string)
+		objLabels := sandbox.GetLabels()
+		if objLabels == nil {
+			objLabels = make(map[string]string, len(labels))
 		}
-		sandbox.Labels["app.kubernetes.io/name"] = "knight"
-		sandbox.Labels["app.kubernetes.io/instance"] = knight.Name
-		sandbox.Labels["app.kubernetes.io/managed-by"] = "roundtable-operator"
-		sandbox.Labels["roundtable.io/domain"] = knight.Spec.Domain
+		maps.Copy(objLabels, labels)
+		sandbox.SetLabels(objLabels)
 
-		// Build Sandbox spec from Knight
-		// Pod labels and annotations match the Deployment backend so that
-		// label-selecting policies and monitors see sandbox pods too.
-		sandbox.Spec.PodTemplate = sandboxv1alpha1.PodTemplate{
-			ObjectMeta: sandboxv1alpha1.PodMetadata{
-				Labels: map[string]string{
-					"app.kubernetes.io/name":       "knight",
-					"app.kubernetes.io/instance":   knight.Name,
-					"app.kubernetes.io/managed-by": "roundtable-operator",
-					"roundtable.io/domain":         knight.Spec.Domain,
-				},
-				Annotations: map[string]string{
-					"roundtable.io/model":  knight.Spec.Model,
-					"roundtable.io/skills": strings.Join(knight.Spec.Skills, ","),
-					"roundtable.io/domain": knight.Spec.Domain,
-				},
-			},
-			Spec: podSpec,
+		if err := unstructured.SetNestedField(sandbox.Object, podSpecMap, "spec", "podTemplate", "spec"); err != nil {
+			return err
 		}
-
-		// Sandbox is a singleton — always 1 replica (or 0 when suspended)
-		sandbox.Spec.Replicas = new(int32(1))
-
-		// Map VolumeClaimTemplates from Knight workspace config
-		sandbox.Spec.VolumeClaimTemplates = b.buildVolumeClaimTemplates(knight)
-
-		return nil
+		if err := unstructured.SetNestedStringMap(sandbox.Object, labels,
+			"spec", "podTemplate", "metadata", "labels"); err != nil {
+			return err
+		}
+		if err := unstructured.SetNestedStringMap(sandbox.Object, sandboxPodAnnotations(knight),
+			"spec", "podTemplate", "metadata", "annotations"); err != nil {
+			return err
+		}
+		return unstructured.SetNestedField(sandbox.Object, SandboxOperatingModeRunning, "spec", "operatingMode")
 	})
-
 	if err != nil {
 		return fmt.Errorf("sandbox reconcile failed: %w", err)
 	}
@@ -126,17 +152,31 @@ func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knigh
 	return nil
 }
 
+// getSandbox fetches the Knight's Sandbox. A missing Sandbox returns nil, nil.
+func (b *SandboxBackend) getSandbox(
+	ctx context.Context, knight *aiv1alpha1.Knight,
+) (*unstructured.Unstructured, error) {
+	sandbox := NewSandboxObject(knight.Name, knight.Namespace)
+	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, sandbox)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sandbox, nil
+}
+
 // Cleanup deletes the Sandbox CR owned by the Knight.
 func (b *SandboxBackend) Cleanup(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
 
-	sandbox := &sandboxv1alpha1.Sandbox{}
-	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, sandbox)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
+	sandbox, err := b.getSandbox(ctx, knight)
 	if err != nil {
 		return fmt.Errorf("failed to get sandbox for cleanup: %w", err)
+	}
+	if sandbox == nil {
+		return nil
 	}
 
 	if err := b.Client.Delete(ctx, sandbox); err != nil && !apierrors.IsNotFound(err) {
@@ -147,90 +187,74 @@ func (b *SandboxBackend) Cleanup(ctx context.Context, knight *aiv1alpha1.Knight)
 	return nil
 }
 
-// IsReady checks if the Knight's Sandbox has a ready pod.
+// IsReady reports whether the Knight's Sandbox has the Ready=True condition.
 func (b *SandboxBackend) IsReady(ctx context.Context, knight *aiv1alpha1.Knight) (bool, error) {
-	sandbox := &sandboxv1alpha1.Sandbox{}
-	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, sandbox)
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
+	sandbox, err := b.getSandbox(ctx, knight)
 	if err != nil {
 		return false, fmt.Errorf("failed to get sandbox: %w", err)
 	}
+	if sandbox == nil {
+		return false, nil
+	}
+	return SandboxReady(sandbox), nil
+}
 
-	// Check the Ready condition on the Sandbox status
-	readyCond := meta.FindStatusCondition(sandbox.Status.Conditions,
-		string(sandboxv1alpha1.SandboxConditionReady))
-	if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
+// SandboxReady reports whether status.conditions holds Ready=True.
+func SandboxReady(sandbox *unstructured.Unstructured) bool {
+	conditions, _, _ := unstructured.NestedSlice(sandbox.Object, "status", "conditions")
+	for _, c := range conditions {
+		m, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["type"] == sandboxConditionReady {
+			return m["status"] == "True"
+		}
+	}
+	return false
+}
+
+// setOperatingMode sets spec.operatingMode on the Knight's Sandbox. It returns
+// whether the Sandbox exists.
+func (b *SandboxBackend) setOperatingMode(ctx context.Context, knight *aiv1alpha1.Knight, mode string) (bool, error) {
+	log := logf.FromContext(ctx)
+
+	sandbox, err := b.getSandbox(ctx, knight)
+	if err != nil {
+		return false, fmt.Errorf("failed to get sandbox: %w", err)
+	}
+	if sandbox == nil {
+		return false, nil
+	}
+	current, _, _ := unstructured.NestedString(sandbox.Object, "spec", "operatingMode")
+	if current == mode {
 		return true, nil
 	}
-
-	// Fallback: check replicas
-	return sandbox.Status.Replicas >= 1, nil
+	if err := unstructured.SetNestedField(sandbox.Object, mode, "spec", "operatingMode"); err != nil {
+		return true, err
+	}
+	if err := b.Client.Update(ctx, sandbox); err != nil {
+		return true, fmt.Errorf("failed to set sandbox operatingMode to %s: %w", mode, err)
+	}
+	log.Info("Set knight sandbox operatingMode", "knight", knight.Name, "operatingMode", mode)
+	return true, nil
 }
 
-// Suspend scales the Knight's Sandbox to 0 replicas (pause).
+// Suspend sets the Knight's Sandbox to operatingMode Suspended. The Sandbox
+// object and its volumes are kept.
 func (b *SandboxBackend) Suspend(ctx context.Context, knight *aiv1alpha1.Knight) error {
-	log := logf.FromContext(ctx)
-
-	sandbox := &sandboxv1alpha1.Sandbox{}
-	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, sandbox)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to get sandbox for suspend: %w", err)
-	}
-
-	if sandbox.Spec.Replicas == nil || *sandbox.Spec.Replicas != 0 {
-		sandbox.Spec.Replicas = new(int32(0))
-		if err := b.Client.Update(ctx, sandbox); err != nil {
-			return fmt.Errorf("failed to scale sandbox to 0: %w", err)
-		}
-		log.Info("Suspended knight sandbox — scaled to 0", "knight", knight.Name)
-	}
-
-	return nil
+	_, err := b.setOperatingMode(ctx, knight, SandboxOperatingModeSuspended)
+	return err
 }
 
-// Resume scales the Knight's Sandbox to 1 replica.
+// Resume sets the Knight's Sandbox to operatingMode Running.
 func (b *SandboxBackend) Resume(ctx context.Context, knight *aiv1alpha1.Knight) error {
-	log := logf.FromContext(ctx)
-
-	sandbox := &sandboxv1alpha1.Sandbox{}
-	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, sandbox)
-	if apierrors.IsNotFound(err) {
+	found, err := b.setOperatingMode(ctx, knight, SandboxOperatingModeRunning)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return fmt.Errorf("sandbox not found for resume: %s", knight.Name)
 	}
-	if err != nil {
-		return fmt.Errorf("failed to get sandbox for resume: %w", err)
-	}
-
-	if sandbox.Spec.Replicas == nil || *sandbox.Spec.Replicas != 1 {
-		sandbox.Spec.Replicas = new(int32(1))
-		if err := b.Client.Update(ctx, sandbox); err != nil {
-			return fmt.Errorf("failed to scale sandbox to 1: %w", err)
-		}
-		log.Info("Resumed knight sandbox — scaled to 1", "knight", knight.Name)
-	}
-
-	return nil
-}
-
-// buildVolumeClaimTemplates constructs PVC templates for the Sandbox from Knight workspace config.
-//
-//nolint:unparam // intentionally nil until Sandbox-native storage is supported
-func (b *SandboxBackend) buildVolumeClaimTemplates(
-	knight *aiv1alpha1.Knight,
-) []sandboxv1alpha1.PersistentVolumeClaimTemplate {
-	// If the knight uses an existing claim, no templates needed
-	if knight.Spec.Workspace != nil && knight.Spec.Workspace.ExistingClaim != "" {
-		return nil
-	}
-
-	// Build workspace PVC template if workspace is configured
-	// The Sandbox controller will create and manage the PVC lifecycle
-	// For now, return nil — workspace PVCs are managed by the Knight controller directly
-	// This can be enhanced to use Sandbox-native storage in a future iteration
 	return nil
 }

@@ -31,8 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
-
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
@@ -179,14 +177,13 @@ var _ = Describe("Knight GitHub token file", func() {
 		// client, but resolve the RoundTable from the real API server.
 		s := k8sruntime.NewScheme()
 		Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
-		Expect(sandboxv1alpha1.AddToScheme(s)).To(Succeed())
 		sandboxClient := fake.NewClientBuilder().WithScheme(s).Build()
 		backend := rtruntime.NewSandboxBackend(sandboxClient, s, "", reconciler.BuildPodSpec)
 		Expect(backend.Reconcile(ctx, k)).To(Succeed())
 
-		sb := &sandboxv1alpha1.Sandbox{}
+		sb := rtruntime.NewSandboxObject("", "")
 		Expect(sandboxClient.Get(ctx, client.ObjectKeyFromObject(k), sb)).To(Succeed())
-		expectGitHubTokenMount(sb.Spec.PodTemplate.Spec, "roundtable-github-token", "token")
+		expectGitHubTokenMount(sandboxPodSpec(sb), "roundtable-github-token", "token")
 	})
 
 	It("stamps the RoundTable's Secret onto warm-pool knights", func() {

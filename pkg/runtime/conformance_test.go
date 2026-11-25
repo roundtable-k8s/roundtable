@@ -25,13 +25,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 )
 
 // conformanceHarness hides the workload kind from the contract checks.
@@ -106,7 +106,7 @@ func conformanceBackends() []conformanceBackendCase {
 			build: func(t *testing.T) (*conformanceHarness, client.Client, *string) {
 				s := newConformanceScheme(t)
 				c := fake.NewClientBuilder().WithScheme(s).
-					WithStatusSubresource(&sandboxv1alpha1.Sandbox{}).Build()
+					WithStatusSubresource(NewSandboxObject("", "")).Build()
 				image := "knight:v1"
 				b := NewSandboxBackend(c, s, "default:latest",
 					func(_ context.Context, _ *aiv1alpha1.Knight) corev1.PodSpec {
@@ -114,27 +114,36 @@ func conformanceBackends() []conformanceBackendCase {
 					})
 				return &conformanceHarness{
 					backend:  b,
-					workload: func(n string) client.Object { return &sandboxv1alpha1.Sandbox{ObjectMeta: objMeta(n)} },
+					workload: func(n string) client.Object { return NewSandboxObject(n, "ai") },
 					template: func(o client.Object) (map[string]string, map[string]string, corev1.PodSpec) {
-						sb := o.(*sandboxv1alpha1.Sandbox)
-						m := sb.Spec.PodTemplate.ObjectMeta
-						return m.Labels, m.Annotations, sb.Spec.PodTemplate.Spec
+						u := o.(*unstructured.Unstructured)
+						labels, _, err := unstructured.NestedStringMap(u.Object, "spec", "podTemplate", "metadata", "labels")
+						require.NoError(t, err)
+						annotations, _, err := unstructured.NestedStringMap(u.Object, "spec", "podTemplate", "metadata", "annotations")
+						require.NoError(t, err)
+						specMap, _, err := unstructured.NestedMap(u.Object, "spec", "podTemplate", "spec")
+						require.NoError(t, err)
+						var spec corev1.PodSpec
+						require.NoError(t, k8sruntime.DefaultUnstructuredConverter.FromUnstructured(specMap, &spec))
+						return labels, annotations, spec
 					},
-					replicas: func(o client.Object) int32 { return *o.(*sandboxv1alpha1.Sandbox).Spec.Replicas },
-					setReady: func(t *testing.T, o client.Object, ready bool) {
-						sb := o.(*sandboxv1alpha1.Sandbox)
-						status := metav1.ConditionFalse
-						sb.Status.Replicas = 0
-						if ready {
-							status = metav1.ConditionTrue
-							sb.Status.Replicas = 1
+					// Sandbox has no replicas: running means operatingMode Running.
+					replicas: func(o client.Object) int32 {
+						mode, _, _ := unstructured.NestedString(o.(*unstructured.Unstructured).Object, "spec", "operatingMode")
+						if mode == SandboxOperatingModeRunning {
+							return 1
 						}
-						sb.Status.Conditions = []metav1.Condition{{
-							Type:               string(sandboxv1alpha1.SandboxConditionReady),
-							Status:             status,
-							Reason:             "Test",
-							LastTransitionTime: metav1.Now(),
-						}}
+						return 0
+					},
+					setReady: func(t *testing.T, o client.Object, ready bool) {
+						sb := o.(*unstructured.Unstructured)
+						status := string(metav1.ConditionFalse)
+						if ready {
+							status = string(metav1.ConditionTrue)
+						}
+						require.NoError(t, unstructured.SetNestedSlice(sb.Object, []any{
+							map[string]any{"type": "Ready", "status": status, "reason": "Test"},
+						}, "status", "conditions"))
 						require.NoError(t, c.Status().Update(context.Background(), sb))
 					},
 				}, c, &image
@@ -147,7 +156,6 @@ func newConformanceScheme(t *testing.T) *k8sruntime.Scheme {
 	t.Helper()
 	s := k8sruntime.NewScheme()
 	require.NoError(t, aiv1alpha1.AddToScheme(s))
-	require.NoError(t, sandboxv1alpha1.AddToScheme(s))
 	require.NoError(t, corev1.AddToScheme(s))
 	require.NoError(t, appsv1.AddToScheme(s))
 	return s

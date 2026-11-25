@@ -27,12 +27,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-	sandboxv1alpha1 "sigs.k8s.io/agent-sandbox/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -43,7 +43,7 @@ import (
 )
 
 // Regression tests for #186: the operator must start and reconcile
-// Deployment-backed knights when agents.x-k8s.io/v1alpha1 Sandbox is not
+// Deployment-backed knights when agents.x-k8s.io/v1beta1 Sandbox is not
 // served. The suite installs only config/crd/bases, so no agent-sandbox CRDs.
 
 func optionalSandboxKnight(name, runtime string) *aiv1alpha1.Knight {
@@ -64,13 +64,10 @@ func optionalSandboxKnight(name, runtime string) *aiv1alpha1.Knight {
 	}
 }
 
-func newOptionalSandboxManager(withSandboxScheme bool, syncTimeout time.Duration) ctrl.Manager {
+func newOptionalSandboxManager(syncTimeout time.Duration) ctrl.Manager {
 	s := k8sruntime.NewScheme()
 	Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
 	Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
-	if withSandboxScheme {
-		Expect(sandboxv1alpha1.AddToScheme(s)).To(Succeed())
-	}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 s,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -108,7 +105,7 @@ var _ = Describe("Optional sandbox backend (#186)", func() {
 	})
 
 	It("reproduces the crash when Sandbox is watched but not served", func() {
-		mgr := newOptionalSandboxManager(true, 3*time.Second)
+		mgr := newOptionalSandboxManager(3 * time.Second)
 		Expect(newOptionalSandboxReconciler(mgr, true).SetupWithManager(mgr)).To(Succeed())
 
 		mgrCtx, mgrCancel := context.WithTimeout(ctx, time.Minute)
@@ -119,7 +116,7 @@ var _ = Describe("Optional sandbox backend (#186)", func() {
 	})
 
 	It("starts without the Sandbox API and reconciles knights", func() {
-		mgr := newOptionalSandboxManager(false, 10*time.Second)
+		mgr := newOptionalSandboxManager(10 * time.Second)
 		Expect(newOptionalSandboxReconciler(mgr, false).SetupWithManager(mgr)).To(Succeed())
 
 		mgrCtx, mgrCancel := context.WithCancel(ctx)
@@ -226,7 +223,7 @@ var _ = Describe("Optional sandbox backend (#186)", func() {
 		Expect(c).NotTo(BeNil())
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSandboxUnavailable))
-		Expect(c.Message).To(ContainSubstring("agents.x-k8s.io/v1alpha1"))
+		Expect(c.Message).To(ContainSubstring("agents.x-k8s.io/v1beta1"))
 		avail := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
 		Expect(avail).NotTo(BeNil())
 		Expect(avail.Status).To(Equal(metav1.ConditionFalse))
@@ -243,3 +240,13 @@ var _ = Describe("Optional sandbox backend (#186)", func() {
 		Expect(k.ResourceVersion).To(Equal(rv))
 	})
 })
+
+// sandboxPodSpec decodes spec.podTemplate.spec of an unstructured Sandbox.
+func sandboxPodSpec(sb *unstructured.Unstructured) corev1.PodSpec {
+	m, found, err := unstructured.NestedMap(sb.Object, "spec", "podTemplate", "spec")
+	Expect(err).NotTo(HaveOccurred())
+	Expect(found).To(BeTrue())
+	var spec corev1.PodSpec
+	Expect(k8sruntime.DefaultUnstructuredConverter.FromUnstructured(m, &spec)).To(Succeed())
+	return spec
+}

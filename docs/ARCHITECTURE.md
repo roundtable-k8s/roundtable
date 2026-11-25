@@ -81,7 +81,7 @@ type RuntimeBackend interface {
 ```
 
 - **DeploymentBackend** — Standard Kubernetes Deployment. Always running. Good for persistent knights.
-- **SandboxBackend** — Uses `agents.x-k8s.io/Sandbox` CRD. Scale-to-zero capable. Good for cost optimization.
+- **SandboxBackend** — Uses the `agents.x-k8s.io/v1beta1` Sandbox CRD (agent-sandbox v1.0.0 or later). Suspends and resumes through `spec.operatingMode`. Good for cost optimization.
 
 Selected per-knight via `spec.runtime: deployment|sandbox`.
 
