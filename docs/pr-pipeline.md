@@ -342,10 +342,11 @@ tracked in [roundtable-k8s/arsenal#16](https://github.com/roundtable-k8s/arsenal
 until they ship, a chain-mode run fails its post-run steps and the operator
 hands the issue back.
 
-Task templates do not expose the structured `prs` and `verdict` fields yet,
-so `verify` gets the final review's text (whose `PRs:` and `Verdict:` lines are
-what the structured fields are parsed from) and the knight passes the PR URLs
-and the verdict to `rt-verify` as arguments.
+`verify` gets the final review's structured result from the task template
+(`{{ .Steps.<fixloop>.Verdict }}` and `{{ prURLs .Steps.<fixloop>.PRs }}`, see
+[Structured results in task templates](conditional-steps.md#structured-results-in-task-templates))
+and passes both to `rt-verify` as arguments; `handback` lists the PRs the run
+opened next to the failed steps.
 
 ### What the operator still does with `postRun: chain`
 

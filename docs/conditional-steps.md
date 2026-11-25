@@ -111,6 +111,34 @@ final review in the example). Downstream steps read it as
 `{{ .Steps.fixloop.Output }}`, and `{{ .Steps.fixloop.Outcome }}` /
 `{{ .Steps.fixloop.Iterations }}` are available too.
 
+## Structured results in task templates
+
+Besides `.Output`, `.Error`, `.Phase`, `.Reason`, `.Outcome` and `.Iterations`,
+every `.Steps.<name>` entry exposes the step's structured result (the `prs`
+and `verdict` a knight reports, or the `PRs:` / `Verdict:` lines parsed from its
+output when it reports none):
+
+| Field | Type | Empty value |
+|---|---|---|
+| `.Steps.<name>.PRs` | list of `.URL`, `.Repo`, `.Number`, `.State` | empty list |
+| `.Steps.<name>.Verdict` | `ship_it`, `needs_changes` | `""` |
+
+`.State` is what the task did with the PR (`opened`, `updated`, ...) and is
+empty when the knight did not say. A step that did not succeed, has no
+structured result or does not exist renders the empty values, never an error.
+The fields work in plain steps, `forEach` item tasks and loop bodies, and in
+`.Loop.Steps.<body>` for the other body steps of the loop.
+
+The helper `prURLs` joins PR URLs with spaces; it takes the list or the step:
+
+```yaml
+task: |
+  Verify {{ prURLs .Steps.implement.PRs }}
+  Verdict of the review: {{ .Steps.review.Verdict }}
+  {{ range .Steps.implement.PRs }}- {{ .Repo }}#{{ .Number }} {{ .URL }}
+  {{ end }}
+```
+
 **Sessions.** Body tasks are published with the chain's `runId`, the same one
 every ordinary step of the run uses. Knights key agent sessions on `runId`, so
 the coder in `fix` resumes the session it opened in `implement` and keeps its

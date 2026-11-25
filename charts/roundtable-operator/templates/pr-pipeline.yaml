@@ -392,16 +392,19 @@ spec:
               Verify on GitHub that every pull request of {{ $o }} .Input {{ $c }} is merged or queued.
               The merge step reported:
               {{ $o }} .Steps.merge.Output {{ $c }}
-              The final review (its structured "prs" and "verdict", shown here as the
-              "PRs:" and "Verdict:" lines):
+              The final review's structured result:
               {{- range $loops }}
-              {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Outcome "Converged" {{ $c }}{{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+              {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Outcome "Converged" {{ $c }}verdict: {{ $o }} .Verdict {{ $c }}
+              PRs: {{ $o }} prURLs .PRs {{ $c }}
+              final review text:
+              {{ $o }} .Output {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
               {{- end }}
 
               Use the arsenal script, never gh by hand:
-              1. Write the final review above to /tmp/review-<issue>.md.
-              2. Run: bash {{ $scripts }}/rt-verify <repo> <issue> <ship_it|needs_changes> /tmp/review-<issue>.md <pr-url> [<pr-url> ...]
-                 with the review's verdict and every PR it lists. It posts the
+              1. Write the final review text above to /tmp/review-<issue>.md.
+              2. Run: bash {{ $scripts }}/rt-verify <repo> <issue> <verdict> /tmp/review-<issue>.md <pr-url> [<pr-url> ...]
+                 passing the verdict and PR URLs given above as they are (the
+                 verdict is ship_it or needs_changes). It posts the
                  review when the PR has none with that verdict (rt-review),
                  queues a ship-it PR that is still open, and hands the issue back
                  (needs-human) when a PR is closed, a draft, held or not queueable.
@@ -455,9 +458,13 @@ spec:
               {{- range $all }}
               {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if eq .Phase "Failed" {{ $c }}- {{ . }}: {{ $o }} .Error {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
               {{- end }}
+              PRs opened by the run:
+              {{- range $work }}
+              {{ $o }} with .Steps.{{ . }} {{ $c }}{{ $o }} if .PRs {{ $c }}- {{ . }}: {{ $o }} prURLs .PRs {{ $c }}{{ $o }} end {{ $c }}{{ $o }} end {{ $c }}
+              {{- end }}
 
               Hand the issue back to a human with the arsenal script, never gh by hand:
-              1. Write the failed steps above to /tmp/handback-<issue>.md.
+              1. Write the failed steps and the PRs above to /tmp/handback-<issue>.md.
               2. Run: bash {{ $scripts }}/rt-handback <repo> <issue> /tmp/handback-<issue>.md
                  It adds needs-human, comments the failed steps and removes the
                  in-progress label, and does nothing for an issue that is closed or

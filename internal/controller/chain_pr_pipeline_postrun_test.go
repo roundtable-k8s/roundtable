@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -243,7 +244,7 @@ func TestPRPipelinePostRunHandbackTask(t *testing.T) {
 		{Name: "verify", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "loop exhausted"},
 		{Name: "close_parent", Phase: aiv1alpha1.ChainStepPhaseSkipped},
 	}
-	out, err := (&ChainReconciler{}).renderTemplate(chain, task)
+	out, err := (&ChainReconciler{}).renderTemplate(context.Background(), chain, task)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -165,7 +165,7 @@ var _ = Describe("Chain Controller", func() {
 				},
 			}
 
-			result, err := r.renderTemplate(chain, chain.Spec.Steps[1].Task)
+			result, err := r.renderTemplate(context.Background(), chain, chain.Spec.Steps[1].Task)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(ContainSubstring("initial-data"))
 			Expect(result).To(ContainSubstring("step1-result"))
@@ -179,7 +179,7 @@ var _ = Describe("Chain Controller", func() {
 					Steps:         []aiv1alpha1.ChainStep{{Name: "a"}},
 				},
 			}
-			result, err := r.renderTemplate(chain, "plain task with no templates")
+			result, err := r.renderTemplate(context.Background(), chain, "plain task with no templates")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal("plain task with no templates"))
 		})

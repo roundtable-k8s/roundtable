@@ -595,7 +595,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 		}
 		item := items[idx]
 		itemJSON, _ := json.Marshal(item)
-		taskStr, err := r.renderTemplateWith(chain, spec.Task, map[string]any{
+		taskStr, err := r.renderTemplateWith(ctx, chain, spec.Task, map[string]any{
 			"Item": item, "item": item, "ItemIndex": idx, "ItemJSON": string(itemJSON),
 		})
 		now := metav1.Now()
