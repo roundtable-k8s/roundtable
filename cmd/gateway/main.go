@@ -120,7 +120,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer nc.Close()
-	bus, err := gateway.NewNATSBus(nc, bucket, taskTTL)
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
+	bus, err := gateway.NewNATSBus(setupCtx, nc, bucket, taskTTL)
+	cancelSetup()
 	if err != nil {
 		log.Error(err, "Unable to set up NATS JetStream")
 		os.Exit(1)

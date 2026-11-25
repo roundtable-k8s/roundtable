@@ -208,7 +208,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	}
 	defer watch.Close()
 
-	if err := s.Bus.PutRecord(rec); err != nil {
+	if err := s.Bus.PutRecord(ctx, rec); err != nil {
 		return nil, fmt.Errorf("%w: store task: %v", ErrUnavailable, err)
 	}
 	payload := natspkg.TaskPayload{
@@ -223,7 +223,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		rec.Error = "publish failed: " + err.Error()
 		done := s.now().UTC()
 		rec.CompletedAt = &done
-		_ = s.Bus.PutRecord(rec)
+		_ = s.Bus.PutRecord(context.WithoutCancel(ctx), rec)
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	s.Log.Info("Invoked knight", "knight", knightName, "namespace", ns, "taskId", taskID, "runId", runID, "model", model)
@@ -233,7 +233,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		data, err := watch.Next(wctx)
 		cancel()
 		if err == nil {
-			s.complete(rec, data)
+			s.complete(ctx, rec, data)
 			return rec, nil
 		}
 		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
@@ -242,19 +242,19 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	}
 	// The result may have landed between the subscription and now through a
 	// path the watch missed (e.g. a reconnect): check the stream once.
-	if data, err := s.Bus.LastResult(rec.ResultsStream, rec.ResultSubject); err == nil && data != nil {
-		s.complete(rec, data)
+	if data, err := s.Bus.LastResult(ctx, rec.ResultsStream, rec.ResultSubject); err == nil && data != nil {
+		s.complete(ctx, rec, data)
 	}
 	return rec, nil
 }
 
 // GetTask returns a task, reading its result from the results stream if it
 // hasn't been recorded yet.
-func (s *Service) GetTask(_ context.Context, taskID string) (*TaskRecord, error) {
+func (s *Service) GetTask(ctx context.Context, taskID string) (*TaskRecord, error) {
 	if !taskIDPattern.MatchString(taskID) {
 		return nil, fmt.Errorf("%w: task %q", ErrNotFound, taskID)
 	}
-	rec, err := s.Bus.GetRecord(taskID)
+	rec, err := s.Bus.GetRecord(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("%w: task %q", ErrNotFound, taskID)
@@ -262,12 +262,12 @@ func (s *Service) GetTask(_ context.Context, taskID string) (*TaskRecord, error)
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if !rec.Done() {
-		data, err := s.Bus.LastResult(rec.ResultsStream, rec.ResultSubject)
+		data, err := s.Bus.LastResult(ctx, rec.ResultsStream, rec.ResultSubject)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		if data != nil {
-			s.complete(rec, data)
+			s.complete(ctx, rec, data)
 		}
 	}
 	return rec, nil
@@ -283,8 +283,8 @@ type TaskFilter struct {
 
 // ListTasks returns recorded tasks, newest first. Records are as stored:
 // call GetTask to refresh a pending one.
-func (s *Service) ListTasks(_ context.Context, f TaskFilter) ([]*TaskRecord, error) {
-	recs, err := s.Bus.ListRecords()
+func (s *Service) ListTasks(ctx context.Context, f TaskFilter) ([]*TaskRecord, error) {
+	recs, err := s.Bus.ListRecords(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -311,7 +311,7 @@ func (s *Service) ListTasks(_ context.Context, f TaskFilter) ([]*TaskRecord, err
 
 // complete fills rec from a result message and stores it. A malformed result
 // marks the task failed rather than leaving it pending forever.
-func (s *Service) complete(rec *TaskRecord, data []byte) {
+func (s *Service) complete(ctx context.Context, rec *TaskRecord, data []byte) {
 	var res natspkg.TaskResult
 	if err := json.Unmarshal(data, &res); err != nil {
 		rec.Status = TaskFailed
@@ -334,12 +334,12 @@ func (s *Service) complete(rec *TaskRecord, data []byte) {
 	}
 	done := s.now().UTC()
 	rec.CompletedAt = &done
-	if err := s.Bus.PutRecord(rec); err != nil {
+	if err := s.Bus.PutRecord(ctx, rec); err != nil {
 		// Keep the result in the stream so GET can still find it.
 		s.Log.Error(err, "Failed to store task result", "taskId", rec.TaskID)
 		return
 	}
-	if err := s.Bus.Discard(rec.ResultsStream, rec.ResultSubject); err != nil {
+	if err := s.Bus.Discard(ctx, rec.ResultsStream, rec.ResultSubject); err != nil {
 		s.Log.Error(err, "Failed to discard recorded result from the results stream", "taskId", rec.TaskID)
 	}
 }

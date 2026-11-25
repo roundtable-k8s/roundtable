@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -36,11 +36,12 @@ import (
 // operator does and returns a function adding one entry.
 func seedDeadLetters(t *testing.T, e *env) func(entry deadletter.Entry, state deadletter.State) {
 	t.Helper()
-	js, _ := e.nc.JetStream()
-	if _, err := js.AddStream(&nats.StreamConfig{Name: "rt_dev_tasks_DLQ", Subjects: []string{prefix + ".dlq.>"}}); err != nil {
+	ctx := context.Background()
+	js, _ := jetstream.New(e.nc)
+	if _, err := js.CreateStream(ctx, jetstream.StreamConfig{Name: "rt_dev_tasks_DLQ", Subjects: []string{prefix + ".dlq.>"}}); err != nil {
 		t.Fatal(err)
 	}
-	kv, err := js.CreateKeyValue(&nats.KeyValueConfig{Bucket: deadletter.KVBucket, History: 5})
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: deadletter.KVBucket, History: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,12 +54,12 @@ func seedDeadLetters(t *testing.T, e *env) func(entry deadletter.Entry, state de
 		entry.DeadLetteredAt = time.Now().UTC()
 		subject := deadletter.Subject(prefix, entry.Knight, entry.TaskID)
 		body, _ := json.Marshal(entry)
-		if _, err := js.Publish(subject, body); err != nil {
+		if _, err := js.Publish(ctx, subject, body); err != nil {
 			t.Fatal(err)
 		}
 		rec, _ := json.Marshal(deadletter.Record{State: state, Reason: entry.Reason, Knight: entry.Knight,
 			Attempt: entry.Attempt, Subject: subject, UpdatedAt: entry.DeadLetteredAt})
-		if _, err := kv.Put(deadletter.Key("dev", entry.TaskID), rec); err != nil {
+		if _, err := kv.Put(ctx, deadletter.Key("dev", entry.TaskID), rec); err != nil {
 			t.Fatal(err)
 		}
 	}

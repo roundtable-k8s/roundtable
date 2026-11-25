@@ -1,0 +1,207 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
+)
+
+func TestNATSBusRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	ns := runNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]jetstream.StreamConfig{
+		"wq":     {Name: "wq", Subjects: []string{"t.wq.>"}, Retention: jetstream.WorkQueuePolicy},
+		"limits": {Name: "limits", Subjects: []string{"t.limits.>"}, Retention: jetstream.LimitsPolicy},
+	} {
+		if _, err := js.CreateStream(ctx, cfg); err != nil {
+			t.Fatalf("stream %s: %v", name, err)
+		}
+	}
+
+	bus, err := NewNATSBus(ctx, nc, "bus_test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Binding to an existing bucket works too.
+	if _, err := NewNATSBus(ctx, nc, "bus_test", time.Hour); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+
+	// Publish fails when no stream captures the subject, succeeds otherwise.
+	if err := bus.Publish(ctx, "nostream.x", natspkg.TaskPayload{TaskID: "a"}, "rt"); err == nil {
+		t.Fatal("publish without stream should fail")
+	}
+	if err := bus.Publish(ctx, "t.wq.task1", natspkg.TaskPayload{TaskID: "task1", Task: "hi"}, "rt"); err != nil {
+		t.Fatal(err)
+	}
+
+	// LastResult: nil on empty stream/empty name, data otherwise; no consume.
+	if data, err := bus.LastResult(ctx, "", "t.wq.x"); err != nil || data != nil {
+		t.Fatalf("empty stream name: %q %v", data, err)
+	}
+	if data, err := bus.LastResult(ctx, "wq", "t.wq.missing"); err != nil || data != nil {
+		t.Fatalf("missing subject: %q %v", data, err)
+	}
+	for _, subj := range []string{"t.wq.res", "t.limits.res"} {
+		if _, err := js.Publish(ctx, subj, []byte("result")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct{ stream, subj string }{{"wq", "t.wq.res"}, {"limits", "t.limits.res"}} {
+		data, err := bus.LastResult(ctx, c.stream, c.subj)
+		if err != nil || string(data) != "result" {
+			t.Fatalf("LastResult %s: %q %v", c.stream, data, err)
+		}
+	}
+	if _, err := bus.LastResult(ctx, "nope", "t.wq.res"); err == nil {
+		t.Fatal("unknown stream should error")
+	}
+
+	// Discard removes from WorkQueue streams only, and is idempotent.
+	if err := bus.Discard(ctx, "wq", "t.wq.res"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := bus.LastResult(ctx, "wq", "t.wq.res"); data != nil {
+		t.Fatalf("workqueue result not discarded: %q", data)
+	}
+	if err := bus.Discard(ctx, "wq", "t.wq.res"); err != nil {
+		t.Fatalf("second discard: %v", err)
+	}
+	if err := bus.Discard(ctx, "limits", "t.limits.res"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := bus.LastResult(ctx, "limits", "t.limits.res"); string(data) != "result" {
+		t.Fatalf("limits result must be kept, got %q", data)
+	}
+
+	// Records.
+	if recs, err := bus.ListRecords(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("empty list: %v %v", recs, err)
+	}
+	if _, err := bus.GetRecord(ctx, "absent"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetRecord absent = %v, want ErrNotFound", err)
+	}
+	for _, id := range []string{"r1", "r2"} {
+		if err := bus.PutRecord(ctx, &TaskRecord{TaskID: id, Knight: "k", Status: TaskPending}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec, err := bus.GetRecord(ctx, "r1")
+	if err != nil || rec.TaskID != "r1" || rec.Knight != "k" || rec.Status != TaskPending {
+		t.Fatalf("GetRecord = %+v %v", rec, err)
+	}
+	recs, err := bus.ListRecords(ctx)
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("ListRecords = %d %v", len(recs), err)
+	}
+}
+
+func TestNATSBusDeadLetters(t *testing.T) {
+	ctx := context.Background()
+	ns := runNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus, err := NewNATSBus(ctx, nc, "bus_dl_test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No bucket yet: empty, and updates report not found.
+	if recs, err := bus.DeadLetterRecords(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("no bucket: %v %v", recs, err)
+	}
+	if err := bus.UpdateDeadLetterRecord(ctx, "dev.t1", deadletter.Record{}, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update without bucket = %v, want ErrNotFound", err)
+	}
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: deadletter.KVBucket, History: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recs, err := bus.DeadLetterRecords(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("empty bucket: %v %v", recs, err)
+	}
+	if _, err := js.CreateStream(ctx, jetstream.StreamConfig{Name: "dlq", Subjects: []string{"t.dlq.>"}}); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := bus.DeadLetterEntry(ctx, "t.other.x"); e != nil || err != nil {
+		t.Fatalf("entry without stream = %v %v", e, err)
+	}
+	if e, err := bus.DeadLetterEntry(ctx, "t.dlq.t1"); e != nil || err != nil {
+		t.Fatalf("missing entry = %v %v", e, err)
+	}
+	body, _ := json.Marshal(deadletter.Entry{TaskID: "t1", Knight: "k"})
+	if _, err := js.Publish(ctx, "t.dlq.t1", body); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := bus.DeadLetterEntry(ctx, "t.dlq.t1"); err != nil || e == nil || e.TaskID != "t1" {
+		t.Fatalf("entry = %+v %v", e, err)
+	}
+
+	rec, _ := json.Marshal(deadletter.Record{State: deadletter.StateOpen, Knight: "k", Subject: "t.dlq.t1"})
+	if _, err := kv.Put(ctx, "dev.t1", rec); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := bus.DeadLetterRecords(ctx)
+	if err != nil || len(recs) != 1 || recs[0].Key != "dev.t1" || recs[0].Revision == 0 {
+		t.Fatalf("records = %+v %v", recs, err)
+	}
+
+	// Compare-and-set: the first update wins, a repeat at the old revision
+	// is a stale-revision conflict (the retry endpoint's 409).
+	upd := recs[0].Record
+	upd.State = deadletter.StateRetried
+	if err := bus.UpdateDeadLetterRecord(ctx, "dev.t1", upd, recs[0].Revision); err != nil {
+		t.Fatalf("first update: %v", err)
+	}
+	if err := bus.UpdateDeadLetterRecord(ctx, "dev.t1", upd, recs[0].Revision); !errors.Is(err, errStaleRevision) {
+		t.Fatalf("stale update = %v, want errStaleRevision", err)
+	}
+	// A deleted key is skipped.
+	if err := kv.Delete(ctx, "dev.t1"); err != nil {
+		t.Fatal(err)
+	}
+	if recs, err := bus.DeadLetterRecords(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("after delete: %v %v", recs, err)
+	}
+}

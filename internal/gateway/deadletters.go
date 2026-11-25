@@ -88,8 +88,8 @@ type RetryResult struct {
 }
 
 // ListDeadLetters returns dead-letter entries, newest first.
-func (s *Service) ListDeadLetters(_ context.Context, f DeadLetterFilter) ([]*DeadLetterView, error) {
-	recs, err := s.Bus.DeadLetterRecords()
+func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*DeadLetterView, error) {
+	recs, err := s.Bus.DeadLetterRecords(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -108,7 +108,7 @@ func (s *Service) ListDeadLetters(_ context.Context, f DeadLetterFilter) ([]*Dea
 	}
 	out := make([]*DeadLetterView, 0, len(recs))
 	for _, r := range recs {
-		e, err := s.Bus.DeadLetterEntry(r.Subject)
+		e, err := s.Bus.DeadLetterEntry(ctx, r.Subject)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
@@ -120,8 +120,8 @@ func (s *Service) ListDeadLetters(_ context.Context, f DeadLetterFilter) ([]*Dea
 }
 
 // GetDeadLetter returns one entry including its original task payload.
-func (s *Service) GetDeadLetter(_ context.Context, taskID, table string) (*DeadLetterView, error) {
-	rec, e, err := s.findDeadLetter(taskID, table)
+func (s *Service) GetDeadLetter(ctx context.Context, taskID, table string) (*DeadLetterView, error) {
+	rec, e, err := s.findDeadLetter(ctx, taskID, table)
 	if err != nil {
 		return nil, err
 	}
@@ -129,11 +129,11 @@ func (s *Service) GetDeadLetter(_ context.Context, taskID, table string) (*DeadL
 }
 
 // findDeadLetter loads the state record and body of the entry for taskID.
-func (s *Service) findDeadLetter(taskID, table string) (*DeadLetterRecord, *deadletter.Entry, error) {
+func (s *Service) findDeadLetter(ctx context.Context, taskID, table string) (*DeadLetterRecord, *deadletter.Entry, error) {
 	if !taskIDPattern.MatchString(taskID) {
 		return nil, nil, fmt.Errorf("%w: dead letter %q", ErrNotFound, taskID)
 	}
-	recs, err := s.Bus.DeadLetterRecords()
+	recs, err := s.Bus.DeadLetterRecords(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -150,7 +150,7 @@ func (s *Service) findDeadLetter(taskID, table string) (*DeadLetterRecord, *dead
 	default:
 		return nil, nil, fmt.Errorf("%w: task %q is dead-lettered in several RoundTables; pass table", ErrInvalid, taskID)
 	}
-	e, err := s.Bus.DeadLetterEntry(matches[0].Subject)
+	e, err := s.Bus.DeadLetterEntry(ctx, matches[0].Subject)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -181,7 +181,7 @@ func deadLetterView(r DeadLetterRecord, e *deadletter.Entry) *DeadLetterView {
 // carrying the next attempt number, so the knight can look for partial work.
 // It is a deliberate act: nothing retries on its own.
 func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*RetryResult, error) {
-	rec, e, err := s.findDeadLetter(req.TaskID, req.Table)
+	rec, e, err := s.findDeadLetter(ctx, req.TaskID, req.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 	// two retries (two clicks, two gateway replicas) from both publishing.
 	claimed := rec.Record
 	claimed.State, claimed.RetriedAs, claimed.UpdatedAt = deadletter.StateRetried, newID, s.now().UTC()
-	if err := s.Bus.UpdateDeadLetterRecord(rec.Key, claimed, rec.Revision); err != nil {
+	if err := s.Bus.UpdateDeadLetterRecord(ctx, rec.Key, claimed, rec.Revision); err != nil {
 		if errors.Is(err, errStaleRevision) {
 			return nil, &ConflictError{State: string(deadletter.StateRetried), Reason: fmt.Sprintf("dead letter %s changed state while retrying", req.TaskID)}
 		}
@@ -242,16 +242,18 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 		ResultSubject: natspkg.ResultSubject(t.SubjectPrefix, newID), ResultsStream: t.ResultsStream,
 	}
 	fail := func(cause error) error {
+		// The rollback must land even if the caller has gone away.
+		ctx := context.WithoutCancel(ctx)
 		// Hand the entry back so the retry can be tried again. The claim is at
 		// revision+1 unless someone raced us, in which case leave it.
-		if cur, gerr := s.findDeadLetterByKey(rec.Key); gerr == nil && cur.State == deadletter.StateRetried && cur.RetriedAs == newID {
+		if cur, gerr := s.findDeadLetterByKey(ctx, rec.Key); gerr == nil && cur.State == deadletter.StateRetried && cur.RetriedAs == newID {
 			reopened := rec.Record
 			reopened.UpdatedAt = s.now().UTC()
-			_ = s.Bus.UpdateDeadLetterRecord(rec.Key, reopened, cur.Revision)
+			_ = s.Bus.UpdateDeadLetterRecord(ctx, rec.Key, reopened, cur.Revision)
 		}
 		return fmt.Errorf("%w: %v", ErrUnavailable, cause)
 	}
-	if err := s.Bus.PutRecord(task); err != nil {
+	if err := s.Bus.PutRecord(ctx, task); err != nil {
 		return nil, fail(fmt.Errorf("store task: %w", err))
 	}
 	subject := natspkg.TaskSubject(t.SubjectPrefix, t.Knight.Spec.Domain, knightName)
@@ -259,15 +261,15 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 		task.Status, task.Error = TaskFailed, "publish failed: "+err.Error()
 		done := s.now().UTC()
 		task.CompletedAt = &done
-		_ = s.Bus.PutRecord(task)
+		_ = s.Bus.PutRecord(context.WithoutCancel(ctx), task)
 		return nil, fail(err)
 	}
 	s.Log.Info("Retried dead-lettered task", "knight", knightName, "taskId", newID, "retryOf", e.TaskID, "attempt", attempt)
 	return &RetryResult{TaskID: newID, RetryOf: e.TaskID, Attempt: attempt, Knight: knightName}, nil
 }
 
-func (s *Service) findDeadLetterByKey(key string) (*DeadLetterRecord, error) {
-	recs, err := s.Bus.DeadLetterRecords()
+func (s *Service) findDeadLetterByKey(ctx context.Context, key string) (*DeadLetterRecord, error) {
+	recs, err := s.Bus.DeadLetterRecords(ctx)
 	if err != nil {
 		return nil, err
 	}
