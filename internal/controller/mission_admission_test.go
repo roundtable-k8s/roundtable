@@ -134,3 +134,41 @@ func TestAdmitMission(t *testing.T) {
 		})
 	}
 }
+
+// A mission held in Pending longer than timeoutSeconds must not time out because
+// of its queue time: admission resets StartedAt.
+func TestReconcilePendingResetsStartedAtOnAdmission(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	m := admissionMission("b", time.Hour, "t", aiv1alpha1.MissionPhasePending)
+	m.Spec.TimeoutSeconds = 1800
+	old := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	m.Status.StartedAt = &old
+	meta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+		Type: aiv1alpha1.ConditionMissionAdmitted, Status: metav1.ConditionFalse,
+		Reason: aiv1alpha1.ReasonTableAtMissionLimit, Message: "held",
+	})
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(admissionRT(1), m).
+		WithStatusSubresource(&aiv1alpha1.Mission{}).Build()
+	r := &MissionReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
+
+	var subject aiv1alpha1.Mission
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "b"}, &subject); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.reconcilePending(context.Background(), &subject); err != nil {
+		t.Fatal(err)
+	}
+	var got aiv1alpha1.Mission
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "b"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != aiv1alpha1.MissionPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning", got.Status.Phase)
+	}
+	if got.Status.StartedAt == nil || time.Since(got.Status.StartedAt.Time) > time.Minute {
+		t.Errorf("StartedAt not reset on admission: %v", got.Status.StartedAt)
+	}
+}

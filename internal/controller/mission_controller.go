@@ -376,6 +376,11 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 	}
 
 	log.Info("Mission spec validation passed", "mission", mission.Name)
+	// The execution timeout runs from admission, not creation, so time spent
+	// queued behind maxMissions does not eat into timeoutSeconds. ExpiresAt (TTL)
+	// is left alone: queue time does count toward ttlSeconds.
+	admittedAt := metav1.Now()
+	mission.Status.StartedAt = &admittedAt
 	err := status.ForMission(mission).
 		Phase(aiv1alpha1.MissionPhaseProvisioning).
 		Condition(aiv1alpha1.ConditionMissionAdmitted, aiv1alpha1.ReasonMissionAdmitted, "Mission admitted", metav1.ConditionTrue).
