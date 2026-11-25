@@ -74,6 +74,46 @@ spec:
           for: 15m
           labels:
             {{- toYaml $labels | nindent 12 }}
+    - name: roundtable.platform
+      rules:
+        - alert: RoundtableDeadLettersOpen
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} has {{`{{ $value }}`}} open dead letters.
+          expr: |
+            sum by (table, knight) (roundtable_dead_letters_open) > 0
+          for: {{ .Values.alerts.deadLettersOpenMinutes }}m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightConsumerNotReady
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} has no ready task consumer.
+          expr: |
+            roundtable_knight_consumer_ready == 0
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: KnightNotIsolated
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} is not isolated: {{`{{ $labels.reason }}`}}.
+          expr: |
+            roundtable_knight_isolated{reason!~"Isolated|OptedOut|IsolationDisabled"} == 1
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableChainRunsFailing
+          annotations:
+            summary: >-
+              Table {{`{{ $labels.table }}`}}: {{`{{ $value | humanizePercentage }}`}} of chain runs failed in the last hour,
+              above {{ .Values.alerts.chainFailureRatio }}.
+          expr: |
+            sum by (table) (increase(roundtable_chain_runs_total{status="failed"}[1h]))
+              / sum by (table) (increase(roundtable_chain_runs_total[1h])) > {{ .Values.alerts.chainFailureRatio }}
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
     - name: roundtable.pods
       rules:
         - alert: RoundtablePodRestarting

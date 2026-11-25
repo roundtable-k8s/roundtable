@@ -1041,7 +1041,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		return err
 	}
 	if observeWake {
-		rtmetrics.KnightWakeSeconds.WithLabelValues(knight.Name, knight.Namespace).
+		rtmetrics.KnightWakeSeconds.WithLabelValues(knightpkg.KnightTable(knight), knight.Name, knight.Namespace).
 			Observe(r.now().Sub(wakingSince).Seconds())
 	}
 	return nil

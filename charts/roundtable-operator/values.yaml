@@ -571,6 +571,11 @@ alerts:
   # p95 chain step duration (seconds, over 1h) above which
   # RoundtableChainStepsSlow fires. Step histogram buckets stop at ~34min.
   chainStepSlowSeconds: 1800
+  # Failed share (0-1) of chain runs over 1h above which
+  # RoundtableChainRunsFailing fires.
+  chainFailureRatio: 0.5
+  # Minutes a dead letter may stay open before RoundtableDeadLettersOpen fires.
+  deadLettersOpenMinutes: 15
   # Extra labels on every rule; `severity` here overrides the default "warning".
   labels: {}
   scaling:
