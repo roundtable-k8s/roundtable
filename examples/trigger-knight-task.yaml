@@ -1,0 +1,58 @@
+# Triggers that send one task straight to a knight, without a Chain: every
+# night kay writes a briefing, and tristan looks at each firing alert. Needs
+# kay.yaml, tristan.yaml and roundtable-fleet.yaml.
+#
+#   kubectl -n roundtable get trigger nightly-briefing      # Ready, Knight, Last Fired
+#   kubectl -n roundtable get trigger nightly-briefing \
+#     -o jsonpath='{.status.recentFirings[0]}'               # run: <task ID>, outcome
+#
+# The task is recorded with the gateway's tasks: GET /v1/tasks/<task ID> on
+# the gateway (or the dashboard) shows its result.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: nightly-briefing
+  namespace: roundtable
+spec:
+  source:
+    schedule:
+      cron: "0 2 * * *"
+      timeZone: Europe/London
+      startingDeadlineSeconds: 3600
+  target:
+    knight:
+      name: kay
+      task: |
+        Write the nightly fleet briefing for {{ .Event.Time.Format "Monday 2006-01-02" }}
+        to Briefings/.
+      # Counted as lost (and no longer active) without a result after 30m.
+      timeoutSeconds: 1800
+  concurrency:
+    policy: Forbid
+---
+# One task per alert from an events subject. With roundTableRef set the
+# knight must sit at that RoundTable: label tristan
+# ai.roundtable.io/round-table: fleet-a, else the Trigger is not Ready
+# (TargetWrongTable). target.knight.model (a model ID or RoundTable alias)
+# overrides the knight's model for these tasks. The dedupe key sends one task per alert fingerprint while
+# the gateway keeps its task records (gateway.taskTTL, 7 days by default).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: alert-triage
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    nats:
+      subject: fleet-a.events.alerts.>
+  target:
+    knight:
+      name: tristan
+      task: |
+        Alert {{ .Event.Data.alertname }} is firing: {{ toJson .Event.Data }}
+        Find the cause and report what you found.
+  dedupeKey: "{{ .Event.Data.fingerprint }}"
+  concurrency:
+    policy: Allow
+    maxActive: 3

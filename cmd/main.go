@@ -94,6 +94,12 @@ func main() {
 	var githubAPIURL string
 	var providerMaxRetries int
 	var missionResultsTTL time.Duration
+	var triggerTaskBucket string
+	var triggerTaskTTL time.Duration
+	flag.StringVar(&triggerTaskBucket, "trigger-task-bucket", controller.DefaultGatewayTaskBucket,
+		"NATS KV bucket of the gateway's task records; Triggers with a knight target record their tasks there.")
+	flag.DurationVar(&triggerTaskTTL, "trigger-task-ttl", controller.DefaultGatewayTaskTTL,
+		"How long the gateway keeps task records (used if the operator creates the bucket first).")
 	flag.DurationVar(&missionResultsTTL, "mission-results-ttl", natspkg.DefaultResultsTTL,
 		"How long retained mission results are kept in the mission-results NATS KV bucket. "+
 			"An existing bucket with a different TTL is updated.")
@@ -446,6 +452,10 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("trigger-controller"), //nolint:staticcheck // SA1019: see note above
 		NATS:     natsProvider,
 		GitHub:   githubFactory,
+
+		TaskBucket:         triggerTaskBucket,
+		TaskTTL:            triggerTaskTTL,
+		DefaultKnightImage: defaultImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Trigger")
 		os.Exit(1)

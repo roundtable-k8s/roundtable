@@ -445,7 +445,7 @@ var _ = Describe("PR feedback trigger engine", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: ns},
 			Spec: aiv1alpha1.TriggerSpec{
 				Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "0 * * * *"}},
-				Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: feedbackName}},
+				Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: feedbackName}},
 			},
 		})).To(Succeed())
 		_, err := feedback.Reconcile(ctx, reconcile.Request{NamespacedName: rtKey})

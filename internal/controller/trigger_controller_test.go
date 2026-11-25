@@ -17,7 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -95,7 +97,7 @@ var _ = Describe("Trigger controller", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 			Spec: aiv1alpha1.TriggerSpec{
 				Source:        aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: subject}},
-				Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+				Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 				Input:         `{"service": "{{ .Event.Data.service }}", "subject": "{{ .Event.Subject }}"}`,
 				RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
 			},
@@ -181,7 +183,7 @@ var _ = Describe("Trigger controller", func() {
 			return &aiv1alpha1.Trigger{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 				Spec: aiv1alpha1.TriggerSpec{
-					Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+					Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 				},
 			}
 		}
@@ -244,7 +246,7 @@ var _ = Describe("Trigger controller", func() {
 							LocalObjectReference: corev1.LocalObjectReference{Name: "hook"}, Key: "token"}},
 						EventType: eventType,
 					}},
-					Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+					Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 					Input:         `{"alert": "{{ .Event.Data.alert }}", "subject": "{{ .Event.Subject }}"}`,
 					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
 				},
@@ -515,7 +517,7 @@ var _ = Describe("Trigger controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 				Spec: aiv1alpha1.TriggerSpec{
 					Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "*/5 * * * *"}},
-					Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+					Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 					Input:  `{"at": "{{ .Event.Time.UTC.Format "15:04" }}"}`,
 				},
 			}
@@ -596,6 +598,246 @@ var _ = Describe("Trigger controller", func() {
 			reconcileTrigger("missing")
 			cond := meta.FindStatusCondition(getTrigger("missing").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetNotFound))
+		})
+	})
+	Context("knight target", func() {
+		const knightName = "trg-knight"
+		var nc *nats.Conn
+
+		BeforeEach(func() {
+			var err error
+			nc, err = nats.Connect(srv.ClientURL())
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(nc.Close)
+			Expect(k8sClient.Create(ctx, &aiv1alpha1.Knight{
+				ObjectMeta: metav1.ObjectMeta{Name: knightName, Namespace: ns,
+					Labels: map[string]string{aiv1alpha1.LabelRoundTable: rtName}},
+				Spec: aiv1alpha1.KnightSpec{
+					Domain: "ops",
+					Model:  "claude-sonnet-4-20250514",
+					Skills: []string{"ops"},
+					NATS: aiv1alpha1.KnightNATS{
+						URL:      srv.ClientURL(),
+						Subjects: []string{prefix + ".tasks.ops.>"},
+						Stream:   "trg_tasks",
+					},
+				},
+			})).To(Succeed())
+			DeferCleanup(func() {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.Knight{
+					ObjectMeta: metav1.ObjectMeta{Name: knightName, Namespace: ns}}))).To(Succeed())
+			})
+		})
+
+		knightTarget := func(task string) aiv1alpha1.TriggerTarget {
+			return aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: knightName, Task: task}}
+		}
+		// tasks subscribes to the knight's task subject and returns the
+		// payloads published there so far.
+		tasks := func() func() []natspkg.TaskPayload {
+			sub, err := nc.SubscribeSync(natspkg.TaskSubject(prefix, "ops", knightName))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nc.Flush()).To(Succeed())
+			DeferCleanup(func() { _ = sub.Unsubscribe() })
+			var got []natspkg.TaskPayload
+			return func() []natspkg.TaskPayload {
+				for {
+					msg, err := sub.NextMsg(10 * time.Millisecond)
+					if err != nil {
+						return got
+					}
+					var p natspkg.TaskPayload
+					Expect(json.Unmarshal(msg.Data, &p)).To(Succeed())
+					got = append(got, p)
+				}
+			}
+		}
+		publishResult := func(taskID string, result string) {
+			_, err := js.Publish(ctx, natspkg.ResultSubject(prefix, taskID), []byte(result))
+			Expect(err).NotTo(HaveOccurred())
+		}
+		scheduleKnightTrigger := func(name string, mutate func(*aiv1alpha1.TriggerSpec)) *aiv1alpha1.Trigger {
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "*/5 * * * *", TimeZone: "UTC"}},
+					Target: knightTarget(`Brief me for {{ .Event.Time.UTC.Format "15:04" }} ({{ .Trigger.Name }})`),
+				},
+			}
+			if mutate != nil {
+				mutate(&t.Spec)
+			}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			return getTrigger(name)
+		}
+		nextFive := func(t time.Time) time.Time {
+			return t.UTC().Truncate(5 * time.Minute).Add(5 * time.Minute)
+		}
+
+		It("rejects both or no targets and what a knight target does not support", func() {
+			t := scheduleKnightTrigger("kv-ok", nil)
+			Expect(t.Spec.Target.Knight.TimeoutSeconds).To(HaveValue(Equal(int32(3600))))
+
+			bad := func(name string, mutate func(*aiv1alpha1.TriggerSpec)) error {
+				t := &aiv1alpha1.Trigger{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+					Spec: aiv1alpha1.TriggerSpec{
+						Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "* * * * *"}},
+						Target: knightTarget("hi"),
+					},
+				}
+				mutate(&t.Spec)
+				return k8sClient.Create(ctx, t)
+			}
+			Expect(bad("kv-both", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.ChainRef = &corev1.LocalObjectReference{Name: tmplName}
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef or target.knight")))
+			Expect(bad("kv-none", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.Knight = nil
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef or target.knight")))
+			Expect(bad("kv-replace", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyReplace
+			})).To(MatchError(ContainSubstring("Replace is not supported with target.knight")))
+			Expect(bad("kv-input", func(s *aiv1alpha1.TriggerSpec) {
+				s.Input = "x"
+			})).To(MatchError(ContainSubstring("spec.input is for target.chainRef")))
+		})
+
+		It("sends exactly one task with the rendered text and records its outcome", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-cron", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(10 * time.Second)
+			res := reconcileTrigger("kt-cron")
+
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+			Expect(sent[0].Task).To(Equal(fmt.Sprintf("Brief me for %s (kt-cron)", due.Format("15:04"))))
+			Expect(sent[0].TaskID).To(HavePrefix("invoke-" + knightName + "-"))
+			st := getTrigger("kt-cron").Status
+			Expect(st.RecentFirings).To(HaveLen(1))
+			Expect(st.RecentFirings[0].Run).To(Equal(sent[0].TaskID))
+			Expect(st.RecentFirings[0].Outcome).To(BeEmpty())
+			Expect(st.ActiveRuns).To(Equal([]string{sent[0].TaskID}))
+			Expect(st.LastFiredAt).NotTo(BeNil())
+			Expect(res.RequeueAfter).To(BeNumerically("<=", triggerTaskPoll))
+			Expect(runsOf("kt-cron")).To(BeEmpty())
+			Expect(firings("kt-cron", "schedule", "started")).To(Equal(1.0))
+
+			// The task is recorded where the gateway keeps its tasks.
+			svc, err := r.taskService(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			rec, err := svc.GetTask(ctx, sent[0].TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.Knight).To(Equal(knightName))
+			Expect(rec.RoundTable).To(Equal(rtName))
+			Expect(rec.Done()).To(BeFalse())
+
+			// Firing the same schedule time again sends nothing.
+			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "kt-cron"},
+				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil)
+			Expect(err).NotTo(HaveOccurred())
+			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
+			Expect(getTrigger("kt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))
+
+			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","output":"all quiet"}`)
+			reconcileTrigger("kt-cron")
+			st = getTrigger("kt-cron").Status
+			Expect(st.ActiveRuns).To(BeEmpty())
+			Expect(st.RecentFirings[1].Run).To(Equal(sent[0].TaskID))
+			Expect(st.RecentFirings[1].Outcome).To(Equal(aiv1alpha1.TriggerFiringSucceeded))
+			rec, err = svc.GetTask(ctx, sent[0].TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.Output).To(Equal("all quiet"))
+		})
+
+		It("applies Forbid while a task is active and records a task without result as lost", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-forbid", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
+				s.Target.Knight.TimeoutSeconds = ptr.To[int32](600)
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("kt-forbid")
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+
+			// The next time finds the task active: nothing is sent.
+			clock = due.Add(5*time.Minute + time.Second)
+			reconcileTrigger("kt-forbid")
+			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
+			st := getTrigger("kt-forbid").Status
+			Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
+
+			// No result within timeoutSeconds: lost, and no longer active.
+			clock = due.Add(11 * time.Minute)
+			reconcileTrigger("kt-forbid")
+			st = getTrigger("kt-forbid").Status
+			Expect(st.ActiveRuns).To(BeEmpty())
+			Expect(got()).To(HaveLen(1))
+			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
+				HaveField("Run", sent[0].TaskID), HaveField("Outcome", aiv1alpha1.TriggerFiringLost))))
+		})
+
+		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
+			got := tasks()
+			natsTrigger("kt-nats", prefix+".events.alerts.>", func(s *aiv1alpha1.TriggerSpec) {
+				s.Input = ""
+				s.Target = knightTarget(`look at {{ .Event.Data.alert }}`)
+				s.DedupeKey = `{{ .Event.Data.alert }}`
+				s.Concurrency.MaxActive = 2
+			})
+			Expect(meta.IsStatusConditionTrue(getTrigger("kt-nats").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+
+			publish(prefix+".events.alerts.a", "1", `{"alert": "disk"}`)
+			publish(prefix+".events.alerts.a", "2", `{"alert": "disk"}`)
+			publish(prefix+".events.alerts.b", "3", `{"alert": "cpu"}`)
+			Eventually(func() int { return len(getTrigger("kt-nats").Status.RecentFirings) }, "10s").Should(Equal(3))
+			sent := got()
+			Expect(sent).To(HaveLen(2))
+			Expect([]string{sent[0].Task, sent[1].Task}).To(ConsistOf("look at disk", "look at cpu"))
+
+			publish(prefix+".events.alerts.c", "4", `{"alert": "mem"}`)
+			Eventually(func() string { return getTrigger("kt-nats").Status.RecentFirings[0].SkipReason }, "10s").
+				Should(ContainSubstring("maxActive 2 reached"))
+			Expect(got()).To(HaveLen(2))
+			skipped := 0
+			for _, f := range getTrigger("kt-nats").Status.RecentFirings {
+				if strings.Contains(f.SkipReason, "duplicate dedupe key") {
+					skipped++
+				}
+			}
+			Expect(skipped).To(Equal(1))
+		})
+
+		It("reports a missing knight or one at another table and sends nothing", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-missing", func(s *aiv1alpha1.TriggerSpec) { s.Target.Knight.Name = "nobody" })
+			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+			reconcileTrigger("kt-missing")
+			cond := meta.FindStatusCondition(getTrigger("kt-missing").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetNotFound))
+			Expect(getTrigger("kt-missing").Status.RecentFirings).To(BeEmpty())
+
+			Expect(k8sClient.Create(ctx, &aiv1alpha1.RoundTable{
+				ObjectMeta: metav1.ObjectMeta{Name: "trg-other", Namespace: ns},
+				Spec:       aiv1alpha1.RoundTableSpec{NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "other"}},
+			})).To(Succeed())
+			DeferCleanup(func() {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.RoundTable{
+					ObjectMeta: metav1.ObjectMeta{Name: "trg-other", Namespace: ns}}))).To(Succeed())
+			})
+			t = scheduleKnightTrigger("kt-table", func(s *aiv1alpha1.TriggerSpec) {
+				s.RoundTableRef = &corev1.LocalObjectReference{Name: "trg-other"}
+			})
+			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+			reconcileTrigger("kt-table")
+			cond = meta.FindStatusCondition(getTrigger("kt-table").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetWrongTable))
+			Expect(getTrigger("kt-table").Status.RecentFirings).To(BeEmpty())
+			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(BeEmpty())
 		})
 	})
 })

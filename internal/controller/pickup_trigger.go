@@ -117,7 +117,7 @@ func pickupTriggerSpec(rt *aiv1alpha1.RoundTable, spec *aiv1alpha1.IssuePickupSp
 				},
 			},
 		}},
-		Target: aiv1alpha1.TriggerTarget{ChainRef: spec.ChainRef},
+		Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: spec.ChainRef.Name}},
 		Input:  pickupTriggerInput,
 		Concurrency: aiv1alpha1.TriggerConcurrency{
 			Policy:    aiv1alpha1.TriggerConcurrencyAllow,

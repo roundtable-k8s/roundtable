@@ -40,5 +40,8 @@ lacks "$nohooks" 'gateway-hook-secrets' "webhook secret Role rendered with hooks
 has "$nohooks" '--hooks=false' "hooks flag not passed when disabled"
 
 off="$(render --set gateway.enabled=false)"
-lacks "$off" 'gateway' "gateway resources rendered when disabled"
+# The operator still records knight-target Trigger tasks in the gateway's task
+# bucket (--trigger-task-bucket), whose default name says gateway.
+has "$off" '--trigger-task-bucket=roundtable_gateway_tasks' "operator not given the task bucket with the gateway disabled"
+lacks "$(grep -v -- '--trigger-task-' <<<"$off")" 'gateway' "gateway resources rendered when disabled"
 echo "gateway defaults OK"
