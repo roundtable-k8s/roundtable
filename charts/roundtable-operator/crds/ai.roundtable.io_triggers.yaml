@@ -25,6 +25,10 @@ spec:
     - jsonPath: .spec.target.knight.name
       name: Knight
       type: string
+    - jsonPath: .spec.target.mission.objective
+      name: Mission
+      priority: 1
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -625,18 +629,133 @@ spec:
                     - name
                     - task
                     type: object
+                  mission:
+                    description: |-
+                      mission creates a Mission per firing on the Trigger's RoundTable
+                      (spec.roundTableRef), named <trigger>-<short firing key>, owned by the
+                      Trigger. status.recentFirings[].run is the Mission name.
+                    properties:
+                      chains:
+                        description: chains pre-seeds existing Chains (same namespace)
+                          the Mission runs.
+                        items:
+                          description: TriggerMissionChain names an existing Chain
+                            and its input for the Mission.
+                          properties:
+                            input:
+                              description: input for this run of the Chain.
+                              maxLength: 65536
+                              type: string
+                            name:
+                              description: name of the Chain (same namespace).
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        maxItems: 20
+                        type: array
+                      costBudgetUSD:
+                        description: |-
+                          costBudgetUSD is the Mission's spending cap, a decimal greater than 0
+                          (for example "2.50"), at most the gateway's maximum.
+                        maxLength: 32
+                        minLength: 1
+                        type: string
+                      knights:
+                        description: knights pre-seeds existing Knights (same namespace)
+                          taking part.
+                        items:
+                          type: string
+                        maxItems: 50
+                        type: array
+                      metaMission:
+                        default: true
+                        description: |-
+                          metaMission lets a planner knight break the objective into chains
+                          (planner overrides apply). Defaults to true; false needs chains.
+                        type: boolean
+                      objective:
+                        description: |-
+                          objective is a Go template rendered into the Mission's objective, with
+                          the same data as spec.input (.Event, .Trigger). An objective that
+                          renders empty fires nothing.
+                        maxLength: 16384
+                        minLength: 1
+                        type: string
+                      planner:
+                        description: planner overrides the RoundTable's planner knight
+                          and limits.
+                        properties:
+                          context:
+                            description: context is extra information for the planner.
+                            maxLength: 65536
+                            type: string
+                          knight:
+                            description: |-
+                              knight is an existing Knight to plan with; empty uses the
+                              RoundTable's planner.
+                            maxLength: 63
+                            type: string
+                          maxChains:
+                            description: maxChains is the most chains the planner
+                              may generate (1-20).
+                            format: int32
+                            maximum: 20
+                            minimum: 1
+                            type: integer
+                          maxKnights:
+                            description: maxKnights is the most ephemeral knights
+                              the planner may generate (1-50).
+                            format: int32
+                            maximum: 50
+                            minimum: 1
+                            type: integer
+                        type: object
+                      recruitExisting:
+                        description: recruitExisting lets the Mission use standing
+                          knights.
+                        type: boolean
+                      successCriteria:
+                        description: |-
+                          successCriteria is a Go template (same data as objective) saying how
+                          to tell whether the Mission succeeded.
+                        maxLength: 16384
+                        type: string
+                      timeoutSeconds:
+                        description: |-
+                          timeoutSeconds is how long the Mission may run before it fails
+                          (60-86400); unset uses the gateway's default.
+                        format: int32
+                        maximum: 86400
+                        minimum: 60
+                        type: integer
+                      ttlSeconds:
+                        description: |-
+                          ttlSeconds is how long until the Mission is cleaned up (60-604800);
+                          unset uses the gateway's default.
+                        format: int32
+                        maximum: 604800
+                        minimum: 60
+                        type: integer
+                    required:
+                    - costBudgetUSD
+                    - objective
+                    type: object
                 type: object
                 x-kubernetes-validations:
-                - message: set exactly one of target.chainRef or target.knight
-                  rule: '[has(self.chainRef), has(self.knight)].filter(x, x).size()
-                    == 1'
+                - message: set exactly one of target.chainRef, target.knight or target.mission
+                  rule: '[has(self.chainRef), has(self.knight), has(self.mission)].filter(x,
+                    x).size() == 1'
               ttlSecondsAfterFinished:
                 default: 86400
                 description: |-
                   ttlSecondsAfterFinished deletes a finished run this long after it
                   completed. Its dedupe key is forgotten then too. 0 keeps finished runs.
                   A knight target's tasks are kept as long as the gateway keeps task
-                  records (gateway.taskTTL) instead.
+                  records (gateway.taskTTL) instead; a mission target's Missions clean
+                  themselves up (target.mission.ttlSeconds).
                 format: int32
                 minimum: 0
                 type: integer
@@ -651,6 +770,19 @@ spec:
               rule: '!has(self.source.webhook) || has(self.roundTableRef)'
             - message: roundTableRef is required for source.github
               rule: '!has(self.source.github) || has(self.roundTableRef)'
+            - message: 'roundTableRef is required for target.mission: the Mission
+                runs on that RoundTable'
+              rule: '!has(self.target.mission) || has(self.roundTableRef)'
+            - message: 'target.mission is not supported with source.github: use target.chainRef'
+              rule: '!has(self.target.mission) || !has(self.source.github)'
+            - message: 'spec.input is for target.chainRef: put a Mission''s text in
+                target.mission.objective'
+              rule: '!has(self.target.mission) || !has(self.input) || size(self.input)
+                == 0'
+            - message: 'concurrency.policy Replace is not supported with target.mission:
+                a created Mission is not withdrawn'
+              rule: '!has(self.target.mission) || !has(self.concurrency) || !has(self.concurrency.policy)
+                || self.concurrency.policy != ''Replace'''
             - message: 'target.knight is not supported with source.github: use target.chainRef'
               rule: '!has(self.target.knight) || !has(self.source.github)'
             - message: 'spec.input is for target.chainRef: put a knight''s text in
@@ -771,12 +903,29 @@ spec:
                       type: string
                     outcome:
                       description: |-
-                        outcome is how the firing's task ended, once known (knight target):
-                        succeeded, failed or lost.
+                        outcome is how the firing's task or Mission ended, once known (knight
+                        and mission targets): succeeded, failed or lost (a task without a
+                        result in time; a Mission that expired or was deleted).
                       enum:
                       - succeeded
                       - failed
                       - lost
+                      type: string
+                    phase:
+                      description: |-
+                        phase is the final phase of the Mission the firing created (mission
+                        target), once it finished.
+                      enum:
+                      - Pending
+                      - Provisioning
+                      - Planning
+                      - Assembling
+                      - Briefing
+                      - Active
+                      - Succeeded
+                      - Failed
+                      - Expired
+                      - CleaningUp
                       type: string
                     run:
                       description: |-

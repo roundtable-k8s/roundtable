@@ -1,0 +1,37 @@
+# A Trigger that launches a Mission every Monday: a planner knight breaks the
+# objective into read-only review chains. Needs roundtable-fleet.yaml (the
+# RoundTable fleet-a, whose planner knight plans the Mission).
+#
+#   kubectl -n roundtable get trigger weekly-backlog-review
+#   kubectl -n roundtable get trigger weekly-backlog-review \
+#     -o jsonpath='{.status.recentFirings[0]}'   # run: <Mission name>, phase, outcome
+#   kubectl -n roundtable get mission -l ai.roundtable.io/trigger=weekly-backlog-review
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: weekly-backlog-review
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}    # the Mission runs on this table
+  source:
+    schedule:
+      cron: "0 8 * * 1"             # Mondays 08:00
+      timeZone: Europe/London
+      startingDeadlineSeconds: 7200
+  target:
+    mission:
+      # Go template, same data as spec.input (.Event, .Trigger).
+      objective: |
+        Review the open issue backlog as of {{ .Event.Time.Format "2006-01-02" }}:
+        group issues by theme, flag stale ones, and propose the five to do next.
+        Read-only: do not comment on, label or close anything.
+      successCriteria: A ranked list of five issues with a one-line reason each.
+      metaMission: true             # default: a planner breaks the objective into chains
+      recruitExisting: true
+      planner:
+        maxChains: 4
+      costBudgetUSD: "2.50"
+      timeoutSeconds: 3600
+      ttlSeconds: 86400
+  concurrency:
+    policy: Forbid                  # skip a Monday while last week's Mission still runs

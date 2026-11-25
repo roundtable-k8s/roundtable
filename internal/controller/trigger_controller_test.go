@@ -691,10 +691,10 @@ var _ = Describe("Trigger controller", func() {
 			}
 			Expect(bad("kv-both", func(s *aiv1alpha1.TriggerSpec) {
 				s.Target.ChainRef = &corev1.LocalObjectReference{Name: tmplName}
-			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef or target.knight")))
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef, target.knight or target.mission")))
 			Expect(bad("kv-none", func(s *aiv1alpha1.TriggerSpec) {
 				s.Target.Knight = nil
-			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef or target.knight")))
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef, target.knight or target.mission")))
 			Expect(bad("kv-replace", func(s *aiv1alpha1.TriggerSpec) {
 				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyReplace
 			})).To(MatchError(ContainSubstring("Replace is not supported with target.knight")))
@@ -838,6 +838,173 @@ var _ = Describe("Trigger controller", func() {
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetWrongTable))
 			Expect(getTrigger("kt-table").Status.RecentFirings).To(BeEmpty())
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(BeEmpty())
+		})
+	})
+
+	Context("mission target", func() {
+		const plannerName = "trg-planner"
+		missionTarget := func() aiv1alpha1.TriggerTarget {
+			return aiv1alpha1.TriggerTarget{Mission: &aiv1alpha1.TriggerMissionTarget{
+				Objective:       `Review {{ .Trigger.Name }} at {{ .Event.Time.UTC.Format "15:04" }}`,
+				SuccessCriteria: "a short list",
+				CostBudgetUSD:   "2.50",
+				TimeoutSeconds:  600,
+				TTLSeconds:      3600,
+				Planner:         &aiv1alpha1.TriggerMissionPlanner{Knight: plannerName, MaxChains: 3},
+			}}
+		}
+		scheduleMissionTrigger := func(name string, mutate func(*aiv1alpha1.TriggerSpec)) *aiv1alpha1.Trigger {
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source:        aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "*/5 * * * *", TimeZone: "UTC"}},
+					Target:        missionTarget(),
+					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+				},
+			}
+			if mutate != nil {
+				mutate(&t.Spec)
+			}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			return getTrigger(name)
+		}
+		nextFive := func(t time.Time) time.Time {
+			return t.UTC().Truncate(5 * time.Minute).Add(5 * time.Minute)
+		}
+		missionsOf := func(trigger string) []aiv1alpha1.Mission {
+			list := &aiv1alpha1.MissionList{}
+			Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+				client.MatchingLabels{aiv1alpha1.LabelTrigger: trigger})).To(Succeed())
+			return list.Items
+		}
+		setPhase := func(m *aiv1alpha1.Mission, phase aiv1alpha1.MissionPhase) {
+			m.Status.Phase = phase
+			Expect(k8sClient.Status().Update(ctx, m)).To(Succeed())
+		}
+
+		BeforeEach(func() {
+			Expect(k8sClient.Create(ctx, &aiv1alpha1.Knight{
+				ObjectMeta: metav1.ObjectMeta{Name: plannerName, Namespace: ns},
+				Spec: aiv1alpha1.KnightSpec{
+					Domain: "ops", Model: "claude-sonnet-4-20250514", Skills: []string{"ops"},
+					NATS: aiv1alpha1.KnightNATS{URL: srv.ClientURL(), Subjects: []string{prefix + ".tasks.ops.>"}, Stream: "trg_tasks"},
+				},
+			})).To(Succeed())
+			DeferCleanup(func() {
+				Expect(k8sClient.DeleteAllOf(ctx, &aiv1alpha1.Mission{}, client.InNamespace(ns))).To(Succeed())
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.Knight{
+					ObjectMeta: metav1.ObjectMeta{Name: plannerName, Namespace: ns}}))).To(Succeed())
+			})
+		})
+
+		It("creates one Mission per firing with the rendered objective and budget, skips under Forbid, and records its phase", func() {
+			t := scheduleMissionTrigger("mt-cron", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
+			})
+			Expect(t.Spec.Target.Mission.MetaMission).To(HaveValue(BeTrue()))
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(10 * time.Second)
+			reconcileTrigger("mt-cron")
+
+			ms := missionsOf("mt-cron")
+			Expect(ms).To(HaveLen(1))
+			m := ms[0]
+			Expect(m.Name).To(HavePrefix("mt-cron-"))
+			Expect(m.Spec.Objective).To(Equal("Review mt-cron at " + due.Format("15:04")))
+			Expect(m.Spec.SuccessCriteria).To(Equal("a short list"))
+			Expect(m.Spec.CostBudgetUSD).To(Equal("2.5"))
+			Expect(m.Spec.MetaMission).To(BeTrue())
+			Expect(m.Spec.Planner.KnightRef.Name).To(Equal(plannerName))
+			Expect(m.Spec.Planner.MaxChains).To(Equal(int32(3)))
+			Expect(aiv1alpha1.RefName(m.Spec.RoundTableRef)).To(Equal(rtName))
+			Expect(metav1.IsControlledBy(&m, getTrigger("mt-cron"))).To(BeTrue())
+			st := getTrigger("mt-cron").Status
+			Expect(st.RecentFirings).To(HaveLen(1))
+			Expect(st.RecentFirings[0].Run).To(Equal(m.Name))
+			Expect(st.ActiveRuns).To(Equal([]string{m.Name}))
+
+			// The next time finds the Mission unfinished: nothing is created.
+			clock = due.Add(5*time.Minute + time.Second)
+			reconcileTrigger("mt-cron")
+			Expect(missionsOf("mt-cron")).To(HaveLen(1))
+			Expect(getTrigger("mt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
+
+			// Finished: the firing gets its outcome and phase, and the
+			// next time creates a new Mission.
+			// The mission controller moves a finished Mission on to CleaningUp;
+			// the final phase lives in the Complete condition.
+			meta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+				Type: aiv1alpha1.ConditionMissionComplete, Status: metav1.ConditionTrue,
+				Reason: aiv1alpha1.ReasonMissionSucceeded,
+			})
+			setPhase(&m, aiv1alpha1.MissionPhaseCleaningUp)
+			clock = due.Add(10*time.Minute + time.Second)
+			reconcileTrigger("mt-cron")
+			st = getTrigger("mt-cron").Status
+			Expect(st.ActiveRuns).To(ContainElement(Not(Equal(m.Name))))
+			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
+				HaveField("Run", m.Name),
+				HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded),
+				HaveField("Phase", aiv1alpha1.MissionPhaseSucceeded))))
+			Expect(missionsOf("mt-cron")).To(HaveLen(2))
+		})
+
+		It("rejects two target kinds and what a mission target does not support", func() {
+			bad := func(name string, mutate func(*aiv1alpha1.TriggerSpec)) error {
+				t := &aiv1alpha1.Trigger{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+					Spec: aiv1alpha1.TriggerSpec{
+						Source:        aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "* * * * *"}},
+						Target:        missionTarget(),
+						RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+					},
+				}
+				mutate(&t.Spec)
+				return k8sClient.Create(ctx, t)
+			}
+			Expect(bad("mv-chain", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.ChainRef = &corev1.LocalObjectReference{Name: tmplName}
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef, target.knight or target.mission")))
+			Expect(bad("mv-knight", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.Knight = &aiv1alpha1.TriggerKnightTarget{Name: "k", Task: "t"}
+			})).To(MatchError(ContainSubstring("set exactly one of target.chainRef, target.knight or target.mission")))
+			Expect(bad("mv-table", func(s *aiv1alpha1.TriggerSpec) {
+				s.RoundTableRef = nil
+			})).To(MatchError(ContainSubstring("roundTableRef is required for target.mission")))
+			Expect(bad("mv-replace", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyReplace
+			})).To(MatchError(ContainSubstring("Replace is not supported with target.mission")))
+			Expect(bad("mv-input", func(s *aiv1alpha1.TriggerSpec) {
+				s.Input = "x"
+			})).To(MatchError(ContainSubstring("spec.input is for target.chainRef")))
+		})
+
+		It("records a request the gateway builder rejects and creates nothing", func() {
+			t := scheduleMissionTrigger("mt-bad", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.Mission.CostBudgetUSD = "1000000"
+			})
+			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+			reconcileTrigger("mt-bad")
+			Expect(missionsOf("mt-bad")).To(BeEmpty())
+			Expect(getTrigger("mt-bad").Status.RecentFirings[0].SkipReason).To(ContainSubstring("costBudgetUSD"))
+		})
+
+		It("skips a firing over the table's maxMissions with the reason", func() {
+			rt := &aiv1alpha1.RoundTable{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+			rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{MaxMissions: 1}
+			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+
+			t := scheduleMissionTrigger("mt-limit", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("mt-limit")
+			Expect(missionsOf("mt-limit")).To(HaveLen(1))
+
+			clock = due.Add(5*time.Minute + time.Second)
+			reconcileTrigger("mt-limit")
+			Expect(missionsOf("mt-limit")).To(HaveLen(1))
+			Expect(getTrigger("mt-limit").Status.RecentFirings[0].SkipReason).To(ContainSubstring("policies.maxMissions 1"))
 		})
 	})
 })
