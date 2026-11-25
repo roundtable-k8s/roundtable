@@ -453,6 +453,59 @@ var _ = Describe("PodBuilder", func() {
 			}
 			Expect(n).To(Equal(1))
 		})
+
+		Context("table telemetry override (#345)", func() {
+			withTable := func(t *aiv1alpha1.RoundTableTelemetry) map[string]corev1.EnvVar {
+				knight.Namespace = "ns"
+				knight.Labels = map[string]string{aiv1alpha1.LabelRoundTable: "camelot"}
+				rt := &aiv1alpha1.RoundTable{
+					ObjectMeta: metav1.ObjectMeta{Name: "camelot", Namespace: "ns"},
+					Spec:       aiv1alpha1.RoundTableSpec{Telemetry: t},
+				}
+				s := runtime.NewScheme()
+				Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+				builder.WithTelemetry(tel).WithReader(fake.NewClientBuilder().WithScheme(s).WithObjects(rt).Build())
+				return appEnv()
+			}
+			ratio := "0.25"
+			off := false
+
+			It("replaces endpoint, protocol and sampling", func() {
+				env := withTable(&aiv1alpha1.RoundTableTelemetry{
+					OTLPEndpoint: "http://tenant:4317", OTLPProtocol: "grpc", SamplingRatio: &ratio,
+				})
+				Expect(env["OTEL_EXPORTER_OTLP_ENDPOINT"].Value).To(Equal("http://tenant:4317"))
+				Expect(env["OTEL_EXPORTER_OTLP_PROTOCOL"].Value).To(Equal("grpc"))
+				Expect(env["OTEL_TRACES_SAMPLER_ARG"].Value).To(Equal("0.25"))
+				Expect(env["ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT"].Value).To(Equal("true"))
+				Expect(env).NotTo(HaveKey("ACTIVITY_CONTENT"))
+			})
+
+			It("keeps the operator-wide values when the table sets none", func() {
+				env := withTable(nil)
+				Expect(env["OTEL_EXPORTER_OTLP_ENDPOINT"].Value).To(Equal("http://otel:4318"))
+				Expect(env["OTEL_TRACES_SAMPLER_ARG"].Value).To(Equal("0.5"))
+			})
+
+			It("disables telemetry for the table", func() {
+				env := withTable(&aiv1alpha1.RoundTableTelemetry{Disabled: true})
+				Expect(env["OTEL_SDK_DISABLED"].Value).To(Equal("true"))
+				Expect(env).NotTo(HaveKey("OTEL_EXPORTER_OTLP_ENDPOINT"))
+			})
+
+			It("turns content capture off for the table", func() {
+				env := withTable(&aiv1alpha1.RoundTableTelemetry{CaptureContent: &off})
+				Expect(env["ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT"].Value).To(Equal("false"))
+				Expect(env["ACTIVITY_CONTENT"].Value).To(Equal("none"))
+				Expect(env["OTEL_EXPORTER_OTLP_ENDPOINT"].Value).To(Equal("http://otel:4318"))
+			})
+
+			It("lets the knight's own env win over the table", func() {
+				knight.Spec.Env = []corev1.EnvVar{{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: "http://mine"}}
+				env := withTable(&aiv1alpha1.RoundTableTelemetry{OTLPEndpoint: "http://tenant:4317"})
+				Expect(env["OTEL_EXPORTER_OTLP_ENDPOINT"].Value).To(Equal("http://mine"))
+			})
+		})
 	})
 
 	Describe("ROUNDTABLE_TABLE", func() {
