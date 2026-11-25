@@ -79,6 +79,17 @@ egress:
   the plain `NetworkPolicy` fallback (no Cilium) hostnames are not enforced
   anyway, so the union of all host ports is allowed to any destination, and the
   `EgressRestricted` condition message says so.
+- **The operator checks the hosts, not `kubectl apply`.** The CRD schema only
+  requires `allowedHosts` to be an array of at most 64 items, because a schema
+  can't express a string-or-object entry; a bad entry (a wrong shape such as
+  `5` or `{host, port: 1}`, an upper-case or malformed host name, a port outside
+  1-65535, more than 16 ports) is accepted by the API server. The operator
+  reports it on the `EgressRestricted` condition as `False` with reason
+  `EgressPolicyFailed`, naming each rejected entry, and the reconcile
+  keeps failing until it is fixed. It **fails closed**: the policy is still
+  rendered, from the valid entries only, so the rejected hosts are *not*
+  allowed and the pod never runs without a policy (under `deny` or default-deny
+  too). Entries past the 64th are dropped the same way.
 - A knight's own `egress` wins over the table's. Allowlists are **not merged**
   (same rule as `resources`); an explicit `egress: {}` is its own value and
   means the baseline only.

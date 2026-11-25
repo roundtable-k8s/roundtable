@@ -211,8 +211,10 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 			rt := withEgress()
 			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
 			ApplyTableDefaults(ctx, reader(rt), k)
-			k.Spec.Egress.AllowedHosts[0].Host = "changed.example"
-			Expect(rt.Spec.Defaults.Egress.AllowedHosts[0].Host).To(Equal("github.com"))
+			k.Spec.Egress.AllowedHosts[0].Raw[1] = 'X'
+			got, err := rt.Spec.Defaults.Egress.AllowedHosts[0].Parse()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Host).To(Equal("github.com"))
 		})
 
 		It("leaves egress unset without a table default", func() {

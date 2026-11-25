@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -119,7 +120,6 @@ func (r *KnightReconciler) egressAllowlistOf(k *aiv1alpha1.Knight) *EgressAllowl
 		return nil
 	}
 	return &EgressAllowlist{
-		AllowedHosts: k.Spec.Egress.AllowedHosts,
 		AllowedPorts: k.Spec.Egress.AllowedPorts,
 		BaseHosts:    r.Isolation.BaseHosts,
 		GitHosts:     knightpkg.ArsenalGitHosts(k),
@@ -241,7 +241,7 @@ func (a EgressAllowlist) hasHostPorts() bool {
 
 // allHostPorts is the union of the ports of all allowed hosts.
 func (a EgressAllowlist) allHostPorts() []int32 {
-	var out []int32
+	out := make([]int32, 0, len(a.AllowedHosts))
 	for _, ports := range a.hostPorts() {
 		out = append(out, ports...)
 	}
@@ -280,7 +280,7 @@ func (r *KnightReconciler) egressNetPolSettings() missionpkg.NetPolSettings {
 // ports or the allowed ports (one rule per distinct port set). Everything else is denied. The endpoint selector uses the
 // knight's pod labels, so it covers both runtime backends.
 func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s missionpkg.NetPolSettings) *unstructured.Unstructured {
-	egress := []any{
+	egress := []any{ //nolint:prealloc // the rule count depends on several optional sources
 		map[string]any{
 			"toEndpoints": []any{map[string]any{"matchLabels": stringMap(ciliumPeerLabels(dnsNamespace(s), s.DNSPodLabels))}},
 			"toPorts": []any{map[string]any{
@@ -481,12 +481,15 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		meta.RemoveStatusCondition(&k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		return r.deleteEgressPolicies(ctx, k)
 	}
-	err := aiv1alpha1.ValidateEgressHosts(allow.AllowedHosts)
+	// Fail closed: render the policy from the valid entries only, so a bad
+	// entry never leaves the knight without a policy; report the dropped ones.
+	// An EgressAllowlist holds decoded hosts, so the raw entries are parsed here.
+	hosts, dropped := aiv1alpha1.ParseEgressHosts(k.Spec.Egress.AllowedHosts)
+	allow.AllowedHosts = hosts
+	var err error
 	var services []EgressServicePeer
 	var missing []string
-	if err == nil {
-		services, missing, err = r.resolveEgressServices(ctx, k)
-	}
+	services, missing, err = r.resolveEgressServices(ctx, k)
 	if err == nil {
 		allow.Services = services
 		err = r.applyEgressPolicy(ctx, k, *allow)
@@ -538,6 +541,12 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 				r.Recorder.Event(k, corev1.EventTypeWarning, eventReasonInClusterHost, w)
 			}
 		}
+	}
+	if err == nil && len(dropped) > 0 {
+		err = fmt.Errorf("%d allowedHosts entr(ies) invalid and not allowed: %w", len(dropped), errors.Join(dropped...))
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = aiv1alpha1.ReasonEgressPolicyFailed
+		cond.Message = fmt.Sprintf("%s; the policy was rendered from the valid entries only (%s)", err.Error(), cond.Message)
 	}
 	meta.SetStatusCondition(&k.Status.Conditions, cond)
 	return err

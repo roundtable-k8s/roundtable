@@ -158,7 +158,22 @@ spec:
                           is either a string (allowed on allowedPorts) or an object
                           {host, ports} (allowed on its own ports only). Empty allows only DNS
                           and NATS.
-                        x-kubernetes-preserve-unknown-fields: true
+                        items:
+                          description: |-
+                            EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                            the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                            EgressHost.
+
+                            The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                            the items open, because a schema cannot express a string-or-object union.
+                            The operator validates the entries when it renders the policy
+                            (ParseEgressHosts), drops the invalid ones and reports them on the
+                            EgressRestricted condition. Decoding never fails and the original JSON is
+                            written back unchanged, so one malformed entry can't break listing or
+                            caching Knights.
+                          x-kubernetes-preserve-unknown-fields: true
+                        maxItems: 64
+                        type: array
                       allowedPorts:
                         default:
                         - 443
@@ -902,7 +917,22 @@ spec:
                             is either a string (allowed on allowedPorts) or an object
                             {host, ports} (allowed on its own ports only). Empty allows only DNS
                             and NATS.
-                          x-kubernetes-preserve-unknown-fields: true
+                          items:
+                            description: |-
+                              EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                              the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                              EgressHost.
+
+                              The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                              the items open, because a schema cannot express a string-or-object union.
+                              The operator validates the entries when it renders the policy
+                              (ParseEgressHosts), drops the invalid ones and reports them on the
+                              EgressRestricted condition. Decoding never fails and the original JSON is
+                              written back unchanged, so one malformed entry can't break listing or
+                              caching Knights.
+                            x-kubernetes-preserve-unknown-fields: true
+                          maxItems: 64
+                          type: array
                         allowedPorts:
                           default:
                           - 443

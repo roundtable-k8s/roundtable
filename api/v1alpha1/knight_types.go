@@ -21,8 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -623,10 +625,9 @@ type KnightEgress struct {
 	// is either a string (allowed on allowedPorts) or an object
 	// {host, ports} (allowed on its own ports only). Empty allows only DNS
 	// and NATS.
-	// +kubebuilder:validation:Schemaless
-	// +kubebuilder:validation:XPreserveUnknownFields
+	// +kubebuilder:validation:MaxItems=64
 	// +optional
-	AllowedHosts []EgressHost `json:"allowedHosts,omitempty"`
+	AllowedHosts []EgressHostEntry `json:"allowedHosts,omitempty"`
 
 	// allowedPorts are the TCP ports allowed to the allowed hosts.
 	// +kubebuilder:default={443}
@@ -649,48 +650,72 @@ type KnightEgress struct {
 	AllowedServices []EgressService `json:"allowedServices,omitempty"`
 }
 
-// EgressHost is an allowedHosts entry: a host name, optionally with its own
-// ports. In JSON it is a string (the host, on the allowed ports) or an object
-// {host, ports}.
+// EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+// the allowed ports) or an object {host, ports}. Use Parse for the decoded
+// EgressHost.
 //
-// The CRD schema for allowedHosts is open because a schema cannot express a
-// string-or-object union (and CEL rules need a typed schema), so the operator
-// validates the entries when it renders the policy (ValidateEgressHosts) and
-// reports a bad one on the EgressRestricted condition.
+// The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+// the items open, because a schema cannot express a string-or-object union.
+// The operator validates the entries when it renders the policy
+// (ParseEgressHosts), drops the invalid ones and reports them on the
+// EgressRestricted condition. Decoding never fails and the original JSON is
+// written back unchanged, so one malformed entry can't break listing or
+// caching Knights.
+type EgressHostEntry apiextensionsv1.JSON
+
+// NewEgressHostEntry returns an entry for host: a plain string without ports,
+// otherwise an object.
+func NewEgressHostEntry(host string, ports ...int32) EgressHostEntry {
+	var b []byte
+	if len(ports) == 0 {
+		b, _ = json.Marshal(host)
+	} else {
+		b, _ = json.Marshal(struct {
+			Host  string  `json:"host"`
+			Ports []int32 `json:"ports"`
+		}{host, ports})
+	}
+	return EgressHostEntry{Raw: b}
+}
+
+// MarshalJSON writes the entry's original JSON.
+func (e EgressHostEntry) MarshalJSON() ([]byte, error) {
+	if len(e.Raw) == 0 {
+		return []byte("null"), nil
+	}
+	return e.Raw, nil
+}
+
+// UnmarshalJSON keeps the raw JSON; it never fails.
+func (e *EgressHostEntry) UnmarshalJSON(b []byte) error {
+	e.Raw = slices.Clone(b)
+	return nil
+}
+
+// Parse decodes the entry, or returns an error for one that is neither a
+// string nor an object with only host and ports.
+func (e EgressHostEntry) Parse() (EgressHost, error) {
+	var s string
+	if err := json.Unmarshal(e.Raw, &s); err == nil {
+		return EgressHost{Host: s}, nil
+	}
+	var p EgressHost
+	dec := json.NewDecoder(bytes.NewReader(e.Raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil || dec.More() {
+		return EgressHost{}, fmt.Errorf("allowedHosts entry %s must be a host string or an object with host and ports", e.Raw)
+	}
+	return p, nil
+}
+
+// EgressHost is a decoded allowedHosts entry: a host name, optionally with its
+// own ports.
 type EgressHost struct {
 	// Host is an exact host name or a "*." wildcard prefix.
 	Host string `json:"host"`
 	// Ports are the TCP ports allowed to Host. Empty uses the knight's
 	// allowedPorts.
 	Ports []int32 `json:"ports,omitempty"`
-}
-
-// MarshalJSON writes an entry without ports as a plain string, so the string
-// form round-trips unchanged.
-func (h EgressHost) MarshalJSON() ([]byte, error) {
-	if len(h.Ports) == 0 {
-		return json.Marshal(h.Host)
-	}
-	type plain EgressHost
-	return json.Marshal(plain(h))
-}
-
-// UnmarshalJSON accepts a string or a {host, ports} object.
-func (h *EgressHost) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		*h = EgressHost{Host: s}
-		return nil
-	}
-	type plain EgressHost
-	var p plain
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
-		return fmt.Errorf("allowedHosts entry must be a string or an object with host and ports: %w", err)
-	}
-	*h = EgressHost(p)
-	return nil
 }
 
 var egressHostPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -1110,26 +1135,34 @@ type KnightMCPToolFilter struct {
 	Exclude []string `json:"exclude,omitempty"`
 }
 
-// ValidateEgressHosts checks the allowedHosts list: at most 64 entries, each
-// valid per ValidateEgressHost.
-func ValidateEgressHosts(hosts []EgressHost) error {
-	if len(hosts) > 64 {
-		return fmt.Errorf("allowedHosts has %d entries, at most 64 are allowed", len(hosts))
-	}
-	for _, h := range hosts {
-		if err := ValidateEgressHost(h); err != nil {
-			return err
+// ParseEgressHosts decodes and validates the allowedHosts list. It returns
+// the valid entries and one error per entry that is malformed or fails
+// ValidateEgressHost; entries past the 64th are dropped too.
+func ParseEgressHosts(entries []EgressHostEntry) (valid []EgressHost, dropped []error) {
+	for i, e := range entries {
+		if i >= 64 {
+			dropped = append(dropped, fmt.Errorf("allowedHosts has %d entries, at most 64 are allowed; the rest are dropped", len(entries)))
+			break
 		}
+		h, err := e.Parse()
+		if err == nil {
+			err = ValidateEgressHost(h)
+		}
+		if err != nil {
+			dropped = append(dropped, err)
+			continue
+		}
+		valid = append(valid, h)
 	}
-	return nil
+	return valid, dropped
 }
 
 // EgressHostNames returns plain allowedHosts entries (no ports of their own)
 // for names.
-func EgressHostNames(names ...string) []EgressHost {
-	out := make([]EgressHost, 0, len(names))
+func EgressHostNames(names ...string) []EgressHostEntry {
+	out := make([]EgressHostEntry, 0, len(names))
 	for _, n := range names {
-		out = append(out, EgressHost{Host: n})
+		out = append(out, NewEgressHostEntry(n))
 	}
 	return out
 }
