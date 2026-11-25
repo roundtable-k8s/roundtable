@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -39,8 +40,6 @@ const (
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 	// ManagedByGatewayValue is LabelManagedBy on Triggers the gateway creates.
 	ManagedByGatewayValue = "roundtable-gateway"
-	// AnnotationCaller records who asked the gateway for an object.
-	AnnotationCaller = "ai.roundtable.io/caller"
 
 	// ManagedBy values reported for a schedule.
 	ManagedByGit   = "git"
@@ -313,7 +312,7 @@ func setCaller(ctx context.Context, trg *aiv1alpha1.Trigger) {
 	if trg.Annotations == nil {
 		trg.Annotations = map[string]string{}
 	}
-	trg.Annotations[AnnotationCaller] = caller
+	trg.Annotations[aiv1alpha1.AnnotationCaller] = caller
 }
 
 func scheduleRecord(trg *aiv1alpha1.Trigger) *ScheduleRecord {
@@ -321,7 +320,7 @@ func scheduleRecord(trg *aiv1alpha1.Trigger) *ScheduleRecord {
 		Name:      trg.Name,
 		Namespace: trg.Namespace,
 		ManagedBy: ManagedBy(trg),
-		Caller:    trg.Annotations[AnnotationCaller],
+		Caller:    trg.Annotations[aiv1alpha1.AnnotationCaller],
 		CreatedAt: trg.CreationTimestamp.UTC(),
 		Spec:      trg.Spec,
 	}
@@ -372,14 +371,13 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 		return fieldErr("spec.source.schedule.startingDeadlineSeconds", "must be at least 1")
 	}
 
-	chain := ""
-	if spec.Target.ChainRef != nil {
-		chain = spec.Target.ChainRef.Name
+	if err := parseTemplate("spec.input", spec.Input); err != nil {
+		return err
 	}
-	if chain == "" {
-		return fieldErr("spec.target.chainRef.name", "is required")
+	if err := parseTemplate("spec.dedupeKey", spec.DedupeKey); err != nil {
+		return err
 	}
-	if err := s.refExists(ctx, ns, chain, "spec.target.chainRef.name", "chain", &aiv1alpha1.Chain{}); err != nil {
+	if err := s.validateScheduleTarget(ctx, ns, spec); err != nil {
 		return err
 	}
 	if ref := spec.RoundTableRef; ref != nil {
@@ -396,11 +394,81 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 	default:
 		return fieldErr("spec.concurrency.policy", "must be Allow, Forbid or Replace, not %q", spec.Concurrency.Policy)
 	}
+	if spec.Target.Knight != nil && spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+		return fieldErr("spec.concurrency.policy", "Replace is not supported with target.knight")
+	}
 	if spec.Concurrency.MaxActive < 0 {
 		return fieldErr("spec.concurrency.maxActive", "must be at least 0")
 	}
 	if t := spec.TTLSecondsAfterFinished; t != nil && *t < 0 {
 		return fieldErr("spec.ttlSecondsAfterFinished", "must be at least 0")
+	}
+	return nil
+}
+
+// validateScheduleTarget requires exactly one of target.chainRef and
+// target.knight, and applies the trigger controller's rules to a knight
+// target: the Knight exists and sits at roundTableRef, the task parses as a
+// template, and spec.input is unset.
+func (s *Service) validateScheduleTarget(ctx context.Context, ns string, spec *aiv1alpha1.TriggerSpec) error {
+	tgt := spec.Target
+	switch {
+	case tgt.ChainRef != nil && tgt.Knight != nil:
+		return fieldErr("spec.target", "set exactly one of chainRef or knight, not both")
+	case tgt.Knight != nil:
+		return s.validateKnightTarget(ctx, ns, spec)
+	case tgt.ChainRef != nil && tgt.ChainRef.Name != "":
+		return s.refExists(ctx, ns, tgt.ChainRef.Name, "spec.target.chainRef.name", "chain", &aiv1alpha1.Chain{})
+	case tgt.ChainRef != nil:
+		return fieldErr("spec.target.chainRef.name", "is required")
+	default:
+		return fieldErr("spec.target", "set exactly one of chainRef or knight")
+	}
+}
+
+// triggerTemplateFuncs stand in for the trigger controller's template
+// functions: templates are only parsed here, never executed.
+var triggerTemplateFuncs = template.FuncMap{
+	"toJson": func(any) (string, error) { return "", nil },
+	"pluck":  func(string, any) []any { return nil },
+}
+
+func parseTemplate(field, text string) error {
+	if _, err := template.New(field).Option("missingkey=error").Funcs(triggerTemplateFuncs).Parse(text); err != nil {
+		return fieldErr(field, "%v", err)
+	}
+	return nil
+}
+
+func (s *Service) validateKnightTarget(ctx context.Context, ns string, spec *aiv1alpha1.TriggerSpec) error {
+	kt := spec.Target.Knight
+	if kt.Name == "" {
+		return fieldErr("spec.target.knight.name", "is required")
+	}
+	if kt.Task == "" {
+		return fieldErr("spec.target.knight.task", "is required")
+	}
+	if err := parseTemplate("spec.target.knight.task", kt.Task); err != nil {
+		return err
+	}
+	if spec.Input != "" {
+		return fieldErr("spec.input", "is not supported with target.knight")
+	}
+	table, err := s.Resolver.KnightTable(ctx, ns, kt.Name)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return fieldErr("spec.target.knight.name", "knight %s/%s not found", ns, kt.Name)
+	case errors.Is(err, ErrUnavailable):
+		return fieldErr("spec.target.knight.name", "%v", err)
+	case err != nil:
+		return k8sError("get knight", err)
+	}
+	if want := aiv1alpha1.RefName(spec.RoundTableRef); want != "" && table != want {
+		at := "no RoundTable"
+		if table != "" {
+			at = fmt.Sprintf("RoundTable %q", table)
+		}
+		return fieldErr("spec.target.knight.name", "knight %q sits at %s, not at roundTableRef %q", kt.Name, at, want)
 	}
 	return nil
 }

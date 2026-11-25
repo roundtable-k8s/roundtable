@@ -865,11 +865,14 @@ API server returns (OpenAPI or CEL rules):
 
 Creates the Trigger, labelled `app.kubernetes.io/managed-by:
 roundtable-gateway` and annotated `ai.roundtable.io/caller` with the caller
-(`token` for the static bearer tokens). Returns 201 with a `Location`, or 409
+(the token's name from the token file, or `<namespace>/<serviceaccount>` for
+ServiceAccount callers; see [Auth](#auth)). A schedule may
+target a Chain (`target.chainRef`) or a Knight (`target.knight`); the gateway
+applies the trigger controller's rules to either. Returns 201 with a `Location`, or 409
 if a Trigger of that name exists.
 
 ```json
-{"name": "morning-digest", "namespace": "roundtable", "managedBy": "api", "caller": "token",
+{"name": "morning-digest", "namespace": "roundtable", "managedBy": "api", "caller": "jobs/runner",
  "createdAt": "2026-11-25T07:00:00Z", "spec": {"source": {"schedule": {"cron": "0 7 * * 1-5", "timeZone": "Europe/Berlin"}}, "...": "..."}}
 ```
 

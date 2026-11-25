@@ -130,7 +130,7 @@ func TestCreateSchedule(t *testing.T) {
 	if trg.Labels[LabelManagedBy] != ManagedByGatewayValue {
 		t.Errorf("labels = %v", trg.Labels)
 	}
-	if trg.Annotations[AnnotationCaller] != defaultTokenName {
+	if trg.Annotations[aiv1alpha1.AnnotationCaller] != defaultTokenName {
 		t.Errorf("annotations = %v", trg.Annotations)
 	}
 	if s := trg.Spec.Source.Schedule; s == nil || s.Cron != "0 7 * * 1-5" || s.TimeZone != "Europe/Berlin" {
@@ -177,7 +177,7 @@ func TestCreateScheduleValidation(t *testing.T) {
 		{"nats source", map[string]any{"name": "x", "spec": spec(func(s map[string]any) {
 			s["source"].(map[string]any)["nats"] = map[string]any{"subject": "dev.events.>"}
 		})}, "spec.source"},
-		{"no target", map[string]any{"name": "x", "spec": spec(func(s map[string]any) { delete(s, "target") })}, "spec.target.chainRef.name"},
+		{"no target", map[string]any{"name": "x", "spec": spec(func(s map[string]any) { delete(s, "target") })}, "spec.target"},
 		{"missing chain", map[string]any{"name": "x", "spec": spec(func(s map[string]any) {
 			s["target"] = map[string]any{"chainRef": map[string]any{"name": "nope"}}
 		})}, "spec.target.chainRef.name"},
@@ -190,6 +190,8 @@ func TestCreateScheduleValidation(t *testing.T) {
 		{"negative maxActive", map[string]any{"name": "x", "spec": spec(func(s map[string]any) {
 			s["concurrency"] = map[string]any{"maxActive": -1}
 		})}, "spec.concurrency.maxActive"},
+		{"bad input template", map[string]any{"name": "x", "spec": spec(func(s map[string]any) { s["input"] = "{{ .Oops" })}, "spec.input"},
+		{"bad dedupeKey template", map[string]any{"name": "x", "spec": spec(func(s map[string]any) { s["dedupeKey"] = "{{ .Oops" })}, "spec.dedupeKey"},
 		{"negative ttl", map[string]any{"name": "x", "spec": spec(func(s map[string]any) { s["ttlSecondsAfterFinished"] = -1 })}, "spec.ttlSecondsAfterFinished"},
 	}
 	for _, tc := range cases {
@@ -213,6 +215,76 @@ func TestCreateScheduleValidation(t *testing.T) {
 	})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown field: status %d: %v", resp.StatusCode, out)
+	}
+}
+
+func knightSpec(knight, task string) map[string]any {
+	s := scheduleSpec("0 7 * * *", "", "digest")
+	s["target"] = map[string]any{"knight": map[string]any{"name": knight, "task": task}}
+	return s
+}
+
+func testKnight(name, table string) *aiv1alpha1.Knight {
+	k := &aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS}}
+	if table != "" {
+		k.Labels = map[string]string{aiv1alpha1.LabelRoundTable: table}
+	}
+	k.Spec.NATS.Subjects = []string{"fleet.tasks." + name + ".>"}
+	return k
+}
+
+func TestCreateScheduleKnightTarget(t *testing.T) {
+	e := newScheduleEnv(t, true, nil, testKnight("galahad", "dev"), testKnight("loner", ""))
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, map[string]any{
+		"name": "nightly", "spec": knightSpec("galahad", "Run {{ .Trigger.Name }}"),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d: %v", resp.StatusCode, out)
+	}
+	trg := e.trigger(t, "nightly")
+	if trg.Spec.Target.Knight == nil || trg.Spec.Target.Knight.Name != "galahad" || trg.Spec.Target.ChainRef != nil {
+		t.Errorf("target = %+v", trg.Spec.Target)
+	}
+
+	// PUT keeps a knight target.
+	resp, out = e.do(t, http.MethodPut, "/v1/schedules/"+testNS+"/nightly", testToken, map[string]any{
+		"spec": knightSpec("galahad", "Run again"),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("replace: status %d: %v", resp.StatusCode, out)
+	}
+
+	bad := func(mut func(map[string]any)) map[string]any {
+		s := knightSpec("galahad", "do it")
+		mut(s)
+		return map[string]any{"name": "x", "spec": s}
+	}
+	cases := []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"both", bad(func(s map[string]any) {
+			s["target"].(map[string]any)["chainRef"] = map[string]any{"name": "digest"}
+		}), "spec.target"},
+		{"neither", bad(func(s map[string]any) { s["target"] = map[string]any{} }), "spec.target"},
+		{"missing knight", map[string]any{"name": "x", "spec": knightSpec("nope", "t")}, "spec.target.knight.name"},
+		{"empty task", map[string]any{"name": "x", "spec": knightSpec("galahad", "")}, "spec.target.knight.task"},
+		{"bad task template", map[string]any{"name": "x", "spec": knightSpec("galahad", "{{ .Oops")}, "spec.target.knight.task"},
+		{"input set", bad(func(s map[string]any) { s["input"] = "hi" }), "spec.input"},
+		{"replace policy", bad(func(s map[string]any) { s["concurrency"] = map[string]any{"policy": "Replace"} }), "spec.concurrency.policy"},
+		{"wrong table", bad(func(s map[string]any) {
+			s["target"].(map[string]any)["knight"].(map[string]any)["name"] = "loner"
+			s["roundTableRef"] = map[string]any{"name": "dev"}
+		}), "spec.target.knight.name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, tc.body)
+			if resp.StatusCode != http.StatusBadRequest || out["field"] != tc.field {
+				t.Fatalf("status %d, field %v, want 400 %s: %v", resp.StatusCode, out["field"], tc.field, out)
+			}
+		})
 	}
 }
 
@@ -253,7 +325,7 @@ func TestReplaceSchedule(t *testing.T) {
 	if trg.Labels["team"] != "a" || trg.Labels[LabelManagedBy] != ManagedByGatewayValue {
 		t.Errorf("labels not kept: %v", trg.Labels)
 	}
-	if trg.Annotations[AnnotationCaller] != defaultTokenName {
+	if trg.Annotations[aiv1alpha1.AnnotationCaller] != defaultTokenName {
 		t.Errorf("caller not recorded: %v", trg.Annotations)
 	}
 
