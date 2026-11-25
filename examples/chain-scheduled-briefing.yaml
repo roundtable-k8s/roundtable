@@ -1,0 +1,53 @@
+# Scheduled briefing (#374): a cron-triggered Chain that fans out to two domain
+# knights in parallel, then has one knight (kay) synthesise their output and
+# write it to the vault. Needs fleet-a (roundtable-fleet.yaml), galahad.yaml,
+# tristan.yaml and kay.yaml applied in the same namespace.
+# Trigger a run by hand: see examples/README.md#scheduled-briefing.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: daily-briefing
+  namespace: roundtable
+spec:
+  description: "Daily briefing — security and infrastructure knights report, kay writes the vault note"
+  roundTableRef: {name: fleet-a}
+  schedule: "0 7 * * *"          # 07:00 every day
+  timeZone: Europe/London        # optional IANA zone; defaults to UTC
+  timeoutSeconds: 1800
+  input: "Daily briefing for the fleet: what changed, what needs attention"
+
+  # Knight that writes steps with outputPath (defaults to "gawain").
+  outputKnightRef: {name: kay}
+
+  steps:
+    - name: security
+      knightRef: {name: galahad}
+      timeoutSeconds: 600
+      task: |
+        Briefing scope: {{ .Input }}
+        Report the security events and open advisories from the last 24 hours
+        that matter to this fleet. Keep it to bullet points with a one-line
+        "so what" each.
+
+    - name: infrastructure
+      knightRef: {name: tristan}
+      timeoutSeconds: 600
+      task: |
+        Briefing scope: {{ .Input }}
+        Report cluster health from the last 24 hours: pod restarts, failed
+        HelmReleases, pending PVCs and any drift from GitOps state. Keep it to
+        bullet points with a one-line "so what" each.
+
+    - name: synthesis
+      knightRef: {name: kay}
+      dependsOn: [security, infrastructure]
+      timeoutSeconds: 900
+      outputPath: "Briefings/{{ .Date }}-{{ .Chain }}.md"
+      task: |
+        Write the daily briefing as markdown. Action items go at the top.
+
+        ## Security
+        {{ .Steps.security.Output }}
+
+        ## Infrastructure
+        {{ .Steps.infrastructure.Output }}
