@@ -1,120 +1,98 @@
 # Getting Started
 
-Deploy your first AI agent fleet in 5 minutes.
+Go from nothing to a finished two-step Chain, visible in the dashboard, on a local
+[kind](https://kind.sigs.k8s.io/) cluster in about ten minutes.
 
 ## Prerequisites
 
-- Kubernetes cluster (1.28+)
-- Helm 3.12+
-- NATS JetStream running in-cluster
-- An LLM API key (Anthropic, OpenAI, etc.)
-
-## 1. Install the Operator
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) (with Docker or another kind provider), [Helm](https://helm.sh/docs/intro/install/) 3.12+ and `kubectl`
+- A clone of this repository (the script installs the chart from `charts/roundtable-operator` and the manifests live in `examples/quickstart/`)
+- One model-provider API key. The examples use Anthropic (`ANTHROPIC_API_KEY`)
 
 ```bash
-helm install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
-  --namespace roundtable --create-namespace \
-  --set images.piKnight.tag=latest
+git clone https://github.com/roundtable-k8s/roundtable.git
+cd roundtable
 ```
 
-## 2. Create a NATS Secret
+## 1. Create the cluster and install Round Table
 
 ```bash
-kubectl create secret generic llm-api-keys \
-  --namespace roundtable \
+hack/quickstart-kind.sh
+```
+
+The script creates a kind cluster named `roundtable`, installs NATS with JetStream
+(pinned `nats` chart version) and the operator chart into the `roundtable` namespace,
+then waits for the operator and dashboard Deployments to be Available. Image tags are
+the chart's pinned defaults. Because kind has no gVisor or Cilium, it installs the
+chart with `isolation.runtimeClassName=""` and `isolation.egress.mode=off`
+(see [runtime isolation](runtime-isolation.md) and [egress](egress.md)); do not copy
+those settings to a real cluster.
+
+To install a released chart instead of the local one, pass `--chart-version X.Y.Z`
+(the OCI chart `oci://ghcr.io/roundtable-k8s/charts/roundtable-operator`). The script
+also takes `--cluster` and `--namespace`.
+
+This is the smallest install that works today; a minimal "Core" tier is tracked in
+[#182](https://github.com/roundtable-k8s/roundtable/issues/182).
+
+## 2. Store your API key
+
+```bash
+kubectl -n roundtable create secret generic llm-api-keys \
   --from-literal=ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## 3. Deploy a RoundTable
+The quickstart Knight loads this Secret through `spec.envFrom`.
 
-```yaml
-apiVersion: ai.roundtable.io/v1alpha1
-kind: RoundTable
-metadata:
-  name: my-fleet
-  namespace: roundtable
-spec:
-  nats:
-    url: nats://nats.database.svc:4222
-    subjectPrefix: my-fleet
-    tasksStream: my_fleet_tasks
-    resultsStream: my_fleet_results
-    createStreams: true
-  defaults:
-    model: claude-sonnet-4-20250514
-    concurrency: 2
-    taskTimeoutSeconds: 120
-```
+## 3. Apply a RoundTable, a Knight and a Chain
 
 ```bash
-kubectl apply -f roundtable.yaml
-kubectl get rt -n roundtable
+kubectl apply -f examples/quickstart/roundtable.yaml
+kubectl apply -f examples/quickstart/knight.yaml
+kubectl -n roundtable get knights -w   # wait for READY true, then Ctrl-C
 ```
 
-## 4. Deploy Your First Knight
-
-```yaml
-apiVersion: ai.roundtable.io/v1alpha1
-kind: Knight
-metadata:
-  name: my-first-knight
-  namespace: roundtable
-spec:
-  domain: general
-  model: claude-sonnet-4-20250514
-  skills:
-    - general
-  nats:
-    url: nats://nats.database.svc:4222
-    stream: my_fleet_tasks
-    resultsStream: my_fleet_results
-    subjects:
-      - "my-fleet.tasks.general.>"
-```
+- [`roundtable.yaml`](../examples/quickstart/roundtable.yaml): one RoundTable pointing at the in-cluster NATS (`nats://nats.roundtable.svc:4222`); `createStreams: true` makes the operator create its JetStream streams.
+- [`knight.yaml`](../examples/quickstart/knight.yaml): one Knight, `arthur`, consuming `quickstart.tasks.general.>`.
+- [`chain.yaml`](../examples/quickstart/chain.yaml): two steps, `research` then `summarize`, the second using `{{ .Steps.research.Output }}`.
 
 ```bash
-kubectl apply -f knight.yaml
-kubectl get knights -n roundtable -w
-# Wait for Phase: Ready
+kubectl apply -f examples/quickstart/chain.yaml
 ```
 
-## 5. Send a Task
+## 4. Run the Chain
+
+Applying a Chain does not start it. Annotate it with `ai.roundtable.io/run` (any new
+value starts a new run):
 
 ```bash
-# Install NATS CLI: https://github.com/nats-io/natscli
-nats pub my-fleet.tasks.general.my-first-knight '{
-  "task_id": "test-1",
-  "task": "What is Kubernetes? Explain in 2 sentences."
-}' --server nats://nats.database.svc:4222
-
-# Watch for results
-nats sub "my-fleet.results.>" --server nats://nats.database.svc:4222
+kubectl -n roundtable annotate chain hello-chain \
+  ai.roundtable.io/run="$(date +%s)" --overwrite
+kubectl -n roundtable get chain hello-chain -w   # Running, then Succeeded
 ```
 
-## 6. Create a Chain
-
-```yaml
-apiVersion: ai.roundtable.io/v1alpha1
-kind: Chain
-metadata:
-  name: hello-chain
-  namespace: roundtable
-spec:
-  timeoutSeconds: 600
-  input: "Tell me about Kubernetes operators"
-  steps:
-    - name: research
-      knightRef: {name: my-first-knight}
-      prompt: "Research this topic: {{ .Input }}"
-    - name: summarize
-      knightRef: {name: my-first-knight}
-      prompt: "Summarize this in 3 bullet points: {{ .Steps.research.Output }}"
-```
+## 5. See it in the dashboard
 
 ```bash
-kubectl apply -f chain.yaml
-kubectl get chains -n roundtable -w
+kubectl -n roundtable port-forward svc/roundtable-operator-dashboard 8080:80
 ```
+
+Open <http://localhost:8080> and open the `hello-chain` run to see both steps and their
+output. The same output is in `kubectl -n roundtable get chain hello-chain -o yaml`
+under `status.stepStatuses`.
+
+## Clean up
+
+```bash
+hack/quickstart-kind.sh --delete
+```
+
+## Alternative: your own NATS
+
+On an existing cluster, install the chart yourself
+(`helm install roundtable-operator oci://ghcr.io/roundtable-k8s/charts/roundtable-operator -n roundtable --create-namespace`)
+and edit `nats.url` in the RoundTable and Knight manifests to your NATS server. NATS
+must have JetStream enabled. Values are in [helm-values.md](helm-values.md).
 
 ### Running a chain by hand
 

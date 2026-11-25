@@ -1,0 +1,19 @@
+# Quickstart (docs/getting-started.md): one RoundTable on the NATS that
+# hack/quickstart-kind.sh installs in the same namespace.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: quickstart
+  namespace: roundtable
+spec:
+  description: "Quickstart fleet on a local kind cluster"
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    subjectPrefix: quickstart
+    tasksStream: quickstart_tasks
+    resultsStream: quickstart_results
+    createStreams: true
+  defaults:
+    model: claude-sonnet-4-20250514
+    concurrency: 1
+    taskTimeoutSeconds: 300

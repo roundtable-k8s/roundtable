@@ -238,32 +238,22 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
 
 ## Quick Start
 
-### Prerequisites
-
-- Kubernetes 1.28+
-- NATS with JetStream enabled
-- An AI model API key (Anthropic, OpenAI, etc.)
-
-### Install via Helm (recommended)
+The fastest path is the [10-minute kind quickstart](docs/getting-started.md): one
+script creates a local cluster with NATS and the operator, then you apply a
+RoundTable, a Knight and a two-step Chain from [`examples/quickstart/`](examples/quickstart/).
 
 ```bash
-# Add the OCI chart
-helm install roundtable-operator \
-  oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
-  --namespace roundtable --create-namespace \
-  --set image.tag=latest \
-  --set images.piKnight.tag=latest
-
-# Create your first knight
-kubectl apply -f examples/galahad.yaml
-
-# Check status
-kubectl get knights -n roundtable
-NAME       DOMAIN     MODEL                       READY   AGE
-galahad    security   claude-sonnet-4-20250514    true    30s
+hack/quickstart-kind.sh
 ```
 
-The chart installs CRDs, the operator, and the [dashboard](#ecosystem) in one shot.
+For an existing cluster (Kubernetes 1.28+, NATS with JetStream, a model API key),
+install the chart (it installs the CRDs, the operator and the [dashboard](#ecosystem)):
+
+```bash
+helm install roundtable-operator \
+  oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
+  --namespace roundtable --create-namespace
+```
 
 ### Install from source
 
