@@ -26,6 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +36,10 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -45,6 +49,7 @@ import (
 
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch
 
 // defaultEgressPort is the port allowed to the allowed hosts when
 // spec.egress.allowedPorts is empty.
@@ -75,7 +80,8 @@ var kubeAPIFallbackPorts = []int32{443, 6443}
 
 // EgressAllowlist is the input to the egress policy renderers. Every policy
 // allows the baseline: DNS, NATS, the Kubernetes API, BaseHosts (on 443) and
-// GitHosts (on their ports). AllowedHosts are allowed on AllowedPorts on top.
+// GitHosts (on their ports). AllowedHosts are allowed on AllowedPorts on top,
+// and each of Services on its own ports.
 type EgressAllowlist struct {
 	AllowedHosts []string
 	AllowedPorts []int32
@@ -83,6 +89,25 @@ type EgressAllowlist struct {
 	BaseHosts []string
 	// GitHosts are the hosts of the knight's arsenal repos.
 	GitHosts []knightpkg.GitHost
+	// Services are the allowed in-cluster Services that exist and have a pod
+	// selector, resolved by resolveEgressServices.
+	Services []EgressServicePeer
+}
+
+// EgressServicePeer is an allowed in-cluster Service resolved to its pods.
+type EgressServicePeer struct {
+	Namespace string
+	Name      string
+	// Selector is the Service's pod selector (never empty).
+	Selector map[string]string
+	// Ports are the pod ports to allow (the listed ports' targetPorts).
+	Ports []EgressServicePort
+}
+
+// EgressServicePort is a pod port (number or name) with its protocol.
+type EgressServicePort struct {
+	Port     intstr.IntOrString
+	Protocol corev1.Protocol
 }
 
 // egressAllowlistOf returns the knight's allowlist with the baseline, or nil
@@ -207,6 +232,9 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 	if hosts := allow.hosts(); len(hosts) > 0 {
 		egress = append(egress, ciliumFQDNRule(hosts, allow.ports()))
 	}
+	for _, svc := range allow.Services {
+		egress = append(egress, ciliumServiceRule(svc))
+	}
 
 	cnp := newCiliumEgressPolicy(k)
 	cnp.SetLabels(knightLabels(k))
@@ -215,6 +243,19 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 		"egress":           egress,
 	}
 	return cnp
+}
+
+// ciliumServiceRule allows the Service's pods (its namespace and pod
+// selector) on the Service's allowed pod ports.
+func ciliumServiceRule(svc EgressServicePeer) map[string]any {
+	ports := make([]any, 0, len(svc.Ports))
+	for _, p := range svc.Ports {
+		ports = append(ports, map[string]any{"port": p.Port.String(), "protocol": string(p.Protocol)})
+	}
+	return map[string]any{
+		"toEndpoints": []any{map[string]any{"matchLabels": stringMap(ciliumPeerLabels(svc.Namespace, svc.Selector))}},
+		"toPorts":     []any{map[string]any{"ports": ports}},
+	}
 }
 
 // ciliumFQDNRule allows TCP on ports to hosts (exact names, or "*." patterns).
@@ -269,7 +310,8 @@ func ciliumNATSRules(rawURL string, s missionpkg.NetPolSettings) []any {
 // CiliumNetworkPolicy API isn't served. It can't express hostnames or the
 // API server, so it allows DNS, NATS and, to any destination, the Kubernetes
 // API ports (443, 6443), the baseline hosts' ports and, when hosts are
-// allowed, the allowed ports.
+// allowed, the allowed ports. Allowed Services get a namespace and pod
+// selector rule on their ports.
 func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s missionpkg.NetPolSettings) *networkingv1.NetworkPolicy {
 	rules := []networkingv1.NetworkPolicyEgressRule{missionpkg.DNSEgressRule(s)}
 	seen := map[string]bool{}
@@ -298,6 +340,9 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 		})
 	}
 	rules = append(rules, networkingv1.NetworkPolicyEgressRule{Ports: ports})
+	for _, svc := range allow.Services {
+		rules = append(rules, serviceEgressRule(svc))
+	}
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      egressPolicyName(k),
@@ -309,6 +354,21 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 			Egress:      rules,
 		},
+	}
+}
+
+// serviceEgressRule allows the Service's pods on its allowed pod ports.
+func serviceEgressRule(svc EgressServicePeer) networkingv1.NetworkPolicyEgressRule {
+	ports := make([]networkingv1.NetworkPolicyPort, 0, len(svc.Ports))
+	for _, p := range svc.Ports {
+		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: new(p.Protocol), Port: new(p.Port)})
+	}
+	return networkingv1.NetworkPolicyEgressRule{
+		To: []networkingv1.NetworkPolicyPeer{{
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{corev1.LabelMetadataName: svc.Namespace}},
+			PodSelector:       &metav1.LabelSelector{MatchLabels: maps.Clone(svc.Selector)},
+		}},
+		Ports: ports,
 	}
 }
 
@@ -348,14 +408,20 @@ func newCiliumEgressPolicy(k *aiv1alpha1.Knight) *unstructured.Unstructured {
 
 // reconcileEgress renders the knight's egress policy from spec.egress (after
 // ApplyIsolationDefaults), or removes it when spec.egress is unset, and sets
-// EgressRestricted.
+// EgressRestricted. Allowed Services that are missing or have no selector,
+// and in-cluster names under allowedHosts, are reported in the condition
+// message and as Warning events.
 func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Knight) error {
 	allow := r.egressAllowlistOf(k)
 	if allow == nil {
 		meta.RemoveStatusCondition(&k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		return r.deleteEgressPolicies(ctx, k)
 	}
-	err := r.applyEgressPolicy(ctx, k, *allow)
+	services, missing, err := r.resolveEgressServices(ctx, k)
+	if err == nil {
+		allow.Services = services
+		err = r.applyEgressPolicy(ctx, k, *allow)
+	}
 	cond := metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightEgressRestricted,
 		ObservedGeneration: k.Generation,
@@ -368,17 +434,204 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	case r.CiliumEnabled:
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = aiv1alpha1.ReasonFQDNPolicyApplied
+		if len(missing) > 0 {
+			cond.Reason = aiv1alpha1.ReasonEgressServiceNotFound
+		}
 		cond.Message = fmt.Sprintf("CiliumNetworkPolicy %s limits egress to DNS, NATS, the Kubernetes API and %d host(s)",
 			egressPolicyName(k), allow.hostCount())
+		if n := len(allow.Services); n > 0 {
+			cond.Message += fmt.Sprintf(" and %d Service(s)", n)
+		}
 	default:
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = aiv1alpha1.ReasonFQDNPolicyUnavailable
 		cond.Message = fmt.Sprintf("%s CiliumNetworkPolicy is not served, so hostnames can't be enforced; "+
 			"NetworkPolicy %s allows DNS, NATS, the Kubernetes API (ports 443 and 6443) and the allowed ports to any destination",
 			rtruntime.CiliumNetworkPolicyGVK.GroupVersion(), egressPolicyName(k))
+		if n := len(allow.Services); n > 0 {
+			cond.Message += fmt.Sprintf(", and %d Service(s) on their ports", n)
+		}
+	}
+	if err == nil {
+		hostWarnings := inClusterHostWarnings(allow.AllowedHosts)
+		for _, w := range slices.Concat(missing, hostWarnings) {
+			cond.Message += "; " + w
+		}
+		prev := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+		if r.Recorder != nil && (prev == nil || prev.Message != cond.Message) {
+			for _, w := range missing {
+				r.Recorder.Event(k, corev1.EventTypeWarning, aiv1alpha1.ReasonEgressServiceNotFound, w)
+			}
+			for _, w := range hostWarnings {
+				r.Recorder.Event(k, corev1.EventTypeWarning, eventReasonInClusterHost, w)
+			}
+		}
 	}
 	meta.SetStatusCondition(&k.Status.Conditions, cond)
 	return err
+}
+
+// eventReasonInClusterHost is the Warning event reason for an allowedHosts
+// entry that names an in-cluster Service.
+const eventReasonInClusterHost = "InClusterAllowedHost"
+
+// inClusterHostWarnings returns a warning for each allowedHosts entry that is
+// an in-cluster name (ending in .svc or .cluster.local): it resolves to a
+// ClusterIP, which FQDN rules never match.
+func inClusterHostWarnings(hosts []string) []string {
+	var out []string
+	for _, h := range (EgressAllowlist{AllowedHosts: hosts}).hosts() {
+		if strings.HasSuffix(h, ".svc") || strings.HasSuffix(h, ".cluster.local") {
+			out = append(out, fmt.Sprintf("allowedHosts entry %q is an in-cluster name, which hostname rules never match; "+
+				"use allowedServices instead", h))
+		}
+	}
+	return out
+}
+
+// egressServiceRef is a Service named in spec.egress.allowedServices, with
+// the union of its listed ports.
+type egressServiceRef struct {
+	Namespace string
+	Name      string
+	Ports     []int32
+}
+
+// egressServiceRefs returns the Services in the knight's spec.egress (empty
+// namespace = the knight's), merged by namespace/name and sorted.
+func egressServiceRefs(k *aiv1alpha1.Knight) []egressServiceRef {
+	if k.Spec.Egress == nil {
+		return nil
+	}
+	byKey := map[types.NamespacedName][]int32{}
+	for _, s := range k.Spec.Egress.AllowedServices {
+		ns := s.Namespace
+		if ns == "" {
+			ns = k.Namespace
+		}
+		key := types.NamespacedName{Namespace: ns, Name: s.Name}
+		byKey[key] = append(byKey[key], s.Ports...)
+	}
+	out := make([]egressServiceRef, 0, len(byKey))
+	for key, ports := range byKey {
+		slices.Sort(ports)
+		out = append(out, egressServiceRef{Namespace: key.Namespace, Name: key.Name, Ports: slices.Compact(ports)})
+	}
+	slices.SortFunc(out, func(a, b egressServiceRef) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
+	return out
+}
+
+// resolveEgressServices reads the knight's allowed Services. Services that
+// exist and have a pod selector are returned as peers; the others are
+// described in missing and left out of the policy.
+func (r *KnightReconciler) resolveEgressServices(ctx context.Context, k *aiv1alpha1.Knight) (
+	peers []EgressServicePeer, missing []string, err error) {
+	for _, ref := range egressServiceRefs(k) {
+		svc := &corev1.Service{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, svc); err != nil {
+			if apierrors.IsNotFound(err) {
+				missing = append(missing, fmt.Sprintf("allowed Service %s/%s not found; its egress rule is left out",
+					ref.Namespace, ref.Name))
+				continue
+			}
+			return nil, nil, fmt.Errorf("failed to get allowed Service %s/%s: %w", ref.Namespace, ref.Name, err)
+		}
+		if len(svc.Spec.Selector) == 0 {
+			missing = append(missing, fmt.Sprintf("allowed Service %s/%s has no pod selector; its egress rule is left out",
+				ref.Namespace, ref.Name))
+			continue
+		}
+		peers = append(peers, EgressServicePeer{
+			Namespace: ref.Namespace,
+			Name:      ref.Name,
+			Selector:  maps.Clone(svc.Spec.Selector),
+			Ports:     serviceTargetPorts(svc, ref.Ports),
+		})
+	}
+	return peers, missing, nil
+}
+
+// serviceTargetPorts maps the listed Service ports to the pod ports a policy
+// must allow: each matching Service port's targetPort (a number or a named
+// port; unset means the port itself) with its protocol. A listed port the
+// Service does not expose is allowed as a TCP pod port as-is. The result is
+// deduplicated and sorted (numbers first).
+func serviceTargetPorts(svc *corev1.Service, listed []int32) []EgressServicePort {
+	var out []EgressServicePort
+	for _, p := range listed {
+		matched := false
+		for _, sp := range svc.Spec.Ports {
+			if sp.Port != p {
+				continue
+			}
+			matched = true
+			target := sp.TargetPort
+			if target.Type == intstr.Int && target.IntVal == 0 || target.Type == intstr.String && target.StrVal == "" {
+				target = intstr.FromInt32(sp.Port)
+			}
+			proto := sp.Protocol
+			if proto == "" {
+				proto = corev1.ProtocolTCP
+			}
+			out = append(out, EgressServicePort{Port: target, Protocol: proto})
+		}
+		if !matched {
+			out = append(out, EgressServicePort{Port: intstr.FromInt32(p), Protocol: corev1.ProtocolTCP})
+		}
+	}
+	slices.SortFunc(out, func(a, b EgressServicePort) int {
+		if a.Port.Type != b.Port.Type {
+			return int(a.Port.Type) - int(b.Port.Type)
+		}
+		if c := int(a.Port.IntVal) - int(b.Port.IntVal); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Port.StrVal, b.Port.StrVal); c != 0 {
+			return c
+		}
+		return strings.Compare(string(a.Protocol), string(b.Protocol))
+	})
+	return slices.Compact(out)
+}
+
+// serviceKnightRequests maps a Service to the knights whose effective egress
+// allowlist (their own, or their table's default) names it.
+func (r *KnightReconciler) serviceKnightRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	knights := &aiv1alpha1.KnightList{}
+	if err := r.List(ctx, knights); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list knights for allowed Service requeue")
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range knights.Items {
+		k := knightpkg.WithTableDefaults(ctx, r.Client, &knights.Items[i])
+		if k.Spec.Isolation.EgressOptedOut() {
+			continue
+		}
+		for _, ref := range egressServiceRefs(k) {
+			if ref.Namespace == obj.GetNamespace() && ref.Name == obj.GetName() {
+				reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
+// egressServiceChanged passes Service creates and deletes, and updates that
+// change what an egress rule is rendered from (the selector or the ports).
+var egressServiceChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldSvc, ok1 := e.ObjectOld.(*corev1.Service)
+		newSvc, ok2 := e.ObjectNew.(*corev1.Service)
+		if !ok1 || !ok2 {
+			return true
+		}
+		return !equality.Semantic.DeepEqual(oldSvc.Spec.Selector, newSvc.Spec.Selector) ||
+			!equality.Semantic.DeepEqual(oldSvc.Spec.Ports, newSvc.Spec.Ports)
+	},
 }
 
 // applyEgressPolicy creates or updates the CiliumNetworkPolicy when Cilium is

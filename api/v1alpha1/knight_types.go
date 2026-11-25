@@ -617,6 +617,45 @@ type KnightEgress struct {
 	// +listType=set
 	// +optional
 	AllowedPorts []int32 `json:"allowedPorts,omitempty"`
+
+	// allowedServices are in-cluster Services the knight may reach, each on
+	// its own ports. A "*.svc.cluster.local" name under allowedHosts does not
+	// open a Service: FQDN rules only match addresses outside the cluster.
+	// The policy selects the Service's pods (its namespace and pod selector),
+	// so a Service without a selector, or one that does not exist, is left out
+	// and reported on the EgressRestricted condition.
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
+	// +optional
+	AllowedServices []EgressService `json:"allowedServices,omitempty"`
+}
+
+// EgressService is an in-cluster Service a knight may reach on the listed ports.
+type EgressService struct {
+	// name is the Service's name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]*[a-z0-9])?$`
+	// +required
+	Name string `json:"name"`
+
+	// namespace is the Service's namespace. Empty means the knight's namespace.
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// ports are the Service ports the knight dials. The policy allows each
+	// port's targetPort on the Service's pods (policies apply after the
+	// Service address is translated to a pod); a port the Service does not
+	// expose is allowed as a pod port as-is.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:Minimum=1
+	// +kubebuilder:validation:items:Maximum=65535
+	// +listType=set
+	// +required
+	Ports []int32 `json:"ports"`
 }
 
 // KnightTools defines system-level tools the knight needs installed.

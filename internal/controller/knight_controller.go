@@ -1171,7 +1171,11 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&aiv1alpha1.Knight{},
 			handler.EnqueueRequestsFromMapFunc(r.planSiblingRequests),
-			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{}))
+			ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		// spec.egress.allowedServices: re-render when a named Service changes.
+		Watches(&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(r.serviceKnightRequests),
+			ctrlbuilder.WithPredicates(egressServiceChanged))
 	if r.SandboxEnabled {
 		b = b.Owns(rtruntime.NewSandboxObject("", ""))
 	}

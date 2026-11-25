@@ -1,0 +1,32 @@
+# A knight that uses in-cluster Services (a self-hosted search engine and a
+# feed reader) without opting out of egress control. A
+# "*.svc.cluster.local" name under allowedHosts would not work: hostname rules
+# only match addresses outside the cluster. allowedServices selects each
+# Service's pods instead, on the listed Service ports (the policy allows their
+# targetPorts). A missing Service, or one without a pod selector, is left out
+# and reported on the EgressRestricted condition.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: scout
+  namespace: roundtable
+spec:
+  domain: research
+  skills:
+    - research
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.research.>"
+  egress:
+    allowedHosts:
+      - "en.wikipedia.org"
+    allowedServices:
+      - name: searxng
+        namespace: selfhosted
+        ports: [8080]
+      - name: miniflux
+        namespace: selfhosted
+        ports: [8080]

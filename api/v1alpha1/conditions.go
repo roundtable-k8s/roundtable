@@ -69,7 +69,9 @@ const (
 	// ConditionKnightEgressRestricted reports whether the knight's
 	// spec.egress allowlist is enforced. Only set on knights with spec.egress.
 	// Status=True means a CiliumNetworkPolicy limits egress to DNS, NATS and
-	// the allowed hosts. Status=False means the hostname allowlist can't be
+	// the allowed hosts and Services (reason FQDNPolicyApplied, or
+	// ServiceNotFound when an allowed Service is missing or has no selector
+	// and its rule is left out). Status=False means the hostname allowlist can't be
 	// enforced (FQDNPolicyUnavailable: a NetworkPolicy allows the allowed
 	// ports to any destination) or the policy failed to apply.
 	ConditionKnightEgressRestricted = "EgressRestricted"
@@ -303,6 +305,11 @@ const (
 
 	// ReasonEgressPolicyFailed indicates the egress policy could not be applied.
 	ReasonEgressPolicyFailed = "EgressPolicyFailed"
+
+	// ReasonEgressServiceNotFound indicates the CiliumNetworkPolicy is applied,
+	// but at least one spec.egress.allowedServices entry names a Service that
+	// does not exist or has no pod selector, so its rule is left out.
+	ReasonEgressServiceNotFound = "ServiceNotFound"
 
 	// ReasonIsolated indicates the knight runs under a RuntimeClass and
 	// behind an egress policy with hostname rules.

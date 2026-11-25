@@ -16,6 +16,7 @@ below plus its allow-listed hosts. Opting out is explicit on the Knight.
 | `Knight.spec.egress` renders a per-knight policy (#348) | live |
 | `RoundTable.spec.defaults.egress` gives every knight of a table an allowlist (#349) | live |
 | Default-deny for every knight, with an explicit per-knight opt-out (#387) | live (chart `isolation.egress.mode: deny`, the default) |
+| `egress.allowedServices` reaches named in-cluster Services on their ports (#517) | live |
 
 The allowlist is resolved in this order: the knight's `egress`, then the
 table's `defaults.egress`, then an empty allowlist (the baseline only). With
@@ -49,7 +50,8 @@ Every knight's policy allows, even with an empty allowlist:
 | `isolation.egress.baseHosts` (`KNIGHT_EGRESS_BASE_HOSTS`, default `openrouter.ai`, `api.anthropic.com`) | the model providers | `toFQDNs` on 443 |
 | The hosts of the knight's arsenal repos (`spec.arsenal.repo`, `spec.arsenals[].repo`) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
 
-The knight's own `allowedHosts` are added on top, on its `allowedPorts`.
+The knight's own `allowedHosts` are added on top, on its `allowedPorts`, and
+each of its `allowedServices` on that Service's ports.
 
 ## The fields
 
@@ -60,11 +62,18 @@ egress:
     - api.anthropic.com
     - "*.githubusercontent.com"   # subdomains only, not githubusercontent.com itself
   allowedPorts: [443]      # TCP, default 443
+  allowedServices:         # in-cluster Services, each on its own ports (at most 32)
+    - name: searxng
+      namespace: selfhosted  # empty = the knight's namespace
+      ports: [8080]          # required, 1 to 8 Service ports
 ```
 
 - A knight's own `egress` wins over the table's. Allowlists are **not merged**
   (same rule as `resources`); an explicit `egress: {}` is its own value and
   means the baseline only.
+- `allowedServices` is part of the allowlist, so it follows the same rule:
+  a knight without `egress` gets the table's services, a knight with its own
+  `egress` gets only its own.
 - The table default applies to the table's standing knights (those labelled
   `ai.roundtable.io/round-table`).
 - The operator renders `CiliumNetworkPolicy knight-<name>-egress` allowing the
@@ -76,12 +85,58 @@ egress:
   `mission-<name>-isolation` NetworkPolicy, which allowed 443 to anywhere and
   would have widened the knight's policy (NetworkPolicies are additive).
 
+## In-cluster Services
+
+Listing `searxng.selfhosted.svc.cluster.local` under `allowedHosts` does **not**
+open the Service. `toFQDNs` rules match names resolved through Cilium's DNS
+proxy to addresses outside the cluster; an in-cluster name resolves to a
+ClusterIP, which Cilium treats as a cluster identity, so the FQDN rule never
+matches it. One shared `allowedPorts` list would also open every in-cluster
+port to every allowed host. The operator warns about such entries: an
+`allowedHosts` entry ending in `.svc` or `.cluster.local` adds a note to the
+`EgressRestricted` message and a Warning event (`InClusterAllowedHost`).
+
+Use `allowedServices` instead:
+
+```yaml
+spec:
+  egress:
+    allowedServices:
+      - name: searxng
+        namespace: selfhosted
+        ports: [8080]
+      - name: home-assistant
+        namespace: home
+        ports: [8123]
+```
+
+- The operator reads each Service and renders one rule that selects the
+  Service's pods: `toEndpoints` with the namespace label and the Service's pod
+  selector (Cilium), or `namespaceSelector` + `podSelector` (fallback
+  `NetworkPolicy`).
+- `ports` are the **Service** ports the knight dials. Network policies apply
+  after the ClusterIP is translated to a pod, so the rule allows each listed
+  port's `targetPort` (a named `targetPort` stays a named port) with the
+  port's protocol. A listed port the Service does not expose is allowed as a
+  pod port as-is. Only the listed ports are opened.
+- A Service that does not exist, or has no pod selector (`ExternalName`, or
+  hand-managed Endpoints), is left out of the policy. On Cilium the knight
+  reports `EgressRestricted=True` with reason `ServiceNotFound` and names the
+  Service in the message, and a Warning event `ServiceNotFound` is recorded.
+- The operator watches Services: creating, deleting or changing the selector
+  or ports of an allowed Service re-renders the policy of every knight that
+  uses it (directly or through its table's `defaults.egress`).
+- Mission knights get `allowedServices` from their template or inline spec,
+  like the rest of `egress`.
+
+See [`examples/egress/in-cluster-services.yaml`](../examples/egress/in-cluster-services.yaml).
+
 ## Cilium vs fallback
 
 | Cluster | Result | `EgressRestricted` condition |
 | --- | --- | --- |
-| `cilium.io/v2` `CiliumNetworkPolicy` is served | Hostname allowlist enforced with `toFQDNs` | `True`, reason `FQDNPolicyApplied` |
-| Not served | A plain `NetworkPolicy` allows DNS, NATS and, to **any** destination, the Kubernetes API ports (443, 6443), the baseline hosts' ports and the allowed **ports**; hostnames cannot be enforced | `False`, reason `FQDNPolicyUnavailable` |
+| `cilium.io/v2` `CiliumNetworkPolicy` is served | Hostname allowlist enforced with `toFQDNs` | `True`, reason `FQDNPolicyApplied` (`ServiceNotFound` when an allowed Service is missing or has no selector) |
+| Not served | A plain `NetworkPolicy` allows DNS, NATS and, to **any** destination, the Kubernetes API ports (443, 6443), the baseline hosts' ports and the allowed **ports**; hostnames cannot be enforced. Allowed Services are enforced by namespace and pod selector on their ports | `False`, reason `FQDNPolicyUnavailable` |
 | Applying the policy failed | See the condition message | `False`, reason `EgressPolicyFailed` |
 
 Do not treat a fallback cluster as isolated: check `EgressRestricted` before

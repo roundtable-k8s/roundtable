@@ -11,6 +11,7 @@ the files are examples to copy from. Each file holds one Knight or RoundTable.
 | [`model-providers.yaml`](model-providers.yaml) | `openrouter.ai`, `api.anthropic.com`, as a table default |
 | [`research.yaml`](research.yaml) | A research knight: search and a short list of reference sites |
 | [`feed-reader.yaml`](feed-reader.yaml) | A feed-reading knight: its feed hosts and nothing else |
+| [`in-cluster-services.yaml`](in-cluster-services.yaml) | In-cluster Services (`allowedServices`): a self-hosted search engine and feed reader |
 
 A knight's own `egress` replaces the table's; allowlists are not merged, so a
 knight that needs model access *and* GitHub lists both.

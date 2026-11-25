@@ -190,6 +190,23 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 			Expect(k.Spec.Egress).To(Equal(&aiv1alpha1.KnightEgress{}))
 		})
 
+		It("inherits the table's allowedServices, or keeps the knight's own (#517)", func() {
+			rt := withEgress()
+			rt.Spec.Defaults.Egress.AllowedServices = []aiv1alpha1.EgressService{
+				{Name: "searxng", Namespace: "selfhosted", Ports: []int32{8080}},
+			}
+			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
+			ApplyTableDefaults(ctx, reader(rt), k)
+			Expect(k.Spec.Egress.AllowedServices).To(Equal(rt.Spec.Defaults.Egress.AllowedServices))
+			k.Spec.Egress.AllowedServices[0].Ports[0] = 1
+			Expect(rt.Spec.Defaults.Egress.AllowedServices[0].Ports[0]).To(Equal(int32(8080)))
+
+			own := &aiv1alpha1.KnightEgress{AllowedServices: []aiv1alpha1.EgressService{{Name: "hass", Ports: []int32{8123}}}}
+			k = newKnight(aiv1alpha1.LabelRoundTable, func(s *aiv1alpha1.KnightSpec) { s.Egress = own.DeepCopy() })
+			ApplyTableDefaults(ctx, reader(rt), k)
+			Expect(k.Spec.Egress).To(Equal(own))
+		})
+
 		It("does not share the table's egress with the knight", func() {
 			rt := withEgress()
 			k := newKnight(aiv1alpha1.LabelRoundTable, nil)

@@ -32,7 +32,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -366,3 +370,273 @@ func TestRenderEgressIsolationBaseline(t *testing.T) {
 	require.Len(t, np.Spec.Egress, 3)
 	assert.Equal(t, []int32{22, 443, 6443}, npPorts(np.Spec.Egress[2]))
 }
+
+// ─── spec.egress.allowedServices (#517) ─────────────────────────────────────
+
+func TestRenderEgressAllowedServices(t *testing.T) {
+	k := testEgressKnight("")
+	s := missionpkg.DefaultNetPolSettings()
+	allow := EgressAllowlist{Services: []EgressServicePeer{{
+		Namespace: "selfhosted", Name: "searxng",
+		Selector: map[string]string{"app.kubernetes.io/name": "searxng"},
+		Ports:    []EgressServicePort{{Port: intstr.FromInt32(8080), Protocol: corev1.ProtocolTCP}},
+	}}}
+
+	cnp := RenderCiliumEgressPolicy(k, allow, s)
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	// DNS, NATS, kube-apiserver, then the Service; no FQDN rule without hosts.
+	require.Len(t, egress, 4)
+	assert.Equal(t, map[string]any{
+		"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{
+			"k8s:io.kubernetes.pod.namespace": "selfhosted", "app.kubernetes.io/name": "searxng",
+		}}},
+		"toPorts": []any{map[string]any{"ports": []any{map[string]any{"port": "8080", "protocol": "TCP"}}}},
+	}, egress[3])
+
+	np := RenderEgressNetworkPolicy(k, allow, s)
+	require.Len(t, np.Spec.Egress, 4)
+	// The Service port is not opened to any destination.
+	assert.Equal(t, []int32{443, 6443}, npPorts(np.Spec.Egress[2]))
+	rule := np.Spec.Egress[3]
+	require.Len(t, rule.To, 1)
+	assert.Equal(t, map[string]string{"kubernetes.io/metadata.name": "selfhosted"}, rule.To[0].NamespaceSelector.MatchLabels)
+	assert.Equal(t, map[string]string{"app.kubernetes.io/name": "searxng"}, rule.To[0].PodSelector.MatchLabels)
+	assert.Equal(t, []int32{8080}, npPorts(rule))
+	assert.Equal(t, corev1.ProtocolTCP, *rule.Ports[0].Protocol)
+}
+
+func TestServiceTargetPorts(t *testing.T) {
+	svc := &corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
+		{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8080), Protocol: corev1.ProtocolTCP},
+		{Name: "web", Port: 8000, TargetPort: intstr.FromString("web")},
+		{Name: "plain", Port: 8123},
+		{Name: "dns", Port: 53, TargetPort: intstr.FromInt32(5353), Protocol: corev1.ProtocolUDP},
+		{Name: "dns-tcp", Port: 53, TargetPort: intstr.FromInt32(5353), Protocol: corev1.ProtocolTCP},
+	}}}
+	got := serviceTargetPorts(svc, []int32{8000, 80, 8123, 53, 9999, 80})
+	assert.Equal(t, []EgressServicePort{
+		{Port: intstr.FromInt32(5353), Protocol: corev1.ProtocolTCP},
+		{Port: intstr.FromInt32(5353), Protocol: corev1.ProtocolUDP},
+		{Port: intstr.FromInt32(8080), Protocol: corev1.ProtocolTCP},
+		{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP},
+		// Not a Service port: allowed as a pod port as-is.
+		{Port: intstr.FromInt32(9999), Protocol: corev1.ProtocolTCP},
+		{Port: intstr.FromString("web"), Protocol: corev1.ProtocolTCP},
+	}, got)
+
+	// Only the listed ports: port 80 does not open 8000 or 8123.
+	assert.Equal(t, []EgressServicePort{{Port: intstr.FromInt32(8080), Protocol: corev1.ProtocolTCP}},
+		serviceTargetPorts(svc, []int32{80}))
+
+	// Rendered named ports keep the name.
+	rule := ciliumServiceRule(EgressServicePeer{Namespace: "ha", Selector: map[string]string{"a": "b"},
+		Ports: []EgressServicePort{{Port: intstr.FromString("web"), Protocol: corev1.ProtocolTCP}}})
+	assert.Equal(t, []any{map[string]any{"ports": []any{map[string]any{"port": "web", "protocol": "TCP"}}}}, rule["toPorts"])
+}
+
+func TestEgressServiceRefs(t *testing.T) {
+	k := testEgressKnight("")
+	k.Spec.Egress.AllowedServices = []aiv1alpha1.EgressService{
+		{Name: "searxng", Namespace: "selfhosted", Ports: []int32{8080}},
+		{Name: "miniflux", Ports: []int32{8080}},
+		{Name: "searxng", Namespace: "selfhosted", Ports: []int32{80, 8080}},
+	}
+	assert.Equal(t, []egressServiceRef{
+		{Namespace: "roundtable", Name: "miniflux", Ports: []int32{8080}},
+		{Namespace: "selfhosted", Name: "searxng", Ports: []int32{80, 8080}},
+	}, egressServiceRefs(k))
+	k.Spec.Egress = nil
+	assert.Empty(t, egressServiceRefs(k))
+}
+
+func TestInClusterHostWarnings(t *testing.T) {
+	got := inClusterHostWarnings([]string{"api.anthropic.com", "searxng.selfhosted.svc.cluster.local", "hass.home.svc", "svc.example.com"})
+	require.Len(t, got, 2)
+	assert.Contains(t, got[0], `"hass.home.svc"`)
+	assert.Contains(t, got[0], "allowedServices")
+	assert.Contains(t, got[1], `"searxng.selfhosted.svc.cluster.local"`)
+	assert.Empty(t, inClusterHostWarnings(nil))
+}
+
+func TestEgressServiceChangedPredicate(t *testing.T) {
+	old := &corev1.Service{Spec: corev1.ServiceSpec{
+		Selector: map[string]string{"app": "a"},
+		Ports:    []corev1.ServicePort{{Port: 80}},
+	}}
+	upd := func(mut func(*corev1.Service)) bool {
+		n := old.DeepCopy()
+		mut(n)
+		return egressServiceChanged.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: n})
+	}
+	assert.False(t, upd(func(s *corev1.Service) { s.Labels = map[string]string{"x": "y"} }))
+	assert.False(t, upd(func(s *corev1.Service) { s.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{{IP: "1.2.3.4"}} }))
+	assert.True(t, upd(func(s *corev1.Service) { s.Spec.Selector["app"] = "b" }))
+	assert.True(t, upd(func(s *corev1.Service) { s.Spec.Ports[0].TargetPort = intstr.FromInt32(8080) }))
+	assert.True(t, egressServiceChanged.Create(event.CreateEvent{Object: old}))
+	assert.True(t, egressServiceChanged.Delete(event.DeleteEvent{Object: old}))
+}
+
+var _ = Describe("Knight egress allowedServices (#517)", Ordered, func() {
+	BeforeAll(func() {
+		_, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+			CRDs: []*apiextensionsv1.CustomResourceDefinition{ciliumNetworkPolicyCRD()},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	ciliumReconciler := func() (*KnightReconciler, *record.FakeRecorder) {
+		r := newScalingReconciler(false)
+		r.CiliumEnabled = true
+		rec := record.NewFakeRecorder(100)
+		r.Recorder = rec
+		return r, rec
+	}
+	newService := func(name string, selector map[string]string) *corev1.Service {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				Selector: selector,
+				Ports:    []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8080)}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, svc)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, svc) })
+		return svc
+	}
+	serviceRules := func(k *aiv1alpha1.Knight) []any {
+		cnp, err := getCNP(k)
+		Expect(err).NotTo(HaveOccurred())
+		egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+		var out []any
+		for _, e := range egress {
+			eps, ok := e.(map[string]any)["toEndpoints"].([]any)
+			if !ok {
+				continue
+			}
+			labels := eps[0].(map[string]any)["matchLabels"].(map[string]any)
+			if labels["k8s:io.kubernetes.pod.namespace"] == "default" {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	drain := func(rec *record.FakeRecorder) []string {
+		var out []string
+		for len(rec.Events) > 0 {
+			out = append(out, <-rec.Events)
+		}
+		return out
+	}
+
+	It("rejects an allowed Service without ports", func() {
+		bad := egressKnight("egress-svc-bad", &aiv1alpha1.KnightEgress{
+			AllowedServices: []aiv1alpha1.EgressService{{Name: "searxng"}},
+		})
+		Expect(k8sClient.Create(ctx, bad)).NotTo(Succeed())
+		bad = egressKnight("egress-svc-bad", &aiv1alpha1.KnightEgress{
+			AllowedServices: []aiv1alpha1.EgressService{{Name: "searxng", Ports: []int32{1, 2, 3, 4, 5, 6, 7, 8, 9}}},
+		})
+		Expect(k8sClient.Create(ctx, bad)).NotTo(Succeed())
+	})
+
+	It("renders the Service's pods on its target ports, reports a missing Service and re-renders on a selector change", func() {
+		newService("searxng", map[string]string{"app": "searxng"})
+		k := egressKnight("egress-svc", &aiv1alpha1.KnightEgress{
+			AllowedHosts: []string{"searxng.default.svc.cluster.local"},
+			AllowedServices: []aiv1alpha1.EgressService{
+				{Name: "searxng", Namespace: "default", Ports: []int32{80}},
+				{Name: "miniflux", Ports: []int32{8080}},
+			},
+		})
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		DeferCleanup(deleteKnight, k)
+		r, rec := ciliumReconciler()
+		reconcileKnight(r, k)
+
+		Expect(serviceRules(k)).To(Equal([]any{map[string]any{
+			"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{
+				"k8s:io.kubernetes.pod.namespace": "default", "app": "searxng",
+			}}},
+			"toPorts": []any{map[string]any{"ports": []any{map[string]any{"port": "8080", "protocol": "TCP"}}}},
+		}}))
+		cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonEgressServiceNotFound))
+		Expect(cond.Message).To(ContainSubstring("1 Service(s)"))
+		Expect(cond.Message).To(ContainSubstring("allowed Service default/miniflux not found"))
+		Expect(cond.Message).To(ContainSubstring(`allowedHosts entry "searxng.default.svc.cluster.local" is an in-cluster name`))
+		events := drain(rec)
+		Expect(events).To(ContainElement(ContainSubstring("Warning ServiceNotFound allowed Service default/miniflux not found")))
+		Expect(events).To(ContainElement(ContainSubstring("Warning InClusterAllowedHost")))
+
+		// Unchanged: no repeated warnings.
+		reconcileKnight(r, k)
+		Expect(drain(rec)).NotTo(ContainElement(ContainSubstring("ServiceNotFound")))
+
+		// The Service watch maps a selector change to the knight, which re-renders.
+		svc := &corev1.Service{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "searxng", Namespace: "default"}, svc)).To(Succeed())
+		svc.Spec.Selector = map[string]string{"app.kubernetes.io/name": "searxng"}
+		Expect(k8sClient.Update(ctx, svc)).To(Succeed())
+		Expect(r.serviceKnightRequests(ctx, svc)).To(ContainElement(
+			reconcile.Request{NamespacedName: types.NamespacedName{Name: k.Name, Namespace: k.Namespace}}))
+		reconcileKnight(r, k)
+		rules := serviceRules(k)
+		Expect(rules).To(HaveLen(1))
+		Expect(rules[0].(map[string]any)["toEndpoints"]).To(Equal([]any{map[string]any{"matchLabels": map[string]any{
+			"k8s:io.kubernetes.pod.namespace": "default", "app.kubernetes.io/name": "searxng",
+		}}}))
+
+		// The missing Service appears: its rule is added and the condition clears.
+		mf := newService("miniflux", map[string]string{"app": "miniflux"})
+		Expect(r.serviceKnightRequests(ctx, mf)).To(HaveLen(1))
+		reconcileKnight(r, k)
+		Expect(serviceRules(k)).To(HaveLen(2))
+		cond = meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonFQDNPolicyApplied))
+		Expect(cond.Message).To(ContainSubstring("2 Service(s)"))
+		Expect(cond.Message).NotTo(ContainSubstring("not found"))
+
+		// A Service without a selector is left out.
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(mf), mf)).To(Succeed())
+		mf.Spec.Selector = nil
+		Expect(k8sClient.Update(ctx, mf)).To(Succeed())
+		reconcileKnight(r, k)
+		Expect(serviceRules(k)).To(HaveLen(1))
+		cond = meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonEgressServiceNotFound))
+		Expect(cond.Message).To(ContainSubstring("allowed Service default/miniflux has no pod selector"))
+	})
+
+	It("maps a Service to knights using it through their table's defaults", func() {
+		svc := newService("hass", map[string]string{"app": "hass"})
+		rt := &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: "egress-svc-table", Namespace: "default"},
+			Spec: aiv1alpha1.RoundTableSpec{
+				NATS: aiv1alpha1.RoundTableNATS{URL: egressTestNATSURL, SubjectPrefix: "egress-svc"},
+				Defaults: &aiv1alpha1.RoundTableDefaults{Egress: &aiv1alpha1.KnightEgress{
+					AllowedServices: []aiv1alpha1.EgressService{{Name: "hass", Ports: []int32{80}}},
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, rt)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, rt) })
+
+		member := egressKnight("egress-svc-member", nil)
+		member.Labels = map[string]string{aiv1alpha1.LabelRoundTable: rt.Name}
+		Expect(k8sClient.Create(ctx, member)).To(Succeed())
+		DeferCleanup(deleteKnight, member)
+		own := egressKnight("egress-svc-own", &aiv1alpha1.KnightEgress{})
+		own.Labels = map[string]string{aiv1alpha1.LabelRoundTable: rt.Name}
+		Expect(k8sClient.Create(ctx, own)).To(Succeed())
+		DeferCleanup(deleteKnight, own)
+
+		r, _ := ciliumReconciler()
+		Expect(r.serviceKnightRequests(ctx, svc)).To(Equal([]reconcile.Request{
+			{NamespacedName: types.NamespacedName{Name: member.Name, Namespace: member.Namespace}},
+		}))
+		reconcileKnight(r, member)
+		Expect(serviceRules(member)).To(HaveLen(1))
+	})
+})
