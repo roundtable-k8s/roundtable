@@ -338,9 +338,9 @@ func appendSecretEnvFrom(spec *aiv1alpha1.KnightSpec, secretRef corev1.LocalObje
 
 // MissionShutdownTime is when a mission's knights may be shut down: the
 // mission's expiry, status.expiresAt (start + ttlSeconds). Before the mission
-// controller records it, it is derived from status.startedAt, or from now when
-// the mission has not started yet (then from its creation time, so the result
-// is deterministic).
+// controller records it, it is derived from status.startedAt, or, when the
+// mission has not started yet, from its creation time (so the result is
+// deterministic).
 func MissionShutdownTime(mission *aiv1alpha1.Mission) time.Time {
 	if mission.Status.ExpiresAt != nil {
 		return mission.Status.ExpiresAt.Time

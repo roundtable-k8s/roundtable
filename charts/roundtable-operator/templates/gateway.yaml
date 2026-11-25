@@ -3,6 +3,7 @@
 {{- $name := printf "%s-gateway" (include "roundtable-operator.fullname" .) }}
 {{- $missions := $gw.missions | default dict }}
 {{- $runs := $gw.runs | default dict }}
+{{- $hooks := $gw.hooks | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -51,6 +52,12 @@ rules:
   - apiGroups: ["ai.roundtable.io"]
     resources: ["knights", "roundtables", "chains"]
     verbs: ["get", "list"]
+  {{- if $hooks.enabled }}
+  # Webhook Triggers: looked up by name per delivery.
+  - apiGroups: ["ai.roundtable.io"]
+    resources: ["triggers"]
+    verbs: ["get"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -138,6 +145,81 @@ subjects:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if $hooks.enabled }}
+{{- /*
+Webhook credentials. RBAC cannot select Secrets by label, so the gateway gets
+"get" (never "list" or "watch") on Secrets in the namespaces callers may
+target, and reads only Secrets named by a webhook Trigger and labelled
+ai.roundtable.io/webhook-secret: "true" (checked in code).
+*/}}
+{{- if has "*" ($gw.allowedNamespaces | default list) }}
+---
+# Webhook Trigger credentials in any namespace (allowedNamespaces holds "*").
+# Only Secrets labelled ai.roundtable.io/webhook-secret=true are used.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-hook-secrets
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-hook-secrets
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-hook-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- else }}
+{{- range $ns := uniq (prepend ($gw.allowedNamespaces | default list) ($gw.namespace | default $.Release.Namespace)) }}
+---
+# Webhook Trigger credentials, only in the namespaces callers may target.
+# Only Secrets labelled ai.roundtable.io/webhook-secret=true are used.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-hook-secrets
+  namespace: {{ $ns }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-hook-secrets
+  namespace: {{ $ns }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-hook-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -204,6 +286,12 @@ spec:
             - --runs={{ $runs.enabled | default false }}
             {{- if $runs.enabled }}
             - --run-ttl={{ $gw.runTTL | default "24h" }}
+            {{- end }}
+            - --hooks={{ $hooks.enabled | default false }}
+            {{- if $hooks.enabled }}
+            - --hook-max-body-bytes={{ int64 ($hooks.maxBodyBytes | default 1048576) }}
+            - --hook-rate={{ $hooks.rate | default 2 }}
+            - --hook-burst={{ int ($hooks.burst | default 20) }}
             {{- end }}
             {{- range $gw.extraArgs }}
             - {{ . }}

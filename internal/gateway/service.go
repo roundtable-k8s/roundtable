@@ -79,6 +79,9 @@ type Options struct {
 	// Runs configures the chain-run endpoints (served when Service.Runs is
 	// set).
 	Runs RunOptions
+	// Hooks configures the webhook endpoint (served when Service.Hooks is
+	// set).
+	Hooks HookOptions
 }
 
 // Service implements the gateway operations shared by the HTTP API and MCP.
@@ -93,9 +96,13 @@ type Service struct {
 	// Runs creates, reads and deletes run copies of opted-in Chains. nil
 	// disables the chain-run endpoints.
 	Runs client.Client
+	// Hooks reads webhook Triggers, their RoundTables and their labelled
+	// credential Secrets. nil disables POST /v1/hooks/{namespace}/{trigger}.
+	Hooks client.Reader
 
-	now      func() time.Time
-	inflight chan struct{}
+	hookLimits *hookLimiter
+	now        func() time.Time
+	inflight   chan struct{}
 	// streams holds a slot per open event stream; closing ends them all.
 	streams   chan struct{}
 	closing   chan struct{}
@@ -112,7 +119,9 @@ func NewService(resolver *Resolver, bus Bus, opts Options, log logr.Logger) *Ser
 	}
 	opts.Missions.defaults()
 	opts.Runs.defaults()
-	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now, closing: make(chan struct{})}
+	opts.Hooks.defaults()
+	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now, closing: make(chan struct{}),
+		hookLimits: newHookLimiter(opts.Hooks.Rate, opts.Hooks.Burst)}
 	if opts.MaxStreams > 0 {
 		s.streams = make(chan struct{}, opts.MaxStreams)
 	}

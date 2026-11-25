@@ -94,3 +94,11 @@ func EventSubject(prefix, name string) string {
 func TriggerConsumerName(namespace, name string) string {
 	return "trigger-" + namespace + "_" + name
 }
+
+// WebhookEventSubject is the subject the gateway publishes a webhook
+// Trigger's deliveries to and the Trigger reads them from.
+// Format: {prefix}.events.webhook.{namespace}.{name}. The namespace keeps
+// same-named Triggers in different namespaces apart on a shared prefix.
+func WebhookEventSubject(prefix, namespace, name string) string {
+	return EventSubject(prefix, "webhook."+namespace+"."+name)
+}

@@ -88,3 +88,20 @@ func TestDedupeHash(t *testing.T) {
 		t.Fatalf("dedupeHash: %q %q", a, b)
 	}
 }
+
+func TestWebhookEventType(t *testing.T) {
+	cases := []struct {
+		headers map[string]string
+		want    string
+	}{
+		{map[string]string{"Ce-Type": "a.b", "X-Github-Event": "push"}, "a.b"},
+		{map[string]string{"ce-type": "lower"}, "lower"},
+		{map[string]string{"X-Github-Event": "push"}, "push"},
+		{map[string]string{"Content-Type": "application/json"}, ""},
+	}
+	for _, c := range cases {
+		if got := webhookEventType(c.headers); got != c.want {
+			t.Errorf("webhookEventType(%v) = %q, want %q", c.headers, got, c.want)
+		}
+	}
+}

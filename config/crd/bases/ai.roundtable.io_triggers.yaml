@@ -39,7 +39,8 @@ spec:
       openAPIV3Schema:
         description: |-
           Trigger starts a run of a Chain with input rendered from an event: a
-          message on the RoundTable's events stream or a cron schedule.
+          message on the RoundTable's events stream, a webhook delivered through the
+          gateway, or a cron schedule.
         properties:
           apiVersion:
             description: |-
@@ -88,7 +89,8 @@ spec:
                   dedupeKey is a Go template (same data as input) whose result
                   identifies the event: an event whose key matches a run that still
                   exists starts nothing. Defaults to the Nats-Msg-Id header (else the
-                  stream sequence) for NATS, and the scheduled time for schedule.
+                  stream sequence) for NATS and webhook, and the scheduled time for
+                  schedule.
                 type: string
               input:
                 description: |-
@@ -102,7 +104,8 @@ spec:
               roundTableRef:
                 description: |-
                   roundTableRef names the RoundTable (same namespace) whose events
-                  stream a NATS source reads. Required for source.nats.
+                  stream a NATS or webhook source reads. Required for source.nats and
+                  source.webhook.
                 properties:
                   name:
                     default: ""
@@ -165,8 +168,86 @@ spec:
                     - cron
                     type: object
                   webhook:
-                    description: webhook is reserved for the gateway webhook source
-                      (#176).
+                    description: |-
+                      webhook fires on each authenticated POST to the gateway's
+                      /v1/hooks/<namespace>/<name>. The gateway publishes the request body
+                      to <subjectPrefix>.events.webhook.<namespace>.<name> on the
+                      RoundTable's events stream, which the Trigger reads like a NATS source.
+                    properties:
+                      auth:
+                        description: |-
+                          auth is the credential a sender must present. The gateway accepts only
+                          this credential on the Trigger's hook URL, never its own API tokens.
+                        properties:
+                          bearerTokenSecretRef:
+                            description: |-
+                              bearerTokenSecretRef selects the Secret key holding the token senders
+                              send as "Authorization: Bearer <token>" (at least 16 characters).
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          hmacSecretRef:
+                            description: |-
+                              hmacSecretRef selects the Secret key holding the HMAC-SHA256 key
+                              senders sign the raw request body with, sent as
+                              "X-Hub-Signature-256: sha256=<hex>" (GitHub style) or
+                              "X-Signature: sha256=<hex>" (Flux generic-hmac).
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        type: object
+                        x-kubernetes-validations:
+                        - message: set exactly one of auth.bearerTokenSecretRef or
+                            auth.hmacSecretRef
+                          rule: '[has(self.bearerTokenSecretRef), has(self.hmacSecretRef)].filter(x,
+                            x).size() == 1'
+                      eventType:
+                        description: |-
+                          eventType, when set, fires only on events of this type: the Ce-Type
+                          header (CloudEvents), else X-GitHub-Event. Other events are stored on
+                          the stream and acknowledged without firing.
+                        maxLength: 253
+                        type: string
+                    required:
+                    - auth
                     type: object
                 type: object
                 x-kubernetes-validations:
@@ -174,14 +255,12 @@ spec:
                     or source.github
                   rule: '[has(self.nats), has(self.schedule), has(self.webhook), has(self.github)].filter(x,
                     x).size() == 1'
-                - message: source.webhook is not implemented yet (#176)
-                  rule: '!has(self.webhook)'
                 - message: source.github is not implemented yet
                   rule: '!has(self.github)'
               suspend:
                 description: |-
-                  suspend stops firing. A NATS source's consumer is deleted, so events
-                  published while suspended do not fire on resume.
+                  suspend stops firing. A NATS or webhook source's consumer is deleted,
+                  so events published while suspended do not fire on resume.
                 type: boolean
               target:
                 description: target is what each firing starts.
@@ -219,6 +298,8 @@ spec:
             x-kubernetes-validations:
             - message: roundTableRef is required for source.nats
               rule: '!has(self.source.nats) || has(self.roundTableRef)'
+            - message: roundTableRef is required for source.webhook
+              rule: '!has(self.source.webhook) || has(self.roundTableRef)'
           status:
             description: status defines the observed state of Trigger
             properties:
@@ -290,7 +371,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               consumer:
-                description: consumer is the NATS source's durable consumer.
+                description: consumer is the NATS or webhook source's durable consumer.
                 type: string
               lastFiredAt:
                 description: lastFiredAt is when a firing last started a run.
@@ -333,8 +414,8 @@ spec:
                   type: object
                 type: array
               stream:
-                description: stream is the JetStream stream the NATS source's consumer
-                  is on.
+                description: stream is the JetStream stream the NATS or webhook source's
+                  consumer is on.
                 type: string
             type: object
         required:
