@@ -1,0 +1,22 @@
+# Installs the operator and its CRDs from the OCIRepository above.
+# See docs/install.md for the upgrade behaviour of CRDs.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: roundtable-operator
+  namespace: roundtable
+spec:
+  interval: 10m
+  releaseName: roundtable-operator
+  targetNamespace: roundtable
+  chartRef:
+    kind: OCIRepository
+    name: roundtable-operator
+  install:
+    # Helm installs the chart's crds/ directory on first install.
+    crds: CreateReplace
+  upgrade:
+    # Helm never upgrades CRDs in crds/; have Flux replace them on upgrade.
+    crds: CreateReplace
+  # Chart values, see docs/helm-values.md. Defaults are used when empty.
+  values: {}

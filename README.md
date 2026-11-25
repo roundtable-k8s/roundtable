@@ -270,6 +270,8 @@ helm install roundtable-operator \
   --namespace roundtable --create-namespace
 ```
 
+For Flux (`OCIRepository` + `HelmRelease`) and CRD upgrade notes, see [installing Round Table](docs/install.md).
+
 ### Install from source
 
 ```bash
