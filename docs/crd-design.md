@@ -74,6 +74,14 @@ A step with `forEach` fans out over a JSON list taken from `spec.input` or a pri
 
 A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,output,error,reason,outcome,iterations}`, `input`, plus `json()` and the extended string functions). It is evaluated when the step's dependencies are done. When it is false the step is `Skipped` (`reason: WhenFalse`) without dispatching anything, and its dependents still run. A step with `loop` is a bounded loop. Its 1–5 body steps (each with its own `knightRef`, `task`, `model`, `timeoutSeconds`, `retry`) run in order, round after round. The CEL `until` expression is checked against `last` (the `from` step on entry, then the last body step after each round). The loop ends `Converged`, `Exhausted` after `maxIterations` rounds (the step fails, or with `onExhausted: continue` succeeds so dependents can branch on `steps.<loop>.outcome`), or `Failed`. Body tasks reuse the chain `runId`, so a coder resumes its session. Status is bounded: `status.stepStatuses[].loop` holds the round counter, the outcome and one latest-round entry per body step. `retry-failed` resumes a failed loop at the failed body step and gives an exhausted one another `maxIterations` rounds. See `docs/conditional-steps.md` and `examples/chain-pr-pipeline.yaml`.
 
+Any Chain's active run can be cancelled with the `ai.roundtable.io/cancel` annotation (the value is the reason):
+
+```bash
+kubectl annotate chain <name> -n <ns> ai.roundtable.io/cancel="wrong input" --overwrite
+```
+
+Every Pending/Running step becomes `Failed` with `error: "cancelled: <reason>"`, the chain ends `Failed` with condition `Cancelled=True` and a `RunCancelled` event, and no further steps, loop rounds or fan-out items start. The controller then removes the annotation. A chain with no active run ignores it. A task a knight already picked up is not recalled; its result is ignored.
+
 **Mission:** Knights can be `ephemeral: true` with an inline `ephemeralSpec` (reusing `KnightSpec`), allowing missions to spin up purpose-built agents. The mission lifecycle (Assembling → Briefing → Active → Succeeded/Failed → CleaningUp) maps to real-world round table semantics.
 
 **RoundTable:** Uses a label selector (`knightSelector`) rather than explicit knight lists, following the Kubernetes pattern (like Deployments select Pods). Provides fleet-wide defaults that individual knight specs can override, plus cost budgets and concurrency policies.

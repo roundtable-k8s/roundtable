@@ -533,3 +533,121 @@ func TestRunChainIdempotencyKey(t *testing.T) {
 		t.Fatalf("long key: %d", r.StatusCode)
 	}
 }
+
+// playCancel plays the chain controller for a cancelled run: once the cancel
+// annotation shows up it fails the run, with its steps carrying the reason.
+func (e *runEnv) playCancel(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if runs := e.runs(t); len(runs) == 1 {
+			c := &runs[0]
+			if reason, ok := c.Annotations[aiv1alpha1.AnnotationChainCancel]; ok {
+				now := metav1.Now()
+				c.Status.Phase, c.Status.RunID = aiv1alpha1.ChainPhaseFailed, "run-123"
+				c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+				c.Status.StartedAt, c.Status.CompletedAt = &now, &now
+				for _, s := range c.Spec.Steps {
+					c.Status.StepStatuses = append(c.Status.StepStatuses, aiv1alpha1.ChainStepStatus{
+						Name: s.Name, Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "cancelled: " + reason})
+				}
+				if err := e.k8s.Status().Update(context.Background(), c); err != nil {
+					t.Error(err)
+				}
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("run was never annotated for cancellation")
+}
+
+func TestCancelRun(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{"input": "x"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d %v", resp.StatusCode, out)
+	}
+	run, _ := out["run"].(string)
+	path := "/v1/runs/" + testNS + "/" + run + "/cancel"
+
+	go e.playCancel(t)
+	resp, out = e.do(t, http.MethodPost, path, testToken, map[string]any{"reason": "wrong input"})
+	if resp.StatusCode != http.StatusOK || out["phase"] != "Failed" || out["done"] != true {
+		t.Fatalf("cancel: %d %v", resp.StatusCode, out)
+	}
+	steps, _ := out["steps"].([]any)
+	if len(steps) != 2 || steps[0].(map[string]any)["error"] != "cancelled: wrong input" {
+		t.Fatalf("steps: %v", steps)
+	}
+
+	// A finished run can't be cancelled again.
+	resp, out = e.do(t, http.MethodPost, path, testToken, nil)
+	if resp.StatusCode != http.StatusConflict || out["state"] != "Failed" {
+		t.Fatalf("cancel finished: %d %v", resp.StatusCode, out)
+	}
+
+	// Chains the gateway didn't start, and unknown runs, are 404.
+	for _, name := range []string{"digest-pickup-1", "digest", "nope"} {
+		resp, _ = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/"+name+"/cancel", testToken, nil)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("cancel %s: %d, want 404", name, resp.StatusCode)
+		}
+	}
+	if c := e.runs(t)[0]; c.Annotations[aiv1alpha1.AnnotationChainCancel] != "wrong input" {
+		t.Errorf("annotation: %v", c.Annotations)
+	}
+}
+
+func TestCancelRunDisabledAndBadBody(t *testing.T) {
+	e := newRunEnv(t, Options{}, false)
+	if resp, _ := e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/x/cancel", testToken, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("disabled: %d", resp.StatusCode)
+	}
+	e = newRunEnv(t, Options{}, true)
+	if resp, _ := e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/x/cancel", testToken, map[string]any{"bogus": 1}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad body: %d", resp.StatusCode)
+	}
+}
+
+func TestMCPCancelRun(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	cs, err := c.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:   e.server.URL + "/mcp",
+		HTTPClient: &http.Client{Transport: bearer{http.DefaultTransport}},
+		MaxRetries: -1,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	text := func(r *mcp.CallToolResult) string {
+		if tc, _ := r.Content[0].(*mcp.TextContent); tc != nil {
+			return tc.Text
+		}
+		return ""
+	}
+
+	r, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "run_chain", Arguments: map[string]any{"chain": "digest"}})
+	if err != nil || r.IsError {
+		t.Fatalf("run_chain: %v %v", err, r)
+	}
+	run := e.runs(t)[0].Name
+
+	go e.playCancel(t)
+	r, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "cancel_run", Arguments: map[string]any{"run": run, "reason": "not needed"}})
+	if err != nil || r.IsError || !strings.Contains(text(r), "cancelled: not needed") {
+		t.Fatalf("cancel_run: %v %v %s", err, r.IsError, text(r))
+	}
+
+	// A finished run and an unknown run are tool errors.
+	for _, name := range []string{run, "nope"} {
+		r, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "cancel_run", Arguments: map[string]any{"run": name}})
+		if err != nil || !r.IsError {
+			t.Errorf("cancel_run %s: %v %v", name, err, r)
+		}
+	}
+}

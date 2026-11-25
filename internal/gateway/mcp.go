@@ -103,6 +103,13 @@ type GetRunInput struct {
 	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the run to finish before returning (default 0)"`
 }
 
+// CancelRunInput is the input of the cancel_run tool.
+type CancelRunInput struct {
+	Run       string `json:"run" jsonschema:"name of the run to cancel (returned by run_chain)"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"namespace of the run; omit for the default"`
+	Reason    string `json:"reason,omitempty" jsonschema:"why the run is cancelled; recorded on its unfinished steps"`
+}
+
 // ListRunsOutput is the output of the list_runs tool.
 type ListRunsOutput struct {
 	Runs []*RunRecord `json:"runs"`
@@ -266,6 +273,17 @@ func addRunTools(s *mcp.Server, svc *Service) {
 		return runResult(rec), rec, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "cancel_run",
+		Description: "Cancel an unfinished chain run started by run_chain: its unfinished steps are marked failed with the reason and no new steps start. " +
+			"Tasks a knight already picked up are not recalled. A finished run is an error.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CancelRunInput) (*mcp.CallToolResult, *RunRecord, error) {
+		rec, err := svc.CancelRun(ctx, in.Namespace, in.Run, in.Reason)
+		if err != nil {
+			return nil, nil, err
+		}
+		return cancelResult(rec), rec, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_runs",
 		Description: "List chain runs started through this gateway, newest first.",
 		Annotations: readOnly,
@@ -299,6 +317,23 @@ func runResult(rec *RunRecord) *mcp.CallToolResult {
 	text := rec.Output
 	if text == "" {
 		text = "Run " + id + " of chain " + rec.Chain + " finished: " + rec.Phase + ". See steps for each step's output."
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+}
+
+// cancelResult reports a cancel_run outcome. A cancelled run ends Failed, so
+// unlike runResult it is a normal result, not a tool error; a run that wasn't
+// ended yet, or that finished some other way first, is described as usual.
+func cancelResult(rec *RunRecord) *mcp.CallToolResult {
+	if !rec.Done || rec.Phase != string(aiv1alpha1.ChainPhaseFailed) {
+		return runResult(rec)
+	}
+	text := "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled."
+	for _, st := range rec.Steps {
+		if r, ok := strings.CutPrefix(st.Error, "cancelled: "); ok && r != "" {
+			text = "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled: " + r
+			break
+		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }

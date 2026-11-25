@@ -30,6 +30,14 @@ const (
 	// step(s) only, whenever its value differs from status.lastRetryTrigger.
 	AnnotationChainRetryFailed = "ai.roundtable.io/retry-failed"
 
+	// AnnotationChainCancel cancels the chain's active run. Its value is the
+	// reason (free text, may be empty). The controller marks every unfinished
+	// step Failed ("cancelled: <reason>"), fails the run with the Cancelled
+	// condition, starts no further steps and removes the annotation. Tasks
+	// already published to a knight are not recalled. On a chain without an
+	// active run it is a no-op and is removed.
+	AnnotationChainCancel = "ai.roundtable.io/cancel"
+
 	// LabelInvokable set to "true" opts a Chain in to runs started through
 	// the invoke gateway (POST /v1/chains/{name}/runs, the run_chain tool).
 	LabelInvokable = "ai.roundtable.io/invokable"

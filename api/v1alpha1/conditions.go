@@ -190,6 +190,10 @@ const (
 	// Status=False means chain is still running or pending.
 	ConditionChainComplete = "Complete"
 
+	// ConditionChainCancelled is True when the run was cancelled through the
+	// ai.roundtable.io/cancel annotation; the message holds the reason.
+	ConditionChainCancelled = "Cancelled"
+
 	// ===== Mission Condition Types =====
 
 	// ConditionMissionComplete indicates whether the mission finished execution.
@@ -408,6 +412,9 @@ const (
 
 	// ReasonChainTimeout indicates the chain exceeded its timeout duration.
 	ReasonChainTimeout = "Timeout"
+
+	// ReasonChainCancelled indicates the run was cancelled on request.
+	ReasonChainCancelled = "Cancelled"
 
 	// ===== Mission Condition Reasons =====
 

@@ -160,6 +160,11 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 		}
 	}()
 
+	// Handle cancel annotation before anything can start or advance a run.
+	if handled, res, err := r.handleCancel(ctx, chain); handled {
+		return res, err
+	}
+
 	if reason, message, err := r.validateSpec(ctx, chain); err != nil {
 		return ctrl.Result{}, r.rejectSpec(ctx, chain, reason, message, err)
 	}
