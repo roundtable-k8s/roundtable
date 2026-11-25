@@ -26,7 +26,7 @@ Published by the chain controller and the [invoke gateway](gateway.md) to
 | `chainName`, `stepName` | no | Set for chain steps and mission briefings. |
 | `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. A chain step with `resumeRunId` sends an earlier run's ID instead (see below). |
 | `model` | no | Per-task model override (see below). Absent means "use your configured model" (`KNIGHT_MODEL`, from `Knight.spec.model`). |
-| `attempt`, `retryOf` | no | Set by a manual retry (#397): the 1-based attempt number and the task ID being retried. Absent means attempt 1. Used to de-duplicate dead-letter entries (see [Delivery and failure](#delivery-and-failure)). |
+| `attempt`, `retryOf`, `previousFailure` | no | Set by a manual retry (#397): the 1-based attempt number, the task ID being retried and why that attempt was dead-lettered (at most 2 KB). Absent means attempt 1. A retried task may have partly run, so check for partial work before starting over. Used to de-duplicate dead-letter entries (see [Delivery and failure](#delivery-and-failure)). |
 
 ### `model`
 
@@ -233,10 +233,10 @@ sequence for lost tasks (0 for failed results). Each entry is published with
 advisory and the knight's own `lost: true` result give one entry.
 
 **State** lives in the KV bucket `roundtable-dead-letters`, key
-`<table>.<taskId>`, as `{state, reason, knight, attempt, subject, updatedAt}`:
+`<table>.<taskId>`, as `{state, reason, knight, attempt, subject, updatedAt, retriedAs}`:
 `open` on capture; `resolved` when a `success: true` result for the same task
 id arrives later (a spurious "lost" after an event-loop stall, pi-knight#84);
-`retried` is set by the retry API. Keys expire after 30 days.
+`retried` is set by the gateway's retry API (`retriedAs` is the new task ID). Keys expire after 30 days.
 
 **Metrics**: `roundtable_tasks_dead_lettered_total{table,knight,reason}` and
 `roundtable_dead_letters_open{table,knight}`.
