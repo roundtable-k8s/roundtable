@@ -17,7 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,8 +37,10 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -462,6 +467,105 @@ func TestRenderEgressAllowedServices(t *testing.T) {
 	assert.Equal(t, map[string]string{"app.kubernetes.io/name": "searxng"}, rule.To[0].PodSelector.MatchLabels)
 	assert.Equal(t, []int32{8080}, npPorts(rule))
 	assert.Equal(t, corev1.ProtocolTCP, *rule.Ports[0].Protocol)
+}
+
+func TestRenderEgressHostNetworkService(t *testing.T) {
+	k := testEgressKnight("")
+	s := missionpkg.DefaultNetPolSettings()
+	allow := EgressAllowlist{Services: []EgressServicePeer{{
+		Namespace: "home-automation", Name: "home-assistant",
+		Selector:    map[string]string{"app": "home-assistant"},
+		Ports:       []EgressServicePort{{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP}},
+		HostNetwork: true,
+		Addresses:   []string{"10.0.0.5", "fd00::5"},
+	}}}
+
+	cnp := RenderCiliumEgressPolicy(k, allow, s)
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	require.Len(t, egress, 4)
+	assert.Equal(t, map[string]any{
+		"toEntities": []any{"host", "remote-node"},
+		"toPorts":    []any{map[string]any{"ports": []any{map[string]any{"port": "8123", "protocol": "TCP"}}}},
+	}, egress[3])
+
+	np := RenderEgressNetworkPolicy(k, allow, s)
+	require.Len(t, np.Spec.Egress, 4)
+	rule := np.Spec.Egress[3]
+	require.Len(t, rule.To, 2)
+	assert.Equal(t, "10.0.0.5/32", rule.To[0].IPBlock.CIDR)
+	assert.Equal(t, "fd00::5/128", rule.To[1].IPBlock.CIDR)
+	assert.Nil(t, rule.To[0].PodSelector)
+	assert.Equal(t, []int32{8123}, npPorts(rule))
+
+	notes := hostNetworkNotes(allow.Services)
+	require.Len(t, notes, 1)
+	assert.Contains(t, notes[0], "home-automation/home-assistant")
+	assert.Contains(t, notes[0], "host network: reaches every node on port 8123")
+	allow.Services[0].HostNetwork = false
+	assert.Empty(t, hostNetworkNotes(allow.Services))
+}
+
+func TestResolveEgressHostNetwork(t *testing.T) {
+	sch := k8sruntime.NewScheme()
+	require.NoError(t, scheme.AddToScheme(sch))
+	require.NoError(t, aiv1alpha1.AddToScheme(sch))
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "hass"},
+			Ports:    []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromString("web")}},
+		},
+	}
+	pod := func(name string, host bool) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: name}, Spec: corev1.PodSpec{HostNetwork: host}}
+	}
+	slice := func(pods ...string) *discoveryv1.EndpointSlice {
+		es := &discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass-x", Labels: map[string]string{discoveryv1.LabelServiceName: "hass"}},
+			Ports:      []discoveryv1.EndpointPort{{Name: new("http"), Port: new(int32(8123)), Protocol: new(corev1.ProtocolTCP)}},
+		}
+		for i, p := range pods {
+			es.Endpoints = append(es.Endpoints, discoveryv1.Endpoint{
+				Addresses:  []string{"10.0.0." + strconv.Itoa(i+1)},
+				Conditions: discoveryv1.EndpointConditions{Ready: new(true)},
+				TargetRef:  &corev1.ObjectReference{Kind: "Pod", Namespace: "ha", Name: p},
+			})
+		}
+		return es
+	}
+	k := testEgressKnight("")
+	k.Spec.Egress.AllowedServices = []aiv1alpha1.EgressService{{Name: "hass", Namespace: "ha", Ports: []int32{80}}}
+	resolve := func(objs ...client.Object) EgressServicePeer {
+		r := &KnightReconciler{Client: fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()}
+		peers, missing, err := r.resolveEgressServices(context.Background(), k)
+		require.NoError(t, err)
+		require.Empty(t, missing)
+		require.Len(t, peers, 1)
+		return peers[0]
+	}
+
+	// Host-network pod: node-entity rule on the resolved numeric port.
+	p := resolve(svc, pod("a", true), slice("a"))
+	assert.True(t, p.HostNetwork)
+	assert.Equal(t, []string{"10.0.0.1"}, p.Addresses)
+	assert.Equal(t, []EgressServicePort{{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP}}, p.Ports)
+
+	// Ordinary pod, a mix, and no endpoints at all keep the pod selector rule.
+	assert.False(t, resolve(svc, pod("a", false), slice("a")).HostNetwork)
+	assert.False(t, resolve(svc, pod("a", true), pod("b", false), slice("a", "b")).HostNetwork)
+	assert.False(t, resolve(svc).HostNetwork)
+
+	// The Service moves back to a pod-network pod: re-rendered as toEndpoints.
+	assert.Equal(t, intstr.FromString("web"), resolve(svc, pod("b", false), slice("b")).Ports[0].Port)
+}
+
+func TestEgressEndpointSliceChangedPredicate(t *testing.T) {
+	old := &discoveryv1.EndpointSlice{Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}}}
+	n := old.DeepCopy()
+	n.Labels = map[string]string{"x": "y"}
+	assert.False(t, egressEndpointSliceChanged.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: n}))
+	n.Endpoints[0].Addresses = []string{"10.0.0.2"}
+	assert.True(t, egressEndpointSliceChanged.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: n}))
 }
 
 func TestServiceTargetPorts(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -66,6 +67,11 @@ type KnightReconciler struct {
 	Scheme       *runtime.Scheme
 	Recorder     record.EventRecorder
 	DefaultImage string // Default pi-knight image (set via DEFAULT_KNIGHT_IMAGE env var)
+
+	// APIReader reads Pods uncached, so the operator keeps no cluster-wide
+	// Pod informer just to tell host-network endpoints apart. Optional;
+	// without it Pods are read through Client.
+	APIReader client.Reader
 
 	// KnightSecurity is the pod-level security context applied to both knight
 	// Deployments and Nix build Jobs. Chart-driven (KNIGHT_* env vars); zero
@@ -1225,7 +1231,11 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// spec.egress.allowedServices: re-render when a named Service changes.
 		Watches(&corev1.Service{},
 			handler.EnqueueRequestsFromMapFunc(r.serviceKnightRequests),
-			ctrlbuilder.WithPredicates(egressServiceChanged))
+			ctrlbuilder.WithPredicates(egressServiceChanged)).
+		// A Service may move between pod and host network: re-render on its endpoints.
+		Watches(&discoveryv1.EndpointSlice{},
+			handler.EnqueueRequestsFromMapFunc(r.endpointSliceKnightRequests),
+			ctrlbuilder.WithPredicates(egressEndpointSliceChanged))
 	if r.SandboxEnabled {
 		b = b.Owns(rtruntime.NewSandboxObject("", ""))
 	}

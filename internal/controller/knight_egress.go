@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,6 +52,8 @@ import (
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
 
 // defaultEgressPort is the port allowed to the allowed hosts when
 // spec.egress.allowedPorts is empty.
@@ -101,8 +104,17 @@ type EgressServicePeer struct {
 	Name      string
 	// Selector is the Service's pod selector (never empty).
 	Selector map[string]string
-	// Ports are the pod ports to allow (the listed ports' targetPorts).
+	// Ports are the pod ports to allow (the listed ports' targetPorts). For a
+	// host-network Service they are resolved port numbers.
 	Ports []EgressServicePort
+	// HostNetwork is true when the Service's ready endpoints are pods on the
+	// host network. They have no Cilium endpoint identity, so the Service is
+	// allowed as traffic to the nodes (Cilium: toEntities host and
+	// remote-node) on Ports, not as a pod selector.
+	HostNetwork bool
+	// Addresses are the ready endpoint addresses of a host-network Service
+	// (the /32 or /128 ipBlocks of the fallback NetworkPolicy).
+	Addresses []string
 }
 
 // EgressServicePort is a pod port (number or name) with its protocol.
@@ -312,11 +324,18 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 }
 
 // ciliumServiceRule allows the Service's pods (its namespace and pod
-// selector) on the Service's allowed pod ports.
+// selector) on the Service's allowed pod ports; a host-network Service is
+// allowed as the host and remote-node entities on those ports.
 func ciliumServiceRule(svc EgressServicePeer) map[string]any {
 	ports := make([]any, 0, len(svc.Ports))
 	for _, p := range svc.Ports {
 		ports = append(ports, map[string]any{"port": p.Port.String(), "protocol": string(p.Protocol)})
+	}
+	if svc.HostNetwork {
+		return map[string]any{
+			"toEntities": []any{"host", "remote-node"},
+			"toPorts":    []any{map[string]any{"ports": ports}},
+		}
 	}
 	return map[string]any{
 		"toEndpoints": []any{map[string]any{"matchLabels": stringMap(ciliumPeerLabels(svc.Namespace, svc.Selector))}},
@@ -421,11 +440,25 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 	}
 }
 
-// serviceEgressRule allows the Service's pods on its allowed pod ports.
+// serviceEgressRule allows the Service's pods on its allowed pod ports, or a
+// host-network Service's endpoint addresses (as /32 or /128 ipBlocks) on them.
 func serviceEgressRule(svc EgressServicePeer) networkingv1.NetworkPolicyEgressRule {
 	ports := make([]networkingv1.NetworkPolicyPort, 0, len(svc.Ports))
 	for _, p := range svc.Ports {
 		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: new(p.Protocol), Port: new(p.Port)})
+	}
+	if svc.HostNetwork {
+		rule := networkingv1.NetworkPolicyEgressRule{Ports: ports}
+		for _, a := range svc.Addresses {
+			bits := 32
+			if strings.Contains(a, ":") {
+				bits = 128
+			}
+			rule.To = append(rule.To, networkingv1.NetworkPolicyPeer{
+				IPBlock: &networkingv1.IPBlock{CIDR: fmt.Sprintf("%s/%d", a, bits)},
+			})
+		}
+		return rule
 	}
 	return networkingv1.NetworkPolicyEgressRule{
 		To: []networkingv1.NetworkPolicyPeer{{
@@ -529,7 +562,7 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	}
 	if err == nil {
 		hostWarnings := inClusterHostWarnings(allow.AllowedHosts)
-		for _, w := range slices.Concat(missing, hostWarnings) {
+		for _, w := range slices.Concat(missing, hostWarnings, hostNetworkNotes(allow.Services)) {
 			cond.Message += "; " + w
 		}
 		prev := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
@@ -624,14 +657,184 @@ func (r *KnightReconciler) resolveEgressServices(ctx context.Context, k *aiv1alp
 				ref.Namespace, ref.Name))
 			continue
 		}
-		peers = append(peers, EgressServicePeer{
+		peer := EgressServicePeer{
 			Namespace: ref.Namespace,
 			Name:      ref.Name,
 			Selector:  maps.Clone(svc.Spec.Selector),
 			Ports:     serviceTargetPorts(svc, ref.Ports),
-		})
+		}
+		hostNet, addrs, slicePorts, err := r.hostNetworkEndpoints(ctx, svc)
+		if err != nil {
+			return nil, nil, err
+		}
+		if hostNet {
+			peer.HostNetwork = true
+			peer.Addresses = addrs
+			peer.Ports = hostNetworkPorts(svc, ref.Ports, slicePorts)
+		}
+		peers = append(peers, peer)
 	}
 	return peers, missing, nil
+}
+
+// hostNetworkEndpoints reads the Service's EndpointSlices and reports whether
+// its ready endpoints are pods on the host network, with their addresses
+// (sorted, deduplicated) and the slices' ports. A Service with no ready
+// endpoint, or with any endpoint that is an ordinary pod, is not host-network:
+// the pod selector rule still matches the ordinary pods.
+func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1.Service) (
+	hostNet bool, addrs []string, ports []discoveryv1.EndpointPort, err error) {
+	slices_ := &discoveryv1.EndpointSliceList{}
+	if err := r.List(ctx, slices_, client.InNamespace(svc.Namespace),
+		client.MatchingLabels{discoveryv1.LabelServiceName: svc.Name}); err != nil {
+		return false, nil, nil, fmt.Errorf("failed to list EndpointSlices of allowed Service %s/%s: %w",
+			svc.Namespace, svc.Name, err)
+	}
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	podHost := map[types.NamespacedName]bool{}
+	ready := 0
+	for _, es := range slices_.Items {
+		for _, ep := range es.Endpoints {
+			if ep.Conditions.Ready != nil && !*ep.Conditions.Ready {
+				continue
+			}
+			if ep.TargetRef == nil || ep.TargetRef.Kind != "Pod" {
+				return false, nil, nil, nil
+			}
+			key := types.NamespacedName{Namespace: cmpOr(ep.TargetRef.Namespace, svc.Namespace), Name: ep.TargetRef.Name}
+			isHost, seen := podHost[key]
+			if !seen {
+				pod := &corev1.Pod{}
+				if err := reader.Get(ctx, key, pod); err != nil {
+					if apierrors.IsNotFound(err) {
+						continue // gone since the slice was written
+					}
+					return false, nil, nil, fmt.Errorf("failed to get pod %s of allowed Service %s/%s: %w",
+						key, svc.Namespace, svc.Name, err)
+				}
+				isHost = pod.Spec.HostNetwork
+				podHost[key] = isHost
+			}
+			if !isHost {
+				return false, nil, nil, nil
+			}
+			ready++
+			addrs = append(addrs, ep.Addresses...)
+		}
+		ports = append(ports, es.Ports...)
+	}
+	if ready == 0 {
+		return false, nil, nil, nil
+	}
+	slices.Sort(addrs)
+	return true, slices.Compact(addrs), ports, nil
+}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// hostNetworkPorts returns the numeric ports to allow on the nodes for a
+// host-network Service: each listed Service port resolved to the port number
+// in the EndpointSlices (which resolves a named targetPort), else the
+// targetPort when numeric, else the Service port itself.
+func hostNetworkPorts(svc *corev1.Service, listed []int32, slicePorts []discoveryv1.EndpointPort) []EgressServicePort {
+	var out []EgressServicePort
+	for _, p := range listed {
+		matched := false
+		for _, sp := range svc.Spec.Ports {
+			if sp.Port != p {
+				continue
+			}
+			matched = true
+			proto := sp.Protocol
+			if proto == "" {
+				proto = corev1.ProtocolTCP
+			}
+			num := int32(0)
+			for _, ep := range slicePorts {
+				epProto := corev1.ProtocolTCP
+				if ep.Protocol != nil {
+					epProto = *ep.Protocol
+				}
+				if ep.Port != nil && ptr.Deref(ep.Name, "") == sp.Name && epProto == proto {
+					num = *ep.Port
+					break
+				}
+			}
+			if num == 0 && sp.TargetPort.Type == intstr.Int && sp.TargetPort.IntVal > 0 {
+				num = sp.TargetPort.IntVal
+			}
+			if num == 0 && sp.TargetPort.Type == intstr.Int {
+				num = sp.Port
+			}
+			if num == 0 {
+				continue // unresolved named port: nothing to allow
+			}
+			out = append(out, EgressServicePort{Port: intstr.FromInt32(num), Protocol: proto})
+		}
+		if !matched {
+			out = append(out, EgressServicePort{Port: intstr.FromInt32(p), Protocol: corev1.ProtocolTCP})
+		}
+	}
+	slices.SortFunc(out, func(a, b EgressServicePort) int {
+		if c := int(a.Port.IntVal) - int(b.Port.IntVal); c != 0 {
+			return c
+		}
+		return strings.Compare(string(a.Protocol), string(b.Protocol))
+	})
+	return slices.Compact(out)
+}
+
+// hostNetworkNotes describes each host-network Service in the status message:
+// the rule is wider than one Service, so the reader should know.
+func hostNetworkNotes(services []EgressServicePeer) []string {
+	var out []string
+	for _, svc := range services {
+		if !svc.HostNetwork {
+			continue
+		}
+		ports := make([]string, 0, len(svc.Ports))
+		for _, p := range svc.Ports {
+			ports = append(ports, p.Port.String())
+		}
+		slices.Sort(ports)
+		ports = slices.Compact(ports)
+		out = append(out, fmt.Sprintf("Service %s/%s uses the host network: reaches every node on port %s",
+			svc.Namespace, svc.Name, strings.Join(ports, ", ")))
+	}
+	return out
+}
+
+// endpointSliceKnightRequests maps an EndpointSlice to the knights that
+// allow its Service.
+func (r *KnightReconciler) endpointSliceKnightRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	name := obj.GetLabels()[discoveryv1.LabelServiceName]
+	if name == "" {
+		return nil
+	}
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: obj.GetNamespace()}}
+	return r.serviceKnightRequests(ctx, svc)
+}
+
+// egressEndpointSliceChanged passes EndpointSlice creates and deletes, and
+// updates that change the endpoints or ports a host-network rule is rendered from.
+var egressEndpointSliceChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldES, ok1 := e.ObjectOld.(*discoveryv1.EndpointSlice)
+		newES, ok2 := e.ObjectNew.(*discoveryv1.EndpointSlice)
+		if !ok1 || !ok2 {
+			return true
+		}
+		return !equality.Semantic.DeepEqual(oldES.Endpoints, newES.Endpoints) ||
+			!equality.Semantic.DeepEqual(oldES.Ports, newES.Ports)
+	},
 }
 
 // serviceTargetPorts maps the listed Service ports to the pod ports a policy

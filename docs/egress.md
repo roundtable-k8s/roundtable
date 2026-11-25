@@ -151,6 +151,30 @@ spec:
 - Mission knights get `allowedServices` from their template or inline spec,
   like the rest of `egress`.
 
+### Services on the host network
+
+Some Services are backed by pods with `hostNetwork: true` (home-automation
+software that needs mDNS or device discovery, for example). Such a pod has no
+Cilium endpoint identity: traffic to it is traffic to its node (`host` on the
+same node, `remote-node` on the others), so a `toEndpoints` selector never
+matches it. The operator reads the Service's ready EndpointSlice endpoints and,
+when every ready endpoint is a pod with `hostNetwork: true`, renders the
+allowance differently:
+
+- Cilium: `toEntities: [host, remote-node]` limited to the Service's listed
+  ports, resolved to the port numbers in the EndpointSlices.
+- Fallback `NetworkPolicy`: the endpoint addresses as `/32` (`/128`) `ipBlock`
+  peers on those ports, refreshed when the EndpointSlice changes.
+
+**This is wider than one Service**: on Cilium the knight can reach *every node*
+on those ports, not only the node running the pod. The `EgressRestricted`
+message says so (`Service ns/name uses the host network: reaches every node on
+port N`). The operator watches EndpointSlices, so the rule changes back to
+`toEndpoints` when the Service's pods move to the pod network, and the other
+way round. A Service with a mix of host-network and ordinary pods, or with no
+ready endpoint, keeps the pod-selector rule. Node addresses or CIDRs listed
+directly and selector-less Services with manual endpoints are not covered.
+
 See [`examples/egress/in-cluster-services.yaml`](../examples/egress/in-cluster-services.yaml).
 
 ## Cilium vs fallback
