@@ -1,0 +1,74 @@
+# A tool-less persona Knight and two job Chains that run on it
+# (docs/migrating-from-kagent.md). The Knight is the persona: identity, model
+# default, tools and limits. Each Chain is a job: its own prompt, model and
+# input. Neither Chain has a schedule: a caller runs them through the gateway
+# (POST /v1/chains/{name}/runs), which needs the invokable label.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: reader
+  namespace: roundtable
+spec:
+  domain: reader
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
+  model: haiku
+  nats:
+    subjects:
+      - "fleet-a.tasks.reader.>"
+  concurrency: 1
+  taskTimeoutSeconds: 600
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  prompt:
+    identity: |
+      You are a read-only analyst. You have no tools and no access to files,
+      the cluster or the network. You answer only from the text you are given
+      and you never invent facts.
+  env:
+    # A tool-less knight on claude-knight still has Claude Code's built-in
+    # tools and the knight-to-knight tools until they are disabled here.
+    - name: CLAUDE_DISALLOWED_TOOLS
+      value: "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,TodoWrite,mcp__roundtable__nats_request,mcp__roundtable__nats_publish"
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: triage-alert
+  namespace: roundtable
+  labels:
+    ai.roundtable.io/invokable: "true"
+spec:
+  description: Classify one alert and return a single JSON object.
+  timeoutSeconds: 600
+  steps:
+    - name: triage
+      knightRef: {name: reader}
+      model: haiku
+      task: |
+        Classify the alert below as one of: page, ticket, ignore.
+        Reply with one JSON object: {"action": "...", "reason": "..."}.
+
+        Alert:
+        {{ .Input }}
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: summarize-report
+  namespace: roundtable
+  labels:
+    ai.roundtable.io/invokable: "true"
+spec:
+  description: Summarize one report in five bullet points.
+  timeoutSeconds: 900
+  steps:
+    - name: summarize
+      knightRef: {name: reader}
+      model: sonnet
+      task: |
+        Summarize the report below in at most five bullet points. Say so if
+        the report is empty or unreadable.
+
+        Report:
+        {{ .Input }}

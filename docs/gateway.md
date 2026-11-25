@@ -542,6 +542,8 @@ spec:
                   [ "$code" = 200 ] && grep -q '"phase":"Succeeded"' /tmp/run.json
 ```
 
+Moving a kagent caller to these endpoints, with a Python helper: [Migrating from kagent](migrating-from-kagent.md).
+
 ### Example: run, then poll
 
 ```bash

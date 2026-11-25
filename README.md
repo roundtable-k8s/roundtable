@@ -33,7 +33,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
-**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything. See [docs/principles.md](docs/principles.md). How knights remember and share files: [docs/memory.md](docs/memory.md).
+**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything. See [docs/principles.md](docs/principles.md). How knights remember and share files: [docs/memory.md](docs/memory.md). Moving an agent off kagent: [docs/migrating-from-kagent.md](docs/migrating-from-kagent.md).
 
 ## Features
 
