@@ -91,10 +91,11 @@ TILT_ARGS ?=
 tilt-up: ## Create the dev kind cluster if missing and run tilt up (docs/local-development.md)
 	@command -v $(KIND) >/dev/null 2>&1 || { echo "kind is not installed."; exit 1; }
 	@command -v tilt >/dev/null 2>&1 || { echo "tilt is not installed (https://docs.tilt.dev/install.html)."; exit 1; }
-	@case "$$($(KIND) get clusters)" in \
-		*"$(TILT_KIND_CLUSTER)"*) echo "Kind cluster '$(TILT_KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) $(KIND) create cluster --name $(TILT_KIND_CLUSTER) --wait 120s ;; \
-	esac
+	@if $(KIND) get clusters | grep -qx '$(TILT_KIND_CLUSTER)'; then \
+		echo "Kind cluster '$(TILT_KIND_CLUSTER)' already exists. Skipping creation."; \
+	else \
+		$(KIND) create cluster --name $(TILT_KIND_CLUSTER) --wait 120s; \
+	fi
 	kubectl config use-context kind-$(TILT_KIND_CLUSTER)
 	tilt up $(TILT_ARGS)
 

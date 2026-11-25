@@ -11,8 +11,13 @@ load('ext://restart_process', 'docker_build_with_restart')
 NAMESPACE = 'roundtable'
 RELEASE = 'roundtable-operator'
 CHART = 'charts/roundtable-operator'
-# Keep in step with NATS_CHART_VERSION in hack/quickstart-kind.sh.
-NATS_CHART_VERSION = os.getenv('NATS_CHART_VERSION', '2.12.3')
+# One pin for both paths: read the default from hack/quickstart-kind.sh.
+def _nats_pin():
+    for line in str(read_file('hack/quickstart-kind.sh')).split('\n'):
+        if line.startswith('NATS_CHART_VERSION='):
+            return line.split(':-')[1].split('}')[0]
+    fail('NATS_CHART_VERSION not found in hack/quickstart-kind.sh')
+NATS_CHART_VERSION = os.getenv('NATS_CHART_VERSION', _nats_pin())
 ARCH = str(local('go env GOARCH', quiet=True)).strip()
 
 # Only ever act on a kind cluster, never on a "real" one.
@@ -67,17 +72,25 @@ docker_build_with_restart(
     'roundtable-operator-dev',
     '.',
     dockerfile='Dockerfile.dev',
-    entrypoint=['/manager'],
+    entrypoint=['/app/manager'],
     only=['.tilt'],
-    live_update=[sync('.tilt/manager', '/manager'), sync('.tilt/gateway', '/gateway')],
+    live_update=[sync('.tilt/manager', '/app/manager'), sync('.tilt/gateway', '/app/gateway')],
 )
 
 watch_file(CHART)
 watch_file('hack/tilt-values.yaml')
-k8s_yaml(local(
+watch_file('hack/quickstart-kind.sh')
+objs = decode_yaml_stream(local(
     'helm template %s %s --namespace %s -f hack/tilt-values.yaml' % (RELEASE, CHART, NAMESPACE),
     quiet=True,
 ))
+# Live update and the restart wrapper write the binary and /tmp inside the
+# container, so the operator container's root filesystem must be writable in dev.
+for o in objs:
+    if o['kind'] == 'Deployment' and o['metadata']['name'] == RELEASE:
+        for c in o['spec']['template']['spec']['containers']:
+            c.setdefault('securityContext', {})['readOnlyRootFilesystem'] = False
+k8s_yaml(encode_yaml_stream(objs))
 k8s_resource(
     RELEASE,
     resource_deps=['crds', 'nats', 'compile'],

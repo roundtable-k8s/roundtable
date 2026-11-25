@@ -40,8 +40,9 @@ kubectl -n roundtable create secret generic llm-api-keys --from-literal=ANTHROPI
 ## The loop
 
 Edit a Go file under `cmd/`, `api/`, `internal/` or `pkg/`. Tilt recompiles on the host and
-syncs the binary into the running operator pod, which restarts the process in place; no image
-rebuild. Changes to the chart or `hack/tilt-values.yaml` re-render and re-apply the manifests.
+syncs the binary into the running operator pod (`/app/manager`, which `/manager` links to), which
+restarts the process in place; no image rebuild. For this the Tiltfile makes the operator
+container's root filesystem writable in dev only; the chart default stays read-only. Changes to the chart or `hack/tilt-values.yaml` re-render and re-apply the manifests.
 If you change the types in `api/`, run `make manifests generate` and copy the CRDs to
 `charts/roundtable-operator/crds` as usual; the `crds` resource re-applies them.
 

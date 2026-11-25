@@ -2,8 +2,10 @@
 # The Tiltfile cross-compiles the binaries on the host into .tilt/ and live-updates
 # them into the running pod. Not for releases: use the Dockerfile for that.
 FROM alpine:3.21
-WORKDIR /
-COPY .tilt/manager /manager
-COPY .tilt/gateway /gateway
+# The binaries live in /app, owned by the non-root user, so live update can
+# overwrite them. /manager and /gateway still resolve (the trigger CronJob runs /manager).
+RUN mkdir /app && chown 65532:65532 /app \
+ && ln -s /app/manager /manager && ln -s /app/gateway /gateway
+COPY --chown=65532:65532 .tilt/manager .tilt/gateway /app/
 USER 65532:65532
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/app/manager"]
