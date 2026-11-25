@@ -18,7 +18,7 @@ const (
 	// cleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes resources.
 	cleanupPolicyDelete = "Delete"
 	// resultsKVBucket is the NATS KV bucket holding retained mission results.
-	resultsKVBucket = "mission-results"
+	resultsKVBucket = natspkg.ResultsBucket
 )
 
 // Cleaner owns mission teardown (ephemeral knights, NATS streams/consumers,
@@ -155,6 +155,48 @@ func (c *Cleaner) DeleteEphemeralRoundTable(ctx context.Context, mission *aiv1al
 	return c.Client.Delete(ctx, rt)
 }
 
+// SetResultsRef records where the retained results are: status.resultsRef and
+// its deprecated "<bucket>.<key>" alias status.resultsConfigMap.
+func SetResultsRef(mission *aiv1alpha1.Mission, bucket, key string) {
+	mission.Status.ResultsRef = &aiv1alpha1.MissionResultsRef{Bucket: bucket, Key: key}
+	mission.Status.ResultsConfigMap = fmt.Sprintf("%s.%s", bucket, key)
+}
+
+// ResultsKey returns the KV key a mission's results are stored under.
+func ResultsKey(mission *aiv1alpha1.Mission) string { return mission.Name }
+
+// ResultsBucketName returns the KV bucket retained results are stored in.
+func ResultsBucketName() string { return resultsKVBucket }
+
+// retainedSkill is a generated skill in the retained results document.
+type retainedSkill struct {
+	Name    string `json:"name"`
+	Knight  string `json:"knight"`
+	Content string `json:"content"`
+}
+
+// generatedChains returns the full specs of the chains the planner generated.
+func generatedChains(mission *aiv1alpha1.Mission) []aiv1alpha1.GeneratedChain {
+	if len(mission.Spec.GeneratedChains) == 0 {
+		return []aiv1alpha1.GeneratedChain{}
+	}
+	return mission.Spec.GeneratedChains
+}
+
+// generatedSkills returns the skills generated for the mission's knights.
+func generatedSkills(mission *aiv1alpha1.Mission) []retainedSkill {
+	out := []retainedSkill{}
+	for _, mk := range mission.Spec.GeneratedKnights {
+		if mk.EphemeralSpec == nil {
+			continue
+		}
+		for _, sk := range mk.EphemeralSpec.GeneratedSkills {
+			out = append(out, retainedSkill{Name: sk.Name, Knight: mk.Name, Content: sk.Content})
+		}
+	}
+	return out
+}
+
 // StoreResultsToKV stores mission results in a NATS KV bucket for retention.
 // Bucket: "mission-results", Key: mission name, Value: JSON with all results.
 // KV Put is idempotent — no "already exists" problem like ConfigMaps.
@@ -167,7 +209,7 @@ func (c *Cleaner) StoreResultsToKV(ctx context.Context, mission *aiv1alpha1.Miss
 		return fmt.Errorf("NATS client not available: %w", err)
 	}
 
-	kvKey := mission.Name
+	kvKey := ResultsKey(mission)
 	const kvBucket = resultsKVBucket
 
 	// Build duration string
@@ -194,6 +236,9 @@ func (c *Cleaner) StoreResultsToKV(ctx context.Context, mission *aiv1alpha1.Miss
 		},
 		"chains":  map[string]any{},
 		"knights": []map[string]any{},
+		// What the planner generated, so it can be copied out and reused.
+		"generatedChains": generatedChains(mission),
+		"generatedSkills": generatedSkills(mission),
 	}
 
 	// Timeline
@@ -271,7 +316,7 @@ func (c *Cleaner) StoreResultsToKV(ctx context.Context, mission *aiv1alpha1.Miss
 		return fmt.Errorf("failed to store results in NATS KV: %w", err)
 	}
 
-	mission.Status.ResultsConfigMap = fmt.Sprintf("%s.%s", kvBucket, kvKey)
+	SetResultsRef(mission, kvBucket, kvKey)
 	log.Info("Stored mission results to NATS KV", "bucket", kvBucket, "key", kvKey,
 		"chains", len(mission.Status.ChainStatuses), "bytes", len(resultsJSON))
 	return nil

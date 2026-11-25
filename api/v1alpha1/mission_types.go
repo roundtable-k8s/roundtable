@@ -117,8 +117,12 @@ type MissionSpec struct {
 	// +optional
 	RoundTableTemplate *MissionRoundTableTemplate `json:"roundTableTemplate,omitempty"`
 
-	// retainResults, if true, copies mission results to a ConfigMap before cleanup.
-	// The ConfigMap persists beyond mission deletion for post-mortem analysis.
+	// retainResults, if true, writes the mission results (summary, timeline,
+	// chain outputs, costs, and the generated chains and skills) as one JSON
+	// document to NATS KV before cleanup. The document is kept in NATS KV for
+	// the operator's results TTL (30 days unless the chart value
+	// mission.resultsTTL says otherwise) and outlives the Mission; status.resultsRef
+	// names where it is.
 	// +kubebuilder:default=true
 	// +optional
 	RetainResults bool `json:"retainResults,omitempty"`
@@ -299,8 +303,15 @@ type MissionStatus struct {
 	// +optional
 	ChainStatuses []MissionChainStatus `json:"chainStatuses,omitempty"`
 
-	// resultsConfigMap is the name of the ConfigMap containing preserved results
-	// (only set when retainResults=true and mission is complete).
+	// resultsRef says where the retained results document is: a NATS KV bucket
+	// and key (only set when retainResults=true and the mission is complete).
+	// The entry expires after the operator's results TTL (default 30 days).
+	// +optional
+	ResultsRef *MissionResultsRef `json:"resultsRef,omitempty"`
+
+	// resultsConfigMap is a deprecated alias of resultsRef, kept for one
+	// release: "<bucket>.<key>" of the NATS KV entry holding the retained
+	// results. No ConfigMap is written; use resultsRef.
 	// +optional
 	ResultsConfigMap string `json:"resultsConfigMap,omitempty"`
 
@@ -450,6 +461,17 @@ type MissionPlanner struct {
 	// +kubebuilder:validation:Maximum=50
 	// +optional
 	MaxKnights int32 `json:"maxKnights,omitempty"`
+}
+
+// MissionResultsRef locates a mission's retained results document in NATS KV.
+type MissionResultsRef struct {
+	// bucket is the NATS KV bucket holding the document.
+	// +kubebuilder:validation:Required
+	Bucket string `json:"bucket"`
+
+	// key is the entry's key in the bucket.
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
 }
 
 // GeneratedChain represents a chain definition created by the planner.

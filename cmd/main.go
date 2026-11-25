@@ -91,6 +91,10 @@ func main() {
 	var natsMonitoringEndpoint string
 	var githubAPIURL string
 	var providerMaxRetries int
+	var missionResultsTTL time.Duration
+	flag.DurationVar(&missionResultsTTL, "mission-results-ttl", natspkg.DefaultResultsTTL,
+		"How long retained mission results are kept in the mission-results NATS KV bucket. "+
+			"An existing bucket with a different TTL is updated.")
 	flag.IntVar(&providerMaxRetries, "provider-overload-max-retries", 4,
 		"Retries (1m, 2m, 4m, 8m backoff) of a chain step whose task failed with a transient "+
 			"model provider error (HTTP 529/503/502/500, overloaded). 0 disables.")
@@ -306,6 +310,7 @@ func main() {
 	if natsURL := os.Getenv("NATS_URL"); natsURL != "" {
 		natsConfig.URL = natsURL
 	}
+	natsConfig.ResultsTTL = missionResultsTTL
 	natsProvider := natspkg.NewProvider(natsConfig, ctrl.Log.WithName("nats"))
 	setupLog.Info("NATS provider initialized", "url", natsConfig.URL)
 

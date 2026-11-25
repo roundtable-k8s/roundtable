@@ -2,14 +2,18 @@ package mission
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 func TestShouldDeleteResources(t *testing.T) {
@@ -94,4 +98,67 @@ func testScheme(t *testing.T) *runtime.Scheme {
 
 func clientKey(ns, name string) types.NamespacedName {
 	return types.NamespacedName{Namespace: ns, Name: name}
+}
+
+// kvCapture records KVPut calls on top of fakeNATS.
+type kvCapture struct {
+	fakeNATS
+	bucket, key string
+	value       []byte
+}
+
+func (k *kvCapture) KVPut(_ context.Context, bucket, key string, value []byte) error {
+	k.bucket, k.key, k.value = bucket, key, value
+	return nil
+}
+
+func TestStoreResultsToKVIncludesGeneratedChainsAndSkills(t *testing.T) {
+	kv := &kvCapture{}
+	c := &Cleaner{
+		Client: fake.NewClientBuilder().WithScheme(testScheme(t)).Build(),
+		NATS:   natspkg.NewProviderWithClient(kv, logr.Discard()),
+	}
+	m := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "ns"},
+		Spec: aiv1alpha1.MissionSpec{
+			GeneratedChains: []aiv1alpha1.GeneratedChain{{
+				Name:  "research",
+				Steps: []aiv1alpha1.ChainStep{{Name: "s1", KnightRef: corev1.LocalObjectReference{Name: "k1"}, Task: "do it"}},
+			}},
+			GeneratedKnights: []aiv1alpha1.MissionKnight{{
+				Name:      "k1",
+				Ephemeral: true,
+				EphemeralSpec: &aiv1alpha1.KnightSpec{
+					GeneratedSkills: []aiv1alpha1.GeneratedSkill{{Name: "sk", Content: "# skill"}},
+				},
+			}},
+		},
+	}
+	if err := c.StoreResultsToKV(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	if kv.bucket != "mission-results" || kv.key != "m1" {
+		t.Errorf("stored at %s/%s, want mission-results/m1", kv.bucket, kv.key)
+	}
+	var doc struct {
+		GeneratedChains []aiv1alpha1.GeneratedChain `json:"generatedChains"`
+		GeneratedSkills []retainedSkill             `json:"generatedSkills"`
+	}
+	if err := json.Unmarshal(kv.value, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.GeneratedChains) != 1 || doc.GeneratedChains[0].Name != "research" ||
+		len(doc.GeneratedChains[0].Steps) != 1 || doc.GeneratedChains[0].Steps[0].Task != "do it" {
+		t.Errorf("generatedChains = %+v", doc.GeneratedChains)
+	}
+	want := retainedSkill{Name: "sk", Knight: "k1", Content: "# skill"}
+	if len(doc.GeneratedSkills) != 1 || doc.GeneratedSkills[0] != want {
+		t.Errorf("generatedSkills = %+v, want [%+v]", doc.GeneratedSkills, want)
+	}
+	if m.Status.ResultsRef == nil || m.Status.ResultsRef.Bucket != "mission-results" || m.Status.ResultsRef.Key != "m1" {
+		t.Errorf("resultsRef = %+v", m.Status.ResultsRef)
+	}
+	if m.Status.ResultsConfigMap != "mission-results.m1" {
+		t.Errorf("resultsConfigMap = %q", m.Status.ResultsConfigMap)
+	}
 }

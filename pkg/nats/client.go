@@ -478,20 +478,32 @@ func (c *JetStreamClient) kvBucket(ctx context.Context, bucket string) (jetstrea
 	if js == nil {
 		return nil, errors.New("JetStream not connected")
 	}
+	ttl := c.config.kvTTL(bucket)
 	kv, err := js.KeyValue(ctx, bucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
 		kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 			Bucket:      bucket,
 			Description: fmt.Sprintf("Round Table %s store", bucket),
 			History:     3,
-			TTL:         30 * 24 * time.Hour, // 30 day TTL
+			TTL:         ttl,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create KV bucket %s: %w", bucket, err)
 		}
-		c.log.Info("Created NATS KV bucket", "bucket", bucket)
+		c.log.Info("Created NATS KV bucket", "bucket", bucket, "ttl", ttl.String())
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to access KV bucket %s: %w", bucket, err)
+	} else if bucket == ResultsBucket {
+		// The results TTL is operator configuration: bring an existing bucket
+		// in line when it differs.
+		if status, serr := kv.Status(ctx); serr == nil && status.TTL() != ttl {
+			cfg := status.Config()
+			cfg.TTL = ttl
+			if kv, err = js.UpdateKeyValue(ctx, cfg); err != nil {
+				return nil, fmt.Errorf("failed to update TTL of KV bucket %s: %w", bucket, err)
+			}
+			c.log.Info("Updated NATS KV bucket TTL", "bucket", bucket, "ttl", ttl.String())
+		}
 	}
 	return kv, nil
 }

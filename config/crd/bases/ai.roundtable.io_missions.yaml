@@ -5527,8 +5527,12 @@ spec:
               retainResults:
                 default: true
                 description: |-
-                  retainResults, if true, copies mission results to a ConfigMap before cleanup.
-                  The ConfigMap persists beyond mission deletion for post-mortem analysis.
+                  retainResults, if true, writes the mission results (summary, timeline,
+                  chain outputs, costs, and the generated chains and skills) as one JSON
+                  document to NATS KV before cleanup. The document is kept in NATS KV for
+                  the operator's results TTL (30 days unless the chart value
+                  mission.resultsTTL says otherwise) and outlives the Mission; status.resultsRef
+                  names where it is.
                 type: boolean
               roundTableRef:
                 description: |-
@@ -6115,9 +6119,26 @@ spec:
                 type: string
               resultsConfigMap:
                 description: |-
-                  resultsConfigMap is the name of the ConfigMap containing preserved results
-                  (only set when retainResults=true and mission is complete).
+                  resultsConfigMap is a deprecated alias of resultsRef, kept for one
+                  release: "<bucket>.<key>" of the NATS KV entry holding the retained
+                  results. No ConfigMap is written; use resultsRef.
                 type: string
+              resultsRef:
+                description: |-
+                  resultsRef says where the retained results document is: a NATS KV bucket
+                  and key (only set when retainResults=true and the mission is complete).
+                  The entry expires after the operator's results TTL (default 30 days).
+                properties:
+                  bucket:
+                    description: bucket is the NATS KV bucket holding the document.
+                    type: string
+                  key:
+                    description: key is the entry's key in the bucket.
+                    type: string
+                required:
+                - bucket
+                - key
+                type: object
               roundTableName:
                 description: roundTableName is the name of the ephemeral RoundTable
                   created for this mission.
