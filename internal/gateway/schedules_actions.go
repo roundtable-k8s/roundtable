@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -76,8 +77,9 @@ type ScheduleRun struct {
 	// Schedule and Namespace name the schedule.
 	Schedule  string `json:"schedule"`
 	Namespace string `json:"namespace"`
-	// Run is the Chain run the firing starts (or started).
-	Run string `json:"run"`
+	// Run is the Chain run the firing starts (or started), or for a knight
+	// target the task ID; empty while a knight target's request is pending.
+	Run string `json:"run,omitempty"`
 	// Key is the firing's dedupe key, "manual:<id>".
 	Key string `json:"key"`
 	// State is started, pending (the controller has not handled it yet) or
@@ -194,8 +196,9 @@ func (s *Service) ResumeSchedule(ctx context.Context, namespace, name string) (*
 // RunSchedule asks the trigger controller to fire the schedule once now (the
 // run-now annotation) and waits briefly for it to be handled. The firing goes
 // through the controller's normal path: input rendering, concurrency policy
-// and run labels; it fires even while the schedule is suspended. The run's
-// name is known up front, so a pending answer names it too.
+// and run labels; it fires even while the schedule is suspended. Chain
+// targets: the run's name is known up front, so a pending answer names it too.
+// Knight targets: Run is the task ID, empty while the request is pending.
 func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*ScheduleRun, error) {
 	caller := callerOr(ctx)
 	id := newRunNowID(s.now())
@@ -208,17 +211,15 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 		if !t.DeletionTimestamp.IsZero() {
 			return false, &ConflictError{State: "deleting", Reason: fmt.Sprintf("schedule %s/%s is being deleted", t.Namespace, t.Name)}
 		}
-		if t.Spec.Target.ChainRef == nil {
-			return false, &ConflictError{State: "unsupportedTarget",
-				Reason: fmt.Sprintf("schedule %s/%s does not target a Chain; run now supports Chain targets only", t.Namespace, t.Name)}
-		}
-		chain = t.Spec.Target.ChainRef.Name
-		if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: chain}, &aiv1alpha1.Chain{}); err != nil {
-			if apierrors.IsNotFound(err) {
-				return false, &ConflictError{State: "targetNotFound",
-					Reason: fmt.Sprintf("schedule %s/%s targets Chain %q, which does not exist", t.Namespace, t.Name, chain)}
+		if ref := t.Spec.Target.ChainRef; ref != nil {
+			chain = ref.Name
+			if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: chain}, &aiv1alpha1.Chain{}); err != nil {
+				if apierrors.IsNotFound(err) {
+					return false, &ConflictError{State: "targetNotFound",
+						Reason: fmt.Sprintf("schedule %s/%s targets Chain %q, which does not exist", t.Namespace, t.Name, chain)}
+				}
+				return false, k8sError("get target chain", err)
 			}
-			return false, k8sError("get target chain", err)
 		}
 		t.Annotations[aiv1alpha1.AnnotationTriggerRunNow] = id
 		t.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller] = caller
@@ -228,8 +229,12 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 		return nil, err
 	}
 	key := aiv1alpha1.TriggerRunNowKey(id)
-	out := &ScheduleRun{Schedule: trg.Name, Namespace: trg.Namespace, Key: key, Caller: caller,
-		Run: chainrun.TriggerRunName(chain, trg.Name, key), State: ScheduleRunPending}
+	out := &ScheduleRun{Schedule: trg.Name, Namespace: trg.Namespace, Key: key, Caller: caller, State: ScheduleRunPending}
+	if chain != "" {
+		// A Chain run's name derives from the firing's key; a knight task's
+		// ID is only known once the controller has sent the task.
+		out.Run = chainrun.TriggerRunName(chain, trg.Name, key)
+	}
 	s.Log.Info("Requested schedule run", "namespace", trg.Namespace, "schedule", trg.Name, "run", out.Run, "caller", caller)
 	return out, s.waitScheduleRun(ctx, out, min(scheduleRunWait, s.Opts.MaxTimeout))
 }
@@ -313,6 +318,14 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "conflict: " + run.SkipReason, "state": run.State, "run": run})
 		return
 	}
-	w.Header().Set("Location", "/v1/schedules/"+run.Namespace+"/"+run.Schedule+"/runs/"+run.Run)
+	// Location is set only when the run's name is known. A Chain run's points
+	// at GET .../runs/{run} (#586, not served yet); a task's at the task.
+	switch {
+	case run.Run == "":
+	case strings.HasPrefix(run.Run, TaskIDPrefix):
+		w.Header().Set("Location", "/v1/tasks/"+run.Run)
+	default:
+		w.Header().Set("Location", "/v1/schedules/"+run.Namespace+"/"+run.Schedule+"/runs/"+run.Run)
+	}
 	writeJSON(w, code, run)
 }

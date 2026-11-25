@@ -928,14 +928,22 @@ run, annotates it `ai.roundtable.io/caller` with the caller, records the
 firing and removes the request. The gateway waits up to 10 seconds for that:
 
 - **201** with `state: started` once the run exists;
-- **202** with `state: pending` if the operator has not handled it yet (the
-  run name is already known: it is derived from the firing's key);
+- **202** with `state: pending` if the operator has not handled it yet. For a
+  Chain target the run name is already known (it is derived from the firing's
+  key). For a knight target the task ID is not: `run` is empty and there is
+  no `Location`; the task ID appears in the schedule's
+  `status.recentFirings[].run` once the firing is recorded;
 - **409** with `state: skipped` and the reason when the firing started
   nothing (for example `concurrency Forbid: run ... is active`), when an
   earlier run-now request is still waiting (`state: pending`), or when the
   target Chain does not exist.
 
-Both 201 and 202 carry `Location: /v1/schedules/{namespace}/{name}/runs/{run}`.
+A knight target works the same way: `run` is the task ID, the task records
+the caller, and a 201 carries `Location: /v1/tasks/{taskId}`.
+
+For a Chain target, 201 and 202 carry
+`Location: /v1/schedules/{namespace}/{name}/runs/{run}`. That route comes with
+the schedule run routes (#586) and is not served yet.
 
 ```json
 {"schedule": "morning-digest", "namespace": "roundtable", "run": "daily-digest-morning-digest-3f9a0c1b2d4e",

@@ -65,6 +65,8 @@ func newScheduleEnv(t *testing.T, enabled bool) *scheduleEnv {
 	suspended.Spec.Suspend = true
 	orphan := scheduleTrigger("orphan", nil)
 	orphan.Spec.Target.ChainRef.Name = "gone"
+	knight := scheduleTrigger("knight-digest", nil)
+	knight.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "brief me"}}
 	events := scheduleTrigger("events", nil)
 	events.Spec.Source = aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: "x.events.y"}}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
@@ -73,7 +75,7 @@ func newScheduleEnv(t *testing.T, enabled bool) *scheduleEnv {
 			"kustomize.toolkit.fluxcd.io/name":      "apps",
 			"kustomize.toolkit.fluxcd.io/namespace": "flux-system",
 		}),
-		suspended, orphan, events,
+		suspended, orphan, events, knight,
 	).WithStatusSubresource(&aiv1alpha1.Trigger{}, &aiv1alpha1.Chain{}).Build()
 
 	svc := NewService(&Resolver{Client: k8s}, nil, Options{Namespace: testNS, MaxTimeout: time.Minute,
@@ -123,7 +125,11 @@ func (e *scheduleEnv) playTrigger(t *testing.T, name, skipReason string) {
 		key := aiv1alpha1.TriggerRunNowKey(id)
 		firing := aiv1alpha1.TriggerFiring{Time: metav1.Now(), Key: key, SkipReason: skipReason}
 		if skipReason == "" {
-			firing.Run = chainrun.TriggerRunName(trg.Spec.Target.ChainRef.Name, trg.Name, key)
+			if trg.Spec.Target.ChainRef != nil {
+				firing.Run = chainrun.TriggerRunName(trg.Spec.Target.ChainRef.Name, trg.Name, key)
+			} else {
+				firing.Run = TaskIDPrefix + "galahad-abc123"
+			}
 		}
 		trg.Status.RecentFirings = append([]aiv1alpha1.TriggerFiring{firing}, trg.Status.RecentFirings...)
 		if err := e.k8s.Status().Update(ctx, trg); err != nil {
@@ -237,6 +243,40 @@ func TestRunScheduleRecordsCallerAndPending(t *testing.T) {
 	resp, out = e.do(t, http.MethodPost, path, testToken, nil)
 	if resp.StatusCode != http.StatusConflict || out["state"] != ScheduleRunPending {
 		t.Fatalf("second run: %d %v", resp.StatusCode, out)
+	}
+}
+
+func TestRunKnightSchedule(t *testing.T) {
+	old := scheduleRunWait
+	t.Cleanup(func() { scheduleRunWait = old })
+	e := newScheduleEnv(t, true)
+	path := "/v1/schedules/" + testNS + "/knight-digest/run"
+
+	// Handled: 201 with the task ID.
+	go e.playTrigger(t, "knight-digest", "")
+	resp, out := e.do(t, http.MethodPost, path, testToken, nil)
+	if resp.StatusCode != http.StatusCreated || out["state"] != ScheduleRunStarted || out["run"] != TaskIDPrefix+"galahad-abc123" || out["caller"] != "token" {
+		t.Fatalf("run: %d %v", resp.StatusCode, out)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/v1/tasks/"+TaskIDPrefix+"galahad-abc123" {
+		t.Errorf("Location: %q", loc)
+	}
+
+	// Not handled yet: 202 with the key, no run and no Location.
+	scheduleRunWait = 50 * time.Millisecond
+	resp, out = e.do(t, http.MethodPost, path, testToken, nil)
+	if resp.StatusCode != http.StatusAccepted || out["state"] != ScheduleRunPending || out["key"] == "" {
+		t.Fatalf("pending run: %d %v", resp.StatusCode, out)
+	}
+	if run, ok := out["run"]; ok && run != "" {
+		t.Errorf("pending run named: %v", out)
+	}
+	if loc := resp.Header.Get("Location"); loc != "" {
+		t.Errorf("pending Location: %q", loc)
+	}
+	trg := e.trigger(t, "knight-digest")
+	if trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller] != "token" {
+		t.Errorf("annotations: %v", trg.Annotations)
 	}
 }
 

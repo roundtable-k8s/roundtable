@@ -909,6 +909,33 @@ var _ = Describe("Trigger controller", func() {
 			Expect(skipped).To(Equal(1))
 		})
 
+		It("fires once now for the run-now annotation and records the caller on the task", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-runnow", func(s *aiv1alpha1.TriggerSpec) { s.Suspend = true })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{
+				aiv1alpha1.AnnotationTriggerRunNow:       "req-k",
+				aiv1alpha1.AnnotationTriggerRunNowCaller: "roundtable/ui",
+			}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("kt-runnow")
+
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+			t = getTrigger("kt-runnow")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("req-k")))
+			Expect(t.Status.RecentFirings[0].Run).To(Equal(sent[0].TaskID))
+
+			svc, err := r.taskService(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			rec, err := svc.GetTask(ctx, sent[0].TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.Caller).To(Equal("roundtable/ui"))
+		})
+
 		It("reports a missing knight or one at another table and sends nothing", func() {
 			got := tasks()
 			t := scheduleKnightTrigger("kt-missing", func(s *aiv1alpha1.TriggerSpec) { s.Target.Knight.Name = "nobody" })

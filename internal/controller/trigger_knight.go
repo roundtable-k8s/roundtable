@@ -128,6 +128,8 @@ type knightFiring struct {
 	now    time.Time
 	table  string
 	mutate func(*aiv1alpha1.TriggerStatus)
+	// manual is set for a run-now firing; its caller is recorded on the task.
+	manual *triggerManualFiring
 	// skip records a firing that sent nothing; deduped does for a duplicate
 	// dedupe key.
 	skip    func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error)
@@ -176,7 +178,11 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	if err != nil {
 		return triggerRetry, fmt.Errorf("gateway task service: %w", err)
 	}
-	rec, err := svc.Invoke(ctx, kt.Name, gateway.InvokeRequest{
+	invokeCtx := ctx
+	if f.manual != nil && f.manual.caller != "" {
+		invokeCtx = gateway.WithCaller(ctx, gateway.Caller{Name: f.manual.caller})
+	}
+	rec, err := svc.Invoke(invokeCtx, kt.Name, gateway.InvokeRequest{
 		Task:           task,
 		Model:          kt.Model,
 		Namespace:      trg.Namespace,
