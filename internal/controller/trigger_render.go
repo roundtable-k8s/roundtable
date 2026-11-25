@@ -58,6 +58,10 @@ type triggerRunRef struct {
 	Name string
 	// ID is the run's ai.roundtable.io/run value.
 	ID string
+	// Attempt counts the runs started for a github item of a source with a
+	// state selector: the run being started (input), or the runs started
+	// (onMaxRuns comment).
+	Attempt int32
 }
 
 type triggerRef struct {
@@ -70,6 +74,20 @@ var triggerFuncs = template.FuncMap{
 		b, err := json.Marshal(v)
 		return string(b), err
 	},
+	"pluck": pluck,
+}
+
+// pluck returns field key of every object in list (a JSON array), skipping
+// elements that are not objects; nil when there is none.
+func pluck(key string, list any) []any {
+	items, _ := list.([]any)
+	var out []any
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			out = append(out, m[key])
+		}
+	}
+	return out
 }
 
 // parseTriggerTemplate parses a Trigger template. A missing map key is an

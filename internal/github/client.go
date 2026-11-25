@@ -173,7 +173,7 @@ func toLabels(in []*gh.Label) []Label {
 
 func toPull(p *gh.PullRequest) PullRequest {
 	out := PullRequest{
-		Number: p.GetNumber(), HTMLURL: p.GetHTMLURL(), State: p.GetState(), Title: p.GetTitle(),
+		Number: p.GetNumber(), HTMLURL: p.GetHTMLURL(), State: p.GetState(), Title: p.GetTitle(), Body: p.GetBody(),
 		Draft: p.GetDraft(), Merged: p.GetMerged(), MergeableState: p.GetMergeableState(),
 		NodeID: p.GetNodeID(), User: User{Login: p.GetUser().GetLogin()}, Labels: toLabels(p.Labels),
 	}
@@ -420,6 +420,7 @@ type PullRequest struct {
 	HTMLURL string `json:"html_url"`
 	State   string `json:"state"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	Draft   bool   `json:"draft"`
 	Merged  bool   `json:"merged"`
 	// MergeableState is GitHub's merge state (the REST form of GraphQL's

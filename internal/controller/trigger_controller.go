@@ -539,6 +539,30 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		return outcome, nil
 	}
 
+	var item *githubItem
+	if trg.Spec.Source.GitHub != nil {
+		if it, err := githubEventItem(ev); err == nil {
+			item = &it
+		}
+	}
+	stateItem := item != nil && githubStateSource(trg.Spec.Source.GitHub)
+	feedbackTable := ""
+	if item != nil {
+		feedbackTable = prFeedbackTable(trg)
+	}
+	if feedbackTable != "" {
+		// PR feedback: the input names the author knight and its run.
+		extra, reason, err := r.prFeedbackAuthor(ctx, trg, feedbackTable, *item)
+		if err != nil {
+			return triggerRetry, err
+		}
+		if reason != "" {
+			firing.Key = truncate(defaultKey, 253)
+			return skip(triggerHandled, "%s", reason)
+		}
+		ev.Data = withEventFields(ev.Data, extra)
+	}
+
 	data := triggerTemplateData{Event: ev, Trigger: triggerRef{Name: trg.Name, Namespace: trg.Namespace}}
 	input, err := renderTriggerTemplate("input", trg.Spec.Input, data)
 	if err != nil {
@@ -563,12 +587,6 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	if err := r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: trg.Spec.Target.ChainRef.Name}, tmpl); err != nil {
 		return triggerRetry, fmt.Errorf("get target chain %q: %w", trg.Spec.Target.ChainRef.Name, err)
 	}
-	var item *githubItem
-	if trg.Spec.Source.GitHub != nil {
-		if it, err := githubEventItem(ev); err == nil {
-			item = &it
-		}
-	}
 	name := triggerRunName(trg, tmpl.Name, key, item)
 
 	// duplicate handles an event whose run already exists. A github item
@@ -588,10 +606,24 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	// rerun is a finished run of a github item whose claim was applied and
 	// that is selected again (its selecting label was put back): it runs
 	// again under the same name.
+	// A state-selector item has one run, started again for each new
+	// failure: attempt counts its runs.
 	var rerun *aiv1alpha1.Chain
+	attempt := int32(1)
 	existing := &aiv1alpha1.Chain{}
 	err = r.reader().Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: name}, existing)
 	switch {
+	case err == nil && stateItem:
+		state, runs := githubItemRun(trg, existing, key)
+		switch state {
+		case githubItemRunDuplicate:
+			return duplicate()
+		case githubItemRunBusy:
+			return skip(triggerHandled, "run %s of %s is active", name, item.key())
+		case githubItemRunExhausted:
+			return skip(triggerHandled, "maxRunsPerItem %d reached for %s: the poller hands it back", runs, item.key())
+		}
+		rerun, attempt = existing, runs+1
 	case err == nil:
 		if owner := githubRunRepo(existing); item != nil && pickupTable(trg) != "" && owner != "" && owner != item.Repo {
 			return skip(triggerHandled, "run %s already belongs to %s", name, owner)
@@ -629,6 +661,17 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		}
 	}
 
+	if stateItem {
+		if feedbackTable != "" {
+			// Fetched only now that a run starts: it costs API calls.
+			ev.Data = withEventFields(ev.Data, map[string]any{"log": r.prFeedbackLog(ctx, trg, *item)})
+			data.Event = ev
+		}
+		data.Run = triggerRunRef{Name: name, Attempt: attempt}
+		if input, err = renderTriggerTemplate("input", trg.Spec.Input, data); err != nil {
+			return skip(triggerTerm, "input template: %v", err)
+		}
+	}
 	if trg.Spec.Input == "" {
 		input = tmpl.Spec.Input
 	}
@@ -650,6 +693,10 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		if err := r.githubRunOptions(ctx, trg, *item, &opts); err != nil {
 			return triggerRetry, err
 		}
+	}
+	if stateItem {
+		opts.Annotations[aiv1alpha1.AnnotationTriggerItemRuns] = strconv.Itoa(int(attempt))
+		opts.Annotations[aiv1alpha1.AnnotationTriggerHandedBack] = ""
 	}
 	_, err = chainrun.Start(ctx, r.Client, r.Scheme, tmpl, opts)
 	if apierrors.IsAlreadyExists(err) {

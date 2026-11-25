@@ -130,6 +130,21 @@ spec:
                       <subjectPrefix>.events.github.<namespace>.<name> on the RoundTable's
                       events stream, which the Trigger reads like a NATS source.
                     properties:
+                      author:
+                        description: |-
+                          author selects items opened by this GitHub login (REST form, e.g.
+                          "dunce-bot[bot]" for a GitHub App), compared case-insensitively.
+                        maxLength: 100
+                        minLength: 1
+                        type: string
+                      checks:
+                        description: |-
+                          checks: failing selects pull requests (kind: pullRequest) whose head
+                          commit has a check whose latest attempt failed or timed out. The
+                          event's failedChecks lists them.
+                        enum:
+                        - failing
+                        type: string
                       claim:
                         description: |-
                           claim marks an item as taken once its run was created, so it is not
@@ -190,6 +205,17 @@ spec:
                         maxLength: 50
                         minLength: 1
                         type: string
+                      ignoreChecks:
+                        description: |-
+                          ignoreChecks are check (and merge queue workflow) names that never
+                          count as failed, for example a policy check that fails until a human
+                          acts.
+                        items:
+                          maxLength: 100
+                          type: string
+                        maxItems: 20
+                        type: array
+                        x-kubernetes-list-type: set
                       kind:
                         default: issue
                         description: kind selects issues or pull requests. Defaults
@@ -208,6 +234,73 @@ spec:
                         maximum: 50
                         minimum: 0
                         type: integer
+                      maxRunsPerItem:
+                        description: |-
+                          maxRunsPerItem caps the runs started for one pull request (one per
+                          failure) while its run is kept (ttlSecondsAfterFinished). The next
+                          failure after the last run applies onMaxRuns instead. 0 means no cap.
+                          Needs a state selector.
+                        format: int32
+                        maximum: 50
+                        minimum: 0
+                        type: integer
+                      mergeQueue:
+                        description: |-
+                          mergeQueue: rejected selects pull requests (kind: pullRequest) whose
+                          newest merge queue attempt (merge_group workflow runs) failed. Failed
+                          checks on the head commit fire first.
+                        enum:
+                        - rejected
+                        type: string
+                      mergeable:
+                        description: |-
+                          mergeable: conflicting selects pull requests (kind: pullRequest) with
+                          merge conflicts with their base branch. A conflict fires before failed
+                          checks: the pull request cannot merge until it is rebased.
+                        enum:
+                        - conflicting
+                        type: string
+                      onMaxRuns:
+                        description: |-
+                          onMaxRuns is applied to a pull request whose runs ran out
+                          (maxRunsPerItem). Items carrying one of its addLabels are not
+                          selected; when a human removes the label the item's run count starts
+                          over. Its comment also sees .Run (.Run.Name, .Run.Attempt: the runs
+                          started).
+                        properties:
+                          addLabels:
+                            description: |-
+                              addLabels are added to the item. An item that already carries one of
+                              them is handed back as well.
+                            items:
+                              maxLength: 50
+                              minLength: 1
+                              type: string
+                            maxItems: 10
+                            type: array
+                            x-kubernetes-list-type: set
+                          comment:
+                            description: |-
+                              comment is a Go template posted on the item. It sees .Event (as in
+                              spec.input), .Trigger and .Reason (why the item was skipped). Empty
+                              posts no comment.
+                            maxLength: 4096
+                            type: string
+                          removeLabels:
+                            description: removeLabels are removed from the item, last.
+                            items:
+                              maxLength: 50
+                              minLength: 1
+                              type: string
+                            maxItems: 10
+                            type: array
+                            x-kubernetes-list-type: set
+                        type: object
+                        x-kubernetes-validations:
+                        - message: set handBack.addLabels or handBack.removeLabels
+                          rule: (has(self.addLabels) && size(self.addLabels) > 0)
+                            || (has(self.removeLabels) && size(self.removeLabels)
+                            > 0)
                       pollInterval:
                         description: |-
                           pollInterval is how often each repository is listed. Defaults to 60s;
@@ -220,13 +313,14 @@ spec:
                         description: query selects the items.
                         properties:
                           labels:
-                            description: labels an item must all carry.
+                            description: |-
+                              labels an item must all carry. Required unless a state selector
+                              (checks, mergeable, mergeQueue) is set.
                             items:
                               maxLength: 50
                               minLength: 1
                               type: string
                             maxItems: 10
-                            minItems: 1
                             type: array
                             x-kubernetes-list-type: set
                           state:
@@ -238,8 +332,6 @@ spec:
                             - closed
                             - all
                             type: string
-                        required:
-                        - labels
                         type: object
                       repositories:
                         description: repositories are the repositories polled, as
@@ -312,6 +404,25 @@ spec:
                     - query
                     - repositories
                     type: object
+                    x-kubernetes-validations:
+                    - message: set query.labels, or a state selector (checks, mergeable,
+                        mergeQueue)
+                      rule: (has(self.query.labels) && size(self.query.labels) > 0)
+                        || has(self.checks) || has(self.mergeable) || has(self.mergeQueue)
+                    - message: 'checks, mergeable and mergeQueue need kind: pullRequest'
+                      rule: '!(has(self.checks) || has(self.mergeable) || has(self.mergeQueue))
+                        || (has(self.kind) && self.kind == ''pullRequest'')'
+                    - message: 'checks, mergeable and mergeQueue select open pull
+                        requests: leave query.state open'
+                      rule: '!(has(self.checks) || has(self.mergeable) || has(self.mergeQueue))
+                        || !has(self.query.state) || self.query.state == ''open'''
+                    - message: maxRunsPerItem needs a state selector and onMaxRuns.addLabels
+                      rule: '!has(self.maxRunsPerItem) || self.maxRunsPerItem == 0
+                        || ((has(self.checks) || has(self.mergeable) || has(self.mergeQueue))
+                        && has(self.onMaxRuns) && has(self.onMaxRuns.addLabels) &&
+                        size(self.onMaxRuns.addLabels) > 0)'
+                    - message: ignoreChecks needs checks or mergeQueue
+                      rule: '!has(self.ignoreChecks) || has(self.checks) || has(self.mergeQueue)'
                   nats:
                     description: |-
                       nats fires on each message published to a subject on the RoundTable's

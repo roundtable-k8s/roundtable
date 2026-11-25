@@ -251,8 +251,11 @@ and publishes each item that needs handling to
 `<subjectPrefix>.events.github.<namespace>.<name>` on the table's events
 stream. The Trigger reads that subject like a NATS source, so everything under
 [Delivery](#delivery-nats-webhook-and-github-sources) applies and the bus stays
-the system of record. Issue pickup can run on a github-source Trigger too, see
-[Issue pickup on a Trigger](#issue-pickup-on-a-trigger).
+the system of record. Issue pickup and PR feedback can run on a github-source
+Trigger too, see [Issue pickup on a Trigger](#issue-pickup-on-a-trigger) and
+[PR feedback on a Trigger](#pr-feedback-on-a-trigger). Pull requests can also be
+selected by their checks and merge state instead of labels, see
+[Pull request state](#pull-request-state).
 
 [`examples/trigger-github.yaml`](../examples/trigger-github.yaml):
 
@@ -300,8 +303,13 @@ spec:
 | `kind` | `issue` or `pullRequest` |
 | `state` | `open` or `closed` |
 
+A source with a [state selector](#pull-request-state) adds `headSha`,
+`mergeState`, `failureKind`, `failureUrl`, `failedChecks` and, for a merge
+queue rejection, `mergeGroupSha`.
+
 The message also carries a `Roundtable-Event-Key: <owner/name>#<number>`
-header, the default dedupe key. `.Event.Subject` is the Trigger's subject and
+header (`<owner/name>#<number>@<kind>:<head sha>` with a state selector), the
+default dedupe key. `.Event.Subject` is the Trigger's subject and
 `.Event.Time` when the item was published.
 
 ### Polling
@@ -310,8 +318,8 @@ header, the default dedupe key. `.Event.Subject` is the Trigger's subject and
   leader and stopped when the Trigger is suspended, deleted or switched to
   another source. A spec change restarts it, so it polls at once.
 - Each poll lists every repository through the issues endpoint (`labels`,
-  `state`; pull requests are told apart by GitHub's `pull_request` link) and
-  publishes:
+  `state`; pull requests are told apart by GitHub's `pull_request` link;
+  `author`, if set, keeps the items that login opened) and publishes:
   - an item **without a run** (by its dedupe key), unless the concurrency policy
     would hold it back anyway (`maxActive` reached, `Forbid` with a run active;
     `Replace` publishes at most one new item per poll). Held items are counted
@@ -397,6 +405,117 @@ Trigger is 0). So switching a table between engines in either direction never
 runs an issue twice. Switching back to `builtin` deletes the Trigger. See
 [issue-pickup.md](issue-pickup.md#engines).
 
+### Pull request state
+
+With `kind: pullRequest`, three state selectors pick pull requests with a
+failure instead of (or next to) labels. `query.labels` becomes optional and
+`query.state` must stay `open`:
+
+| Field | Selects |
+|---|---|
+| `checks: failing` | a check on the head commit whose latest attempt failed or timed out |
+| `mergeable: conflicting` | merge conflicts with the base branch (GitHub `mergeable_state: dirty`) |
+| `mergeQueue: rejected` | a failed workflow run in the newest merge group (`merge_group` runs on `gh-readonly-queue/<base>/pr-<n>-<sha>`) |
+
+`ignoreChecks` lists check (and merge queue workflow) names that never count
+as failed, `author` keeps the pull requests one login opened. The poll lists
+open pull requests through the pulls endpoint (labels filtered by the
+operator), reads each one for its `mergeable_state`, its head commit's check
+runs (`checks`) and, once per repository, the merge group runs (`mergeQueue`).
+A pull request has at most one failure per poll, in this order: conflict
+(nothing merges before a rebase, which re-runs CI anyway), failed checks,
+merge queue rejection. `.Event.Data` then also has:
+
+| Key | Value |
+|---|---|
+| `headSha` | the head commit |
+| `mergeState` | GitHub's `mergeable_state` (empty if the pull request could not be read) |
+| `failureKind` | `conflict`, `ci` or `merge-queue` |
+| `failureUrl` | the first failed check or run, or the pull request for a conflict |
+| `failedChecks` | `[{name, url, summary}]`: the failed checks (`ci`, `summary` is the check's output summary, sanitized and capped at 1000 bytes; the pull request's code controls it) or merge queue runs (`merge-queue`); empty for a conflict |
+| `mergeGroupSha` | the rejected merge group's commit (`merge-queue` only) |
+
+The event key is `<owner/name>#<number>@<failureKind>:<headSha>` (plus
+`:<mergeGroupSha>` for `merge-queue`), so one failure fires once and a new
+push (or merge queue attempt) can fire again. A pull request has **one run**,
+`<chain>-<trigger>-<hash of owner/name#number>`, started again for each new
+failure once it finished; while it is active the pull request is left alone
+(counted "with an active run" in `GitHubReady`). The run counts its runs in
+`ai.roundtable.io/trigger-item-runs`; templates see it as `.Run.Attempt` (in
+`input`, the run being started: 1, 2, ...).
+
+`maxRunsPerItem` caps those runs, and needs `onMaxRuns` with `addLabels`: the
+next failure after the last run is handed back instead (`addLabels`, then
+`comment`, which also sees `.Run.Attempt`, the runs started, then
+`removeLabels`), with a `HandedBack` event. Pull requests carrying an
+`onMaxRuns.addLabels` label are not selected; when a human removes it, the
+count starts over and the pull request's current failure fires again. The
+count lives on the run, so it also starts over once the finished run is
+deleted (`ttlSecondsAfterFinished`).
+
+```yaml
+source:
+  github:
+    repositories: [acme/api]
+    kind: pullRequest
+    query: {}
+    author: dunce-bot[bot]
+    checks: failing
+    ignoreChecks: [merge-guard]
+    mergeable: conflicting
+    mergeQueue: rejected
+    maxRunsPerItem: 3
+    onMaxRuns:
+      addLabels: [needs-human]
+      comment: "Still failing after {{ .Run.Attempt }} round(s); over to a human."
+input: |
+  {"repo": {{ toJson .Event.Data.repo }}, "pr": {{ toJson .Event.Data.number }},
+   "attempt": {{ .Run.Attempt }}, "kind": {{ toJson .Event.Data.failureKind }},
+   "failedChecks": {{ toJson (pluck "name" .Event.Data.failedChecks) }}}
+```
+
+### PR feedback on a Trigger
+
+`RoundTable.spec.prFeedback.engine: trigger` makes [PR feedback](pr-feedback.md)
+run on generated github-source Triggers instead of its builtin poller (the
+default `builtin` is unchanged). The PR feedback controller owns one Trigger per
+watched author, `<table>-pr-feedback-<author>` (the login lowercased, other
+characters turned into `-`, e.g. `roundtable-dev-pr-feedback-dunce-bot-bot`),
+and rebuilds it from the `prFeedback` fields; edit those, not the Triggers:
+
+| prFeedback | Trigger |
+|---|---|
+| `repos` | `source.github.repositories` |
+| `authors` | one Trigger per author, `source.github.author` |
+| `ignoreChecks` | `ignoreChecks` (with `checks: failing`, `mergeable: conflicting`, `mergeQueue: rejected`) |
+| `maxAttempts` | `maxRunsPerItem`, and `maxAttempts` in the input |
+| `escalationLabel` | `onMaxRuns.addLabels` (with the builtin escalation comment) |
+| `pollIntervalSeconds` | `pollInterval` |
+| `chainRef` | `target.chainRef`, with `input` rendering the builtin input |
+
+`concurrency.maxActive` is 1 (one fix round at a time, as the builtin engine's
+single feedback Chain) and `ttlSecondsAfterFinished` 7 days, so a pull request's
+attempt count lasts a week after its last fix round.
+
+What only PR feedback knows stays in the operator, for Triggers labelled
+`ai.roundtable.io/prfeedback-roundtable: <table>` and controlled by that
+RoundTable: before a pull request is published, and again when it fires, the
+operator finds its author knight and run in the chain run that opened it (the
+step whose output names the pull request) or uses `fallbackKnightRef`. While
+that chain run is still running, or when nothing opened the pull request and
+there is no fallback, it is not published (counted "without a known author
+knight" in `GitHubReady`). The fired event gets `knight`, `runId`, `issue` and,
+for a CI or merge queue failure, the trimmed and fenced job `log`, so the
+input is the builtin engine's: `repo`, `pr`, `url`, `knight`, `runId`,
+`attempt`, `maxAttempts`, `kind`, `headSha`, `failedChecks` (names),
+`failureUrl`, `log`, `issue`.
+
+Flaky-test issues are filed by the builtin engine only: on the trigger engine
+a check that failed and passed on the same commit is not reported (a failed
+latest attempt starts a fix round), and `status.prFeedback.conditions` carries
+`FlakeReportingSkipped`. Switching back to `builtin` deletes the Triggers and
+their runs. See [pr-feedback.md](pr-feedback.md#engines).
+
 ### Rate limits and GitHubReady
 
 `GitHubReady` reports the last poll:
@@ -453,9 +572,14 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 - `.Event.Time`: when the message was stored in the stream, or the schedule time (in the schedule's zone)
 - `.Trigger.Name`, `.Trigger.Namespace`
 
+A github source's `input` also sees `.Run.Name` and `.Run.Attempt` (state
+selectors, see [Pull request state](#pull-request-state)).
+
 A missing map key is an error (`missingkey=error`), so `{{ .Event.Data.service }}`
-fails on an event without `service` instead of rendering `<no value>`. `toJson`
-encodes a value as JSON, for embedding strings in a JSON input safely.
+fails on an event without `service` instead of rendering `<no value>` (use
+`index .Event.Data "service"` for an optional key). `toJson` encodes a value
+as JSON, for embedding strings in a JSON input safely. `pluck "name" list`
+returns the `name` of every object in a list.
 
 A template that does not parse makes the Trigger not Ready (`InvalidSpec`) and
 nothing is read until it is fixed. An event the template cannot render is
@@ -466,7 +590,9 @@ redelivered.
 
 The run's name is `<chain>-<trigger>-<hash of dedupe key>` (a Trigger
 generated by issue pickup names runs `<chain>-<repo>-<issue>`, see
-[Issue pickup on a Trigger](#issue-pickup-on-a-trigger)). An event whose key
+[Issue pickup on a Trigger](#issue-pickup-on-a-trigger); a github source with a
+state selector has one run per pull request, see
+[Pull request state](#pull-request-state)). An event whose key
 matches a run that still exists starts nothing, so a key is remembered until
 its run is deleted (`ttlSecondsAfterFinished`). The same name makes redelivery
 safe: if the operator restarts after creating a run but before acking the

@@ -511,4 +511,14 @@ const (
 	// ReasonIssuePickupTriggerEngineProven indicates a trigger-engine run
 	// succeeded on the table.
 	ReasonIssuePickupTriggerEngineProven = "TriggerEngineProven"
+
+	// ===== PR feedback Condition Types and Reasons =====
+
+	// ConditionPRFeedbackFlakeReportingSkipped is set on
+	// status.prFeedback.conditions while the table runs PR feedback on the
+	// trigger engine: flaky-test issues are filed by the builtin engine only.
+	ConditionPRFeedbackFlakeReportingSkipped = "FlakeReportingSkipped"
+
+	// ReasonPRFeedbackTriggerEngine indicates the trigger engine is in use.
+	ReasonPRFeedbackTriggerEngine = "TriggerEngine"
 )
