@@ -30,12 +30,10 @@ spec:
     reason: "nmap/whois/shodan reach targets chosen per task"
 
   tools:
-    apt:
+    nix:
       - nmap
       - whois
-      - dnsutils
-    mise:
-      - shodan
+      - bind
 
   nats:
     url: nats://nats.database.svc:4222

@@ -183,15 +183,14 @@ kubectl get knight galahad -o jsonpath='{.status.conditions[?(@.type=="EgressRes
 
 ## Tool installs need egress
 
-`tools.apt`, `tools.pip` and `tools.mise` download their packages **when the
-pod starts**, and a failed install is only a warning: the knight still starts
-and reports Ready, but without the tools. Under default-deny, allow the package
-hosts in `allowedHosts` (for example your apt mirrors, `pypi.org` and
-`files.pythonhosted.org` for pip, and for mise `mise-versions.jdx.dev`,
-`github.com`, `api.github.com`, `*.githubusercontent.com` plus the tool's own
-download host such as `dl.k8s.io` or `get.helm.sh`), or move the tools to
-`tools.nix`, which needs no egress at pod start. When enabling isolation on an
-existing knight, check its `tools` first; see `examples/tristan.yaml`.
+`tools.pip` downloads its packages **when the pod starts**, and a failed
+install is only a warning: the knight still starts and reports Ready, but
+without the tools. Under default-deny, allow the package hosts in
+`allowedHosts` (for example `pypi.org` and `files.pythonhosted.org`), or use
+`tools.nix`, which needs no egress at pod start. `tools.apt` and `tools.mise`
+are deprecated (see [CRD design](crd-design.md#deprecated-fields)); move them to
+`tools.nix` or `tools.flakes`. When enabling isolation on an existing knight,
+check its `tools` first; see `examples/tristan.yaml`.
 
 ## Finding the hosts a knight needs
 

@@ -2520,8 +2520,12 @@ spec:
                             tools the knight needs.
                           properties:
                             apt:
-                              description: apt is a list of apt packages to install
-                                (fallback, requires root — prefer nix).
+                              description: |-
+                                apt is a list of apt packages to install.
+
+                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                                non-root user, so apt installs cannot succeed. The field will be removed
+                                in a future release.
                               items:
                                 type: string
                               type: array
@@ -2563,8 +2567,12 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                             mise:
-                              description: mise is a list of tools to install via
-                                mise (e.g., "shodan", "kubectl").
+                              description: |-
+                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                                are downloaded at every cold start. The field will be removed in a
+                                future release.
                               items:
                                 type: string
                               type: array
@@ -3077,8 +3085,12 @@ spec:
                             (nix packages, apt, mise).
                           properties:
                             apt:
-                              description: apt is a list of apt packages to install
-                                (fallback, requires root — prefer nix).
+                              description: |-
+                                apt is a list of apt packages to install.
+
+                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                                non-root user, so apt installs cannot succeed. The field will be removed
+                                in a future release.
                               items:
                                 type: string
                               type: array
@@ -3120,8 +3132,12 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                             mise:
-                              description: mise is a list of tools to install via
-                                mise (e.g., "shodan", "kubectl").
+                              description: |-
+                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                                are downloaded at every cold start. The field will be removed in a
+                                future release.
                               items:
                                 type: string
                               type: array
@@ -5127,8 +5143,12 @@ spec:
                             tools the knight needs.
                           properties:
                             apt:
-                              description: apt is a list of apt packages to install
-                                (fallback, requires root — prefer nix).
+                              description: |-
+                                apt is a list of apt packages to install.
+
+                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                                non-root user, so apt installs cannot succeed. The field will be removed
+                                in a future release.
                               items:
                                 type: string
                               type: array
@@ -5170,8 +5190,12 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                             mise:
-                              description: mise is a list of tools to install via
-                                mise (e.g., "shodan", "kubectl").
+                              description: |-
+                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                                are downloaded at every cold start. The field will be removed in a
+                                future release.
                               items:
                                 type: string
                               type: array
@@ -7453,8 +7477,12 @@ spec:
                             tools the knight needs.
                           properties:
                             apt:
-                              description: apt is a list of apt packages to install
-                                (fallback, requires root — prefer nix).
+                              description: |-
+                                apt is a list of apt packages to install.
+
+                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                                non-root user, so apt installs cannot succeed. The field will be removed
+                                in a future release.
                               items:
                                 type: string
                               type: array
@@ -7496,8 +7524,12 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                             mise:
-                              description: mise is a list of tools to install via
-                                mise (e.g., "shodan", "kubectl").
+                              description: |-
+                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                                are downloaded at every cold start. The field will be removed in a
+                                future release.
                               items:
                                 type: string
                               type: array
@@ -8010,8 +8042,12 @@ spec:
                             (nix packages, apt, mise).
                           properties:
                             apt:
-                              description: apt is a list of apt packages to install
-                                (fallback, requires root — prefer nix).
+                              description: |-
+                                apt is a list of apt packages to install.
+
+                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                                non-root user, so apt installs cannot succeed. The field will be removed
+                                in a future release.
                               items:
                                 type: string
                               type: array
@@ -8053,8 +8089,12 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                             mise:
-                              description: mise is a list of tools to install via
-                                mise (e.g., "shodan", "kubectl").
+                              description: |-
+                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                                are downloaded at every cold start. The field will be removed in a
+                                future release.
                               items:
                                 type: string
                               type: array
@@ -10135,8 +10175,12 @@ spec:
                           tools the knight needs.
                         properties:
                           apt:
-                            description: apt is a list of apt packages to install
-                              (fallback, requires root — prefer nix).
+                            description: |-
+                              apt is a list of apt packages to install.
+
+                              Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                              non-root user, so apt installs cannot succeed. The field will be removed
+                              in a future release.
                             items:
                               type: string
                             type: array
@@ -10178,8 +10222,12 @@ spec:
                             type: array
                             x-kubernetes-list-type: atomic
                           mise:
-                            description: mise is a list of tools to install via mise
-                              (e.g., "shodan", "kubectl").
+                            description: |-
+                              mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                              Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                              are downloaded at every cold start. The field will be removed in a
+                              future release.
                             items:
                               type: string
                             type: array

@@ -300,7 +300,7 @@ knights:
     model: claude-sonnet-4-20250514
     skills: [security, threat-intel]
     tools:
-      apt: [nmap, whois]
+      nix: [nmap, whois]
     nats:
       subjects: ["fleet-a.tasks.security.>"]
     taskTimeoutSeconds: 300

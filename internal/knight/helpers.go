@@ -48,9 +48,9 @@ func GenerateMiseToml(knight *aiv1alpha1.Knight) string {
 	sb.WriteString("# Knight: " + knight.Name + "\n")
 	sb.WriteString("# Domain: " + knight.Spec.Domain + "\n\n")
 
-	if knight.Spec.Tools != nil && len(knight.Spec.Tools.Mise) > 0 {
+	if knight.Spec.Tools != nil && len(knight.Spec.Tools.Mise) > 0 { //nolint:staticcheck // still generated for one more release
 		sb.WriteString("[tools]\n")
-		for _, tool := range knight.Spec.Tools.Mise {
+		for _, tool := range knight.Spec.Tools.Mise { //nolint:staticcheck // still generated for one more release
 			sb.WriteString(fmt.Sprintf("%s = \"latest\"\n", tool))
 		}
 	}
