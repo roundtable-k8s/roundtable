@@ -25,6 +25,12 @@ grep -q -- '--metrics-bind-address=:8080' <<<"$on" || fail "metrics flag missing
 grep -q 'release: prom' <<<"$on" || fail "metrics.labels not applied"
 grep -q 'honorLabels: true' <<<"$on" || fail "honorLabels missing"
 
+# The operator NetworkPolicy must allow the metrics port the operator binds.
+np="$("$HELM" template rt "$chart" --set metrics.enabled=true,networkPolicy.enabled=true \
+  --set 'networkPolicy.metricsFrom[0].namespaceSelector.matchLabels.x=y')"
+grep -q -- '- port: 8080$' <<<"$np" || fail "network policy does not allow metrics port 8080"
+! grep -q -- '- port: 8443$' <<<"$np" || fail "network policy still allows 8443 with metrics.enabled"
+
 # Without the CRD API the monitors are skipped.
 nocrd="$("$HELM" template rt "$chart" --set metrics.enabled=true,metrics.serviceMonitor.enabled=true,metrics.podMonitor.enabled=true)"
 [ "$(count "$nocrd" ServiceMonitor)" = 0 ] || fail "monitors rendered without the API"

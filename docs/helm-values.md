@@ -34,7 +34,7 @@ helm install roundtable charts/roundtable-operator \
 
 ### Metrics
 
-Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com/v1` API is served. When `metrics.enabled` is set the operator runs with `--metrics-bind-address=:8080 --metrics-secure=false` (plain HTTP, so no TLS/authz config is needed on the monitor), with a `metrics` container port and a `<release>-metrics` Service.
+Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com/v1` API is served. When `metrics.enabled` is set the operator runs with `--metrics-bind-address=:8080 --metrics-secure=false` (plain HTTP, so no TLS/authz config is needed on the monitor), with a `metrics` container port and a `<release>-metrics` Service. Do not also set `--metrics-bind-address` in `extraArgs`: the flag would be passed twice, the last value wins, and the operator would bind a port other than the declared 8080. The knight PodMonitor only scrapes knight pods in the release namespace.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -64,11 +64,11 @@ Opt-in ingress NetworkPolicies for the operator, the dashboard and knight pods. 
 | `networkPolicy.enabled` | bool | `false` | Render the operator, dashboard and knight policies |
 | `networkPolicy.metricsFrom` | list | monitoring namespace | NetworkPolicyPeers allowed to scrape metrics: the operator's metrics port and knights' `:3000/metrics`. The dashboard also accepts these peers. Empty denies all scraping |
 | `networkPolicy.dashboardFrom` | list | `[]` | NetworkPolicyPeers allowed to reach the dashboard's `http` port, in addition to `metricsFrom`. Empty means only `metricsFrom` |
-| `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint; must match `--metrics-bind-address` in `extraArgs` (metrics are off by default) |
+| `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint when enabled via `extraArgs`; ignored when `metrics.enabled` is true (the policy then allows 8080) |
 
 What each policy allows:
 
-- **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and `operatorMetricsPort`, from `metricsFrom`.
+- **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and the metrics port (8080 when `metrics.enabled`, else `operatorMetricsPort`), from `metricsFrom`.
 - **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
 - **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).
 

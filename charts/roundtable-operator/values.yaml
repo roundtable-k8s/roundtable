@@ -143,8 +143,9 @@ networkPolicy:
   # NetworkPolicyPeers allowed to reach the dashboard's http port, in addition
   # to metricsFrom. Empty means only metricsFrom can reach it.
   dashboardFrom: []
-  # Port of the operator's metrics endpoint; must match --metrics-bind-address
-  # in extraArgs (metrics are off by default).
+  # Port of the operator's metrics endpoint when it is enabled through
+  # extraArgs. Ignored when metrics.enabled is true: the policy then allows
+  # the chart-managed port 8080.
   operatorMetricsPort: 8443
 
 # Dashboard (Round Table UI) — observability platform
