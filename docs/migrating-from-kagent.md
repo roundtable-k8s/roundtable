@@ -35,8 +35,8 @@ network reach. A job that needs more than the others gets its own persona.
 | Vault MCP server | `spec.vault` (`claimName`, `readOnly`, `writablePaths`), mounted at `/vault` | |
 | `Harness` tool settings | `spec.env`: `CLAUDE_DISALLOWED_TOOLS` and `MCP_SERVERS_JSON` on claude-knight | |
 | `RemoteMCPServer` | A CLI tool in `spec.tools.nix`, a skill, or `MCP_SERVERS_JSON` on claude-knight | Declarative MCP servers: [#211](https://github.com/roundtable-k8s/roundtable/issues/211) |
-| `EgressPolicy` | `spec.egress` | Per-knight egress allow-lists: [#348](https://github.com/roundtable-k8s/roundtable/issues/348) (see [egress](egress.md) for what exists) |
-| Sandbox / isolation | `spec.runtimeClassName` | gVisor isolation: [#164](https://github.com/roundtable-k8s/roundtable/issues/164) (PR #383) |
+| `EgressPolicy` | `spec.egress` per-knight allow-lists, see [egress](egress.md) | Deny-all by default: [#387](https://github.com/roundtable-k8s/roundtable/issues/387) |
+| Sandbox / isolation | `spec.runtimeClassName` (e.g. gVisor), see [runtime isolation](runtime-isolation.md) | |
 
 ### Tool-less is not tool-free on claude-knight
 
@@ -48,7 +48,7 @@ tools. Disable what the persona must not use with `CLAUDE_DISALLOWED_TOOLS`
 ```yaml
 env:
   - name: CLAUDE_DISALLOWED_TOOLS
-    value: "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,TodoWrite,mcp__roundtable__nats_request,mcp__roundtable__nats_publish"
+    value: "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,Agent,TodoWrite,mcp__roundtable__nats_request,mcp__roundtable__nats_publish"
 ```
 
 ## The job Chain
@@ -124,7 +124,8 @@ refused because the knight's plan quota is used up
 
 A usage-limited refusal is not a failure: the chain defers that step until
 the plan window resets. The run stays not `done`, and the step shows
-`phase: "Deferred"` with the refusal in `error`. The helper raises as soon as
+`phase: "Deferred"`, usually with the refusal in `error` (a refused loop step
+can be `Deferred` with `error` empty). The helper raises as soon as
 it sees such a step, so the caller can retry later instead of waiting out
 `timeout`.
 
@@ -143,7 +144,7 @@ class UsageLimited(RunChainError):
     """A step was refused because the knight's plan quota is used up.
 
     The chain defers the step until the plan window resets; it has not failed.
-    Retry later (`resets` carries the refusal text, which names the reset time).
+    Retry later (`resets` carries the refusal text, which may name the reset time; it can be empty).
     """
 
     def __init__(self, message, resets=""):
@@ -182,7 +183,7 @@ def run_chain(base_url, token, chain, input, timeout=900, namespace=None):
         for step in rec.get("steps") or []:
             if step.get("phase") == "Deferred":
                 err = step.get("error", "")
-                raise UsageLimited("step %s deferred: %s" % (step.get("name"), err), err)
+                raise UsageLimited("step %s deferred: %s" % (step.get("name"), err or "usage limit"), err)
         if rec.get("done"):
             break
         left = deadline - time.monotonic()
@@ -203,7 +204,7 @@ def run_chain(base_url, token, chain, input, timeout=900, namespace=None):
 try:
     out = run_chain(GATEWAY, TOKEN, "triage-alert", alert_text, timeout=600)
 except UsageLimited as e:
-    ...  # retry after the reset time in e.resets
+    ...  # retry later; e.resets holds the refusal text, which may name the reset time
 ```
 
 ## Checklist

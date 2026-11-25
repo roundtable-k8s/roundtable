@@ -29,7 +29,7 @@ spec:
     # A tool-less knight on claude-knight still has Claude Code's built-in
     # tools and the knight-to-knight tools until they are disabled here.
     - name: CLAUDE_DISALLOWED_TOOLS
-      value: "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,TodoWrite,mcp__roundtable__nats_request,mcp__roundtable__nats_publish"
+      value: "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,Agent,TodoWrite,mcp__roundtable__nats_request,mcp__roundtable__nats_publish"
 ---
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain
