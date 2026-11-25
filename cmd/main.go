@@ -22,7 +22,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -53,6 +55,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/controller"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	"github.com/roundtable-k8s/roundtable/internal/firetrigger"
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
 	"github.com/roundtable-k8s/roundtable/internal/github"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -80,6 +83,15 @@ func init() {
 
 // nolint:gocyclo
 func main() {
+	// manager fire-trigger ...: the one gateway call a schedule Trigger's
+	// CronJob pod makes. No manager, no Kubernetes client.
+	if len(os.Args) > 1 && os.Args[1] == firetrigger.Command {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		code := firetrigger.Run(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
+
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string

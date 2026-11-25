@@ -24,7 +24,8 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
     only in the namespaces callers may target (see [Missions](#missions) and
     [Chain runs](#chain-runs)). For [webhooks](#webhooks) it can `get`
     Triggers and `get` (not list) Secrets in those namespaces, and uses only
-    Secrets labelled `ai.roundtable.io/webhook-secret: "true"`.
+    Secrets labelled `ai.roundtable.io/webhook-secret: "true"`. The same
+    Trigger access serves [schedule firings](#firing-a-schedule-trigger).
   - **Separate failure and scaling.** Invoke requests stay open for up to
     `maxTimeout`. Load spikes and restarts of the gateway don't touch the
     reconcilers. The operator's leader election would also either leave
@@ -246,7 +247,7 @@ The run copy carries `ai.roundtable.io/caller: roundtable/nightly-digest`, and
 The API is described as an OpenAPI 3.1 document at `GET /openapi.json`. It
 needs the same bearer token as `/v1`, reports the chart `appVersion` as
 `info.version` and lists only the route groups that are enabled (missions,
-chain runs, webhooks). It covers the REST routes, not the `/mcp` endpoint. A
+chain runs, webhooks and schedule firings). It covers the REST routes, not the `/mcp` endpoint. A
 test keeps it in sync with the routes the gateway serves.
 
 ```bash
@@ -949,6 +950,62 @@ default).
 Sender configurations (Alertmanager, Flux `generic-hmac`, Home Assistant
 `rest_command`) and the response codes are in
 [triggers.md](triggers.md#webhook-source).
+
+## Firing a schedule Trigger
+
+`POST /v1/triggers/{namespace}/{name}/fire` fires a
+[schedule Trigger](triggers.md). It is the one call the Trigger's CronJob pod
+makes (`manager fire-trigger`, below). Served with the webhook endpoint
+(`gateway.hooks.enabled`, the default).
+
+- **Who may call.** The request goes through the normal bearer-token auth,
+  and then only two callers are accepted: the Trigger's own ServiceAccount,
+  `<namespace>/trigger-<name>` (a projected token with the gateway's
+  audience, see [Calling from a workload](#calling-from-a-workload)), and a
+  static gateway token. Any other ServiceAccount, including a
+  `trigger-<name>` ServiceAccount in another namespace, gets **403**.
+- **Body (optional).** `{"scheduledTime": "<RFC 3339>"}`, the CronJob's
+  scheduled time. Without it the gateway uses now. Either way the time is
+  truncated to the minute.
+- **Publish, don't run.** The gateway publishes a schedule event to
+  `<subjectPrefix>.events.schedule.<namespace>.<name>` on the Trigger's
+  RoundTable events stream and answers **202**:
+
+  ```json
+  {"subject": "rt.events.schedule.roundtable.nightly", "stream": "rt_tasks_EVENTS",
+   "seq": 42, "key": "2026-11-25T02:00:00Z", "scheduledTime": "2026-11-25T02:00:00Z"}
+  ```
+
+  The firing key is the scheduled time in UTC (RFC 3339), the key the
+  in-process scheduler records. It travels in the `Roundtable-Event-Key` and
+  `Roundtable-Scheduled-Time` headers; the body is
+  `{"trigger", "scheduledTime", "key", "caller"}`. Two calls for the same slot
+  carry the same key: within the stream's duplicate window JetStream stores
+  one message (`"duplicate": true` on the second), and after it the trigger
+  controller dedupes by the key. Concurrency and `status.recentFirings` stay
+  in the trigger controller.
+- **Errors.** 404 for an unknown Trigger or a namespace outside the gateway's
+  namespace and `allowedNamespaces`; 422 for a Trigger without
+  `source.schedule`; 400 for a bad body; 503 when the Trigger's RoundTable or
+  NATS is unavailable.
+
+### `manager fire-trigger`
+
+The operator image carries the client as a subcommand, so the CronJob needs
+no other image and no Kubernetes client:
+
+```bash
+/manager fire-trigger \
+  --gateway http://roundtable-gateway.roundtable.svc:8080 \
+  --trigger roundtable/nightly \
+  --token-file /var/run/secrets/roundtable/trigger/token \
+  [--scheduled-time 2026-11-25T02:00:00Z] [--timeout 30s]
+```
+
+It reads the token, makes the one call and exits 0 on a 202. A refusal, an
+unreachable gateway or no answer within `--timeout` (default 30 s) exits 1
+with the reason on stderr; bad arguments exit 2. `--gateway` defaults to
+`$ROUNDTABLE_GATEWAY_URL`.
 
 ## MCP endpoint
 

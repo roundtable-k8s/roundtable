@@ -117,7 +117,10 @@ func (s *Service) routes() []route {
 		)
 	}
 	if s.HooksEnabled() {
-		rs = append(rs, route{pattern: "POST /v1/hooks/{namespace}/{trigger}", public: true, handler: s.handleHook})
+		rs = append(rs,
+			route{pattern: "POST /v1/hooks/{namespace}/{trigger}", public: true, handler: s.handleHook},
+			route{pattern: "POST /v1/triggers/{namespace}/{name}/fire", handler: s.handleFireTrigger},
+		)
 	}
 	return rs
 }
