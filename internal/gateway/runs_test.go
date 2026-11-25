@@ -502,3 +502,34 @@ func TestMCPRuns(t *testing.T) {
 		t.Fatalf("run_chain on a chain without the label: %v %v", err, r2)
 	}
 }
+
+func TestRunChainIdempotencyKey(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	path := "/v1/chains/digest/runs"
+
+	r1, o1 := e.doKey(t, path, "run-1", map[string]any{})
+	r2, o2 := e.doKey(t, path, "run-1", map[string]any{})
+	if r1.StatusCode != http.StatusAccepted || r2.StatusCode != http.StatusAccepted {
+		t.Fatalf("status %d / %d: %v %v", r1.StatusCode, r2.StatusCode, o1, o2)
+	}
+	if r1.Header.Get("Idempotent-Replay") != "" || r2.Header.Get("Idempotent-Replay") != "true" {
+		t.Fatalf("replay headers %q / %q", r1.Header.Get("Idempotent-Replay"), r2.Header.Get("Idempotent-Replay"))
+	}
+	runs := e.runs(t)
+	if len(runs) != 1 || o1["run"] != o2["run"] || o1["run"] != runs[0].Name {
+		t.Fatalf("want one run, got %d: %v %v", len(runs), o1, o2)
+	}
+	if want := "digest-gw-" + idempotencyHash(testNS, "digest", "run-1")[:8]; runs[0].Name != want {
+		t.Errorf("run name %q, want %q", runs[0].Name, want)
+	}
+
+	// Another key, or none, makes another run.
+	e.doKey(t, path, "run-2", map[string]any{})
+	e.doKey(t, path, "", map[string]any{})
+	if n := len(e.runs(t)); n != 3 {
+		t.Fatalf("want 3 runs, got %d", n)
+	}
+	if r, _ := e.doKey(t, path, strings.Repeat("a", 256), map[string]any{}); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("long key: %d", r.StatusCode)
+	}
+}

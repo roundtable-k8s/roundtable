@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -57,6 +58,15 @@ type Bus interface {
 	GetRecord(ctx context.Context, taskID string) (*TaskRecord, error)
 	// ListRecords returns every stored task record.
 	ListRecords(ctx context.Context) ([]*TaskRecord, error)
+
+	// GetIdempotency loads the entry stored for an idempotency key;
+	// ErrNotFound when there is none.
+	GetIdempotency(ctx context.Context, key string) (*IdempotencyEntry, error)
+	// CreateIdempotency stores e under key unless the key exists. When it
+	// does, the stored entry is returned and nothing is written.
+	CreateIdempotency(ctx context.Context, key string, e IdempotencyEntry) (existing *IdempotencyEntry, err error)
+	// DeleteIdempotency removes an idempotency key.
+	DeleteIdempotency(ctx context.Context, key string) error
 
 	// DeadLetterRecords returns the state of every dead-letter entry.
 	DeadLetterRecords(ctx context.Context) ([]DeadLetterRecord, error)
@@ -245,6 +255,49 @@ func (b *NATSBus) GetRecord(ctx context.Context, taskID string) (*TaskRecord, er
 	return &rec, nil
 }
 
+// idempotencyPrefix namespaces idempotency keys in the task KV bucket.
+const idempotencyPrefix = "idempotency/"
+
+// GetIdempotency implements Bus.
+func (b *NATSBus) GetIdempotency(ctx context.Context, key string) (*IdempotencyEntry, error) {
+	entry, err := b.kv.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var e IdempotencyEntry
+	if err := json.Unmarshal(entry.Value(), &e); err != nil {
+		return nil, fmt.Errorf("decode idempotency key: %w", err)
+	}
+	return &e, nil
+}
+
+// CreateIdempotency implements Bus.
+func (b *NATSBus) CreateIdempotency(ctx context.Context, key string, e IdempotencyEntry) (*IdempotencyEntry, error) {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := b.kv.Create(ctx, key, data); err != nil {
+		if errors.Is(err, jetstream.ErrKeyExists) {
+			return b.GetIdempotency(ctx, key)
+		}
+		return nil, err
+	}
+	return nil, nil
+}
+
+// DeleteIdempotency implements Bus.
+func (b *NATSBus) DeleteIdempotency(ctx context.Context, key string) error {
+	err := b.kv.Delete(ctx, key)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return nil
+	}
+	return err
+}
+
 // ListRecords implements Bus.
 func (b *NATSBus) ListRecords(ctx context.Context) ([]*TaskRecord, error) {
 	lister, err := b.kv.ListKeys(ctx)
@@ -255,6 +308,9 @@ func (b *NATSBus) ListRecords(ctx context.Context) ([]*TaskRecord, error) {
 	// nothing to Stop after a full drain.
 	var keys []string
 	for k := range lister.Keys() {
+		if strings.HasPrefix(k, idempotencyPrefix) {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	out := make([]*TaskRecord, 0, len(keys))

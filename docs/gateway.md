@@ -144,6 +144,16 @@ Responses:
   not retry or defer the task itself.
 - **202**: still running when the wait ended. The `Location` header is
   `/v1/tasks/{taskId}`.
+
+**Idempotency.** Send an `Idempotency-Key` header (1 to 255 printable ASCII
+characters, else **400**) to make the call safe to retry after a dropped
+connection. The first call publishes the task and stores the key (scoped to
+namespace and knight) next to the task record; a repeat publishes nothing and
+returns the original task (**200** or **202** as the current state says) with
+the response header `Idempotent-Replay: true`. A repeat with a different
+`task`, `model` or `runId` is a **422**. The key lives as long as the task
+record (`gateway.taskTTL`); a call that fails before publishing releases it.
+
 - **400**: bad request, bad model, or a namespace that isn't allowed.
 - **404**: unknown knight.
 - **429**: `maxInFlight` waits are already open.
@@ -441,6 +451,14 @@ Unknown fields are a **400**, an unknown Chain a **404**, a Chain without the
 label a **403** and a suspended Chain a **503**. The answer is the run record:
 **200** when the run has finished, otherwise **202** with
 `Location: /v1/runs/{namespace}/{run}`.
+
+**Idempotency.** An `Idempotency-Key` header (1 to 255 printable ASCII
+characters, else **400**) names the run copy `<chain>-gw-<first 8 hex of
+sha256(namespace/chain/key)>` instead of a random suffix, so a repeat hits
+Kubernetes `AlreadyExists` and returns the existing run with
+`Idempotent-Replay: true` instead of starting another. The key lasts as long
+as the run copy: once the janitor deletes it (`gateway.runs.ttl` after it
+finished), the key can start a new run.
 
 ```json
 {

@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -179,9 +180,22 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		}
 		wait = min(time.Duration(*req.TimeoutSeconds)*time.Second, s.Opts.MaxTimeout)
 	}
+	if err := validIdempotencyKey(req.IdempotencyKey); err != nil {
+		return nil, err
+	}
 	ns, err := s.namespace(req.Namespace)
 	if err != nil {
 		return nil, err
+	}
+	var idemKey, fingerprint string
+	if req.IdempotencyKey != "" {
+		idemKey = idempotencyPrefix + idempotencyHash(ns, knightName, req.IdempotencyKey)
+		fingerprint = invokeFingerprint(req)
+		if prior, err := s.Bus.GetIdempotency(ctx, idemKey); err == nil {
+			return s.replayInvoke(ctx, prior, fingerprint)
+		} else if !errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, err)
+		}
 	}
 
 	t, err := s.Resolver.resolve(ctx, ns, knightName)
@@ -230,7 +244,24 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	}
 	defer watch.Close()
 
+	if idemKey != "" {
+		prior, err := s.Bus.CreateIdempotency(ctx, idemKey, IdempotencyEntry{TaskID: taskID, Fingerprint: fingerprint})
+		if err != nil {
+			return nil, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, err)
+		}
+		if prior != nil {
+			// A concurrent request with the same key won.
+			return s.replayInvoke(ctx, prior, fingerprint)
+		}
+	}
+	// A failed start must not hold the key: the caller's retry should run.
+	releaseKey := func() {
+		if idemKey != "" {
+			_ = s.Bus.DeleteIdempotency(context.WithoutCancel(ctx), idemKey)
+		}
+	}
 	if err := s.Bus.PutRecord(ctx, rec); err != nil {
+		releaseKey()
 		return nil, fmt.Errorf("%w: store task: %v", ErrUnavailable, err)
 	}
 	payload := natspkg.TaskPayload{
@@ -246,6 +277,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		done := s.now().UTC()
 		rec.CompletedAt = &done
 		_ = s.Bus.PutRecord(context.WithoutCancel(ctx), rec)
+		releaseKey()
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	s.Log.Info("Invoked knight", "knight", knightName, "namespace", ns, "taskId", taskID, "runId", runID, "model", model)
@@ -289,6 +321,51 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		s.complete(ctx, rec, data)
 	}
 	return rec, nil
+}
+
+// replayInvoke answers a repeated Idempotency-Key with the original task.
+func (s *Service) replayInvoke(ctx context.Context, prior *IdempotencyEntry, fingerprint string) (*TaskRecord, error) {
+	if prior.Fingerprint != fingerprint {
+		return nil, fmt.Errorf("%w: Idempotency-Key was already used with a different request (task, model or runId)", ErrUnprocessable)
+	}
+	rec, err := s.GetTask(ctx, prior.TaskID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, fmt.Errorf("%w: the request with this Idempotency-Key is still being started; retry shortly", ErrUnavailable)
+	}
+	if err != nil {
+		return nil, err
+	}
+	rec.Replayed = true
+	return rec, nil
+}
+
+// maxIdempotencyKeyLen bounds an Idempotency-Key.
+const maxIdempotencyKeyLen = 255
+
+// validIdempotencyKey accepts an empty key or up to 255 printable ASCII
+// characters.
+func validIdempotencyKey(k string) error {
+	if len(k) > maxIdempotencyKeyLen {
+		return fmt.Errorf("%w: Idempotency-Key exceeds %d characters", ErrInvalid, maxIdempotencyKeyLen)
+	}
+	for i := 0; i < len(k); i++ {
+		if k[i] < 0x20 || k[i] > 0x7e {
+			return fmt.Errorf("%w: Idempotency-Key must be printable ASCII", ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// idempotencyHash is the hex sha256 of namespace/target/key.
+func idempotencyHash(ns, target, key string) string {
+	sum := sha256.Sum256([]byte(ns + "/" + target + "/" + key))
+	return hex.EncodeToString(sum[:])
+}
+
+// invokeFingerprint identifies an invoke request's content.
+func invokeFingerprint(req InvokeRequest) string {
+	sum := sha256.Sum256([]byte(req.Task + "\x00" + req.Model + "\x00" + req.RunID))
+	return hex.EncodeToString(sum[:])
 }
 
 // GetTask returns a task, reading its result from the results stream if it

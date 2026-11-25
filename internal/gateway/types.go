@@ -55,6 +55,17 @@ type InvokeRequest struct {
 	TimeoutSeconds *int `json:"timeoutSeconds,omitempty" jsonschema:"seconds to wait for the result before returning a pending task (0 = do not wait)"`
 	// Namespace of the Knight; defaults to the gateway's namespace.
 	Namespace string `json:"namespace,omitempty" jsonschema:"namespace of the knight; omit for the default"`
+	// IdempotencyKey, from the Idempotency-Key header, makes a retry return
+	// the original task instead of publishing a new one. Not part of the
+	// JSON body.
+	IdempotencyKey string `json:"-"`
+}
+
+// IdempotencyEntry is what the gateway stores per idempotency key of an
+// invoke: the task it made and a fingerprint of the request.
+type IdempotencyEntry struct {
+	TaskID      string `json:"taskId"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 // TaskRecord is what the gateway stores per invoked task (NATS KV) and
@@ -84,6 +95,9 @@ type TaskRecord struct {
 	Verdict     string          `json:"verdict,omitempty"`
 	CreatedAt   time.Time       `json:"createdAt"`
 	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+	// Replayed marks a record returned for a repeated Idempotency-Key (the
+	// Idempotent-Replay response header). Not serialized.
+	Replayed bool `json:"-"`
 
 	// ResultSubject and ResultsStream locate the result on NATS.
 	ResultSubject string `json:"resultSubject"`
