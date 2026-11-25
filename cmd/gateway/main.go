@@ -63,14 +63,15 @@ func splitList(v string) []string {
 
 func main() {
 	var (
-		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion                 string
-		defaultTimeout, maxTimeout, taskTTL, runTTL, scheduleRetention                                                  time.Duration
-		maxInFlight, maxStreams                                                                                         int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth, schedulesEnabled, scheduleRunsEnabled bool
-		saAudience, saNamespaces                                                                                        string
-		maxBudgetUSD, hookRate                                                                                          float64
-		maxMissionTTL, maxMissionTimeout, hookBurst                                                                     int
-		hookMaxBody                                                                                                     int64
+		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
+		defaultTimeout, maxTimeout, taskTTL, runTTL, scheduleRetention                                  time.Duration
+		maxInFlight, maxStreams                                                                         int
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
+		schedulesEnabled, scheduleRunsEnabled                                                           bool
+		saAudience, saNamespaces                                                                        string
+		maxBudgetUSD, hookRate                                                                          float64
+		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
+		hookMaxBody                                                                                     int64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
 	flag.StringVar(&metricsListen, "metrics-listen", "",
