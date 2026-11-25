@@ -21,6 +21,8 @@ package chainrun
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"maps"
 	"regexp"
 	"strings"
@@ -146,6 +148,20 @@ func Expired(c *aiv1alpha1.Chain, ttl *int32, now time.Time) bool {
 }
 
 var nonDNSChars = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// KeyHash is the short hash of a Trigger event's dedupe key that names its
+// run.
+func KeyHash(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// TriggerRunName is the name of the run a Trigger starts from chain for an
+// event with dedupe key key (github items of state selectors and issue
+// pickup name theirs differently).
+func TriggerRunName(chain, trigger, key string) string {
+	return Name(chain, trigger, KeyHash(key))
+}
 
 // Name joins base and parts with "-" into a DNS-safe name of at most 253
 // characters. Parts are lowercased and stripped of unsafe characters; base is

@@ -146,11 +146,17 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
+	if id := trg.Annotations[aiv1alpha1.AnnotationTriggerRunNow]; id != "" {
+		if err := r.runNow(ctx, trg, id); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	now := r.now()
 	var res ctrl.Result
 	var cond metav1.Condition
 	var err error
-	if trg.Spec.Suspend {
+	if trg.Suspended() {
 		cond, err = r.suspend(ctx, trg)
 	} else {
 		res, cond, err = r.reconcileSource(ctx, trg, now)
@@ -195,9 +201,10 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	latest.Status.Consumer = trg.Status.Consumer
 	latest.Status.NextScheduledAt = trg.Status.NextScheduledAt
 	latest.Status.ObservedGeneration = latest.Generation
+	latest.Status.SuspendedBy = trg.SuspendedBy()
 	cond.ObservedGeneration = latest.Generation
 	meta.SetStatusCondition(&latest.Status.Conditions, cond)
-	if latest.Spec.Source.GitHub == nil || latest.Spec.Suspend {
+	if latest.Spec.Source.GitHub == nil || trg.Suspended() {
 		meta.RemoveStatusCondition(&latest.Status.Conditions, aiv1alpha1.ConditionTriggerGitHubReady)
 		latest.Status.LastPolledAt = nil
 	}
@@ -310,7 +317,64 @@ func (r *TriggerReconciler) suspend(ctx context.Context, trg *aiv1alpha1.Trigger
 		return metav1.Condition{}, err
 	}
 	trg.Status.NextScheduledAt = nil
-	return triggerCondition(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerSuspended, "spec.suspend is set"), nil
+	return triggerCondition(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerSuspended, suspendedMessage(trg)), nil
+}
+
+// suspendedMessage says what suspends the Trigger.
+func suspendedMessage(trg *aiv1alpha1.Trigger) string {
+	var why []string
+	if trg.Spec.Suspend {
+		why = append(why, "spec.suspend is set")
+	}
+	if trg.SuspendedByAnnotation() {
+		msg := "annotation " + aiv1alpha1.AnnotationTriggerSuspended + " is set"
+		if by := trg.Annotations[aiv1alpha1.AnnotationTriggerSuspended]; by != "" && by != labelValueTrue {
+			msg += " (by " + by + ")"
+		}
+		why = append(why, msg)
+	}
+	return strings.Join(why, "; ")
+}
+
+// triggerManualFiring is a firing asked for with the run-now annotation.
+type triggerManualFiring struct {
+	// caller asked for it; recorded on the run.
+	caller string
+}
+
+// runNow fires the Trigger once for the ai.roundtable.io/run-now annotation
+// (request id), through the normal firing path, then removes the
+// annotation. The firing's key is "manual:<id>", so a repeated reconcile
+// finds the run by name and starts nothing twice.
+func (r *TriggerReconciler) runNow(ctx context.Context, trg *aiv1alpha1.Trigger, id string) error {
+	nn := client.ObjectKeyFromObject(trg)
+	manual := &triggerManualFiring{caller: trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller]}
+	ev := TriggerEvent{Time: r.now(), Headers: map[string]string{}}
+	out, err := r.fire(ctx, nn, ev, aiv1alpha1.TriggerRunNowKey(id), "", nil, manual)
+	if out == triggerRetry {
+		if err == nil {
+			err = errors.New("trigger is not ready to fire")
+		}
+		return err
+	}
+	// Remove the request only if it is still this one: a newer request
+	// (conflict) is handled on the next reconcile.
+	latest := &aiv1alpha1.Trigger{}
+	if err := r.reader().Get(ctx, nn, latest); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if latest.Annotations[aiv1alpha1.AnnotationTriggerRunNow] != id {
+		return nil
+	}
+	patch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	delete(latest.Annotations, aiv1alpha1.AnnotationTriggerRunNow)
+	delete(latest.Annotations, aiv1alpha1.AnnotationTriggerRunNowCaller)
+	if err := r.Patch(ctx, latest, patch); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	trg.Annotations = latest.Annotations
+	trg.ResourceVersion = latest.ResourceVersion
+	return nil
 }
 
 // reconcileSource validates the spec and runs the configured source.
@@ -515,7 +579,7 @@ func (r *TriggerReconciler) reconcileSchedule(ctx context.Context, trg *aiv1alph
 			}
 			countTriggerFiring(r.triggerTable(ctx, trg), trg, triggerOutcomeSkipped)
 		} else {
-			out, err := r.fire(ctx, nn, TriggerEvent{Time: due, Headers: map[string]string{}}, key, "", markDue)
+			out, err := r.fire(ctx, nn, TriggerEvent{Time: due, Headers: map[string]string{}}, key, "", markDue, nil)
 			if out == triggerRetry {
 				if err == nil {
 					err = errors.New("trigger is not ready to fire")
@@ -556,7 +620,7 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 		if ev.Time.IsZero() {
 			ev.Time = r.now()
 		}
-		out, err := r.fire(ctx, nn, ev, key, msg.Subject(), nil)
+		out, err := r.fire(ctx, nn, ev, key, msg.Subject(), nil, nil)
 		switch out {
 		case triggerHandled:
 			if err := msg.DoubleAck(ctx); err != nil {
@@ -593,8 +657,10 @@ func (r *TriggerReconciler) fireLock(nn types.NamespacedName) *sync.Mutex {
 
 // fire handles one event: render the input and dedupe key, apply dedupe and
 // concurrency, start the run, and record the firing. mutate, if set, also
-// changes the status written with the firing.
-func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, mutate func(*aiv1alpha1.TriggerStatus)) (_ triggerOutcome, retErr error) {
+// changes the status written with the firing. A manual firing (run-now) fires
+// while the Trigger is suspended and keeps defaultKey: spec.dedupeKey is not
+// rendered, so the run's name is known to whoever asked for it.
+func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, mutate func(*aiv1alpha1.TriggerStatus), manual *triggerManualFiring) (_ triggerOutcome, retErr error) {
 	mu := r.fireLock(nn)
 	mu.Lock()
 	defer mu.Unlock()
@@ -603,10 +669,10 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	if err := r.reader().Get(ctx, nn, trg); err != nil {
 		return triggerRetry, err
 	}
-	if trg.Spec.Suspend || !trg.DeletionTimestamp.IsZero() {
+	if (trg.Suspended() && manual == nil) || !trg.DeletionTimestamp.IsZero() {
 		return triggerRetry, nil
 	}
-	if wh := trg.Spec.Source.Webhook; wh != nil && wh.EventType != "" && webhookEventType(ev.Headers) != wh.EventType {
+	if wh := trg.Spec.Source.Webhook; manual == nil && wh != nil && wh.EventType != "" && webhookEventType(ev.Headers) != wh.EventType {
 		// Filtered out: the event stays on the stream, nothing fires and the
 		// status is not churned by events the Trigger never wanted.
 		return triggerHandled, nil
@@ -671,7 +737,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		return skip(triggerTerm, "input template: %v", err)
 	}
 	key := defaultKey
-	if trg.Spec.DedupeKey != "" {
+	if trg.Spec.DedupeKey != "" && manual == nil {
 		rendered, err := renderTriggerTemplate("dedupeKey", trg.Spec.DedupeKey, data)
 		if err != nil {
 			return skip(triggerTerm, "dedupeKey template: %v", err)
@@ -687,7 +753,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 
 	if trg.Spec.Target.Mission != nil {
 		return r.fireMission(ctx, missionFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -698,7 +764,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	if trg.Spec.Target.Knight != nil {
 		return r.fireKnight(ctx, knightFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -815,6 +881,9 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	if subject != "" {
 		opts.Annotations[aiv1alpha1.AnnotationTriggerSubject] = subject
+	}
+	if manual != nil && manual.caller != "" {
+		opts.Annotations[aiv1alpha1.AnnotationCaller] = manual.caller
 	}
 	if item != nil {
 		if err := r.githubRunOptions(ctx, trg, *item, &opts); err != nil {

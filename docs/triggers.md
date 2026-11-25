@@ -642,6 +642,30 @@ Secret, pod or knight spec.
 - `spec.input` is not used (put the text in `target.mission.objective`), and a
   github source needs a Chain target.
 
+## Suspend and run now without editing the spec
+
+Two annotations let you pause a Trigger, or fire it once, without changing
+its spec. That matters for a Trigger applied from Git: Flux would revert a
+spec edit, but it leaves annotations it does not own alone. The gateway's
+[schedule routes](gateway.md#schedules) set them; `kubectl annotate` works
+too.
+
+| Annotation | Effect |
+|---|---|
+| `ai.roundtable.io/suspended` | Suspends the Trigger like `spec.suspend`. It is suspended while **either** is set; removing the annotation does not clear `spec.suspend`. Any value but `"false"` counts. The value records who suspended it (the gateway writes its caller). |
+| `ai.roundtable.io/run-now` | Fires the Trigger once now, through the normal firing path: the same input rendering (`.Event.Time` is now, `.Event.Data` empty), concurrency policy, labels and `ttlSecondsAfterFinished`. It fires even while the Trigger is suspended. The value is a request ID: the firing's dedupe key is `manual:<value>` (`spec.dedupeKey` is not used), so the run is `<chain>-<trigger>-<hash of manual:<value>>` (a knight target sends one task, a mission target creates the Mission `<trigger>-<8 hex of the key hash>`). The operator removes the annotation once the firing is handled; the firing shows in `status.recentFirings` (with a `skipReason` if, for example, `Forbid` held it back). |
+| `ai.roundtable.io/run-now-caller` | Who asked for the run-now firing; copied to the run (the Chain run, the knight task or the Mission) as `ai.roundtable.io/caller`. |
+
+```bash
+kubectl annotate trigger morning-digest ai.roundtable.io/suspended=me   # suspend
+kubectl annotate trigger morning-digest ai.roundtable.io/suspended-     # resume
+kubectl annotate trigger morning-digest ai.roundtable.io/run-now=$(date +%s)
+```
+
+`status.suspendedBy` says what suspends a Trigger (`spec`, `annotation` or
+`spec,annotation`); it is the `Suspended` column of `kubectl get triggers`,
+and the `Suspended` condition's message names it too.
+
 ## Spec
 
 | Field | Meaning |
@@ -665,7 +689,7 @@ Secret, pod or knight spec.
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
 | `concurrency.policy` | `Allow` (default), `Forbid` or `Replace`. |
 | `concurrency.maxActive` | Under `Allow`, the most active runs; a firing at the cap is skipped. 0 means no cap. |
-| `suspend` | Stop firing. A NATS, webhook or github source's consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them; a github source stops polling and picks up matching items again on resume). |
+| `suspend` | Stop firing (the `ai.roundtable.io/suspended` annotation does the same, see [above](#suspend-and-run-now-without-editing-the-spec)). A NATS, webhook or github source's consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them; a github source stops polling and picks up matching items again on resume). |
 | `roundTableRef` | The RoundTable whose events stream a NATS, webhook or github source reads (and whose GitHub token a github source uses). Required for `nats`, `webhook` and `github`. |
 | `ttlSecondsAfterFinished` | Delete a finished run this long after it completed (default 86400; 0 keeps runs). |
 
@@ -740,6 +764,7 @@ Trigger is deleted (a finalizer) or suspended.
 ```yaml
 status:
   lastFiredAt: "2026-11-24T07:00:03Z"
+  suspendedBy: ""           # spec, annotation or spec,annotation while suspended
   activeRuns: [security-report-on-deploy-1f3a9c0b2d4e]
   recentFirings:            # newest first, at most 10
     - time: "2026-11-24T07:00:03Z"

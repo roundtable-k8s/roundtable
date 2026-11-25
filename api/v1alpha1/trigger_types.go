@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -70,6 +72,32 @@ const (
 	// DefaultTriggerKnightTimeoutSeconds is target.knight.timeoutSeconds
 	// when unset.
 	DefaultTriggerKnightTimeoutSeconds int32 = 3600
+
+	// AnnotationTriggerSuspended suspends a Trigger without editing its spec,
+	// so a Trigger applied from Git can be paused without changing its Git
+	// copy. A Trigger is suspended while spec.suspend is true or this
+	// annotation is set (to any value but "false"); the value records who
+	// suspended it. The gateway's suspend and resume routes set and remove
+	// it.
+	AnnotationTriggerSuspended = "ai.roundtable.io/suspended"
+
+	// AnnotationTriggerRunNow asks the trigger controller to fire the
+	// Trigger once now, through its normal firing path (input rendering,
+	// concurrency policy and run labels), even while it is suspended. The
+	// value is a request ID: the firing's dedupe key is "manual:<value>"
+	// (spec.dedupeKey is not used), which names the run (see
+	// TriggerRunNowKey). The controller removes the annotation once the
+	// firing was handled.
+	AnnotationTriggerRunNow = "ai.roundtable.io/run-now"
+
+	// AnnotationTriggerRunNowCaller records who asked for the run-now
+	// firing; the controller copies it to the run's ai.roundtable.io/caller.
+	AnnotationTriggerRunNowCaller = "ai.roundtable.io/run-now-caller"
+
+	// TriggerSuspendedBySpec and TriggerSuspendedByAnnotation are the values
+	// of status.suspendedBy (joined with "," when both apply).
+	TriggerSuspendedBySpec       = "spec"
+	TriggerSuspendedByAnnotation = "annotation"
 )
 
 // TriggerFiringOutcome is how a firing's task ended (knight target).
@@ -85,6 +113,34 @@ const (
 	// task record is gone.
 	TriggerFiringLost TriggerFiringOutcome = "lost"
 )
+
+// TriggerRunNowKey is the dedupe key of the firing requested with
+// AnnotationTriggerRunNow set to id.
+func TriggerRunNowKey(id string) string { return "manual:" + id }
+
+// SuspendedByAnnotation reports whether AnnotationTriggerSuspended suspends
+// the Trigger.
+func (t *Trigger) SuspendedByAnnotation() bool {
+	v, ok := t.Annotations[AnnotationTriggerSuspended]
+	return ok && v != "false"
+}
+
+// Suspended reports whether the Trigger is suspended: spec.suspend is true
+// or AnnotationTriggerSuspended is set.
+func (t *Trigger) Suspended() bool { return t.Spec.Suspend || t.SuspendedByAnnotation() }
+
+// SuspendedBy says what suspends the Trigger: "spec", "annotation",
+// "spec,annotation", or "" when it is not suspended.
+func (t *Trigger) SuspendedBy() string {
+	var by []string
+	if t.Spec.Suspend {
+		by = append(by, TriggerSuspendedBySpec)
+	}
+	if t.SuspendedByAnnotation() {
+		by = append(by, TriggerSuspendedByAnnotation)
+	}
+	return strings.Join(by, ",")
+}
 
 // TriggerConcurrencyPolicy says what a firing does while earlier runs of the
 // same Trigger are still active.
@@ -701,7 +757,9 @@ type TriggerSpec struct {
 	// +optional
 	Concurrency TriggerConcurrency `json:"concurrency,omitempty"`
 
-	// suspend stops firing. A NATS, webhook or github source's consumer is
+	// suspend stops firing. The ai.roundtable.io/suspended annotation does
+	// the same without editing the spec (status.suspendedBy says which
+	// applies). A NATS, webhook or github source's consumer is
 	// deleted, so events published while suspended do not fire on resume (a
 	// github source stops polling and picks up matching items again on
 	// resume).
@@ -792,6 +850,12 @@ type TriggerStatus struct {
 	// +optional
 	Consumer string `json:"consumer,omitempty"`
 
+	// suspendedBy says what suspends the Trigger: "spec" (spec.suspend),
+	// "annotation" (ai.roundtable.io/suspended) or "spec,annotation". Empty
+	// while it is not suspended.
+	// +optional
+	SuspendedBy string `json:"suspendedBy,omitempty"`
+
 	// lastPolledAt is when a github source last listed its repositories
 	// successfully.
 	// +optional
@@ -813,7 +877,7 @@ type TriggerStatus struct {
 // +kubebuilder:printcolumn:name="Mission",type=string,JSONPath=`.spec.target.mission.objective`,priority=1
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Last Fired",type=date,JSONPath=`.status.lastFiredAt`
-// +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`
+// +kubebuilder:printcolumn:name="Suspended",type=string,JSONPath=`.status.suspendedBy`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be at most 63 characters: it labels the Trigger's runs"
 

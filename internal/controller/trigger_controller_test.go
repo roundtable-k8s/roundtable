@@ -19,6 +19,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -599,6 +600,103 @@ var _ = Describe("Trigger controller", func() {
 			cond := meta.FindStatusCondition(getTrigger("missing").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetNotFound))
 		})
+
+		annotate := func(name string, set map[string]string, del ...string) {
+			t := getTrigger(name)
+			patch := client.MergeFrom(t.DeepCopy())
+			if t.Annotations == nil {
+				t.Annotations = map[string]string{}
+			}
+			maps.Copy(t.Annotations, set)
+			for _, k := range del {
+				delete(t.Annotations, k)
+			}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+		}
+
+		It("is suspended by the suspended annotation while spec.suspend is false, and resumes when it is removed", func() {
+			t := scheduleTrigger("annsuspend", nil)
+			Expect(t.Spec.Suspend).To(BeFalse())
+			due := nextFive(t.CreationTimestamp.Time)
+			annotate("annsuspend", map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "token"})
+
+			clock = due.Add(10 * time.Second)
+			reconcileTrigger("annsuspend")
+			Expect(runsOf("annsuspend")).To(BeEmpty())
+			t = getTrigger("annsuspend")
+			Expect(t.Status.SuspendedBy).To(Equal(aiv1alpha1.TriggerSuspendedByAnnotation))
+			Expect(t.Status.NextScheduledAt).To(BeNil())
+			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerSuspended))
+			Expect(cond.Message).To(ContainSubstring(aiv1alpha1.AnnotationTriggerSuspended))
+			Expect(cond.Message).To(ContainSubstring("by token"))
+
+			// Both set: status names both sources.
+			t.Spec.Suspend = true
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("annsuspend")
+			Expect(getTrigger("annsuspend").Status.SuspendedBy).To(Equal("spec,annotation"))
+			t = getTrigger("annsuspend")
+			t.Spec.Suspend = false
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+
+			// Removing the annotation resumes firing.
+			annotate("annsuspend", nil, aiv1alpha1.AnnotationTriggerSuspended)
+			reconcileTrigger("annsuspend")
+			Expect(runsOf("annsuspend")).To(HaveLen(1))
+			t = getTrigger("annsuspend")
+			Expect(t.Status.SuspendedBy).To(BeEmpty())
+			Expect(meta.IsStatusConditionTrue(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+		})
+
+		It("fires once now for the run-now annotation, even while suspended, and records the caller", func() {
+			t := scheduleTrigger("runnow", func(s *aiv1alpha1.TriggerSpec) {
+				s.Suspend = true
+				s.DedupeKey = "ignored-for-manual-runs"
+			})
+			clock = t.CreationTimestamp.Add(time.Second)
+			annotate("runnow", map[string]string{
+				aiv1alpha1.AnnotationTriggerRunNow:       "req-1",
+				aiv1alpha1.AnnotationTriggerRunNowCaller: "token",
+			})
+			reconcileTrigger("runnow")
+			runs := runsOf("runnow")
+			Expect(runs).To(HaveLen(1))
+			key := aiv1alpha1.TriggerRunNowKey("req-1")
+			Expect(runs[0].Name).To(Equal(chainrun.TriggerRunName(tmplName, "runnow", key)))
+			Expect(runs[0].Annotations[aiv1alpha1.AnnotationTriggerKey]).To(Equal(key))
+			Expect(runs[0].Annotations[aiv1alpha1.AnnotationCaller]).To(Equal("token"))
+			Expect(runs[0].Labels[aiv1alpha1.LabelTrigger]).To(Equal("runnow"))
+			Expect(runs[0].Spec.Input).To(Equal(fmt.Sprintf(`{"at": "%s"}`, clock.UTC().Format("15:04"))))
+			t = getTrigger("runnow")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNowCaller))
+			Expect(t.Status.RecentFirings[0].Key).To(Equal(key))
+			Expect(t.Status.RecentFirings[0].Run).To(Equal(runs[0].Name))
+			Expect(t.Status.SuspendedBy).To(Equal(aiv1alpha1.TriggerSuspendedBySpec))
+
+			// Reconciling again starts nothing more.
+			reconcileTrigger("runnow")
+			Expect(runsOf("runnow")).To(HaveLen(1))
+		})
+
+		It("applies the concurrency policy to a run-now firing", func() {
+			scheduleTrigger("runnowforbid", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
+			})
+			annotate("runnowforbid", map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "a"})
+			reconcileTrigger("runnowforbid")
+			Expect(runsOf("runnowforbid")).To(HaveLen(1))
+
+			annotate("runnowforbid", map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "b"})
+			reconcileTrigger("runnowforbid")
+			Expect(runsOf("runnowforbid")).To(HaveLen(1))
+			st := getTrigger("runnowforbid").Status
+			Expect(st.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("b")))
+			Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
+			Expect(getTrigger("runnowforbid").Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+		})
 	})
 	Context("knight target", func() {
 		const knightName = "trg-knight"
@@ -735,7 +833,7 @@ var _ = Describe("Trigger controller", func() {
 
 			// Firing the same schedule time again sends nothing.
 			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "kt-cron"},
-				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil)
+				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
 			Expect(getTrigger("kt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))
@@ -809,6 +907,33 @@ var _ = Describe("Trigger controller", func() {
 				}
 			}
 			Expect(skipped).To(Equal(1))
+		})
+
+		It("fires once now for the run-now annotation and records the caller on the task", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-runnow", func(s *aiv1alpha1.TriggerSpec) { s.Suspend = true })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{
+				aiv1alpha1.AnnotationTriggerRunNow:       "req-k",
+				aiv1alpha1.AnnotationTriggerRunNowCaller: "roundtable/ui",
+			}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("kt-runnow")
+
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+			t = getTrigger("kt-runnow")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("req-k")))
+			Expect(t.Status.RecentFirings[0].Run).To(Equal(sent[0].TaskID))
+
+			svc, err := r.taskService(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			rec, err := svc.GetTask(ctx, sent[0].TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.Caller).To(Equal("roundtable/ui"))
 		})
 
 		It("reports a missing knight or one at another table and sends nothing", func() {
@@ -895,6 +1020,27 @@ var _ = Describe("Trigger controller", func() {
 				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.Knight{
 					ObjectMeta: metav1.ObjectMeta{Name: plannerName, Namespace: ns}}))).To(Succeed())
 			})
+		})
+
+		It("fires once now for the run-now annotation on a suspended schedule and records the caller on the Mission", func() {
+			t := scheduleMissionTrigger("mt-runnow", func(s *aiv1alpha1.TriggerSpec) { s.Suspend = true })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{
+				aiv1alpha1.AnnotationTriggerRunNow:       "req-m",
+				aiv1alpha1.AnnotationTriggerRunNowCaller: "roundtable/ui",
+			}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("mt-runnow")
+
+			ms := missionsOf("mt-runnow")
+			Expect(ms).To(HaveLen(1))
+			Expect(ms[0].Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationCaller, "roundtable/ui"))
+			t = getTrigger("mt-runnow")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("req-m")))
+			Expect(t.Status.RecentFirings[0].Run).To(Equal(ms[0].Name))
 		})
 
 		It("creates one Mission per firing with the rendered objective and budget, skips under Forbid, and records its phase", func() {

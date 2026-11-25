@@ -58,6 +58,9 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		api.HandleFunc("GET /v1/schedules", svc.handleListSchedules)
 		api.HandleFunc("GET /v1/schedules/{namespace}/{name}", svc.handleGetSchedule)
 		api.HandleFunc("GET /v1/schedules/{namespace}/{name}/manifest", svc.handleScheduleManifest)
+		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/suspend", svc.handleSuspendSchedule)
+		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/resume", svc.handleResumeSchedule)
+		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/run", svc.handleRunSchedule)
 	}
 	api.Handle("/mcp", MCPHandler(svc))
 	mux.Handle("/", auth.Wrap(api))

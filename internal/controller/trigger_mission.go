@@ -93,6 +93,8 @@ type missionFiring struct {
 	now    time.Time
 	table  string
 	mutate func(*aiv1alpha1.TriggerStatus)
+	// manual is set for a run-now firing; its caller is recorded on the Mission.
+	manual *triggerManualFiring
 	// skip records a firing that created nothing; deduped does for a
 	// duplicate dedupe key.
 	skip    func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error)
@@ -254,6 +256,9 @@ func (r *TriggerReconciler) fireMission(ctx context.Context, f missionFiring) (t
 		aiv1alpha1.LabelCreatedBy: aiv1alpha1.CreatedByTrigger,
 	}
 	m.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerKey: truncate(f.key, triggerKeyAnnotationMax)}
+	if f.manual != nil && f.manual.caller != "" {
+		m.Annotations[aiv1alpha1.AnnotationCaller] = f.manual.caller
+	}
 	if err := controllerutil.SetControllerReference(trg, m, r.Scheme); err != nil {
 		return triggerRetry, err
 	}

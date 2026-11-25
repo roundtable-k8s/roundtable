@@ -418,11 +418,13 @@ gateway:
     enabled: true
   # How long a finished run copy is kept before the gateway deletes it.
   runTTL: 24h
-  # Schedules (GET /v1/schedules, GET /v1/schedules/<namespace>/<name> and
-  # .../manifest, see docs/gateway.md): Triggers with a schedule source.
-  # When enabled, the gateway gets get, list and watch on Triggers in its
-  # namespace and allowedNamespaces (a ClusterRole if allowedNamespaces holds
-  # "*").
+  # Schedules (Triggers with a schedule source, see docs/gateway.md):
+  # GET /v1/schedules, GET /v1/schedules/<namespace>/<name> and .../manifest,
+  # plus POST .../suspend, /resume and /run. The POSTs patch annotations the
+  # trigger controller honours, never the spec, so they work on schedules
+  # applied from Git too. When enabled, the gateway gets get/list/watch/patch
+  # on Triggers in its namespace and allowedNamespaces (a ClusterRole if
+  # allowedNamespaces holds "*").
   schedules:
     enabled: true
   # Run history of schedules (GET /v1/schedules/<namespace>/<name>/runs and

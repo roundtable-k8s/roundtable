@@ -100,7 +100,8 @@ type Service struct {
 	// disables the chain-run endpoints.
 	Runs client.Client
 	// Schedules reads Triggers with a schedule source (and Chains, for their
-	// RoundTable). nil disables the schedule endpoints.
+	// RoundTable) and patches them (suspend, resume, run now). nil disables
+	// the schedule endpoints.
 	Schedules client.Client
 	// Hooks reads webhook and schedule Triggers, their RoundTables and the
 	// webhook Triggers' labelled credential Secrets. nil disables
