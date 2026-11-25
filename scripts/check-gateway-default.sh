@@ -64,6 +64,14 @@ nosched="$(render --set gateway.schedules.enabled=false)"
 lacks "$nosched" 'gateway-schedules' "schedule Role rendered with schedules disabled"
 has "$nosched" '--schedules=false' "schedules flag not passed when disabled"
 
+# Schedule run history: on by default, results kept 30 days by both the
+# gateway and the operator, the retention value configurable.
+has "$def" '--schedule-runs=true' "schedule run history not enabled by default"
+[ "$(grep -c -- '--schedule-result-retention=720h' <<<"$def")" = 2 ] || fail "gateway and operator must both default the result retention to 720h"
+ret="$(render --set gateway.scheduleRuns.resultRetention=48h)"
+[ "$(grep -c -- '--schedule-result-retention=48h' <<<"$ret")" = 2 ] || fail "gateway.scheduleRuns.resultRetention ignored"
+has "$(render --set gateway.scheduleRuns.enabled=false)" '--schedule-runs=false' "schedule-runs flag not passed when disabled"
+
 off="$(render --set gateway.enabled=false)"
 # The operator still records knight-target Trigger tasks in the gateway's task
 # bucket (--trigger-task-bucket), whose default name says gateway.

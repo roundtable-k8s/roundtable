@@ -309,6 +309,22 @@ var openAPIOperations = map[string]obj{
 				"content": obj{"application/json": obj{"schema": schemaRef("Run")}}},
 		}, "400", "401", "403", "404", "409", "503"),
 	},
+	"GET /v1/schedules/{namespace}/{name}/runs": {
+		"summary": "List a schedule's runs, newest first", "tags": []any{"schedules"},
+		"description": "Firings with their time, outcome (skips with their reason), duration and cost when known, and the run to fetch the result with. History goes back as far as results are retained (gateway.scheduleRuns.resultRetention).",
+		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name."),
+			queryInteger("limit", "Maximum number of runs (default 20, max 200).")},
+		"responses": errs(obj{"200": jsonResp("OK", object([]string{"runs"}, obj{"runs": array(schemaRef("ScheduleRun"))}))},
+			"400", "401", "404", "503"),
+	},
+	"GET /v1/schedules/{namespace}/{name}/runs/{run}": {
+		"summary": "Get the result of one run of a schedule", "tags": []any{"schedules"},
+		"description": "For a chain target, the run's steps and final output. A run that does not belong to the schedule is a 404.",
+		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name."),
+			pathParam("run", "Run from the run history.")},
+		"responses": errs(obj{"200": jsonResp("The run's result.", schemaRef("ScheduleRunResult"))},
+			"400", "401", "404", "422", "503"),
+	},
 	"POST /v1/hooks/{namespace}/{trigger}": {
 		"summary": "Deliver a webhook to a Trigger", "tags": []any{"hooks"},
 		"description": "Not behind the API bearer token: authenticated by the Trigger's own bearer token or HMAC signature (X-Hub-Signature-256 or X-Signature).",
@@ -442,6 +458,25 @@ var openAPISchemas = obj{
 			"name": str(""), "phase": str(""), "error": str(""), "output": str(""), "outputTruncated": boolean(""),
 		})),
 		"output": str(""), "outputTruncated": boolean(""),
+	}),
+	"ScheduleRun": object([]string{"time", "outcome", "resultAvailable"}, obj{
+		"run":  str("Run to fetch the result with; empty for a skipped firing."),
+		"time": obj{"type": "string", "format": "date-time"}, "key": str("The firing's dedupe key."),
+		"outcome": str("succeeded, failed, partiallySucceeded, lost, skipped, pending, running or unknown."),
+		"reason":  str("Why a firing was skipped."), "durationSeconds": obj{"type": "number"},
+		"costUSD": str("The run's cost, when known."), "resultAvailable": boolean("The result can still be fetched."),
+	}),
+	"ScheduleRunResult": object([]string{"schedule", "target", "run", "chain", "namespace", "phase", "done", "createdAt"}, obj{
+		"schedule": str(""), "target": str("Kind of target that ran: chain."),
+		"run": str("Name of the run."), "chain": str(""), "namespace": str(""), "runId": str(""),
+		"phase": str(""), "done": boolean(""),
+		"createdAt":   obj{"type": "string", "format": "date-time"},
+		"startedAt":   obj{"type": "string", "format": "date-time"},
+		"completedAt": obj{"type": "string", "format": "date-time"},
+		"steps": array(object([]string{"name"}, obj{
+			"name": str(""), "phase": str(""), "error": str(""), "output": str(""), "outputTruncated": boolean(""),
+		})),
+		"output": str("The run's final output."), "outputTruncated": boolean(""),
 	}),
 	"HookResult": object([]string{"subject", "stream", "seq"}, obj{
 		"subject": str("NATS subject the delivery was published on."), "stream": str("JetStream stream."),

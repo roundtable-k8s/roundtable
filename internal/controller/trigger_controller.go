@@ -90,6 +90,10 @@ type TriggerReconciler struct {
 	// gateway's defaults.
 	TaskBucket string
 	TaskTTL    time.Duration
+	// ScheduleRetention keeps the finished runs of a schedule source at
+	// least this long (chart value gateway.scheduleRuns.resultRetention),
+	// whatever its ttlSecondsAfterFinished. 0 leaves the Trigger's own.
+	ScheduleRetention time.Duration
 	// DefaultKnightImage infers a knight's runtime to validate a knight
 	// target's model (the operator's DEFAULT_KNIGHT_IMAGE).
 	DefaultKnightImage string
@@ -973,6 +977,16 @@ func (r *TriggerReconciler) activeRuns(ctx context.Context, trg *aiv1alpha1.Trig
 	return slices.DeleteFunc(runs, func(c aiv1alpha1.Chain) bool { return !chainrun.Active(&c) }), nil
 }
 
+// scheduleRunTTL raises the TTL of a schedule source's finished runs to the
+// result retention, so their results stay readable that long. 0 (keep
+// forever) and other sources are left as they are.
+func scheduleRunTTL(trg *aiv1alpha1.Trigger, ttl *int32, retention time.Duration) *int32 {
+	if retention <= 0 || trg.Spec.Source.Schedule == nil || ttl == nil || *ttl <= 0 {
+		return ttl
+	}
+	return new(max(*ttl, int32(min(retention/time.Second, 1<<31-1))))
+}
+
 // collectRuns deletes finished runs past ttlSecondsAfterFinished and returns
 // the active run names and when the next finished run expires (0: none).
 func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Trigger, now time.Time) ([]string, time.Duration, error) {
@@ -986,6 +1000,7 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 		// checks are done (ttlSecondsAfterFinished of spec.issuePickup).
 		ttl = nil
 	}
+	ttl = scheduleRunTTL(trg, ttl, r.ScheduleRetention)
 	var active []string
 	var next time.Duration
 	for i := range runs {

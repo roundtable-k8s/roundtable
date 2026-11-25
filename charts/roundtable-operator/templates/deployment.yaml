@@ -58,6 +58,7 @@ spec:
             - --mission-results-ttl={{ .Values.mission.resultsTTL | default "720h" }}
             - --trigger-task-bucket={{ .Values.gateway.taskBucket | default "roundtable_gateway_tasks" }}
             - --trigger-task-ttl={{ .Values.gateway.taskTTL | default "168h" }}
+            - --schedule-result-retention={{ (.Values.gateway.scheduleRuns | default dict).resultRetention | default "720h" }}
             {{- with .Values.natsMonitoringEndpoint }}
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}

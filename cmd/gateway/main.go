@@ -64,9 +64,10 @@ func splitList(v string) []string {
 func main() {
 	var (
 		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
-		defaultTimeout, maxTimeout, taskTTL, runTTL                                                     time.Duration
+		defaultTimeout, maxTimeout, taskTTL, runTTL, scheduleRetention                                  time.Duration
 		maxInFlight, maxStreams                                                                         int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth, schedulesEnabled      bool
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
+		schedulesEnabled, scheduleRunsEnabled                                                           bool
 		saAudience, saNamespaces                                                                        string
 		maxBudgetUSD, hookRate                                                                          float64
 		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
@@ -104,6 +105,11 @@ func main() {
 	flag.DurationVar(&runTTL, "run-ttl", 24*time.Hour, "How long a finished chain run started by the gateway is kept.")
 	flag.BoolVar(&schedulesEnabled, "schedules", true,
 		"Serve the schedule endpoints (needs RBAC to get, list and watch Triggers).")
+	flag.BoolVar(&scheduleRunsEnabled, "schedule-runs", true,
+		"Serve a schedule's run history and results, GET /v1/schedules/{namespace}/{name}/runs "+
+			"(needs RBAC to get Triggers, get and list Chains).")
+	flag.DurationVar(&scheduleRetention, "schedule-result-retention", gateway.DefaultScheduleResultRetention,
+		"How long the results of a schedule's runs stay readable: the task record TTL is raised to it.")
 	flag.BoolVar(&hooksEnabled, "hooks", true,
 		"Serve POST /v1/hooks/{namespace}/{trigger} for webhook Triggers (needs RBAC to get Triggers and "+
 			"Secrets labelled ai.roundtable.io/webhook-secret=true).")
@@ -165,7 +171,7 @@ func main() {
 	}
 	defer nc.Close()
 	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
-	bus, err := gateway.NewNATSBus(setupCtx, nc, bucket, taskTTL)
+	bus, err := gateway.NewNATSBus(setupCtx, nc, bucket, gateway.EffectiveTaskTTL(taskTTL, scheduleRetention))
 	cancelSetup()
 	if err != nil {
 		log.Error(err, "Unable to set up NATS JetStream")
@@ -199,6 +205,9 @@ func main() {
 	}
 	if schedulesEnabled {
 		svc.Schedules = k8s
+	}
+	if scheduleRunsEnabled {
+		svc.ScheduleReader = k8s
 	}
 	if hooksEnabled {
 		svc.Hooks = k8s
@@ -260,6 +269,7 @@ func main() {
 	}()
 
 	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled, "hooks", hooksEnabled,
+		"scheduleRuns", scheduleRunsEnabled,
 		"serviceAccountAuth", saAuth, "serviceAccountAudience", saAudience,
 		"schedules", schedulesEnabled,
 		"namespace", namespace, "nats", natsURL)

@@ -226,6 +226,8 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
 | `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records (also of Triggers with a knight target) |
 | `gateway.taskTTL` | duration | `168h` | How long task records are kept |
+| `gateway.scheduleRuns.enabled` | bool | `true` | Serve a schedule's run history and results (`GET /v1/schedules/{namespace}/{name}/runs`, `.../runs/{run}`) and let the gateway `get` Triggers ([gateway.md](gateway.md#schedule-run-history)) |
+| `gateway.scheduleRuns.resultRetention` | duration | `720h` | How long the results of a schedule's runs stay readable: raises the task bucket TTL to at least this and keeps finished chain runs of schedule Triggers at least this long ([gateway.md](gateway.md#how-long-results-stay-readable)) |
 | `gateway.auth.existingSecret` | string | `""` | Secret holding the bearer token(s); empty = chart generates one |
 | `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation), optionally `<name> <token>` to name the caller |
 | `gateway.serviceAccountAuth.enabled` | bool | `true` | Also accept in-cluster callers' own ServiceAccount tokens, checked with a TokenReview; grants the gateway `create` on `tokenreviews.authentication.k8s.io` (a ClusterRole, only when enabled) ([gateway.md](gateway.md#calling-from-a-workload)) |

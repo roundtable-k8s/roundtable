@@ -425,6 +425,18 @@ gateway:
   # "*").
   schedules:
     enabled: true
+  # Run history of schedules (GET /v1/schedules/<namespace>/<name>/runs and
+  # .../runs/<run>, see docs/gateway.md#schedule-run-history). When enabled,
+  # the gateway may get Triggers.
+  # resultRetention is how long the results of a schedule's runs stay
+  # readable. It raises gateway.taskTTL (the task bucket TTL, for knight
+  # targets) to at least that, and keeps the finished chain runs of schedule
+  # Triggers at least that long, over their ttlSecondsAfterFinished (0 there
+  # still keeps them). An existing task bucket keeps its TTL: see
+  # docs/gateway.md.
+  scheduleRuns:
+    enabled: true
+    resultRetention: 720h
   # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see
   # docs/triggers.md). Outside the bearer-token auth: each delivery must carry
   # the Trigger's own bearer token or HMAC signature, from a Secret in the

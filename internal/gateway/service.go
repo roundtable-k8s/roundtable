@@ -105,6 +105,9 @@ type Service struct {
 	// Hooks reads webhook Triggers, their RoundTables and their labelled
 	// credential Secrets. nil disables POST /v1/hooks/{namespace}/{trigger}.
 	Hooks client.Reader
+	// ScheduleReader reads schedule Triggers and the Chains they started. nil
+	// disables GET /v1/schedules/{namespace}/{name}/runs and its result route.
+	ScheduleReader client.Reader
 
 	hookLimits *hookLimiter
 	now        func() time.Time
