@@ -108,6 +108,9 @@ type Service struct {
 	// ScheduleReader reads schedule Triggers and the Chains they started. nil
 	// disables GET /v1/schedules/{namespace}/{name}/runs and its result route.
 	ScheduleReader client.Reader
+	// Schedules reads and patches schedule Triggers (suspend, resume, run
+	// now). nil disables those endpoints.
+	Schedules client.Client
 
 	hookLimits *hookLimiter
 	now        func() time.Time

@@ -496,7 +496,8 @@ const (
 	// ReasonTriggerListening indicates the Trigger is listening.
 	ReasonTriggerListening = "Listening"
 
-	// ReasonTriggerSuspended indicates spec.suspend is set.
+	// ReasonTriggerSuspended indicates spec.suspend or the
+	// ai.roundtable.io/suspended annotation is set.
 	ReasonTriggerSuspended = "Suspended"
 
 	// ReasonTriggerInvalidSpec indicates a template, subject or schedule

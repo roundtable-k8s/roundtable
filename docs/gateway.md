@@ -20,9 +20,10 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
     Secrets, Jobs, cluster-wide). The gateway is the only network-facing,
     caller-driven component, so it runs under its own ServiceAccount with
     read-only `get`/`list` on Knights, RoundTables and Chains. The only
-    objects it writes are Missions and run copies of opted-in Chains, and
-    only in the namespaces callers may target (see [Missions](#missions) and
-    [Chain runs](#chain-runs)). For [webhooks](#webhooks) it can `get`
+    objects it writes are Missions, run copies of opted-in Chains and the
+    suspend and run-now annotations of schedule Triggers, and only in the
+    namespaces callers may target (see [Missions](#missions),
+    [Chain runs](#chain-runs) and [Schedules](#schedules)). For [webhooks](#webhooks) it can `get`
     Triggers and `get` (not list) Secrets in those namespaces, and uses only
     Secrets labelled `ai.roundtable.io/webhook-secret: "true"`.
   - **Separate failure and scaling.** Invoke requests stay open for up to
@@ -757,8 +758,9 @@ A schedule is a [Trigger](triggers.md) with a `spec.source.schedule`. The
 gateway reads schedules and exports them as YAML; Triggers with any other
 source (NATS, webhook, GitHub) are not schedules and are a **404** on these
 routes. Served when `gateway.schedules.enabled` is true (the default), which
-grants `get`, `list` and `watch` on Triggers in the gateway's namespace and
-`allowedNamespaces` (a ClusterRole if `allowedNamespaces` holds `"*"`).
+grants `get`, `list`, `watch` and `patch` on Triggers in the gateway's namespace and
+`allowedNamespaces` (a ClusterRole if `allowedNamespaces` holds `"*"`). The
+POST actions below patch annotations only, never the spec.
 
 ### `managedBy`
 
@@ -897,6 +899,54 @@ two places a schedule's results are stored today:
 
 Raising the retention raises the task bucket TTL for all tasks, not only
 schedule runs.
+### `POST /v1/schedules/{namespace}/{name}/suspend`
+
+Sets `ai.roundtable.io/suspended` to the caller (`token` for the static bearer
+tokens). The answer is the effective state:
+
+```json
+{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "annotation"}
+```
+
+### `POST /v1/schedules/{namespace}/{name}/resume`
+
+Removes the annotation. It does **not** clear `spec.suspend`: a schedule
+suspended in its spec stays suspended, and the answer says so:
+
+```json
+{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "spec",
+ "message": "spec.suspend is still true: the schedule stays suspended until spec.suspend is cleared where the Trigger is defined"}
+```
+
+### `POST /v1/schedules/{namespace}/{name}/run`
+
+Fires the schedule once now through the trigger controller's normal firing
+path (input rendering, concurrency policy, run labels), even while it is
+suspended. The gateway sets `ai.roundtable.io/run-now` (a request ID) and
+`ai.roundtable.io/run-now-caller` on the Trigger; the controller starts the
+run, annotates it `ai.roundtable.io/caller` with the caller, records the
+firing and removes the request. The gateway waits up to 10 seconds for that:
+
+- **201** with `state: started` once the run exists;
+- **202** with `state: pending` if the operator has not handled it yet (the
+  run name is already known: it is derived from the firing's key);
+- **409** with `state: skipped` and the reason when the firing started
+  nothing (for example `concurrency Forbid: run ... is active`), when an
+  earlier run-now request is still waiting (`state: pending`), or when the
+  target Chain does not exist.
+
+Both 201 and 202 carry `Location: /v1/schedules/{namespace}/{name}/runs/{run}`.
+
+```json
+{"schedule": "morning-digest", "namespace": "roundtable", "run": "daily-digest-morning-digest-3f9a0c1b2d4e",
+ "key": "manual:1795627159000-1a2b3c4d", "state": "started", "caller": "token"}
+```
+
+```bash
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/suspend"
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/run"
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/resume"
+```
 
 ## Webhooks
 

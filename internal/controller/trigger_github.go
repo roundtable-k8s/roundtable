@@ -269,7 +269,7 @@ func triggerRunName(trg *aiv1alpha1.Trigger, tmpl, key string, item *githubItem)
 	if item != nil && pickupTable(trg) != "" {
 		return pickupChainName(tmpl, item.Repo, item.Number)
 	}
-	return chainrun.Name(tmpl, trg.Name, dedupeHash(key))
+	return chainrun.TriggerRunName(tmpl, trg.Name, key)
 }
 
 // githubRunOptions adds the item to a github-source run: its repository, and
@@ -421,7 +421,7 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 		return triggerGitHubDefaultInterval
 	}
 	src := trg.Spec.Source.GitHub
-	if src == nil || trg.Spec.Suspend || !trg.DeletionTimestamp.IsZero() {
+	if src == nil || trg.Suspended() || !trg.DeletionTimestamp.IsZero() {
 		return triggerGitHubDefaultInterval
 	}
 	interval := githubPollInterval(src)
@@ -734,7 +734,7 @@ func (r *TriggerReconciler) setGitHubCondition(ctx context.Context, nn types.Nam
 		if err := r.reader().Get(ctx, nn, trg); err != nil {
 			return err
 		}
-		if trg.Spec.Source.GitHub == nil || trg.Spec.Suspend {
+		if trg.Spec.Source.GitHub == nil || trg.Suspended() {
 			return nil
 		}
 		cond.ObservedGeneration = trg.Generation

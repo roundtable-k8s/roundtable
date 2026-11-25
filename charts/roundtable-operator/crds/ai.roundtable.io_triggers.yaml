@@ -35,9 +35,9 @@ spec:
     - jsonPath: .status.lastFiredAt
       name: Last Fired
       type: date
-    - jsonPath: .spec.suspend
-      name: Suspend
-      type: boolean
+    - jsonPath: .status.suspendedBy
+      name: Suspended
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -565,7 +565,9 @@ spec:
                     x).size() == 1'
               suspend:
                 description: |-
-                  suspend stops firing. A NATS, webhook or github source's consumer is
+                  suspend stops firing. The ai.roundtable.io/suspended annotation does
+                  the same without editing the spec (status.suspendedBy says which
+                  applies). A NATS, webhook or github source's consumer is
                   deleted, so events published while suspended do not fire on resume (a
                   github source stops polling and picks up matching items again on
                   resume).
@@ -947,6 +949,12 @@ spec:
                 description: |-
                   stream is the JetStream stream the NATS, webhook or github source's
                   consumer is on.
+                type: string
+              suspendedBy:
+                description: |-
+                  suspendedBy says what suspends the Trigger: "spec" (spec.suspend),
+                  "annotation" (ai.roundtable.io/suspended) or "spec,annotation". Empty
+                  while it is not suspended.
                 type: string
             type: object
         required:

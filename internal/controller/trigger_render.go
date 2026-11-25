@@ -18,14 +18,14 @@ package controller
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 )
 
 // TriggerEvent is what a Trigger's input and dedupeKey templates see as
@@ -149,6 +149,5 @@ func webhookEventType(headers map[string]string) string {
 
 // dedupeHash is the short, name-safe hash of a dedupe key that names a run.
 func dedupeHash(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])[:12]
+	return chainrun.KeyHash(key)
 }

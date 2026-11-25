@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Renders the chart and checks the gateway is on by default with a generated,
 # kept token Secret wired into the dashboard and the webhook endpoint with
-# get-only Secret access and the schedule endpoints with get, list and watch
-# on Triggers, and that a user-supplied Secret or
+# get-only Secret access and the schedule endpoints with get, list, watch and
+# patch on Triggers, and that a user-supplied Secret or
 # gateway.enabled=false suppress the generated one.
 #
 # Usage: HELM=bin/helm scripts/check-gateway-default.sh
@@ -59,7 +59,7 @@ has "$nosa" '--service-account-auth=false' "ServiceAccount auth flag not passed 
 has "$def" '--schedules=true' "schedule endpoints not enabled by default"
 sched_role="$(awk 'BEGIN{RS="\n---\n"} /kind: Role\n/ && /name: rt-roundtable-operator-gateway-schedules\n/' <<<"$def")"
 has "$sched_role" 'resources: \["triggers"\]' "schedule Role missing or not on Triggers"
-[ "$(grep 'verbs:' <<<"$sched_role")" = '    verbs: ["get","list","watch"]' ] || fail "schedule Role must grant get, list and watch"
+[ "$(grep 'verbs:' <<<"$sched_role")" = '    verbs: ["get","list","watch","patch"]' ] || fail "schedule Role must grant get, list, watch and patch"
 nosched="$(render --set gateway.schedules.enabled=false)"
 lacks "$nosched" 'gateway-schedules' "schedule Role rendered with schedules disabled"
 has "$nosched" '--schedules=false' "schedules flag not passed when disabled"
