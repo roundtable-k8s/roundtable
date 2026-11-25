@@ -105,7 +105,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !trg.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, trg)
 	}
-	if trg.Spec.Source.NATS != nil && !controllerutil.ContainsFinalizer(trg, aiv1alpha1.FinalizerTrigger) {
+	if usesConsumer(trg) && !controllerutil.ContainsFinalizer(trg, aiv1alpha1.FinalizerTrigger) {
 		controllerutil.AddFinalizer(trg, aiv1alpha1.FinalizerTrigger)
 		if err := r.Update(ctx, trg); err != nil {
 			return ctrl.Result{}, err
@@ -268,8 +268,8 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	}
 
 	switch src := trg.Spec.Source; {
-	case src.NATS != nil:
-		return r.reconcileNATS(ctx, trg, src.NATS, notReady)
+	case src.NATS != nil, src.Webhook != nil:
+		return r.reconcileNATS(ctx, trg, notReady)
 	case src.Schedule != nil:
 		if err := r.releaseConsumer(ctx, trg); err != nil {
 			return ctrl.Result{}, metav1.Condition{}, err
@@ -282,8 +282,16 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 
 type notReadyFunc func(reason, format string, args ...any) (ctrl.Result, metav1.Condition, error)
 
-// reconcileNATS ensures the durable consumer and its fetch loop.
-func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.Trigger, src *aiv1alpha1.TriggerNATSSource, notReady notReadyFunc) (ctrl.Result, metav1.Condition, error) {
+// usesConsumer reports whether the Trigger reads the events stream through a
+// durable consumer (NATS and webhook sources).
+func usesConsumer(trg *aiv1alpha1.Trigger) bool {
+	return trg.Spec.Source.NATS != nil || trg.Spec.Source.Webhook != nil
+}
+
+// reconcileNATS ensures the durable consumer and its fetch loop. A webhook
+// source is a NATS source on the fixed subject the gateway publishes its
+// deliveries to.
+func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.Trigger, notReady notReadyFunc) (ctrl.Result, metav1.Condition, error) {
 	rtName := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: rtName}, rt); err != nil {
@@ -292,9 +300,18 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 		}
 		return ctrl.Result{}, metav1.Condition{}, err
 	}
-	prefix := natspkg.EventsSubjectPrefix(rt.Spec.NATS.SubjectPrefix)
-	if !strings.HasPrefix(src.Subject, prefix) || len(src.Subject) == len(prefix) {
-		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "source.nats.subject %q must sit under %q", src.Subject, prefix)
+	var subject string
+	if trg.Spec.Source.Webhook != nil {
+		if rt.Spec.NATS.SubjectPrefix == "" {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "RoundTable %q has no spec.nats.subjectPrefix", rtName)
+		}
+		subject = natspkg.WebhookEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
+	} else {
+		subject = trg.Spec.Source.NATS.Subject
+		prefix := natspkg.EventsSubjectPrefix(rt.Spec.NATS.SubjectPrefix)
+		if !strings.HasPrefix(subject, prefix) || len(subject) == len(prefix) {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "source.nats.subject %q must sit under %q", subject, prefix)
+		}
 	}
 
 	stream := rt.Spec.NATS.EventsStreamName()
@@ -309,14 +326,14 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	if err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerConsumerError, "%v", err)
 	}
-	if err := ensureTriggerConsumer(ctx, nc, stream, durable, src.Subject); err != nil {
+	if err := ensureTriggerConsumer(ctx, nc, stream, durable, subject); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerConsumerError, "%v", err)
 	}
 	trg.Status.Stream, trg.Status.Consumer = stream, durable
 	trg.Status.NextScheduledAt = nil
 
 	nn := client.ObjectKeyFromObject(trg)
-	cfg := triggerLoopConfig{stream: stream, durable: durable, subject: src.Subject}
+	cfg := triggerLoopConfig{stream: stream, durable: durable, subject: subject}
 	if err := r.consumers.ensure(nc, nn.String(), cfg, r.messageHandler(nn)); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerConsumerError, "%v", err)
 	}
@@ -324,7 +341,7 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	// (events stream recreated, JetStream storage lost); the next reconcile
 	// recreates the consumer and restarts the loop.
 	return ctrl.Result{RequeueAfter: RequeueVerySlow}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening,
-		fmt.Sprintf("Consumer %s on stream %s reads %s", durable, stream, src.Subject)), nil
+		fmt.Sprintf("Consumer %s on stream %s reads %s", durable, stream, subject)), nil
 }
 
 // reconcileSchedule fires when a schedule time has passed since the last one
@@ -452,6 +469,11 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	if trg.Spec.Suspend || !trg.DeletionTimestamp.IsZero() {
 		return triggerRetry, nil
+	}
+	if wh := trg.Spec.Source.Webhook; wh != nil && wh.EventType != "" && webhookEventType(ev.Headers) != wh.EventType {
+		// Filtered out: the event stays on the stream, nothing fires and the
+		// status is not churned by events the Trigger never wanted.
+		return triggerHandled, nil
 	}
 	now := r.now()
 	firing := aiv1alpha1.TriggerFiring{Time: metav1.NewTime(now)}

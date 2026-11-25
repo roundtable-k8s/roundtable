@@ -1,0 +1,48 @@
+# A webhook Trigger: Alertmanager POSTs to the invoke gateway, the gateway
+# checks the Trigger's own bearer token and publishes the body to
+# fleet-a.events.webhook.roundtable.alerts on the events stream, and the
+# Trigger starts a run of the security-report Chain with the alert as input.
+# Needs the fleet-a RoundTable (roundtable-fleet.yaml, createStreams: true)
+# and chain-sequential.yaml. See docs/triggers.md#webhook-source.
+#
+#   TOKEN=$(kubectl -n roundtable get secret alerts-hook -o jsonpath='{.data.token}' | base64 -d)
+#   curl -X POST http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/alerts \
+#     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+#     -d '{"status":"firing","groupKey":"g1","commonLabels":{"alertname":"DiskFull"},"alerts":[]}'
+#   kubectl -n roundtable get chains -l ai.roundtable.io/trigger=alerts
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alerts-hook
+  namespace: roundtable
+  labels:
+    # Without this label the gateway refuses to use the Secret.
+    ai.roundtable.io/webhook-secret: "true"
+type: Opaque
+stringData:
+  # At least 16 characters, e.g. $(openssl rand -hex 32).
+  token: replace-me-with-a-long-random-token
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: alerts
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    webhook:
+      auth:
+        bearerTokenSecretRef: {name: alerts-hook, key: token}
+  target:
+    chainRef: {name: security-report}
+  # .Event.Data is Alertmanager's webhook payload, parsed.
+  input: |
+    Alertmanager reports {{ .Event.Data.status }} alerts with labels
+    {{ toJson .Event.Data.commonLabels }}. Investigate and summarise.
+    Alerts: {{ toJson .Event.Data.alerts }}
+  # Alertmanager resends a group while it fires: one run per group and status.
+  dedupeKey: "{{ .Event.Data.groupKey }}/{{ .Event.Data.status }}"
+  concurrency:
+    policy: Allow
+    maxActive: 3

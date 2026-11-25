@@ -37,8 +37,9 @@ const maxBodyBytes = maxTaskBytes + 16<<10
 const minTokenLength = 16
 
 // Handler returns the gateway's HTTP handler: the REST API under /v1, the MCP
-// endpoint at /mcp (both behind bearer-token auth) and an unauthenticated
-// /healthz.
+// endpoint at /mcp (both behind bearer-token auth), an unauthenticated
+// /healthz and, when hooks are enabled, POST /v1/hooks/{namespace}/{trigger},
+// which accepts only each Trigger's own credential (never the API tokens).
 func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /v1/knights", svc.handleListKnights)
@@ -68,6 +69,9 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
+	if svc.HooksEnabled() {
+		mux.HandleFunc("POST /v1/hooks/{namespace}/{trigger}", svc.handleHook)
+	}
 	mux.Handle("/", auth.Wrap(api))
 	return mux
 }

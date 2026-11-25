@@ -312,7 +312,8 @@ gateway:
     port: 80
   # NetworkPolicy limiting who can reach the gateway, on top of the token.
   # `from` is a list of NetworkPolicyPeers; the default allows pods in the
-  # release namespace only. Add e.g. a namespaceSelector for OpenClaw.
+  # release namespace only. Add e.g. a namespaceSelector for OpenClaw, and
+  # one for each webhook sender's namespace (Alertmanager, Flux, ...).
   networkPolicy:
     enabled: true
     from:
@@ -349,6 +350,21 @@ gateway:
     enabled: true
   # How long a finished run copy is kept before the gateway deletes it.
   runTTL: 24h
+  # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see
+  # docs/triggers.md). Outside the bearer-token auth: each delivery must carry
+  # the Trigger's own bearer token or HMAC signature, from a Secret in the
+  # Trigger's namespace labelled ai.roundtable.io/webhook-secret: "true".
+  # When enabled, the gateway gets get on Triggers and get (not list) on
+  # Secrets in its namespace and allowedNamespaces (a ClusterRole if
+  # allowedNamespaces holds "*"); it uses only the labelled ones.
+  hooks:
+    enabled: true
+    # Largest body accepted (413 beyond).
+    maxBodyBytes: 1048576
+    # Deliveries per second each Trigger accepts on average, and at once
+    # (429 with Retry-After beyond).
+    rate: 2
+    burst: 20
 
 # Knights to create alongside the operator
 # Example:

@@ -356,4 +356,7 @@ func TestEventHelpers(t *testing.T) {
 	if got := TriggerConsumerName("roundtable", "on-deploy"); got != "trigger-roundtable_on-deploy" {
 		t.Errorf("TriggerConsumerName = %q", got)
 	}
+	if got := WebhookEventSubject("fleet-a", "roundtable", "alerts"); got != "fleet-a.events.webhook.roundtable.alerts" {
+		t.Errorf("WebhookEventSubject = %q", got)
+	}
 }

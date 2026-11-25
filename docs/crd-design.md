@@ -34,7 +34,7 @@
 - **Mission** → references Knights (existing or ephemeral) and Chains
 - **Mission** → creates ephemeral Knights and temporary NATS subjects
 - **Chain** can optionally reference a **RoundTable** for NATS config
-- **Trigger** → starts copies of a **Chain** (owned by the Trigger) from a NATS event on the RoundTable's events stream or a cron schedule
+- **Trigger** → starts copies of a **Chain** (owned by the Trigger) from a NATS event on the RoundTable's events stream, a webhook delivered through the gateway, or a cron schedule
 
 ### Ownership Hierarchy
 

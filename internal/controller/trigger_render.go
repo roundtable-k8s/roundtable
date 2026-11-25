@@ -104,6 +104,19 @@ func eventHeaders(h nats.Header) map[string]string {
 	return out
 }
 
+// webhookEventType is a webhook event's type: the CloudEvents Ce-Type header,
+// else GitHub's X-GitHub-Event. Header names are matched case-insensitively.
+func webhookEventType(headers map[string]string) string {
+	for _, name := range []string{"Ce-Type", "X-GitHub-Event"} {
+		for k, v := range headers {
+			if strings.EqualFold(k, name) {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
 // dedupeHash is the short, name-safe hash of a dedupe key that names a run.
 func dedupeHash(key string) string {
 	sum := sha256.Sum256([]byte(key))

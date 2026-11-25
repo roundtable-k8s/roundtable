@@ -22,7 +22,9 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
     read-only `get`/`list` on Knights, RoundTables and Chains. The only
     objects it writes are Missions and run copies of opted-in Chains, and
     only in the namespaces callers may target (see [Missions](#missions) and
-    [Chain runs](#chain-runs)).
+    [Chain runs](#chain-runs)). For [webhooks](#webhooks) it can `get`
+    Triggers and `get` (not list) Secrets in those namespaces, and uses only
+    Secrets labelled `ai.roundtable.io/webhook-secret: "true"`.
   - **Separate failure and scaling.** Invoke requests stay open for up to
     `maxTimeout`. Load spikes and restarts of the gateway don't touch the
     reconcilers. The operator's leader election would also either leave
@@ -58,7 +60,9 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
 
 ## Auth
 
-Every endpoint except `/healthz` and `/readyz` requires
+Every endpoint except `/healthz`, `/readyz` and the webhook endpoint
+`POST /v1/hooks/{namespace}/{trigger}` (which takes each Trigger's own
+credential instead, see [Webhooks](#webhooks)) requires
 `Authorization: Bearer <token>`. The token comes from a Secret
 (`gateway.auth.existingSecret`, or one the chart generates when unset; key `gateway.auth.secretKey`):
 
@@ -566,6 +570,58 @@ until curl -s -H "$AUTH" "$GW$LOC?waitSeconds=300" | tee /tmp/run.json | jq -e .
 done
 jq -r '.phase, .output' /tmp/run.json
 ```
+
+## Webhooks
+
+`POST /v1/hooks/{namespace}/{trigger}` is the ingress for
+[webhook Triggers](triggers.md#webhook-source): systems that can only send
+webhooks (Alertmanager, Flux notification-controller, Home Assistant) start
+Round Table work through it. Served when `gateway.hooks.enabled` is true (the
+default).
+
+- **Its own auth, outside the API tokens.** The endpoint is not behind the
+  bearer-token middleware. Each delivery must carry the Trigger's own
+  credential: a bearer token or an HMAC-SHA256 signature of the raw body
+  (`X-Hub-Signature-256` or `X-Signature`), from a Secret in the Trigger's
+  namespace labelled `ai.roundtable.io/webhook-secret: "true"`. The gateway's
+  API tokens are refused there (401), and a Trigger's credential opens no
+  other endpoint. Tokens are compared as SHA-256 digests in constant time,
+  signatures with `hmac.Equal`.
+- **Publish, don't run.** The gateway publishes the body to
+  `<subjectPrefix>.events.webhook.<namespace>.<trigger>` on the Trigger's
+  RoundTable events stream (JetStream, expecting that stream) and answers
+  **202** with the stream sequence. The operator's Trigger consumer starts the
+  run. `X-GitHub-Delivery`, `Ce-Id` or `Idempotency-Key` become
+  `Nats-Msg-Id` (scoped to the Trigger), so a retried delivery is stored once.
+- **Limits.** Body at most `gateway.hooks.maxBodyBytes` (1 MiB, else 413).
+  Each Trigger has a token bucket (`gateway.hooks.rate` per second, burst
+  `gateway.hooks.burst`, else 429 with `Retry-After`), per replica.
+- **No oracle.** An unknown Trigger, a Trigger without `source.webhook` and a
+  namespace outside the gateway's namespace and `allowedNamespaces` all get
+  the same 404.
+- **In-cluster senders.** Allow each sender in `gateway.networkPolicy.from`,
+  for example Alertmanager and Flux:
+
+  ```yaml
+  gateway:
+    networkPolicy:
+      from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: flux-system
+  ```
+
+  A LAN sender such as Home Assistant needs an `ipBlock` peer and a way to
+  reach the Service. Exposing the endpoint to the internet (GitHub webhooks)
+  is not covered yet.
+
+Sender configurations (Alertmanager, Flux `generic-hmac`, Home Assistant
+`rest_command`) and the response codes are in
+[triggers.md](triggers.md#webhook-source).
 
 ## MCP endpoint
 
