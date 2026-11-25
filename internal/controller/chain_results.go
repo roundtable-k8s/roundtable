@@ -289,12 +289,13 @@ func (r *ChainReconciler) applyStepError(ctx context.Context, chain *aiv1alpha1.
 	}
 	// #481: a transient provider failure (529 Overloaded...) is retried after
 	// a backoff, on the fallback knight once it has retried twice.
-	if transientProviderFailure(result) {
+	if reason, transient := transientProviderReason(result); transient {
 		if int(ss.ProviderRetries) < r.ProviderMaxRetries {
 			ss.ProviderRetries++
-			metrics.ChainProviderRetriesTotal.WithLabelValues(chain.Name, ss.Name).Inc()
+			metrics.ChainProviderRetriesTotal.WithLabelValues(chain.Name, ss.Name, reason).Inc()
 			ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
 			ss.Reason = stepReasonProviderOverloaded
+			ss.TransientReason = reason
 			ss.Error = resultErr
 			ss.CompletedAt = nil
 			wait := providerBackoff(ss.ProviderRetries)
@@ -308,7 +309,7 @@ func (r *ChainReconciler) applyStepError(ctx context.Context, chain *aiv1alpha1.
 			}
 			log.Info("Model provider overloaded: retrying step after backoff", "step", ss.Name, "retry", ss.ProviderRetries, "wait", wait.String())
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepProviderOverloaded",
-				"Step %s hit a transient provider error (retry %d/%d in %s): %s", ss.Name, ss.ProviderRetries, r.ProviderMaxRetries, wait, truncateUTF8(resultErr, 200))
+				"Step %s hit a transient provider error (%s; retry %d/%d in %s): %s", ss.Name, reason, ss.ProviderRetries, r.ProviderMaxRetries, wait, truncateUTF8(resultErr, 200))
 			return
 		}
 		if ss.ProviderRetries > 0 {

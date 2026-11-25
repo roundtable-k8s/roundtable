@@ -611,6 +611,11 @@ type ChainStepStatus struct {
 	// +optional
 	ProviderRetries int32 `json:"providerRetries,omitempty"`
 
+	// transientReason is why the last transient provider failure happened:
+	// overloaded, provider_5xx or network.
+	// +optional
+	TransientReason string `json:"transientReason,omitempty"`
+
 	// deferUntil is when a Deferred step (a plan-quota refusal or a provider
 	// overload backoff) runs again.
 	// +optional

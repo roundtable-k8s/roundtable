@@ -67,13 +67,14 @@ var (
 	)
 
 	// ChainProviderRetriesTotal counts chain step retries after a transient
-	// model provider failure (overloaded, 5xx), #481.
+	// model provider failure (overloaded, 5xx), #481. reason: overloaded,
+	// provider_5xx, network, unknown.
 	ChainProviderRetriesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "roundtable_chain_provider_retries_total",
 			Help: "Chain step retries after a transient model provider failure",
 		},
-		[]string{"chain", "step"},
+		[]string{"chain", "step", "reason"},
 	)
 
 	// ChainStepDurationSeconds observes how long a chain step took, when it
