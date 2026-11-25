@@ -106,6 +106,27 @@ Everything else is generated per-mission.
 }
 ```
 
+### Existing chains (`existingChains`)
+
+The plan may also reference Chains that already exist on the mission's RoundTable
+instead of generating new ones:
+
+```json
+"existingChains": [
+  {"name": "weekly-report", "input": "repo: roundtable-k8s/roundtable", "phase": "Active"}
+]
+```
+
+- The planner prompt lists the table's template Chains (name, description, steps with
+  their knights, example input truncated to 500 characters; at most 30). Mission copies and
+  chains labelled `ai.roundtable.io/pickup-roundtable` or `ai.roundtable.io/generated-by`, and chains of
+  another table, are not listed and cannot be used.
+- Each entry is appended to `spec.chains` as a `MissionChainRef` (`input` becomes
+  `inputOverride`); the mission controller runs a mission-scoped copy.
+- Existing chains count against `planner.maxChains`. Knights used by their steps are recruited
+  into the plan implicitly as standing knights (`ephemeral: false`) and count against
+  `planner.maxKnights`.
+
 ## CRD Changes Needed
 
 ### MissionSpec
