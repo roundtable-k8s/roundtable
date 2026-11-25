@@ -102,6 +102,32 @@ says `#245` instead of a URL used to stall the review loop):
 | `prs` | Pull requests the task opened or updated: `{repo, number, url, action}` with `action` one of `opened` or `updated`. |
 | `verdict` | A review outcome: `ship_it`, `needs_changes`, or `null`/absent when the task is not a review. |
 
+### Usage: `cost`, `billing` and `tokens`
+
+Optional fields a knight sets to report what a task used. The operator sums
+them into step, chain and mission status and the usage metrics
+([observability.md](observability.md#cost-and-token-totals-per-run-step-and-mission)):
+
+```json
+{
+  "taskId": "…", "output": "…", "cost": 0.42, "billing": "api",
+  "tokens": {"input": 18, "output": 2100, "cacheRead": 41000, "cacheWrite": 2500}
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `cost` | Cost of the task in USD. For subscription-billed models a notional cost. |
+| `billing` | How the model is billed, e.g. `api` or `subscription`. |
+| `tokens.input` | Uncached input tokens. It does **not** include cached input. |
+| `tokens.output` | Output tokens. |
+| `tokens.cacheRead` | Input tokens read from the prompt cache (optional). |
+| `tokens.cacheWrite` | Input tokens written to the prompt cache (optional). |
+
+All input sent to the model is `input + cacheRead + cacheWrite`. The cache
+fields are additive: a knight that does not send them reports as before, and
+its totals have no cached input.
+
 ### Refusals: `usage_limited` and `refused`
 
 Optional fields a knight sets when it declines a task before running it:

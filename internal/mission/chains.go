@@ -283,11 +283,7 @@ func SumChainUsage(mission *aiv1alpha1.Mission) (cost float64, tokens *aiv1alpha
 			cost += v
 		}
 		if cs.Tokens != nil {
-			if tokens == nil {
-				tokens = &aiv1alpha1.TokenTotals{}
-			}
-			tokens.Input += cs.Tokens.Input
-			tokens.Output += cs.Tokens.Output
+			tokens = tokens.Add(*cs.Tokens)
 		}
 	}
 	return cost, tokens

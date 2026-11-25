@@ -99,7 +99,7 @@ var (
 	)
 
 	// ChainStepTokensTotal counts tokens of finished step attempts.
-	// type: input, output
+	// type: input, output, cacheRead, cacheWrite
 	ChainStepTokensTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "roundtable_chain_step_tokens_total",

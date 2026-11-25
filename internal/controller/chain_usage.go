@@ -41,16 +41,6 @@ func parseCostUSD(s string) float64 {
 
 func formatCostUSD(v float64) string { return fmt.Sprintf("%.6f", v) }
 
-// addTokens returns t plus in/out, allocating t when nil.
-func addTokens(t *aiv1alpha1.TokenTotals, in, out int64) *aiv1alpha1.TokenTotals {
-	if t == nil {
-		t = &aiv1alpha1.TokenTotals{}
-	}
-	t.Input += in
-	t.Output += out
-	return t
-}
-
 // metricsChainName is the chain label of the usage metrics: the template's
 // name for a run copy started by issue pickup, a Trigger or the gateway, so
 // cardinality stays bounded; the chain's own name otherwise.
@@ -77,19 +67,22 @@ func (r *ChainReconciler) recordUsage(ctx context.Context, chain *aiv1alpha1.Cha
 	if ss == nil || res == nil {
 		return
 	}
-	var in, out int64
+	var tok aiv1alpha1.TokenTotals
 	if res.Tokens != nil {
-		in, out = res.Tokens.Input, res.Tokens.Output
+		tok = aiv1alpha1.TokenTotals{
+			Input: res.Tokens.Input, Output: res.Tokens.Output,
+			CacheRead: res.Tokens.CacheRead, CacheWrite: res.Tokens.CacheWrite,
+		}
 	}
 	cost := res.Cost
-	if cost <= 0 && in <= 0 && out <= 0 {
+	if cost <= 0 && tok.IsZero() {
 		return
 	}
 	if cost > 0 {
 		ss.CostUSD = formatCostUSD(parseCostUSD(ss.CostUSD) + cost)
 	}
-	if in > 0 || out > 0 {
-		ss.Tokens = addTokens(ss.Tokens, in, out)
+	if !tok.IsZero() {
+		ss.Tokens = ss.Tokens.Add(tok)
 	}
 
 	table := r.chainTable(ctx, chain)
@@ -104,11 +97,16 @@ func (r *ChainReconciler) recordUsage(ctx context.Context, chain *aiv1alpha1.Cha
 			metrics.MissionCostUSDTotal.WithLabelValues(table, m, billing).Add(cost)
 		}
 	}
-	if in > 0 {
-		metrics.ChainStepTokensTotal.WithLabelValues(table, name, ss.Name, knight, "input").Add(float64(in))
-	}
-	if out > 0 {
-		metrics.ChainStepTokensTotal.WithLabelValues(table, name, ss.Name, knight, "output").Add(float64(out))
+	for _, c := range []struct {
+		typ string
+		n   int64
+	}{
+		{"input", tok.Input}, {"output", tok.Output},
+		{"cacheRead", tok.CacheRead}, {"cacheWrite", tok.CacheWrite},
+	} {
+		if c.n > 0 {
+			metrics.ChainStepTokensTotal.WithLabelValues(table, name, ss.Name, knight, c.typ).Add(float64(c.n))
+		}
 	}
 }
 
@@ -119,7 +117,7 @@ func refreshChainUsage(chain *aiv1alpha1.Chain) {
 	for _, ss := range chain.Status.StepStatuses {
 		cost += parseCostUSD(ss.CostUSD)
 		if ss.Tokens != nil {
-			tokens = addTokens(tokens, ss.Tokens.Input, ss.Tokens.Output)
+			tokens = tokens.Add(*ss.Tokens)
 		}
 	}
 	chain.Status.CostUSD = ""

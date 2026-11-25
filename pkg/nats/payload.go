@@ -59,10 +59,14 @@ type TaskPayload struct {
 	PreviousFailure string `json:"previousFailure,omitempty"`
 }
 
-// TokenUsage is the input and output token count of a task.
+// TokenUsage is the token count of a task. Input is uncached input only;
+// CacheRead and CacheWrite (optional) are the cached input tokens read from
+// and written to the prompt cache. Older knights send only Input and Output.
 type TokenUsage struct {
-	Input  int64 `json:"input,omitempty"`
-	Output int64 `json:"output,omitempty"`
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cacheRead,omitempty"`
+	CacheWrite int64 `json:"cacheWrite,omitempty"`
 }
 
 // TaskResult is the JSON payload received from NATS for a completed task.
