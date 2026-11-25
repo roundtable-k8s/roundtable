@@ -100,3 +100,40 @@ func TestMCPServersNotRenderedForPi(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPServersNullUserValueDoesNotPanic(t *testing.T) {
+	for _, v := range []string{`null`, `{"mcpServers":null}`, ``} {
+		k := mcpKnight(corev1.EnvVar{Name: "MCP_SERVERS_JSON", Value: v})
+		var got map[string]map[string]any
+		if err := json.Unmarshal([]byte(envOf(t, k, claudeImg)["MCP_SERVERS_JSON"]), &got); err != nil {
+			t.Fatalf("value %q: %v", v, err)
+		}
+		if got["mcpServers"]["vault"] == nil {
+			t.Errorf("value %q: operator servers missing: %v", v, got)
+		}
+	}
+}
+
+func TestMCPServersValueFromNotDuplicated(t *testing.T) {
+	ref := &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "k"}}
+	k := mcpKnight(
+		corev1.EnvVar{Name: "MCP_SERVERS_JSON", ValueFrom: ref},
+		corev1.EnvVar{Name: "CLAUDE_DISALLOWED_TOOLS", ValueFrom: ref},
+	)
+	env := applyMCPServersEnv(append([]corev1.EnvVar{}, k.Spec.Env...), k, claudeImg)
+	var js, dt []corev1.EnvVar
+	for _, e := range env {
+		switch e.Name {
+		case "MCP_SERVERS_JSON":
+			js = append(js, e)
+		case "CLAUDE_DISALLOWED_TOOLS":
+			dt = append(dt, e)
+		}
+	}
+	if len(js) != 1 || js[0].ValueFrom == nil {
+		t.Errorf("MCP_SERVERS_JSON must stay the user's single valueFrom entry: %+v", js)
+	}
+	if len(dt) != 2 || dt[0].ValueFrom == nil || dt[1].Value != "$(CLAUDE_DISALLOWED_TOOLS),mcp__vault__delete,mcp__vault__write" {
+		t.Errorf("deny list must keep the user's ref and append via expansion: %+v", dt)
+	}
+}

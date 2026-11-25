@@ -48,7 +48,9 @@ func MCPServersEnv(servers []aiv1alpha1.KnightMCPServer) (string, []string) {
 // images; other runtimes get nothing. If the user already set a variable via
 // env, the user's entries are kept and the operator's are merged in (for
 // MCP_SERVERS_JSON the user's servers win on a name clash; for the deny list
-// the operator's entries are appended).
+// the operator's entries are appended). A user value set via valueFrom cannot
+// be merged: MCP_SERVERS_JSON is left as the user set it, and the deny list
+// gets the operator's entries appended through $(NAME) expansion.
 func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string) []corev1.EnvVar {
 	if AgentRuntimeForImage(image) != AgentRuntimeClaude {
 		return env
@@ -57,19 +59,35 @@ func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string)
 	if servers == "" {
 		return env
 	}
-	env = mergeEnvValue(env, EnvMCPServersJSON, servers, mergeMCPJSON)
+	env = mergeEnvValue(env, EnvMCPServersJSON, servers, false, mergeMCPJSON)
 	if len(denied) > 0 {
-		env = mergeEnvValue(env, EnvClaudeDisallowedTools, strings.Join(denied, ","), mergeCSV)
+		env = mergeEnvValue(env, EnvClaudeDisallowedTools, strings.Join(denied, ","), true, mergeCSV)
 	}
 	return env
 }
 
-func mergeEnvValue(env []corev1.EnvVar, name, value string, merge func(user, op string) string) []corev1.EnvVar {
+func mergeEnvValue(env []corev1.EnvVar, name, value string, refMerge bool, merge func(user, op string) string) []corev1.EnvVar {
 	for i := range env {
-		if env[i].Name == name && env[i].ValueFrom == nil {
-			env[i].Value = merge(env[i].Value, value)
+		if env[i].Name != name {
+			continue
+		}
+		if env[i].ValueFrom != nil {
+			// The user's value comes from a Secret/ConfigMap/field and cannot
+			// be merged at build time. Never append a duplicate (the last one
+			// wins and would drop the user's value).
+			if refMerge {
+				// Kubernetes expands $(NAME) against earlier entries, so the
+				// operator's entries are appended to the user's value.
+				env = append(env, corev1.EnvVar{Name: name, Value: "$(" + name + ")," + value})
+			}
 			return env
 		}
+		if strings.TrimSpace(env[i].Value) == "" {
+			env[i].Value = value
+		} else {
+			env[i].Value = merge(env[i].Value, value)
+		}
+		return env
 	}
 	return append(env, corev1.EnvVar{Name: name, Value: value})
 }
@@ -113,6 +131,9 @@ func mergeMCPJSON(user, op string) string {
 		if json.Unmarshal(raw, &servers) != nil {
 			return user
 		}
+	}
+	if servers == nil { // JSON null
+		servers = map[string]json.RawMessage{}
 	}
 	for name, v := range opObj["mcpServers"] {
 		if _, ok := servers[name]; !ok {

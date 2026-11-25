@@ -523,7 +523,8 @@ var _ = Describe("Knight mcpServers on an unsupported runtime", func() {
 		})
 		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 		for range 3 {
-			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+			Expect(err).NotTo(HaveOccurred())
 		}
 		got := &aiv1alpha1.Knight{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), got)).To(Succeed())
