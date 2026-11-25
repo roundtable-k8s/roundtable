@@ -19,6 +19,8 @@ package knight
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -438,6 +440,7 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 	}
 	d := rt.Spec.Defaults
 	return d != nil && (d.Resources != nil || d.Egress != nil || d.Workspace != nil || d.Memory != nil || d.RuntimeClassName != nil ||
+		hasScheduling(d.NodeSelector, d.Affinity, d.Tolerations, d.TopologySpreadConstraints, d.PriorityClassName) ||
 		len(d.Arsenals) > 0 || d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
 }
 
@@ -447,11 +450,19 @@ func knightInheritsNothing(k *aiv1alpha1.Knight) bool {
 	s := &k.Spec
 	return s.Resources != nil && s.Egress != nil && s.Workspace != nil && s.Memory != nil && s.RuntimeClassName != nil &&
 		s.Model != "" && s.Image != "" && s.TaskTimeoutSeconds > 0 && s.Concurrency > 0 &&
-		s.Vault != nil && len(s.Arsenals) > 0
+		s.Vault != nil && len(s.Arsenals) > 0 &&
+		len(s.NodeSelector) > 0 && s.Affinity != nil && len(s.Tolerations) > 0 &&
+		len(s.TopologySpreadConstraints) > 0 && s.PriorityClassName != ""
+}
+
+// hasScheduling reports whether any pod scheduling field is set.
+func hasScheduling(ns map[string]string, a *corev1.Affinity, t []corev1.Toleration, tsc []corev1.TopologySpreadConstraint, pc string) bool {
+	return len(ns) > 0 || a != nil || len(t) > 0 || len(tsc) > 0 || pc != ""
 }
 
 // ApplyTableDefaults fills the knight's unset spec fields in memory from its
-// RoundTable (found via findTable): resources, egress, workspace, memory, arsenals,
+// RoundTable (found via findTable): resources, nodeSelector, affinity, tolerations,
+// topologySpreadConstraints, priorityClassName, egress, workspace, memory, arsenals,
 // runtimeClassName, model, image, taskTimeoutSeconds and concurrency from
 // spec.defaults, and vault from spec.vault. A value on the knight always wins;
 // nothing is merged. A table's workspace existingClaim is not inherited; its
@@ -504,6 +515,27 @@ func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
 	}
 	if k.Spec.Resources == nil && d.Resources != nil {
 		k.Spec.Resources = d.Resources.DeepCopy()
+	}
+	if len(k.Spec.NodeSelector) == 0 && len(d.NodeSelector) > 0 {
+		k.Spec.NodeSelector = maps.Clone(d.NodeSelector)
+	}
+	if k.Spec.Affinity == nil && d.Affinity != nil {
+		k.Spec.Affinity = d.Affinity.DeepCopy()
+	}
+	if len(k.Spec.Tolerations) == 0 && len(d.Tolerations) > 0 {
+		k.Spec.Tolerations = make([]corev1.Toleration, len(d.Tolerations))
+		for i := range d.Tolerations {
+			d.Tolerations[i].DeepCopyInto(&k.Spec.Tolerations[i])
+		}
+	}
+	if len(k.Spec.TopologySpreadConstraints) == 0 && len(d.TopologySpreadConstraints) > 0 {
+		k.Spec.TopologySpreadConstraints = make([]corev1.TopologySpreadConstraint, len(d.TopologySpreadConstraints))
+		for i := range d.TopologySpreadConstraints {
+			d.TopologySpreadConstraints[i].DeepCopyInto(&k.Spec.TopologySpreadConstraints[i])
+		}
+	}
+	if k.Spec.PriorityClassName == "" && d.PriorityClassName != "" {
+		k.Spec.PriorityClassName = d.PriorityClassName
 	}
 	if k.Spec.Egress == nil && d.Egress != nil {
 		k.Spec.Egress = d.Egress.DeepCopy()
@@ -1067,6 +1099,11 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 
 	return corev1.PodSpec{
 		RuntimeClassName:             runtimeClass,
+		NodeSelector:                 maps.Clone(b.knight.Spec.NodeSelector),
+		Affinity:                     b.knight.Spec.Affinity.DeepCopy(),
+		Tolerations:                  slices.Clone(b.knight.Spec.Tolerations),
+		TopologySpreadConstraints:    slices.Clone(b.knight.Spec.TopologySpreadConstraints),
+		PriorityClassName:            b.knight.Spec.PriorityClassName,
 		Containers:                   containers,
 		Volumes:                      b.volumes,
 		EnableServiceLinks:           new(false),

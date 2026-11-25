@@ -27,6 +27,25 @@ spec:
   {{- if .Values.planner.runtimeClassName }}
   runtimeClassName: {{ .Values.planner.runtimeClassName | quote }}
   {{- end }}
+  {{- with .Values.planner.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.planner.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.planner.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.planner.topologySpreadConstraints }}
+  topologySpreadConstraints:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.planner.priorityClassName }}
+  priorityClassName: {{ .Values.planner.priorityClassName | quote }}
+  {{- end }}
   {{- with .Values.planner.github }}
   github:
     {{- toYaml . | nindent 4 }}

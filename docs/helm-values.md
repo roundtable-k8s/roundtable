@@ -179,6 +179,9 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 |-----|------|---------|-------------|
 | `dashboard.enabled` | bool | `true` | Deploy the Round Table dashboard |
 | `dashboard.replicas` | int | `1` | Dashboard replicas |
+| `dashboard.nodeSelector` | map | `{}` | Dashboard pod `nodeSelector` |
+| `dashboard.affinity` | object | `{}` | Dashboard pod `affinity` |
+| `dashboard.tolerations` | list | `[]` | Dashboard pod `tolerations` |
 | `dashboard.ingress.enabled` | bool | `false` | Enable ingress for dashboard |
 | `dashboard.ingress.className` | string | `""` | Ingress class name |
 | `dashboard.ingress.host` | string | `""` | Dashboard hostname |
@@ -339,6 +342,11 @@ escalate). See [pr-pipeline.md](pr-pipeline.md).
 | `planner.skills` | list | `[operator, shared]` | Planner skills |
 | `planner.concurrency` | int | `1` | Max concurrent tasks |
 | `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds |
+| `planner.nodeSelector` | map | `{}` | Planner knight `spec.nodeSelector` |
+| `planner.affinity` | object | `{}` | Planner knight `spec.affinity` |
+| `planner.tolerations` | list | `[]` | Planner knight `spec.tolerations` |
+| `planner.topologySpreadConstraints` | list | `[]` | Planner knight `spec.topologySpreadConstraints` |
+| `planner.priorityClassName` | string | `""` | Planner knight `spec.priorityClassName` |
 | `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Empty = the default platform arsenal |
 | `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). The planner belongs to no RoundTable, so it is configured here |
 | `planner.github.tokenSecretRef.key` | string | required | Key within that Secret (`corev1.SecretKeySelector`; `optional` is honoured too) |
