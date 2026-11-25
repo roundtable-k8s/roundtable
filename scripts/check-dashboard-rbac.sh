@@ -20,7 +20,7 @@ lacks() { ! grep -q "$2" <<<"$1" || fail "$3"; }
 
 minimal="$(role)"
 [ -n "$minimal" ] || fail "dashboard Role not rendered"
-for r in '"deployments", "replicasets"' '"horizontalpodautoscalers"' '"events"'; do
+for r in '"deployments", "replicasets"' '"horizontalpodautoscalers"' '"events"' '"triggers"'; do
   has "$minimal" "$r" "minimal install: Role lacks $r"
 done
 lacks "$minimal" 'scaledobjects' "minimal install: Role must not reference keda.sh"
