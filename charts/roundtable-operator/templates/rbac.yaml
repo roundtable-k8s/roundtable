@@ -58,6 +58,10 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims", "configmaps", "serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Workspace snapshots (ai.roundtable.io/snapshot annotation)
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   # Read-only: knights naming spec.runtimeClassName are parked when it is missing
   - apiGroups: ["node.k8s.io"]
     resources: ["runtimeclasses"]

@@ -304,6 +304,25 @@ spec:
                           size limit in ephemeral mode.
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
+                      snapshots:
+                        description: |-
+                          snapshots configures on-demand CSI VolumeSnapshots of the workspace PVC
+                          (mode: pvc only). A snapshot is taken when the ai.roundtable.io/snapshot
+                          annotation gets a new value. Needs the snapshot.storage.k8s.io/v1 API.
+                        properties:
+                          className:
+                            description: className is the VolumeSnapshotClass. Empty
+                              uses the cluster default.
+                            type: string
+                          keep:
+                            default: 3
+                            description: |-
+                              keep is how many snapshots of this knight to retain; once the newest is
+                              ready, the oldest beyond keep are deleted.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                        type: object
                     type: object
                 type: object
               description:
@@ -1577,6 +1596,25 @@ spec:
                             size limit in ephemeral mode.
                           pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                           x-kubernetes-int-or-string: true
+                        snapshots:
+                          description: |-
+                            snapshots configures on-demand CSI VolumeSnapshots of the workspace PVC
+                            (mode: pvc only). A snapshot is taken when the ai.roundtable.io/snapshot
+                            annotation gets a new value. Needs the snapshot.storage.k8s.io/v1 API.
+                          properties:
+                            className:
+                              description: className is the VolumeSnapshotClass. Empty
+                                uses the cluster default.
+                              type: string
+                            keep:
+                              default: 3
+                              description: |-
+                                keep is how many snapshots of this knight to retain; once the newest is
+                                ready, the oldest beyond keep are deleted.
+                              format: int32
+                              minimum: 1
+                              type: integer
+                          type: object
                       type: object
                   required:
                   - domain

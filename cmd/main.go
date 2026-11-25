@@ -278,6 +278,14 @@ func main() {
 	}
 	setupLog.Info("Knight egress policy backend", "ciliumNetworkPolicy", ciliumEnabled)
 
+	// Workspace snapshots need the external-snapshotter VolumeSnapshot API.
+	snapshotsEnabled, err := rtruntime.VolumeSnapshotAPIServed(discoveryClient)
+	if err != nil {
+		setupLog.Error(err, "Failed to detect the VolumeSnapshot API")
+		os.Exit(1)
+	}
+	setupLog.Info("Knight workspace snapshots", "volumeSnapshotAPI", snapshotsEnabled)
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		// Secrets are read uncached (no cluster-wide Secret informer).
@@ -360,6 +368,7 @@ func main() {
 		NATSMonitoringEndpoint: natsMonitoringEndpoint,
 		NATS:                   natsProvider,
 		CiliumEnabled:          ciliumEnabled,
+		SnapshotsEnabled:       snapshotsEnabled,
 		EgressNetPol:           &egressNetPol,
 		Isolation:              isolation,
 	}

@@ -1100,6 +1100,25 @@ spec:
                       size limit in ephemeral mode.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  snapshots:
+                    description: |-
+                      snapshots configures on-demand CSI VolumeSnapshots of the workspace PVC
+                      (mode: pvc only). A snapshot is taken when the ai.roundtable.io/snapshot
+                      annotation gets a new value. Needs the snapshot.storage.k8s.io/v1 API.
+                    properties:
+                      className:
+                        description: className is the VolumeSnapshotClass. Empty uses
+                          the cluster default.
+                        type: string
+                      keep:
+                        default: 3
+                        description: |-
+                          keep is how many snapshots of this knight to retain; once the newest is
+                          ready, the oldest beyond keep are deleted.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
                 type: object
             required:
             - domain
@@ -1292,6 +1311,37 @@ spec:
                 description: totalCost is the cumulative cost in USD of all tasks
                   processed.
                 type: string
+              workspace:
+                description: workspace reports workspace snapshots.
+                properties:
+                  lastSnapshotRequest:
+                    description: |-
+                      lastSnapshotRequest is the last value of the ai.roundtable.io/snapshot
+                      annotation that was handled.
+                    type: string
+                  snapshots:
+                    description: snapshots lists the knight's workspace VolumeSnapshots,
+                      oldest first.
+                    items:
+                      description: WorkspaceSnapshotStatus is one workspace VolumeSnapshot.
+                      properties:
+                        createdAt:
+                          description: createdAt is when the VolumeSnapshot object
+                            was created.
+                          format: date-time
+                          type: string
+                        name:
+                          description: name is the VolumeSnapshot name.
+                          type: string
+                        readyToUse:
+                          description: readyToUse mirrors the VolumeSnapshot's status.readyToUse.
+                          type: boolean
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
             type: object
         required:
         - spec
