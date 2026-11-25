@@ -105,16 +105,6 @@ var (
 		},
 		[]string{"table"},
 	)
-
-	// WarmPoolKnights is the number of warm pool knights by state
-	// (available, provisioning, claimed).
-	WarmPoolKnights = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "roundtable_warm_pool_knights",
-			Help: "Warm pool knights by table and state",
-		},
-		[]string{"table", "state"},
-	)
 )
 
 // TasksDeadLetteredTotal counts tasks written to a table's dead-letter stream.
@@ -171,7 +161,6 @@ func init() {
 		ChainStepDurationSeconds,
 		Missions,
 		TableCostUSD,
-		WarmPoolKnights,
 		KnightIsolated,
 		KnightConsumerReady,
 		TasksDeadLetteredTotal,

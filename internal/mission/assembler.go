@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,8 +68,6 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 
 	// Resolve the RoundTable lazily — only fetched when an ephemeral knight needs it.
 	var rt *aiv1alpha1.RoundTable
-	// Track which warm pool knights have been claimed this reconcile cycle
-	claimedWarmKnights := make(map[string]bool)
 	getRoundTable := func() (*aiv1alpha1.RoundTable, error) {
 		if rt != nil {
 			return rt, nil
@@ -141,7 +138,7 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 			continue
 		}
 
-		// Ephemeral knight - create if doesn't exist (or claim from warm pool)
+		// Ephemeral knight - create if it doesn't exist
 		knightName := fmt.Sprintf("%s-%s", mission.Name, mk.Name)
 		knight := &aiv1alpha1.Knight{}
 		knightKey := types.NamespacedName{Name: knightName, Namespace: mission.Namespace}
@@ -154,33 +151,12 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 				return ctrl.Result{}, rtErr
 			}
 
-			// Try to claim a warm pool knight first
-			claimed, claimErr := a.claimWarmKnight(ctx, mission, mk, resolvedRT, claimedWarmKnights)
-			if claimErr != nil {
-				log.Error(claimErr, "Failed to claim warm pool knight, falling back to cold start", "knight", mk.Name)
-			}
-
-			if claimed {
-				log.Info("Claimed warm pool knight for mission", "missionKnight", mk.Name)
-				// The claim recreated the knight under its mission-prefixed name;
-				// wait for the new knight to become ready like a cold start.
-				knightStatuses[mk.Name] = aiv1alpha1.MissionKnightStatus{
-					Name:      mk.Name,
-					Ephemeral: true,
-					Ready:     false,
-				}
-				allReady = false
-				notReadyKnights = append(notReadyKnights, mk.Name)
-				continue
-			}
-
-			// No warm knight available — cold start
 			knight, err := a.buildEphemeralKnight(mission, mk, resolvedRT)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to build ephemeral knight %q: %w", mk.Name, err)
 			}
 
-			log.Info("Creating ephemeral knight (cold start)", "name", knightName)
+			log.Info("Creating ephemeral knight", "name", knightName, "runtime", knight.Spec.Runtime)
 			if err := a.Client.Create(ctx, knight); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to create ephemeral knight: %w", err)
 			}
@@ -267,114 +243,6 @@ func (a *KnightAssembler) ReconcileAssembling(ctx context.Context, mission *aiv1
 		"notReady", len(notReadyKnights))
 
 	return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
-}
-
-// claimWarmKnight attempts to claim an available warm pool knight for a mission.
-// It reserves an unclaimed, ready warm knight, creates the mission knight under
-// its mission-prefixed name ("<mission>-<knight>" — the name chain steps
-// reference), and deletes the warm knight so the pool replenishes. The mission
-// knight starts fresh, so the caller must treat it as not-ready and wait.
-// Returns true if a knight was successfully claimed.
-func (a *KnightAssembler) claimWarmKnight(
-	ctx context.Context,
-	mission *aiv1alpha1.Mission,
-	mk aiv1alpha1.MissionKnight,
-	rt *aiv1alpha1.RoundTable,
-	alreadyClaimed map[string]bool,
-) (bool, error) {
-	log := logf.FromContext(ctx)
-
-	// Check if the RoundTable has a warm pool
-	if rt.Spec.WarmPool == nil || rt.Spec.WarmPool.Size == 0 {
-		return false, nil
-	}
-
-	// List unclaimed, ready warm pool knights
-	knightList := &aiv1alpha1.KnightList{}
-	if err := a.Client.List(ctx, knightList,
-		client.InNamespace(mission.Namespace),
-		client.MatchingLabels{
-			aiv1alpha1.LabelWarmPool:        "true",
-			aiv1alpha1.LabelWarmPoolClaimed: "false",
-			aiv1alpha1.LabelRoundTable:      rt.Name,
-		},
-	); err != nil {
-		return false, fmt.Errorf("failed to list warm pool knights: %w", err)
-	}
-
-	// Collect ready knight candidates
-	var candidates []*aiv1alpha1.Knight
-	for i := range knightList.Items {
-		k := &knightList.Items[i]
-		if k.Status.Phase == aiv1alpha1.KnightPhaseReady && k.Status.Ready && !alreadyClaimed[k.Name] {
-			candidates = append(candidates, k)
-		}
-	}
-
-	if len(candidates) == 0 {
-		return false, nil // No warm knights available
-	}
-
-	// Try each candidate in order — optimistic locking handles concurrent claims
-	for _, warmKnight := range candidates {
-		log.Info("Attempting to claim warm pool knight",
-			"warmKnight", warmKnight.Name,
-			"mission", mission.Name,
-			"missionKnight", mk.Name)
-
-		// Reserve the warm knight: mark as claimed and link to the mission.
-		// The knight is replaced (not patched) below — chain steps reference the
-		// mission-prefixed name, and CR names are immutable.
-		warmKnight.Labels[aiv1alpha1.LabelWarmPoolClaimed] = "true"
-		warmKnight.Labels[aiv1alpha1.LabelMission] = mission.Name
-
-		// Attempt update — resourceVersion provides optimistic locking.
-		// If another mission claimed this knight, we get a Conflict and try the next candidate.
-		if err := a.Client.Update(ctx, warmKnight); err != nil {
-			if apierrors.IsConflict(err) {
-				log.Info("Conflict claiming warm knight, trying next candidate",
-					"warmKnight", warmKnight.Name)
-				continue
-			}
-			return false, fmt.Errorf("failed to update warm knight: %w", err)
-		}
-
-		// Mark as claimed in this cycle to avoid double-claiming
-		alreadyClaimed[warmKnight.Name] = true
-
-		// Create the mission knight under its prefixed name so chain steps
-		// (which reference "<mission>-<knight>") resolve to a real CR.
-		missionKnight, err := a.buildEphemeralKnight(mission, mk, rt)
-		if err != nil {
-			return false, fmt.Errorf("failed to build mission knight for warm claim: %w", err)
-		}
-		if err := a.Client.Create(ctx, missionKnight); err != nil && !apierrors.IsAlreadyExists(err) {
-			// Warm knight stays reserved; the caller falls back to cold start,
-			// which retries the same create on the next reconcile.
-			return false, fmt.Errorf("failed to create mission knight %q from warm claim: %w", missionKnight.Name, err)
-		}
-
-		// Delete the warm knight — its capacity is consumed by the mission knight,
-		// and the RoundTable controller will replenish the pool.
-		if err := a.Client.Delete(ctx, warmKnight); err != nil && !apierrors.IsNotFound(err) {
-			log.Error(err, "Failed to delete claimed warm knight; pool controller will reap it",
-				"warmKnight", warmKnight.Name)
-		}
-
-		log.Info("Successfully claimed warm pool knight",
-			"warmKnight", warmKnight.Name,
-			"missionKnight", missionKnight.Name,
-			"mission", mission.Name,
-			"domain", missionKnight.Spec.Domain)
-
-		return true, nil
-	}
-
-	// All candidates were claimed by concurrent reconciles
-	log.Info("All warm knight candidates claimed by concurrent reconciles",
-		"mission", mission.Name,
-		"candidateCount", len(candidates))
-	return false, nil
 }
 
 // resolveKnightSpec resolves a KnightSpec from template or inline ephemeral spec.
@@ -468,7 +336,25 @@ func appendSecretEnvFrom(spec *aiv1alpha1.KnightSpec, secretRef corev1.LocalObje
 	})
 }
 
+// MissionShutdownTime is when a mission's knights may be shut down: the
+// mission's expiry, status.expiresAt (start + ttlSeconds). Before the mission
+// controller records it, it is derived from status.startedAt, or, when the
+// mission has not started yet, from its creation time (so the result is
+// deterministic).
+func MissionShutdownTime(mission *aiv1alpha1.Mission) time.Time {
+	if mission.Status.ExpiresAt != nil {
+		return mission.Status.ExpiresAt.Time
+	}
+	start := mission.CreationTimestamp.Time
+	if mission.Status.StartedAt != nil {
+		start = mission.Status.StartedAt.Time
+	}
+	return start.Add(time.Duration(mission.Spec.TTLSeconds) * time.Second)
+}
+
 // buildEphemeralKnight creates a Knight CR for an ephemeral mission knight.
+// Its runtime comes from the template or inline spec; a "sandbox" knight is
+// one bare Sandbox that shuts down at the mission's expiry.
 func (a *KnightAssembler) buildEphemeralKnight(
 	mission *aiv1alpha1.Mission,
 	mk aiv1alpha1.MissionKnight,
@@ -498,8 +384,7 @@ func (a *KnightAssembler) buildEphemeralKnight(
 		ConsumerName: fmt.Sprintf("msn-%s-%s", mission.Name, mk.Name),
 	}
 
-	// Inject RoundTable-shared secrets, then mission-specific ones. Warm
-	// knights reference these secrets in their own manifests; ephemeral
+	// Inject RoundTable-shared secrets, then mission-specific ones. Ephemeral
 	// knights only get what we inject here (model API keys live in these).
 	for _, secretRef := range rt.Spec.Secrets {
 		appendSecretEnvFrom(spec, secretRef)
@@ -527,6 +412,11 @@ func (a *KnightAssembler) buildEphemeralKnight(
 				aiv1alpha1.LabelMission:    mission.Name,
 				aiv1alpha1.LabelEphemeral:  "true",
 				aiv1alpha1.LabelRoundTable: rt.Name,
+			},
+			// The knight's runtime may stop at the mission's expiry; for a
+			// sandbox knight this becomes the Sandbox's spec.shutdownTime.
+			Annotations: map[string]string{
+				aiv1alpha1.AnnotationShutdownTime: MissionShutdownTime(mission).UTC().Format(time.RFC3339),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(mission, aiv1alpha1.GroupVersion.WithKind("Mission")),

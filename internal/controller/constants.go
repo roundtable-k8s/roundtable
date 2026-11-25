@@ -46,10 +46,3 @@ const (
 	// Examples: roundtable fleet aggregation, long-running status updates.
 	RequeueVerySlow = 60 * time.Second
 )
-
-// Operational limits and burst controls.
-const (
-	// WarmPoolBurstLimit is the maximum number of warm knights created per reconcile.
-	// This prevents resource exhaustion when scaling up warm pools.
-	WarmPoolBurstLimit = 5
-)

@@ -49,8 +49,11 @@ is what an agent-sandbox pod runs under, not an alternative to it.
    `pkg/runtime/sandbox_detect.go`, #366); upstream removed `v1alpha1` in v1.0.0.
    Remaining port work is tracked in #163.
 7. **Mission knights: a bare `Sandbox` per knight now** (#483, outcome of #368).
+   A mission knight with `runtime: sandbox` is one `Sandbox` whose
+   `spec.shutdownTime` is the mission's expiry (start + `ttlSeconds`); the
+   operator's hand-rolled warm pool (`RoundTable.spec.warmPool`) is removed.
    Role pools (`SandboxTemplate` + `SandboxWarmPool` + `SandboxClaim`) only after
-   a spike.
+   a spike; warm starts come back through them if the spike supports it.
 
 ## Backend comparison
 
