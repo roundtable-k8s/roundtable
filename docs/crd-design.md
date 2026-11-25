@@ -539,5 +539,59 @@ For a claude-knight image the operator renders them into `MCP_SERVERS_JSON`
 `mcp__<name>__<tool>`. If `spec.env` already sets either variable, the user's
 entries are kept and the operator's are added (on a server-name clash the
 user's server wins). On any other runtime nothing is rendered and the Knight
-gets `Degraded=True` with reason `MCPServersUnsupported`. No auth headers
-(#359) and no `toolFilter.include`.
+gets `Degraded=True` with reason `MCPServersUnsupported`. No
+`toolFilter.include`.
+
+### Auth headers: `headersFrom`
+
+A server that needs an auth header takes it from a Secret key in the knight's
+namespace (credentials stay in the pod, as narrow as possible; #359):
+
+```yaml
+mcpServers:
+  - name: vault
+    url: https://vault-mcp.example.com/mcp   # host on spec.egress.allowedHosts
+    headersFrom:
+      - name: Authorization            # HTTP header name, unique per server
+        valueFrom:
+          secretKeyRef:                # no namespace: always the knight's
+            name: vault-reader-mcp
+            key: authorization         # whole header value, e.g. "Bearer <token>"
+```
+
+Each entry becomes an env var on the knight container named
+`MCP_<SERVER>_<HEADER>` (upper-cased, every character other than `A-Z0-9`
+turned into `_`, e.g. `MCP_VAULT_AUTHORIZATION`) with `valueFrom.secretKeyRef`
+copied from the spec. `MCP_SERVERS_JSON` holds only the placeholder
+(`"headers":{"Authorization":"${MCP_VAULT_AUTHORIZATION}"}`), which Claude
+Code expands from its environment when it connects (verified with Claude Code
+2.1.329, for both an `--mcp-config` file and inline JSON). The operator never
+reads the value into a ConfigMap, annotation, status field or log line. If two
+headers map to the same variable name (server `a-b` + header `c` and server
+`a` + header `b-c`), or the name is already set in `spec.env`, later ones get a
+`_2`, `_3`, ... suffix in spec order.
+
+The API server rejects a header name listed twice on one server. Header names
+are case-insensitive in HTTP, so an entry that repeats an earlier one in a
+different case is dropped and reported as `MCPHeadersReady=False` with reason
+`MCPHeaderDuplicate`.
+
+The operator checks that every referenced Secret and key exists and sets the
+`MCPHeadersReady` condition: `True`, or `False` with reason
+`MCPHeaderSecretMissing` and a message naming the missing Secret or key
+(otherwise the pod would fail to start with an opaque
+`CreateContainerConfigError`). Secrets are not watched; while a reference is
+missing the knight is re-checked every 30 seconds. The condition is absent when
+no headers are rendered.
+
+- **One token per MCP server.** Don't reuse a token across servers or knights;
+  scope each to what that knight needs.
+- **Egress.** The server's host must be on the knight's `spec.egress`
+  allowlist (see [egress](egress.md)).
+- **Rotation** works like any other knight credential: update the referenced
+  Secret, then restart the knight (`kubectl rollout restart deployment/<knight>`);
+  env vars are read at pod start.
+- The value is visible to anything running in the knight container (as every
+  pod credential is), including the agent's shell.
+
+Example: [`examples/knight-mcp-headers.yaml`](../examples/knight-mcp-headers.yaml).

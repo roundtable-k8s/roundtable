@@ -606,6 +606,64 @@ spec:
                   description: KnightMCPServer is a remote MCP server wired into a
                     claude-knight pod.
                   properties:
+                    headersFrom:
+                      description: |-
+                        headersFrom adds HTTP headers (typically Authorization) whose values
+                        come from a Secret key in the knight's namespace. Each becomes an env
+                        var on the knight container (MCP_<SERVER>_<HEADER>, valueFrom copied
+                        from here) and the rendered MCP config holds only a ${VAR}
+                        placeholder, so the value is never written into a ConfigMap or status.
+                        Header names are unique per server; a later entry that differs from an
+                        earlier one only in case is dropped and reported in MCPHeadersReady.
+                      items:
+                        description: |-
+                          KnightMCPHeader is an HTTP header sent to an MCP server, with its value
+                          taken from a Secret key.
+                        properties:
+                          name:
+                            description: |-
+                              name is the HTTP header name (RFC 9110 token characters), e.g.
+                              Authorization or X-Api-Key.
+                            maxLength: 128
+                            minLength: 1
+                            pattern: ^[A-Za-z0-9!#$%&*+.^_|~-]+$
+                            type: string
+                          valueFrom:
+                            description: valueFrom is the source of the header value.
+                            properties:
+                              secretKeyRef:
+                                description: |-
+                                  secretKeyRef selects a key of a Secret in the knight's namespace
+                                  (there is no namespace field). The whole key value is the header
+                                  value, so include any scheme, e.g. "Bearer <token>".
+                                properties:
+                                  key:
+                                    description: key is the key within the Secret.
+                                    maxLength: 253
+                                    minLength: 1
+                                    pattern: ^[-._a-zA-Z0-9]+$
+                                    type: string
+                                  name:
+                                    description: name is the Secret name.
+                                    maxLength: 253
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            required:
+                            - secretKeyRef
+                            type: object
+                        required:
+                        - name
+                        - valueFrom
+                        type: object
+                      maxItems: 16
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
                     name:
                       description: name is the server name; tools are exposed as mcp__<name>__<tool>.
                       maxLength: 63

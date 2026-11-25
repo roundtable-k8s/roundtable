@@ -782,6 +782,60 @@ type KnightMCPServer struct {
 	// toolFilter restricts the tools the knight may call.
 	// +optional
 	ToolFilter *KnightMCPToolFilter `json:"toolFilter,omitempty"`
+
+	// headersFrom adds HTTP headers (typically Authorization) whose values
+	// come from a Secret key in the knight's namespace. Each becomes an env
+	// var on the knight container (MCP_<SERVER>_<HEADER>, valueFrom copied
+	// from here) and the rendered MCP config holds only a ${VAR}
+	// placeholder, so the value is never written into a ConfigMap or status.
+	// Header names are unique per server; a later entry that differs from an
+	// earlier one only in case is dropped and reported in MCPHeadersReady.
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	HeadersFrom []KnightMCPHeader `json:"headersFrom,omitempty"`
+}
+
+// KnightMCPHeader is an HTTP header sent to an MCP server, with its value
+// taken from a Secret key.
+type KnightMCPHeader struct {
+	// name is the HTTP header name (RFC 9110 token characters), e.g.
+	// Authorization or X-Api-Key.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	// +kubebuilder:validation:Pattern="^[A-Za-z0-9!#$%&*+.^_|~-]+$"
+	Name string `json:"name"`
+
+	// valueFrom is the source of the header value.
+	// +kubebuilder:validation:Required
+	ValueFrom KnightMCPHeaderSource `json:"valueFrom"`
+}
+
+// KnightMCPHeaderSource selects the value of an MCP header.
+type KnightMCPHeaderSource struct {
+	// secretKeyRef selects a key of a Secret in the knight's namespace
+	// (there is no namespace field). The whole key value is the header
+	// value, so include any scheme, e.g. "Bearer <token>".
+	// +kubebuilder:validation:Required
+	SecretKeyRef KnightSecretKeyRef `json:"secretKeyRef"`
+}
+
+// KnightSecretKeyRef names a key of a Secret in the knight's namespace.
+type KnightSecretKeyRef struct {
+	// name is the Secret name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+
+	// key is the key within the Secret.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	Key string `json:"key"`
 }
 
 // KnightMCPToolFilter restricts a server's tools.

@@ -19,45 +19,130 @@ const (
 	EnvClaudeDisallowedTools = "CLAUDE_DISALLOWED_TOOLS"
 )
 
+// MCPHeaderVar is one spec.mcpServers[].headersFrom entry rendered as an env
+// var on the knight container.
+type MCPHeaderVar struct {
+	Server  string
+	Header  string
+	EnvName string
+	Ref     aiv1alpha1.KnightSecretKeyRef
+}
+
+// MCPHeaderEnvName is the base env var name for a header:
+// MCP_<SERVER>_<HEADER>, upper-cased, every character other than A-Z and 0-9
+// replaced by "_". Collisions are resolved by renderMCP.
+func MCPHeaderEnvName(server, header string) string {
+	return "MCP_" + sanitizeEnvPart(server) + "_" + sanitizeEnvPart(header)
+}
+
+func sanitizeEnvPart(s string) string {
+	b := []byte(strings.ToUpper(s))
+	for i, c := range b {
+		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			b[i] = '_'
+		}
+	}
+	return string(b)
+}
+
 // MCPServersEnv renders spec.mcpServers into the MCP_SERVERS_JSON value and
 // the CLAUDE_DISALLOWED_TOOLS entries. It returns empty values when no
-// servers are declared.
+// servers are declared. Header values are ${VAR} placeholders.
 func MCPServersEnv(servers []aiv1alpha1.KnightMCPServer) (string, []string) {
-	if len(servers) == 0 {
-		return "", nil
+	js, denied, _ := renderMCP(servers, nil)
+	return js, denied
+}
+
+// UniqueMCPHeaders returns headers without entries whose name repeats an
+// earlier one case-insensitively (HTTP header names are case-insensitive;
+// the CRD can only reject exact duplicates).
+func UniqueMCPHeaders(headers []aiv1alpha1.KnightMCPHeader) []aiv1alpha1.KnightMCPHeader {
+	seen := make(map[string]bool, len(headers))
+	out := make([]aiv1alpha1.KnightMCPHeader, 0, len(headers))
+	for _, h := range headers {
+		if k := strings.ToLower(h.Name); !seen[k] {
+			seen[k] = true
+			out = append(out, h)
+		}
 	}
-	m := make(map[string]map[string]string, len(servers))
+	return out
+}
+
+// renderMCP renders the MCP config JSON, the deny list and the header env
+// vars. taken holds env var names already in use on the container; a header
+// whose base name is taken (or was assigned to an earlier header, e.g.
+// server "a-b"/header "c" and server "a"/header "b-c") gets a numeric
+// suffix (_2, _3, ...), assigned in spec order. The JSON only ever contains
+// "${NAME}" placeholders, never a header value.
+func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (string, []string, []MCPHeaderVar) {
+	if len(servers) == 0 {
+		return "", nil, nil
+	}
+	used := make(map[string]bool, len(taken))
+	for n := range taken {
+		used[n] = true
+	}
+	m := make(map[string]map[string]any, len(servers))
 	var denied []string
+	var vars []MCPHeaderVar
 	for _, s := range servers {
 		typ := "http"
 		if s.Transport == mcpTransportSSE {
 			typ = mcpTransportSSE
 		}
-		m[s.Name] = map[string]string{"type": typ, "url": s.URL}
+		entry := map[string]any{"type": typ, "url": s.URL}
+		if len(s.HeadersFrom) > 0 {
+			headers := make(map[string]string, len(s.HeadersFrom))
+			for _, h := range UniqueMCPHeaders(s.HeadersFrom) {
+				name := MCPHeaderEnvName(s.Name, h.Name)
+				for i := 2; used[name]; i++ {
+					name = fmt.Sprintf("%s_%d", MCPHeaderEnvName(s.Name, h.Name), i)
+				}
+				used[name] = true
+				headers[h.Name] = "${" + name + "}"
+				vars = append(vars, MCPHeaderVar{Server: s.Name, Header: h.Name, EnvName: name, Ref: h.ValueFrom.SecretKeyRef})
+			}
+			entry["headers"] = headers
+		}
+		m[s.Name] = entry
 		if s.ToolFilter != nil {
 			for _, t := range s.ToolFilter.Exclude {
 				denied = append(denied, fmt.Sprintf("mcp__%s__%s", s.Name, t))
 			}
 		}
 	}
-	b, _ := json.Marshal(map[string]any{"mcpServers": m}) // map of strings: cannot fail
-	return string(b), denied
+	b, _ := json.Marshal(map[string]any{"mcpServers": m}) // maps of strings: cannot fail
+	return string(b), denied, vars
 }
 
 // applyMCPServersEnv adds the rendered MCP env to env for claude-knight
-// images; other runtimes get nothing. If the user already set a variable via
-// env, the user's entries are kept and the operator's are merged in (for
-// MCP_SERVERS_JSON the user's servers win on a name clash; for the deny list
-// the operator's entries are appended). A user value set via valueFrom cannot
-// be merged: MCP_SERVERS_JSON is left as the user set it, and the deny list
-// gets the operator's entries appended through $(NAME) expansion.
+// images; other runtimes get nothing. Each headersFrom entry becomes an env
+// var whose valueFrom is a secretKeyRef copied from the spec. If the user
+// already set a variable via env, the user's entries are kept and the
+// operator's are merged in (for MCP_SERVERS_JSON the user's servers win on a
+// name clash; for the deny list the operator's entries are appended). A user
+// value set via valueFrom cannot be merged: MCP_SERVERS_JSON is left as the
+// user set it, and the deny list gets the operator's entries appended through
+// $(NAME) expansion.
 func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string) []corev1.EnvVar {
 	if AgentRuntimeForImage(image) != AgentRuntimeClaude {
 		return env
 	}
-	servers, denied := MCPServersEnv(k.Spec.MCPServers)
+	taken := make(map[string]bool, len(env))
+	for _, e := range env {
+		taken[e.Name] = true
+	}
+	servers, denied, vars := renderMCP(k.Spec.MCPServers, taken)
 	if servers == "" {
 		return env
+	}
+	for _, v := range vars {
+		env = append(env, corev1.EnvVar{Name: v.EnvName, ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: v.Ref.Name},
+				Key:                  v.Ref.Key,
+			},
+		}})
 	}
 	env = mergeEnvValue(env, EnvMCPServersJSON, servers, false, mergeMCPJSON)
 	if len(denied) > 0 {
