@@ -159,6 +159,11 @@ const (
 	// zero pods because it had no pending tasks. It wakes on the next task.
 	ReasonKnightScaledToZero = "ScaledToZero"
 
+	// ReasonKnightWaking indicates an autoscaled knight at zero ready
+	// replicas has tasks queued on its consumer and its pod is starting. The
+	// phase stays Suspended; only the Available reason changes.
+	ReasonKnightWaking = "Waking"
+
 	// ReasonScaledObjectReady indicates the KEDA ScaledObject is rendered.
 	ReasonScaledObjectReady = "ScaledObjectReady"
 

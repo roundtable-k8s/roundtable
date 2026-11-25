@@ -1,6 +1,7 @@
 {{- if .Values.gateway.enabled }}
 {{- $gw := .Values.gateway }}
 {{- $name := printf "%s-gateway" (include "roundtable-operator.fullname" .) }}
+{{- $missions := $gw.missions | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -35,8 +36,8 @@ metadata:
     {{- include "roundtable-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: gateway
 ---
-# Read-only: the gateway looks up Knights and their RoundTables; it never
-# writes Kubernetes objects. Tasks go over NATS.
+# Read-only: the gateway looks up Knights, their RoundTables and Chains.
+# Tasks go over NATS. The only objects it writes are Missions (below).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -46,7 +47,7 @@ metadata:
     app.kubernetes.io/component: gateway
 rules:
   - apiGroups: ["ai.roundtable.io"]
-    resources: ["knights", "roundtables"]
+    resources: ["knights", "roundtables", "chains"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -64,6 +65,73 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
+{{- if $missions.enabled }}
+{{- if has "*" ($gw.allowedNamespaces | default list) }}
+---
+# Missions in any namespace (allowedNamespaces holds "*").
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-missions
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups: ["ai.roundtable.io"]
+    resources: ["missions"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-missions
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-missions
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- range $ns := uniq (prepend ($gw.allowedNamespaces | default list) ($gw.namespace | default $.Release.Namespace)) }}
+---
+# Missions only in the namespaces callers may target.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-missions
+  namespace: {{ $ns }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups: ["ai.roundtable.io"]
+    resources: ["missions"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-missions
+  namespace: {{ $ns }}
+  labels:
+    {{- include "roundtable-operator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-missions
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -119,6 +187,13 @@ spec:
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
             - --token-file=/var/run/secrets/roundtable/gateway/token
+            - --missions={{ $missions.enabled | default false }}
+            {{- if $missions.enabled }}
+            - --mission-max-budget-usd={{ $missions.maxBudgetUSD | default 10 }}
+            - --mission-max-ttl-seconds={{ int ($missions.maxTTLSeconds | default 86400) }}
+            - --mission-max-timeout-seconds={{ int ($missions.maxTimeoutSeconds | default 21600) }}
+            - --mission-allow-skill-generation={{ $missions.allowSkillGeneration | default false }}
+            {{- end }}
             {{- range $gw.extraArgs }}
             - {{ . }}
             {{- end }}

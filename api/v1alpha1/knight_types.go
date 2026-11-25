@@ -42,6 +42,14 @@ const (
 	// LabelWarmPoolClaimed marks a warm pool knight as claimed by a mission
 	LabelWarmPoolClaimed = "ai.roundtable.io/warm-pool-claimed"
 
+	// LabelCreatedBy records which component created a resource. Missions
+	// created through the invoke gateway carry CreatedByGateway; the planner
+	// then only accepts template-based ephemeral knights for them.
+	LabelCreatedBy = "ai.roundtable.io/created-by"
+
+	// CreatedByGateway is the LabelCreatedBy value of gateway-created resources.
+	CreatedByGateway = "gateway"
+
 	// AnnotationWarmPoolCreatedAt tracks when a warm pool knight was created (for idle recycling)
 	AnnotationWarmPoolCreatedAt = "ai.roundtable.io/warm-pool-created-at"
 )

@@ -1,0 +1,32 @@
+# Briefing writer for chain-scheduled-briefing.yaml. Synthesises domain
+# knights' output and writes Briefings/ notes to the vault.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: kay
+  namespace: roundtable
+spec:
+  domain: briefing
+  model: claude-sonnet-4-20250514
+
+  skills:
+    - shared
+    - report-generator
+
+  nats:
+    subjects:
+      - "fleet-a.tasks.briefing.>"
+
+  vault:
+    claimName: roundtable-vault
+    writablePaths:
+      - "Briefings/"
+
+  concurrency: 1
+  taskTimeoutSeconds: 900
+
+  prompt:
+    identity: |
+      You are Sir Kay, Knight of Briefings for the Round Table. You take the
+      reports of the other knights and turn them into one clear, dated note.
+      You never invent facts: if a section is missing or failed, say so.
