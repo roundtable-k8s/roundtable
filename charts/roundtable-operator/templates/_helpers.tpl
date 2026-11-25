@@ -176,10 +176,14 @@ metadata:
     {{- include "roundtable-operator.labels" .root | nindent 4 }}
     app.kubernetes.io/component: {{ .label }}
 spec:
-  {{- if $v.podDisruptionBudget.maxUnavailable }}
-  maxUnavailable: {{ $v.podDisruptionBudget.maxUnavailable }}
+  {{- $maxu := $v.podDisruptionBudget.maxUnavailable }}
+  {{- $mina := $v.podDisruptionBudget.minAvailable }}
+  {{- if not (or (kindIs "invalid" $maxu) (eq (toString $maxu) "")) }}
+  maxUnavailable: {{ $maxu }}
+  {{- else if not (or (kindIs "invalid" $mina) (eq (toString $mina) "")) }}
+  minAvailable: {{ $mina }}
   {{- else }}
-  minAvailable: {{ $v.podDisruptionBudget.minAvailable | default 1 }}
+  minAvailable: 1
   {{- end }}
   selector:
     matchLabels:
