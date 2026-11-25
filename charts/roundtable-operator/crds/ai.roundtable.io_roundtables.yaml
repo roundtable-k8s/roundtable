@@ -26,6 +26,10 @@ spec:
       jsonPath: .status.knightsReady
       name: Ready
       type: integer
+    - description: Knights scaled to zero; they wake on demand
+      jsonPath: .status.knightsScaledToZero
+      name: Idle
+      type: integer
     - jsonPath: .status.knightsTotal
       name: Total
       type: integer
@@ -4748,8 +4752,27 @@ spec:
                   - name
                   type: object
                 type: array
+              knightsNotReady:
+                description: |-
+                  knightsNotReady is the number of knights that should be running but
+                  are not ready. Any such knight makes the table Degraded.
+                format: int32
+                type: integer
               knightsReady:
                 description: knightsReady is the number of knights in Ready phase.
+                format: int32
+                type: integer
+              knightsScaledToZero:
+                description: |-
+                  knightsScaledToZero is the number of autoscaled knights that KEDA
+                  scaled to zero (idle or waking). They wake on demand and do not
+                  degrade the table.
+                format: int32
+                type: integer
+              knightsSuspended:
+                description: |-
+                  knightsSuspended is the number of knights suspended by spec.suspend.
+                  They do not degrade the table.
                 format: int32
                 type: integer
               knightsTotal:

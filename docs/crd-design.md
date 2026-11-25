@@ -216,7 +216,7 @@ the operator does not commit results to git.
    - Count total concurrent tasks across knights. If exceeding `maxConcurrentTasks`, pause NATS consumers on lowest-priority knights.
    - Aggregate costs. If exceeding `costBudgetUSD`, suspend all knights (set annotation `roundtable.ai.roundtable.io/budget-suspended=true`).
    - Check cost reset schedule, reset counter when due.
-5. **Health Aggregation** — Compute phase: Ready (all knights ready), Degraded (some not ready), Suspended, OverBudget.
+5. **Health Aggregation** — Count knights as ready, scaled to zero (KEDA, `ScaledToZero` or `Waking`), suspended (`spec.suspend`) or not ready (`status.knightsReady`, `knightsScaledToZero`, `knightsSuspended`, `knightsNotReady`; `kubectl get rt` shows the `Idle` column). Compute phase: Ready (no knight that should run is down; scaled-to-zero and suspended knights count as healthy), Degraded (some not ready), Suspended, OverBudget.
 6. **Mission Counting** — Count active Missions referencing this table.
 
 **NATS Subjects:**

@@ -169,8 +169,10 @@ const (
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
-	// Status=True means all knights are ready and within budget.
-	// Status=False means knights are degraded, suspended, or over budget.
+	// Status=True means every knight that should run is ready (knights
+	// scaled to zero or suspended by spec.suspend count as healthy) and the
+	// table is within budget. Status=False means a knight that should run is
+	// not ready, or the table is suspended or over budget.
 	ConditionRoundTableAvailable = "Available"
 
 	// ConditionNATSReady indicates whether NATS JetStream streams are configured.
