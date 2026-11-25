@@ -383,6 +383,7 @@ func main() {
 	knightReconciler := &controller.KnightReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
+		APIReader:      mgr.GetAPIReader(),
 		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: see note above
 		DefaultImage:   defaultImage,
 		KnightSecurity: knightSecurity,
