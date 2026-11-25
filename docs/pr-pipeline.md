@@ -264,7 +264,23 @@ the template, the `prPipeline` values or the Chain API.
 ## Run it for an issue
 
 [Issue pickup](issue-pickup.md) does this automatically for issues labelled
-`rt:ready` (RoundTable `spec.issuePickup`). By hand:
+`rt:ready` (RoundTable `spec.issuePickup`). It runs on one of two engines,
+chosen per table with `spec.issuePickup.engine`:
+
+- `builtin` (the default): the issue pickup controller polls GitHub itself.
+- `trigger`: the controller generates a Trigger `<table>-issue-pickup` with a
+  [github source](triggers.md#issue-pickup-on-a-trigger) and the Trigger
+  starts the runs. Same run names, input (`{"repo", "issue"}`), labels,
+  comments, caps, breaking-PR hold and needs-human hand-back; the post-run
+  checks (merge verification, failed-run hand-back, split parents) stay with
+  the issue pickup controller for both engines.
+
+Switch with `kubectl patch roundtable <table> --type merge -p
+'{"spec":{"issuePickup":{"engine":"trigger"}}}'`, and back with
+`"engine":"builtin"`: that deletes the generated Trigger, running Chains keep
+going and are not started twice. See [issue-pickup.md](issue-pickup.md#engines).
+
+By hand:
 
 A spec change resets the Chain to `Idle`; the run annotation starts a run:
 

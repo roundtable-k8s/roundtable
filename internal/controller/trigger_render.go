@@ -46,6 +46,18 @@ type TriggerEvent struct {
 type triggerTemplateData struct {
 	Event   TriggerEvent
 	Trigger triggerRef
+	// Run is the run a github claim comment is posted for.
+	Run triggerRunRef
+	// Reason is why a github item was handed back (handBack comment).
+	Reason string
+}
+
+// triggerRunRef names a run in a claim comment.
+type triggerRunRef struct {
+	// Name is the run Chain's name.
+	Name string
+	// ID is the run's ai.roundtable.io/run value.
+	ID string
 }
 
 type triggerRef struct {

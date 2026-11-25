@@ -414,6 +414,39 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(after).To(Equal(labelCalls))
 	})
 
+	It("starts a finished run again when a claimed item is selected again", func() {
+		labels5 := func() []string {
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			return slices.Clone(gh.items[repo][0].labels)
+		}
+		gh.add(&triggerGitHubItem{number: 5, title: "Again", author: "alice", labels: []string{"rt:ready"}})
+		githubTrigger("again", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.Claim = &aiv1alpha1.TriggerGitHubClaim{AddLabels: []string{"rt:in-progress"}, RemoveLabels: []string{"rt:ready"}}
+		})
+		poll("again")
+		Eventually(func() int { return len(runsOf("again")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+		Eventually(labels5, 10*time.Second, 100*time.Millisecond).Should(ConsistOf("rt:in-progress"))
+		first := runsOf("again")[0]
+		firstID := first.Annotations[aiv1alpha1.AnnotationChainRun]
+		Eventually(func() string { return runsOf("again")[0].Annotations[aiv1alpha1.AnnotationTriggerClaimed] },
+			10*time.Second, 100*time.Millisecond).Should(Equal(firstID))
+		Expect(first.Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationTriggerGitHubRepo, repo))
+
+		finish(first.Name)
+		clock = clock.Add(time.Minute)
+		gh.mu.Lock()
+		gh.items[repo][0].labels = []string{"rt:ready"}
+		gh.mu.Unlock()
+		poll("again")
+		Eventually(func() bool { return chainrun.Active(&runsOf("again")[0]) }, 10*time.Second, 100*time.Millisecond).Should(BeTrue())
+		runs := runsOf("again")
+		Expect(runs).To(HaveLen(1))
+		Expect(runs[0].Name).To(Equal(first.Name))
+		Expect(runs[0].Annotations[aiv1alpha1.AnnotationChainRun]).NotTo(Equal(firstID))
+		Eventually(labels5, 10*time.Second, 100*time.Millisecond).Should(ConsistOf("rt:in-progress"))
+	})
+
 	It("does not fire again while the item's run exists", func() {
 		gh.add(&triggerGitHubItem{number: 7, title: "Stay labelled", author: "alice", labels: []string{"rt:ready"}})
 		githubTrigger("noclaim", nil)

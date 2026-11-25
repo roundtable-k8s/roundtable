@@ -57,7 +57,8 @@ type StartOptions struct {
 	Trigger string
 	// Source is one of the Source* values, set as LabelRunSource.
 	Source string
-	// Labels and Annotations are added to a new copy.
+	// Labels and Annotations are added to a new copy, and to Existing on a
+	// re-run.
 	Labels      map[string]string
 	Annotations map[string]string
 	// Owner owns a new copy; nil leaves it unowned.
@@ -81,13 +82,17 @@ func Start(ctx context.Context, c client.Client, scheme *runtime.Scheme, tmpl *a
 		if existing.Annotations == nil {
 			existing.Annotations = map[string]string{}
 		}
+		maps.Copy(existing.Annotations, opts.Annotations)
 		existing.Annotations[aiv1alpha1.AnnotationChainRun] = opts.Trigger
 		existing.Annotations[aiv1alpha1.AnnotationRunTemplate] = tmpl.Name
-		if opts.Source != "" {
+		if opts.Source != "" || len(opts.Labels) > 0 {
 			if existing.Labels == nil {
 				existing.Labels = map[string]string{}
 			}
-			existing.Labels[LabelRunSource] = opts.Source
+			maps.Copy(existing.Labels, opts.Labels)
+			if opts.Source != "" {
+				existing.Labels[LabelRunSource] = opts.Source
+			}
 		}
 		if err := c.Patch(ctx, existing, client.MergeFrom(orig)); err != nil {
 			return nil, err

@@ -43,6 +43,16 @@ const (
 	// consumer before the Trigger goes away.
 	FinalizerTrigger = "ai.roundtable.io/trigger-consumer"
 
+	// AnnotationTriggerGitHubRepo is the owner/name of the GitHub item a
+	// github-source run was started for.
+	AnnotationTriggerGitHubRepo = "ai.roundtable.io/trigger-github-repo"
+
+	// AnnotationTriggerClaimed is set on a github-source run to the run's
+	// ai.roundtable.io/run value once the item's claim was applied for that
+	// run (labels, assignees and comment), so a retried claim never comments
+	// twice and an item selected again after its run finished is a re-run.
+	AnnotationTriggerClaimed = "ai.roundtable.io/trigger-claimed"
+
 	// TriggerMaxRecentFirings bounds status.recentFirings.
 	TriggerMaxRecentFirings = 10
 )
@@ -120,7 +130,7 @@ const (
 type TriggerGitHubSource struct {
 	// repositories are the repositories polled, as "owner/name".
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:MaxItems=50
 	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
 	// +kubebuilder:validation:items:MaxLength=140
 	// +listType=set
@@ -144,9 +154,78 @@ type TriggerGitHubSource struct {
 
 	// claim marks an item as taken once its run was created, so it is not
 	// picked again: typically remove the selecting label and add an
-	// in-progress one.
+	// in-progress one. With a claim, an item that matches again after its
+	// run finished (the selecting label was put back) starts that run again.
 	// +optional
 	Claim *TriggerGitHubClaim `json:"claim,omitempty"`
+
+	// maxActivePerRepository caps active runs per repository, next to
+	// concurrency.maxActive for the whole Trigger. An item over the cap is
+	// held and starts on a later poll. 0 means no cap. Applies under the
+	// Allow concurrency policy.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxActivePerRepository int32 `json:"maxActivePerRepository,omitempty"`
+
+	// holdWhilePullRequestLabeled holds a repository while it has an open
+	// pull request with this label: its items start no new run until the
+	// pull request is merged or closed (for example a pull request that
+	// changes an API). If the pull requests cannot be listed, the repository
+	// is held too.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=50
+	// +optional
+	HoldWhilePullRequestLabeled string `json:"holdWhilePullRequestLabeled,omitempty"`
+
+	// skipIfBodyMatches hands items that must not start a run back instead:
+	// items whose title or body matches a pattern, or that already carry a
+	// handBack.addLabels label.
+	// +optional
+	SkipIfBodyMatches *TriggerGitHubSkip `json:"skipIfBodyMatches,omitempty"`
+}
+
+// TriggerGitHubSkip selects items to hand back instead of starting a run.
+type TriggerGitHubSkip struct {
+	// patterns are RE2 regular expressions matched against an item's title
+	// and body.
+	// +kubebuilder:validation:MaxItems=20
+	// +optional
+	Patterns []string `json:"patterns,omitempty"`
+
+	// handBack is applied to a skipped item. Remove the selecting label so
+	// it is handed back once.
+	// +required
+	HandBack TriggerGitHubHandBack `json:"handBack"`
+}
+
+// TriggerGitHubHandBack is the labelling and comment applied to a skipped
+// item.
+// +kubebuilder:validation:XValidation:rule="(has(self.addLabels) && size(self.addLabels) > 0) || (has(self.removeLabels) && size(self.removeLabels) > 0)",message="set handBack.addLabels or handBack.removeLabels"
+type TriggerGitHubHandBack struct {
+	// addLabels are added to the item. An item that already carries one of
+	// them is handed back as well.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=50
+	// +listType=set
+	// +optional
+	AddLabels []string `json:"addLabels,omitempty"`
+
+	// removeLabels are removed from the item, last.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=50
+	// +listType=set
+	// +optional
+	RemoveLabels []string `json:"removeLabels,omitempty"`
+
+	// comment is a Go template posted on the item. It sees .Event (as in
+	// spec.input), .Trigger and .Reason (why the item was skipped). Empty
+	// posts no comment.
+	// +kubebuilder:validation:MaxLength=4096
+	// +optional
+	Comment string `json:"comment,omitempty"`
 }
 
 // TriggerGitHubQuery is what GitHub's "list repository issues" endpoint can
@@ -180,13 +259,28 @@ type TriggerGitHubClaim struct {
 	// +optional
 	AddLabels []string `json:"addLabels,omitempty"`
 
-	// removeLabels are removed from the item.
+	// removeLabels are removed from the item, last.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=50
 	// +listType=set
 	// +optional
 	RemoveLabels []string `json:"removeLabels,omitempty"`
+
+	// assignees are GitHub logins assigned to the item. GitHub ignores
+	// logins that cannot be assigned.
+	// +kubebuilder:validation:MaxItems=10
+	// +listType=set
+	// +optional
+	Assignees []string `json:"assignees,omitempty"`
+
+	// comment is a Go template posted on the item once per run, after the
+	// labels were added. It sees .Event (as in spec.input), .Trigger and
+	// .Run (.Run.Name, and .Run.ID: the run's ai.roundtable.io/run value).
+	// Empty posts no comment.
+	// +kubebuilder:validation:MaxLength=4096
+	// +optional
+	Comment string `json:"comment,omitempty"`
 }
 
 // TriggerNATSSource reads events from the RoundTable's events stream.

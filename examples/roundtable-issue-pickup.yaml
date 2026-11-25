@@ -29,6 +29,10 @@ spec:
       key: token
 
   issuePickup:
+    # builtin (default) polls in the issue pickup controller; trigger runs
+    # pickup on a generated Trigger "<table>-issue-pickup" (needs
+    # nats.createStreams or an events stream). See docs/issue-pickup.md#engines.
+    # engine: trigger
     repos:
       - roundtable-k8s/roundtable
       - roundtable-k8s/roundtable-ui

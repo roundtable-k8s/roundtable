@@ -28,6 +28,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,29 +83,44 @@ type IssuePickupReconciler struct {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=chains,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile polls GitHub at most once per spec.issuePickup.intervalSeconds.
+// With engine: trigger it keeps the generated Trigger in line with the spec
+// and only does the post-run checks itself.
 func (r *IssuePickupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, req.NamespacedName, rt); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Before anything else, so a switch of engine (a spec change) takes
+	// effect at once and removing spec.issuePickup removes the Trigger.
+	triggerErr := r.reconcilePickupTrigger(ctx, rt)
+	if triggerErr != nil {
+		r.Recorder.Eventf(rt, corev1.EventTypeWarning, "IssuePickupFailed", "%v", triggerErr)
+	}
 	spec := rt.Spec.IssuePickup
 	if spec == nil || spec.Suspend || rt.Spec.Suspend || !rt.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, triggerErr
 	}
 
 	interval := pickupInterval(spec)
 	now := r.now()
 	if st := rt.Status.IssuePickup; st != nil && st.LastPollTime != nil {
 		if next := st.LastPollTime.Add(interval); now.Before(next) {
+			if err := r.patchEngineStatus(ctx, rt); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{RequeueAfter: next.Sub(now)}, nil
 		}
 	}
 
 	res := r.poll(ctx, rt, spec, now)
+	if triggerErr != nil {
+		res.fail("%v", triggerErr)
+	}
 
 	orig := rt.DeepCopy()
 	st := rt.Status.IssuePickup
@@ -118,8 +134,17 @@ func (r *IssuePickupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	st.PickedTotal += res.picked
 	st.SkippedTotal += res.skipped
 	st.LastError = truncate(strings.Join(res.errs, "; "), pickupLastErrorMax)
+	newlyProven := st.TriggerEngineSucceededAt == nil && res.triggerSucceeded != ""
+	if newlyProven {
+		st.TriggerEngineSucceededAt = &pollTime
+	}
+	setPickupEngineStatus(rt, st)
 	if err := r.Status().Patch(ctx, rt, client.MergeFrom(orig)); err != nil {
 		return ctrl.Result{}, err
+	}
+	if newlyProven {
+		r.Recorder.Eventf(rt, corev1.EventTypeNormal, "BuiltinEngineDeprecated",
+			"Chain %s, started by the trigger engine, succeeded: the builtin issue pickup engine is deprecated for this table", res.triggerSucceeded)
 	}
 	if len(res.errs) > 0 {
 		r.Recorder.Eventf(rt, corev1.EventTypeWarning, "IssuePickupFailed", "%s", st.LastError)
@@ -133,6 +158,19 @@ type pickupResult struct {
 	active          int32
 	picked, skipped int64
 	errs            []string
+	// triggerSucceeded names a succeeded run the trigger engine started.
+	triggerSucceeded string
+}
+
+// patchEngineStatus records the engine in use when it changed between polls.
+func (r *IssuePickupReconciler) patchEngineStatus(ctx context.Context, rt *aiv1alpha1.RoundTable) error {
+	st := rt.Status.IssuePickup
+	orig := rt.DeepCopy()
+	setPickupEngineStatus(rt, st)
+	if equality.Semantic.DeepEqual(orig.Status.IssuePickup, st) {
+		return nil
+	}
+	return r.Status().Patch(ctx, rt, client.MergeFrom(orig))
 }
 
 func (p *pickupResult) fail(format string, args ...any) {
@@ -140,10 +178,12 @@ func (p *pickupResult) fail(format string, args ...any) {
 }
 
 // poll does one pickup pass: garbage-collects finished Chains, counts the
-// active ones, and claims ready issues while there is capacity.
+// active ones, runs the post-run checks, and (builtin engine) claims ready
+// issues while there is capacity.
 func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTable, spec *aiv1alpha1.IssuePickupSpec, now time.Time) pickupResult {
 	log := logf.FromContext(ctx)
 	res := pickupResult{}
+	triggerEngine := pickupEngine(spec) == aiv1alpha1.IssuePickupEngineTrigger
 
 	chains := &aiv1alpha1.ChainList{}
 	if err := r.List(ctx, chains, client.InNamespace(rt.Namespace),
@@ -170,14 +210,19 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 	}
 
 	tmpl := &aiv1alpha1.Chain{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: rt.Namespace, Name: spec.ChainRef.Name}, tmpl); err != nil {
-		res.fail("get chain template %q: %v", spec.ChainRef.Name, err)
-		return res
-	}
-	patterns, err := compileHumanPatterns(spec.HumanPatterns)
-	if err != nil {
-		res.fail("%v", err)
-		return res
+	var patterns []*regexp.Regexp
+	if !triggerEngine {
+		// The trigger engine reports a missing template and bad patterns
+		// on its Trigger.
+		if err := r.Get(ctx, types.NamespacedName{Namespace: rt.Namespace, Name: spec.ChainRef.Name}, tmpl); err != nil {
+			res.fail("get chain template %q: %v", spec.ChainRef.Name, err)
+			return res
+		}
+		var err error
+		if patterns, err = compileHumanPatterns(spec.HumanPatterns); err != nil {
+			res.fail("%v", err)
+			return res
+		}
 	}
 	ref := github.ResolveTokenRef(github.TableTokenRef(rt))
 	if ref == nil {
@@ -207,6 +252,12 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 				res.fail("close split parent for chain %s: %v", c.Name, err)
 			}
 		}
+		if res.triggerSucceeded == "" && triggerEngineSucceeded(c) {
+			res.triggerSucceeded = c.Name
+		}
+	}
+	if triggerEngine {
+		return res // the generated Trigger picks up ready issues
 	}
 	maxActive, maxPerRepo := max(spec.MaxActive, 1), max(spec.MaxActivePerRepo, 1)
 	for _, repo := range spec.Repos {

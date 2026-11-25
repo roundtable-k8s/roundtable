@@ -143,6 +143,44 @@ Pause it with `spec.issuePickup.suspend: true` (running Chains continue) or
 remove `spec.issuePickup`. A suspended RoundTable (`spec.suspended`) does not
 poll either.
 
+## Engines
+
+`spec.issuePickup.engine` selects what picks up ready issues:
+
+- `builtin` (the default): the controller's own poller, as described above.
+- `trigger`: the controller generates a [Trigger](triggers.md#issue-pickup-on-a-trigger)
+  named `<table>-issue-pickup` (owned by the RoundTable) with a github source
+  built from these fields, and its own poller no longer claims issues for the
+  table. It still runs the post-run checks ([failed runs](#failed-runs),
+  merge verification, [split parents](#split-parents-319)) and deletes
+  finished Chains after `ttlSecondsAfterFinished`, for both engines.
+
+Like every github-source Trigger, the trigger engine needs the table's events
+stream (`spec.nats.createStreams: true`, see
+[Delivery](triggers.md#delivery-nats-webhook-and-github-sources)); check the
+Trigger's `Ready` and `GitHubReady` conditions after switching.
+
+Observable behaviour is the same on both: run name
+(`<chain>-<repo>-<issue>`), input, labels, claim comment, assignees,
+per-repo cap, the breaking-PR hold and the `humanPatterns` hand-back.
+Switch a table with:
+
+```bash
+kubectl -n roundtable patch roundtable roundtable-dev --type merge \
+  -p '{"spec":{"issuePickup":{"engine":"trigger"}}}'
+```
+
+and back with `"engine":"builtin"` (or by removing the field). Switching back
+deletes the generated Trigger; runs it started are owned by the RoundTable and
+keep running, and the builtin poller finds them by name, so an in-progress
+issue is never picked twice. `status.issuePickup.engine` and `.trigger` show
+the engine in use. Once a run started by the trigger engine has succeeded, the
+RoundTable gets a `BuiltinEngineDeprecated` event and condition (in
+`status.issuePickup.conditions`); nothing is called deprecated before that.
+`pickedTotal` and `skippedTotal` count the builtin engine only; the Trigger's
+`status.recentFirings`, `GitHubReady` condition and events cover the trigger
+engine.
+
 ## Fields
 
 | Field | Default | Description |
@@ -160,6 +198,7 @@ poll either.
 | `maxActivePerRepo` | `1` | Unfinished pickup Chains per repo |
 | `ttlSecondsAfterFinished` | `604800` | Delete finished pickup Chains after this long; `0` keeps them |
 | `suspend` | `false` | Stop polling |
+| `engine` | `builtin` | `builtin` or `trigger`, see [Engines](#engines) |
 
 The operator flag `--github-api-url` (default `https://api.github.com`, set
 through the chart's `extraArgs`) points it at another GitHub API, e.g. GitHub
@@ -173,8 +212,9 @@ kubectl -n roundtable get chains -l ai.roundtable.io/pickup-roundtable=roundtabl
 ```
 
 `status.issuePickup` has `lastPollTime`, `active` (unfinished pickup Chains),
-`pickedTotal`, `skippedTotal` and `lastError` (empty when the last poll
-succeeded). The RoundTable also gets `IssuePickedUp`, `IssueNeedsHuman` and
+`pickedTotal`, `skippedTotal`, `lastError` (empty when the last poll
+succeeded), `engine`, `trigger` (the generated Trigger, trigger engine only),
+`triggerEngineSucceededAt` and `conditions` (see [Engines](#engines)). The RoundTable also gets `IssuePickedUp`, `IssueNeedsHuman` and
 `IssuePickupFailed` events.
 
 ## Limits
