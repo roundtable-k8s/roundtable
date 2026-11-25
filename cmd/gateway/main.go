@@ -212,9 +212,6 @@ func main() {
 	if hooksEnabled {
 		svc.Hooks = k8s
 	}
-	if schedulesEnabled {
-		svc.Schedules = k8s
-	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {

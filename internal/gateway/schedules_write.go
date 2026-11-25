@@ -341,8 +341,13 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 	default:
 		return fieldErr("spec.concurrency.policy", "must be Allow, Forbid or Replace, not %q", spec.Concurrency.Policy)
 	}
-	if spec.Target.Knight != nil && spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
-		return fieldErr("spec.concurrency.policy", "Replace is not supported with target.knight")
+	if spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+		switch {
+		case spec.Target.Knight != nil:
+			return fieldErr("spec.concurrency.policy", "Replace is not supported with target.knight")
+		case spec.Target.Mission != nil:
+			return fieldErr("spec.concurrency.policy", "Replace is not supported with target.mission")
+		}
 	}
 	if spec.Concurrency.MaxActive < 0 {
 		return fieldErr("spec.concurrency.maxActive", "must be at least 0")
@@ -353,15 +358,25 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 	return nil
 }
 
-// validateScheduleTarget requires exactly one of target.chainRef and
-// target.knight, and applies the trigger controller's rules to a knight
-// target: the Knight exists and sits at roundTableRef, the task parses as a
-// template, and spec.input is unset.
+// validateScheduleTarget requires exactly one of target.chainRef,
+// target.knight and target.mission, and applies the trigger controller's
+// rules to a knight target (the Knight exists and sits at roundTableRef, the
+// task parses as a template, spec.input is unset) and to a mission target
+// (objective and successCriteria parse as templates, roundTableRef is set,
+// spec.input is unset).
 func (s *Service) validateScheduleTarget(ctx context.Context, ns string, spec *aiv1alpha1.TriggerSpec) error {
 	tgt := spec.Target
+	set := 0
+	for _, isSet := range []bool{tgt.ChainRef != nil, tgt.Knight != nil, tgt.Mission != nil} {
+		if isSet {
+			set++
+		}
+	}
 	switch {
-	case tgt.ChainRef != nil && tgt.Knight != nil:
-		return fieldErr("spec.target", "set exactly one of chainRef or knight, not both")
+	case set > 1:
+		return fieldErr("spec.target", "set exactly one of chainRef, knight or mission, not more than one")
+	case tgt.Mission != nil:
+		return validateMissionTarget(spec)
 	case tgt.Knight != nil:
 		return s.validateKnightTarget(ctx, ns, spec)
 	case tgt.ChainRef != nil && tgt.ChainRef.Name != "":
@@ -369,8 +384,32 @@ func (s *Service) validateScheduleTarget(ctx context.Context, ns string, spec *a
 	case tgt.ChainRef != nil:
 		return fieldErr("spec.target.chainRef.name", "is required")
 	default:
-		return fieldErr("spec.target", "set exactly one of chainRef or knight")
+		return fieldErr("spec.target", "set exactly one of chainRef, knight or mission")
 	}
+}
+
+// validateMissionTarget follows the trigger controller's target.mission
+// rules. The RoundTable's existence is checked with spec.roundTableRef, and
+// the CRD's own bounds (costBudgetUSD, timeouts) come back from the API
+// server as field errors.
+func validateMissionTarget(spec *aiv1alpha1.TriggerSpec) error {
+	mt := spec.Target.Mission
+	if mt.Objective == "" {
+		return fieldErr("spec.target.mission.objective", "is required")
+	}
+	if err := parseTemplate("spec.target.mission.objective", mt.Objective); err != nil {
+		return err
+	}
+	if err := parseTemplate("spec.target.mission.successCriteria", mt.SuccessCriteria); err != nil {
+		return err
+	}
+	if spec.RoundTableRef == nil || spec.RoundTableRef.Name == "" {
+		return fieldErr("spec.roundTableRef.name", "is required with target.mission")
+	}
+	if spec.Input != "" {
+		return fieldErr("spec.input", "is not supported with target.mission")
+	}
+	return nil
 }
 
 // triggerTemplateFuncs stand in for the trigger controller's template

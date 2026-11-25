@@ -288,6 +288,76 @@ func TestCreateScheduleKnightTarget(t *testing.T) {
 	}
 }
 
+func missionSpec(objective string) map[string]any {
+	s := scheduleSpec("0 7 * * *", "", "digest")
+	s["target"] = map[string]any{"mission": map[string]any{
+		"objective": objective, "successCriteria": "Report for {{ .Trigger.Name }} posted", "costBudgetUSD": "2.50",
+	}}
+	s["roundTableRef"] = map[string]any{"name": "dev"}
+	return s
+}
+
+func TestCreateScheduleMissionTarget(t *testing.T) {
+	e := newScheduleWriteEnv(t, true, nil)
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, map[string]any{
+		"name": "weekly", "spec": missionSpec("Review {{ .Trigger.Name }}"),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d: %v", resp.StatusCode, out)
+	}
+	trg := e.trigger(t, "weekly")
+	if m := trg.Spec.Target.Mission; m == nil || m.Objective != "Review {{ .Trigger.Name }}" || trg.Spec.Target.ChainRef != nil {
+		t.Errorf("target = %+v", trg.Spec.Target)
+	}
+
+	// PUT keeps a mission target.
+	resp, out = e.do(t, http.MethodPut, "/v1/schedules/"+testNS+"/weekly", testToken, map[string]any{
+		"spec": missionSpec("Review again"),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("replace: status %d: %v", resp.StatusCode, out)
+	}
+	if trg := e.trigger(t, "weekly"); trg.Spec.Target.Mission == nil || trg.Spec.Target.Mission.Objective != "Review again" {
+		t.Errorf("replaced target = %+v", trg.Spec.Target)
+	}
+
+	bad := func(mut func(map[string]any)) map[string]any {
+		s := missionSpec("do it")
+		mut(s)
+		return map[string]any{"name": "x", "spec": s}
+	}
+	mission := func(s map[string]any) map[string]any {
+		return s["target"].(map[string]any)["mission"].(map[string]any)
+	}
+	cases := []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"with chainRef", bad(func(s map[string]any) {
+			s["target"].(map[string]any)["chainRef"] = map[string]any{"name": "digest"}
+		}), "spec.target"},
+		{"with knight", bad(func(s map[string]any) {
+			s["target"].(map[string]any)["knight"] = map[string]any{"name": "galahad", "task": "t"}
+		}), "spec.target"},
+		{"no roundTableRef", bad(func(s map[string]any) { delete(s, "roundTableRef") }), "spec.roundTableRef.name"},
+		{"missing table", bad(func(s map[string]any) { s["roundTableRef"] = map[string]any{"name": "nope"} }), "spec.roundTableRef.name"},
+		{"input set", bad(func(s map[string]any) { s["input"] = "hi" }), "spec.input"},
+		{"replace policy", bad(func(s map[string]any) { s["concurrency"] = map[string]any{"policy": "Replace"} }), "spec.concurrency.policy"},
+		{"empty objective", bad(func(s map[string]any) { mission(s)["objective"] = "" }), "spec.target.mission.objective"},
+		{"bad objective template", bad(func(s map[string]any) { mission(s)["objective"] = "{{ .Oops" }), "spec.target.mission.objective"},
+		{"bad successCriteria template", bad(func(s map[string]any) { mission(s)["successCriteria"] = "{{ .Oops" }), "spec.target.mission.successCriteria"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, tc.body)
+			if resp.StatusCode != http.StatusBadRequest || out["field"] != tc.field {
+				t.Fatalf("status %d, field %v, want 400 %s: %v", resp.StatusCode, out["field"], tc.field, out)
+			}
+		})
+	}
+}
+
 func TestCreateScheduleAPIServerValidation(t *testing.T) {
 	funcs := &interceptor.Funcs{
 		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {

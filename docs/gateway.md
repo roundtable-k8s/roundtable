@@ -845,14 +845,15 @@ annotations, status) are rejected.
 |---|---|
 | `name` | Required on `POST` (DNS name, at most 63 characters). On `PUT`, optional and must match the path. |
 | `namespace` | `POST`: defaults to the gateway's namespace; must be allowed. `PUT`: optional and must match the path. |
-| `spec` | A [`TriggerSpec`](triggers.md): `source.schedule` (`cron`, `timeZone`, `startingDeadlineSeconds`), `target.chainRef`, `input`, `dedupeKey`, `concurrency`, `suspend`, `roundTableRef`, `ttlSecondsAfterFinished`. |
+| `spec` | A [`TriggerSpec`](triggers.md): `source.schedule` (`cron`, `timeZone`, `startingDeadlineSeconds`), exactly one of `target.chainRef`, `target.knight` or `target.mission`, `input`, `dedupeKey`, `concurrency`, `suspend`, `roundTableRef`, `ttlSecondsAfterFinished`. |
 
 The gateway checks the CRD's rules before writing: exactly a schedule source
 (`spec.source`), a five-field cron the trigger controller can parse
 (`spec.source.schedule.cron`, no `TZ=` prefix), an IANA time zone other than
 `Local` (`spec.source.schedule.timeZone`), an existing target Chain
-(`spec.target.chainRef.name`) and RoundTable when one is named
-(`spec.roundTableRef.name`), and the concurrency and TTL bounds. A failure is
+(`spec.target.chainRef.name`), Knight (`spec.target.knight.name`) or valid
+Mission templates (`spec.target.mission.objective`), the RoundTable when one
+is named (`spec.roundTableRef.name`), and the concurrency and TTL bounds. A failure is
 a 400 whose `field` names the offending field; so are validation errors the
 API server returns (OpenAPI or CEL rules):
 
@@ -867,8 +868,12 @@ Creates the Trigger, labelled `app.kubernetes.io/managed-by:
 roundtable-gateway` and annotated `ai.roundtable.io/caller` with the caller
 (the token's name from the token file, or `<namespace>/<serviceaccount>` for
 ServiceAccount callers; see [Auth](#auth)). A schedule may
-target a Chain (`target.chainRef`) or a Knight (`target.knight`); the gateway
-applies the trigger controller's rules to either. Returns 201 with a `Location`, or 409
+target a Chain (`target.chainRef`), a Knight (`target.knight`) or a Mission
+(`target.mission`); the gateway applies the trigger controller's rules to each.
+A knight target's Knight must exist (and sit at `roundTableRef` when one is
+set). A mission target needs `roundTableRef`, and its `objective` and
+`successCriteria` must parse as templates. Neither accepts `spec.input` or
+`concurrency.policy: Replace`. Returns 201 with a `Location`, or 409
 if a Trigger of that name exists.
 
 ```json
