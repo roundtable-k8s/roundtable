@@ -241,21 +241,22 @@ spec:
         app.kubernetes.io/name: roundtable-gateway
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: gateway
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
         checksum/values: {{ toJson $gw | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       serviceAccountName: {{ $name }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $gw) }}
+      {{- . | nindent 6 }}
       {{- end }}
       containers:
         - name: gateway
@@ -338,6 +339,7 @@ spec:
             items:
               - key: {{ $gw.auth.secretKey | default "token" }}
                 path: token
+{{ include "roundtable-operator.pdb" (dict "root" . "name" $name "component" $gw "app" "roundtable-gateway" "label" "gateway") }}
 ---
 apiVersion: v1
 kind: Service

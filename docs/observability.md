@@ -98,6 +98,10 @@ telemetry:
   # operator/gateway/dashboard export to this collector's Service.
   collector:
     enabled: false
+    # Pod scheduling for the collector (empty = use the global values).
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
     image:
       repository: otel/opentelemetry-collector-contrib
       tag: "0.120.0"
