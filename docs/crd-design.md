@@ -522,3 +522,17 @@ Start using Mission CRDs for incident response and exploratory tasks that curren
 - Chains reference knights by name, no knight changes needed
 - NATS subjects remain identical — same prefix, same structure
 - All new CRDs are additive; no existing resources are modified
+
+## 7. Knight `spec.mcpServers` (claude-knight only)
+
+CLI-first (#179): prefer a CLI in the tools image; use MCP only for services
+with no CLI. `spec.mcpServers` declares remote MCP servers (`name`, `url`,
+`transport` = `streamable-http` (default) or `sse`, `toolFilter.exclude`).
+For a claude-knight image the operator renders them into `MCP_SERVERS_JSON`
+(`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`) and every
+`toolFilter.exclude` entry into `CLAUDE_DISALLOWED_TOOLS` as
+`mcp__<name>__<tool>`. If `spec.env` already sets either variable, the user's
+entries are kept and the operator's are added (on a server-name clash the
+user's server wins). On any other runtime nothing is rendered and the Knight
+gets `Degraded=True` with reason `MCPServersUnsupported`. No auth headers
+(#359) and no `toolFilter.include`.

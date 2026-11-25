@@ -935,6 +935,7 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	// Append user-defined env vars
 	env = append(env, b.knight.Spec.Env...)
 	env = append(env, b.env...)
+	env = applyMCPServersEnv(env, b.knight, image)
 
 	// Main knight container
 	probePort := 3000

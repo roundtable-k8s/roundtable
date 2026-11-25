@@ -88,6 +88,13 @@ const (
 	// The condition is absent otherwise.
 	ConditionKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
 
+	// ConditionKnightDegraded is True when part of the spec cannot be honoured.
+	ConditionKnightDegraded = "Degraded"
+
+	// ReasonMCPServersUnsupported means spec.mcpServers is set on a runtime
+	// that has no MCP client (anything but claude-knight); nothing is rendered.
+	ReasonMCPServersUnsupported = "MCPServersUnsupported"
+
 	// ReasonKnightDeprecatedFieldsUsed is the reason (and event reason base)
 	// for ConditionKnightDeprecatedFieldsUsed.
 	ReasonKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
