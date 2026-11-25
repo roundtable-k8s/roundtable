@@ -175,6 +175,30 @@ func TestSandboxBackend_Reconcile_ResumesSuspendedSandbox(t *testing.T) {
 	assert.Equal(t, SandboxOperatingModeRunning, nestedStr(t, getSandbox(t, c), "spec", "operatingMode"))
 }
 
+func TestSandboxBackend_Reconcile_ShutdownTime(t *testing.T) {
+	ctx := context.Background()
+	s := newSandboxTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	b := NewSandboxBackend(c, s, "default:latest", stubSandboxPodSpecBuilder)
+
+	// A standing knight has no shutdown time.
+	knight := newTestKnight("gawain")
+	require.NoError(t, b.Reconcile(ctx, knight))
+	_, found, _ := unstructured.NestedFieldNoCopy(getSandbox(t, c).Object, "spec", "shutdownTime")
+	assert.False(t, found, "spec.shutdownTime must not be set without the annotation")
+
+	// A mission knight's annotation becomes spec.shutdownTime, in UTC.
+	knight.Annotations = map[string]string{aiv1alpha1.AnnotationShutdownTime: "2026-11-25T14:30:00+02:00"}
+	require.NoError(t, b.Reconcile(ctx, knight))
+	assert.Equal(t, "2026-11-25T12:30:00Z", nestedStr(t, getSandbox(t, c), "spec", "shutdownTime"))
+
+	// An unparsable annotation clears it rather than failing the reconcile.
+	knight.Annotations[aiv1alpha1.AnnotationShutdownTime] = "tomorrow"
+	require.NoError(t, b.Reconcile(ctx, knight))
+	_, found, _ = unstructured.NestedFieldNoCopy(getSandbox(t, c).Object, "spec", "shutdownTime")
+	assert.False(t, found, "an invalid annotation must not set spec.shutdownTime")
+}
+
 func TestSandboxBackend_Reconcile_KeepsForeignLabels(t *testing.T) {
 	ctx := context.Background()
 	s := newSandboxTestScheme(t)

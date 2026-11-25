@@ -53,7 +53,7 @@ type RoundTableSpec struct {
 	Secrets []corev1.LocalObjectReference `json:"secrets,omitempty"`
 
 	// github configures GitHub credentials inherited by the table's knights
-	// (including mission and warm-pool knights). A Knight's own
+	// (including mission knights). A Knight's own
 	// spec.github.tokenSecretRef takes precedence.
 	// +optional
 	GitHub *GitHubConfig `json:"github,omitempty"`
@@ -85,11 +85,6 @@ type RoundTableSpec struct {
 	// Missions can override specific fields using specOverrides.
 	// +optional
 	KnightTemplates map[string]KnightSpec `json:"knightTemplates,omitempty"`
-
-	// warmPool configures a pool of pre-warmed Knight pods ready for instant mission assignment.
-	// When missions need ephemeral knights, they claim warm pods from this pool instead of cold-starting.
-	// +optional
-	WarmPool *WarmPoolConfig `json:"warmPool,omitempty"`
 
 	// modelAliases maps intent names to model IDs so chain steps can say
 	// "model: deep" instead of a concrete model, e.g.
@@ -410,10 +405,6 @@ type RoundTableStatus struct {
 	// +optional
 	ActiveMissions int32 `json:"activeMissions,omitempty"`
 
-	// warmPool reports the current state of the warm pool.
-	// +optional
-	WarmPool *WarmPoolStatus `json:"warmPool,omitempty"`
-
 	// issuePickup is the observed state of spec.issuePickup.
 	// +optional
 	IssuePickup *IssuePickupStatus `json:"issuePickup,omitempty"`
@@ -431,58 +422,6 @@ type RoundTableStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// WarmPoolConfig configures the operator-wide warm pool of pre-provisioned knight pods.
-// The RoundTable controller maintains a pool of idle, pre-warmed knights that missions
-// can claim instantly instead of cold-starting ephemeral knights.
-type WarmPoolConfig struct {
-	// size is the desired number of warm knights to maintain in the pool.
-	// The controller ensures this many unclaimed knights exist at all times.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=20
-	// +kubebuilder:default=0
-	// +optional
-	Size int32 `json:"size,omitempty"`
-
-	// runtime selects the backend for warm pool pods.
-	// +kubebuilder:validation:Enum=deployment;sandbox
-	// +kubebuilder:default="deployment"
-	// +optional
-	Runtime string `json:"runtime,omitempty"`
-
-	// template defines the base KnightSpec for warm pool pods.
-	// When a mission claims a warm knight, it patches this spec with mission-specific config.
-	// +kubebuilder:validation:Required
-	Template KnightSpec `json:"template"`
-
-	// maxIdleTimeSeconds is how long, in seconds, a warm knight can sit
-	// unclaimed before it is recycled, which prevents stale state.
-	// +kubebuilder:default=3600
-	// +kubebuilder:validation:Minimum=60
-	// +optional
-	MaxIdleTimeSeconds int32 `json:"maxIdleTimeSeconds,omitempty"`
-
-	// replaceOnClaim controls whether claimed knights are immediately replaced.
-	// When true (default), the pool is replenished as soon as a knight is claimed.
-	// +kubebuilder:default=true
-	// +optional
-	ReplaceOnClaim bool `json:"replaceOnClaim,omitempty"`
-}
-
-// WarmPoolStatus reports the observed state of the warm pool.
-type WarmPoolStatus struct {
-	// available is the number of warm knights ready to be claimed.
-	// +optional
-	Available int32 `json:"available,omitempty"`
-
-	// provisioning is the number of warm knights still starting up.
-	// +optional
-	Provisioning int32 `json:"provisioning,omitempty"`
-
-	// claimed is the total number of warm knights claimed by missions since last reset.
-	// +optional
-	Claimed int32 `json:"claimed,omitempty"`
 }
 
 // +kubebuilder:object:root=true

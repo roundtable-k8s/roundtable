@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -104,8 +105,27 @@ func sandboxPodAnnotations(knight *aiv1alpha1.Knight) map[string]string {
 	}
 }
 
+// sandboxShutdownTime returns the Sandbox spec.shutdownTime for the Knight:
+// its ai.roundtable.io/shutdown-time annotation, normalised to RFC 3339 UTC.
+// Mission knights carry it (the mission's expiry); standing knights do not,
+// and a missing or unparsable value leaves the Sandbox without a shutdown time.
+// At shutdownTime agent-sandbox stops the pod; the default shutdownPolicy
+// (Retain) keeps the Sandbox object, which the Mission deletes with the Knight.
+func sandboxShutdownTime(knight *aiv1alpha1.Knight) (string, bool) {
+	v := knight.Annotations[aiv1alpha1.AnnotationShutdownTime]
+	if v == "" {
+		return "", false
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return "", false
+	}
+	return t.UTC().Format(time.RFC3339), true
+}
+
 // Reconcile creates or updates the Sandbox CR for the Knight and sets it to
-// Running. spec.replicas does not exist in v1beta1, and spec.service is left
+// Running, with spec.shutdownTime from the Knight's shutdown-time annotation
+// (see sandboxShutdownTime). spec.replicas does not exist in v1beta1, and spec.service is left
 // unset: knights need no Service.
 func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
@@ -141,6 +161,13 @@ func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knigh
 		if err := unstructured.SetNestedStringMap(sandbox.Object, sandboxPodAnnotations(knight),
 			"spec", "podTemplate", "metadata", "annotations"); err != nil {
 			return err
+		}
+		if shutdown, ok := sandboxShutdownTime(knight); ok {
+			if err := unstructured.SetNestedField(sandbox.Object, shutdown, "spec", "shutdownTime"); err != nil {
+				return err
+			}
+		} else {
+			unstructured.RemoveNestedField(sandbox.Object, "spec", "shutdownTime")
 		}
 		return unstructured.SetNestedField(sandbox.Object, SandboxOperatingModeRunning, "spec", "operatingMode")
 	})

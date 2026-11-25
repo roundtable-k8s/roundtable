@@ -49,25 +49,15 @@ roundtable_missions{phase="Active",table="t1"} 3
 	}
 }
 
-func TestTableCostAndWarmPool(t *testing.T) {
+func TestTableCost(t *testing.T) {
 	TableCostUSD.Reset()
-	WarmPoolKnights.Reset()
 	TableCostUSD.WithLabelValues("t1").Set(1.5)
-	WarmPoolKnights.WithLabelValues("t1", "available").Set(4)
 	const wantCost = `
 # HELP roundtable_table_cost_usd Total cost in USD by table
 # TYPE roundtable_table_cost_usd gauge
 roundtable_table_cost_usd{table="t1"} 1.5
 `
-	const wantPool = `
-# HELP roundtable_warm_pool_knights Warm pool knights by table and state
-# TYPE roundtable_warm_pool_knights gauge
-roundtable_warm_pool_knights{state="available",table="t1"} 4
-`
 	if err := testutil.CollectAndCompare(TableCostUSD, strings.NewReader(wantCost)); err != nil {
-		t.Error(err)
-	}
-	if err := testutil.CollectAndCompare(WarmPoolKnights, strings.NewReader(wantPool)); err != nil {
 		t.Error(err)
 	}
 }

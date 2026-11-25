@@ -19,20 +19,19 @@ spec:
     concurrency: 2
     taskTimeoutSeconds: 120
 
-  # Optional: pre-warm knights for instant mission startup
-  warmPool:
-    size: 2
-    runtime: deployment
-    maxIdleTimeSeconds: 3600
-    replaceOnClaim: true
-    template:
-      domain: warm-pool
+  # Optional: templates for mission knights. A mission knight whose template
+  # says runtime: sandbox is one bare agent-sandbox Sandbox that shuts down
+  # when the mission expires (start + ttlSeconds).
+  knightTemplates:
+    sandboxed:
+      runtime: sandbox
+      domain: general
       model: claude-sonnet-4-20250514
       skills:
         - general
       nats:
         subjects:
-          - "fleet-a.tasks.warm-pool.>"
+          - "fleet-a.tasks.general.>"
 
   policies:
     maxConcurrentTasks: 20

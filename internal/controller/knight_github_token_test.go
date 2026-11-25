@@ -185,45 +185,4 @@ var _ = Describe("Knight GitHub token file", func() {
 		Expect(sandboxClient.Get(ctx, client.ObjectKeyFromObject(k), sb)).To(Succeed())
 		expectGitHubTokenMount(sandboxPodSpec(sb), "roundtable-github-token", "token")
 	})
-
-	It("stamps the RoundTable's Secret onto warm-pool knights", func() {
-		poolRT := &aiv1alpha1.RoundTable{
-			ObjectMeta: metav1.ObjectMeta{Name: "gh-pool", Namespace: "default"},
-			Spec: aiv1alpha1.RoundTableSpec{
-				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "ghp", TasksStream: "ghp_tasks", ResultsStream: "ghp_results"},
-				GitHub: &aiv1alpha1.GitHubConfig{
-					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"},
-				},
-				WarmPool: &aiv1alpha1.WarmPoolConfig{
-					Size: 1,
-					Template: aiv1alpha1.KnightSpec{
-						Domain: "general",
-						Skills: []string{"general"},
-						NATS:   aiv1alpha1.KnightNATS{Subjects: []string{"ghp.tasks.general.>"}},
-					},
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, poolRT)).To(Succeed())
-		defer func() {
-			knights := &aiv1alpha1.KnightList{}
-			_ = k8sClient.List(ctx, knights, client.InNamespace("default"),
-				client.MatchingLabels{aiv1alpha1.LabelRoundTable: poolRT.Name})
-			for i := range knights.Items {
-				_ = k8sClient.Delete(ctx, &knights.Items[i])
-			}
-			_ = k8sClient.Delete(ctx, poolRT)
-		}()
-
-		rtReconciler := &RoundTableReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
-		Expect(rtReconciler.createWarmKnight(ctx, poolRT)).To(Succeed())
-
-		knights := &aiv1alpha1.KnightList{}
-		Expect(k8sClient.List(ctx, knights, client.InNamespace("default"),
-			client.MatchingLabels{aiv1alpha1.LabelRoundTable: poolRT.Name})).To(Succeed())
-		Expect(knights.Items).To(HaveLen(1))
-		gh := knights.Items[0].Spec.GitHub
-		Expect(gh).NotTo(BeNil())
-		Expect(gh.TokenSecretRef).To(Equal(&corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"}))
-	})
 })

@@ -36,12 +36,6 @@ const (
 	// LabelRole specifies a knight's role within a mission
 	LabelRole = "ai.roundtable.io/role"
 
-	// LabelWarmPool marks a knight as belonging to the warm pool
-	LabelWarmPool = "ai.roundtable.io/warm-pool"
-
-	// LabelWarmPoolClaimed marks a warm pool knight as claimed by a mission
-	LabelWarmPoolClaimed = "ai.roundtable.io/warm-pool-claimed"
-
 	// LabelCreatedBy records which component created a resource. Missions
 	// created through the invoke gateway carry CreatedByGateway; the planner
 	// then only accepts template-based ephemeral knights for them.
@@ -50,8 +44,11 @@ const (
 	// CreatedByGateway is the LabelCreatedBy value of gateway-created resources.
 	CreatedByGateway = "gateway"
 
-	// AnnotationWarmPoolCreatedAt tracks when a warm pool knight was created (for idle recycling)
-	AnnotationWarmPoolCreatedAt = "ai.roundtable.io/warm-pool-created-at"
+	// AnnotationShutdownTime is an RFC 3339 timestamp after which a knight's
+	// runtime may be shut down. The mission assembler sets it on mission
+	// knights to the mission's expiry (start + ttlSeconds); the sandbox
+	// runtime copies it into the Sandbox's spec.shutdownTime.
+	AnnotationShutdownTime = "ai.roundtable.io/shutdown-time"
 )
 
 // KnightSpec defines the desired state of a Knight — an AI agent in the Round Table.

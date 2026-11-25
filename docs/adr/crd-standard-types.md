@@ -44,7 +44,7 @@ deprecated aliases. Manifests are updated in the same rollout window.
 
 Decision `change` rows are implemented in the same PR as this document.
 
-### Knight (`spec`; also embedded as `RoundTable.spec.knightTemplates`, `warmPool.template`, Mission `ephemeralSpec`/`knightTemplates[].spec`)
+### Knight (`spec`; also embedded as `RoundTable.spec.knightTemplates`, Mission `ephemeralSpec`/`knightTemplates[].spec`)
 
 | Field | Current | Standard | Decision |
 |---|---|---|---|
@@ -76,7 +76,7 @@ Decision `change` rows are implemented in the same PR as this document.
 |---|---|---|---|
 | `defaults.resources` | `{cpu, memory}` | `corev1.ResourceRequirements` | **change** (same type as Knight) |
 | `defaults.taskTimeout` | int32 seconds | `*Seconds` | **change** → `defaults.taskTimeoutSeconds` |
-| `warmPool.maxIdleTime` | Go-duration string `"1h"` | `*Seconds` | **change** → `warmPool.maxIdleTimeSeconds` (default 3600) |
+| `warmPool.maxIdleTime` | Go-duration string `"1h"` | `*Seconds` | **change** → `warmPool.maxIdleTimeSeconds` (default 3600); the whole field was later removed (#483) |
 | `missionRef` | string (set by the mission controller) | `LocalObjectReference` | **change** → `missionRef: {name}` |
 | `suspended` | bool | `suspend` | **change** → `suspend` |
 | `github.tokenSecretRef` | bespoke | `SecretKeySelector` | **change** (shared `GitHubConfig`) |

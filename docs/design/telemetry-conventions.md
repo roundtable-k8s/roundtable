@@ -234,7 +234,7 @@ The operator renames are done; see "Operator Metrics" in
 | (new) | `roundtable_chain_step_duration_seconds{table,chain,step,status}` |
 | `roundtable_missions_total{phase}` | `roundtable_missions{table,phase}` |
 | `roundtable_cost_total_usd{table}` | `roundtable_table_cost_usd{table}` |
-| `roundtable_warm_pool_size{state,table}` | `roundtable_warm_pool_knights{table,state}` |
+| `roundtable_warm_pool_size{state,table}` | dropped with the warm pool (#483) |
 | `roundtable_reconcile_errors_total{controller}` | dropped (controller-runtime exports `controller_runtime_reconcile_errors_total`) |
 
 ### Knight runtimes (target)

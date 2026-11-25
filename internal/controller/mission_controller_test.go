@@ -27,13 +27,17 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
+	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
 
 var _ = Describe("Mission Controller", func() {
@@ -1373,13 +1377,13 @@ var _ = Describe("Mission Controller", func() {
 	})
 })
 
-var _ = Describe("Mission Controller - Warm Pool", func() {
-	Context("When claiming warm pool knights", func() {
+var _ = Describe("Mission Controller - Sandbox mission knights", func() {
+	Context("When a mission knight's template says runtime: sandbox", func() {
 		const (
-			missionName  = "test-warmpool-mission"
-			rtName       = "test-warmpool-rt"
+			missionName  = "test-sandbox-mission"
+			rtName       = "test-sandbox-rt"
 			namespace    = "default"
-			templateName = "default-knight"
+			templateName = "sandbox-knight"
 		)
 
 		ctx := context.Background()
@@ -1389,50 +1393,28 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 		var rt *aiv1alpha1.RoundTable
 
 		BeforeEach(func() {
-			By("Creating a RoundTable with warm pool")
 			rt = &aiv1alpha1.RoundTable{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      rtName,
-					Namespace: namespace,
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: rtName, Namespace: namespace},
 				Spec: aiv1alpha1.RoundTableSpec{
 					NATS: aiv1alpha1.RoundTableNATS{
 						URL:           "nats://nats.test:4222",
-						SubjectPrefix: "warmpool",
-						TasksStream:   "warmpool_tasks",
-						ResultsStream: "warmpool_results",
+						SubjectPrefix: "sbx",
+						TasksStream:   "sbx_tasks",
+						ResultsStream: "sbx_results",
 					},
 					KnightTemplates: map[string]aiv1alpha1.KnightSpec{
 						templateName: {
-							Domain: "general",
-							Model:  "claude-sonnet-4-20250514",
-							Skills: []string{"general"},
+							Runtime: "sandbox",
+							Domain:  "general",
+							Model:   "claude-sonnet-4-20250514",
+							Skills:  []string{"general"},
 							NATS: aiv1alpha1.KnightNATS{
 								URL:           "nats://nats.test:4222",
-								Subjects:      []string{"warmpool.tasks.general.>"},
-								Stream:        "warmpool_tasks",
-								ResultsStream: "warmpool_results",
+								Subjects:      []string{"sbx.tasks.general.>"},
+								Stream:        "sbx_tasks",
+								ResultsStream: "sbx_results",
 							},
-							Concurrency:        2,
-							TaskTimeoutSeconds: 120,
 						},
-					},
-					WarmPool: &aiv1alpha1.WarmPoolConfig{
-						Size: 2,
-						Template: aiv1alpha1.KnightSpec{
-							Domain: "general",
-							Model:  "claude-sonnet-4-20250514",
-							Skills: []string{"general"},
-							NATS: aiv1alpha1.KnightNATS{
-								URL:           "nats://nats.test:4222",
-								Subjects:      []string{"warmpool.tasks.general.>"},
-								Stream:        "warmpool_tasks",
-								ResultsStream: "warmpool_results",
-							},
-							Concurrency:        2,
-							TaskTimeoutSeconds: 120,
-						},
-						MaxIdleTimeSeconds: 3600,
 					},
 					Ephemeral: true,
 				},
@@ -1441,86 +1423,31 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 		})
 
 		AfterEach(func() {
-			By("Cleaning up mission and warm pool resources")
 			mission := &aiv1alpha1.Mission{}
 			if err := k8sClient.Get(ctx, missionNN, mission); err == nil {
 				mission.Finalizers = nil
 				_ = k8sClient.Update(ctx, mission)
 				_ = k8sClient.Delete(ctx, mission)
 			}
-
-			// Delete warm pool knights
 			knights := &aiv1alpha1.KnightList{}
-			_ = k8sClient.List(ctx, knights)
-			for _, knight := range knights.Items {
-				if knight.Labels[aiv1alpha1.LabelRoundTable] == rtName {
-					_ = k8sClient.Delete(ctx, &knight)
-				}
+			_ = k8sClient.List(ctx, knights, client.InNamespace(namespace),
+				client.MatchingLabels{aiv1alpha1.LabelRoundTable: rtName})
+			for i := range knights.Items {
+				_ = k8sClient.Delete(ctx, &knights.Items[i])
 			}
-
 			if err := k8sClient.Get(ctx, rtNN, rt); err == nil {
 				_ = k8sClient.Delete(ctx, rt)
 			}
 		})
 
-		It("should claim a ready warm knight", func() {
-			By("Creating a ready warm pool knight")
-			warmKnight := &aiv1alpha1.Knight{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      rtName + "-warm-ready",
-					Namespace: namespace,
-					Labels: map[string]string{
-						aiv1alpha1.LabelRoundTable:      rtName,
-						aiv1alpha1.LabelWarmPool:        "true",
-						aiv1alpha1.LabelWarmPoolClaimed: "false",
-					},
-					Annotations: map[string]string{
-						aiv1alpha1.AnnotationWarmPoolCreatedAt: time.Now().Format(time.RFC3339),
-					},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: aiv1alpha1.GroupVersion.String(),
-							Kind:       "RoundTable",
-							Name:       rtName,
-							UID:        rt.UID,
-							Controller: func() *bool { b := true; return &b }(),
-						},
-					},
-				},
-				Spec: aiv1alpha1.KnightSpec{
-					Domain: "general",
-					Model:  "claude-sonnet-4-20250514",
-					Skills: []string{"general"},
-					NATS: aiv1alpha1.KnightNATS{
-						URL:           "nats://nats.test:4222",
-						Subjects:      []string{"warmpool.tasks.general.>"},
-						Stream:        "warmpool_tasks",
-						ResultsStream: "warmpool_results",
-					},
-					Concurrency:        2,
-					TaskTimeoutSeconds: 120,
-				},
-			}
-			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
-			warmKnight.Status.Ready = true
-			warmKnight.Status.Phase = aiv1alpha1.KnightPhaseReady
-			Expect(k8sClient.Status().Update(ctx, warmKnight)).To(Succeed())
-
-			By("Creating a mission that can claim the warm knight")
+		It("creates the knight directly and its Sandbox shuts down at the mission's expiry", func() {
 			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      missionName,
-					Namespace: namespace,
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: missionName, Namespace: namespace},
 				Spec: aiv1alpha1.MissionSpec{
-					Objective:     "Test warm pool claiming",
+					Objective:     "Test bare sandbox mission knight",
 					RoundTableRef: aiv1alpha1.LocalRef(rtName),
 					Knights: []aiv1alpha1.MissionKnight{
-						{
-							Name:         "knight1",
-							Ephemeral:    true,
-							TemplateName: templateName,
-						},
+						{Name: "knight1", Ephemeral: true, TemplateName: templateName},
 					},
 					TimeoutSeconds: 600,
 					TTLSeconds:     900,
@@ -1528,7 +1455,6 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 			}
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
 
-			By("Reconciling the mission to assembling phase")
 			reconciler := &MissionReconciler{
 				Client:      k8sClient,
 				Scheme:      k8sClient.Scheme(),
@@ -1540,373 +1466,43 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
-			// Drive through Assembling — the warm pool claim recreates the knight
-			// under its mission-prefixed name, which starts not-ready; mark it
-			// ready as it appears so the mission can advance.
-			for range 10 {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
-				Expect(err).NotTo(HaveOccurred())
-				// Mark the recreated mission knight ready once it appears
-				claimKnight := &aiv1alpha1.Knight{}
-				if err := k8sClient.Get(ctx, types.NamespacedName{
-					Name:      missionName + "-knight1",
-					Namespace: namespace,
-				}, claimKnight); err == nil && !claimKnight.Status.Ready {
-					claimKnight.Status.Phase = aiv1alpha1.KnightPhaseReady
-					claimKnight.Status.Ready = true
-					_ = k8sClient.Status().Update(ctx, claimKnight)
-				}
-				mission := &aiv1alpha1.Mission{}
-				_ = k8sClient.Get(ctx, missionNN, mission)
-				if mission.Status.Phase == aiv1alpha1.MissionPhaseBriefing ||
-					mission.Status.Phase == aiv1alpha1.MissionPhaseActive {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-
-			By("Verifying the claim created the mission-prefixed knight")
-			// Chain steps reference "<mission>-<knight>", so the claimed knight
-			// must exist under that name.
-			missionKnight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      missionName + "-knight1",
-				Namespace: namespace,
-			}, missionKnight)).To(Succeed())
-			Expect(missionKnight.Labels[aiv1alpha1.LabelMission]).To(Equal(missionName))
-			Expect(missionKnight.Labels[aiv1alpha1.LabelEphemeral]).To(Equal("true"))
-
-			By("Verifying the warm knight was consumed")
-			warmGone := &aiv1alpha1.Knight{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      rtName + "-warm-ready",
-				Namespace: namespace,
-			}, warmGone)
-			Expect(errors.IsNotFound(err)).To(BeTrue(), "warm knight should be deleted after claim")
-
-			By("Verifying mission status shows warm start")
-			mission = &aiv1alpha1.Mission{}
-			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
-
-			foundKnight := false
-			for _, ks := range mission.Status.KnightStatuses {
-				if ks.Name == "knight1" {
-					foundKnight = true
-					Expect(ks.Ephemeral).To(BeTrue())
-				}
-			}
-			Expect(foundKnight).To(BeTrue())
-		})
-
-		It("should fall back to cold start when no warm knights available", func() {
-			By("Creating a mission without any warm pool knights available")
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      missionName,
-					Namespace: namespace,
-				},
-				Spec: aiv1alpha1.MissionSpec{
-					Objective:     "Test cold start fallback",
-					RoundTableRef: aiv1alpha1.LocalRef(rtName),
-					Knights: []aiv1alpha1.MissionKnight{
-						{
-							Name:         "knight1",
-							Ephemeral:    true,
-							TemplateName: templateName,
-						},
-					},
-					TimeoutSeconds: 600,
-					TTLSeconds:     900,
-				},
-			}
-			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
-
-			By("Reconciling the mission")
-			reconciler := &MissionReconciler{
-				Client:      k8sClient,
-				Scheme:      k8sClient.Scheme(),
-				Recorder:    record.NewFakeRecorder(100),
-				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
-				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
-				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
-				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
-				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
-			}
-
-			// Drive to assembling phase
-			for range 10 {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
-				Expect(err).NotTo(HaveOccurred())
-				mission := &aiv1alpha1.Mission{}
-				_ = k8sClient.Get(ctx, missionNN, mission)
-				// Keep reconciling through Assembling — assembly work happens
-				// during the Assembling reconcile, not on entry to it. These
-				// missions stay in Assembling (their cold-start knights never
-				// become ready in envtest), so all iterations run.
-				if mission.Status.Phase == aiv1alpha1.MissionPhaseBriefing ||
-					mission.Status.Phase == aiv1alpha1.MissionPhaseActive {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-
-			By("Verifying a cold start knight was created")
-			ephemeralKnightName := fmt.Sprintf("%s-%s", missionName, "knight1")
-			ephemeralKnight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      ephemeralKnightName,
-				Namespace: namespace,
-			}, ephemeralKnight)).To(Succeed())
-
-			Expect(ephemeralKnight.Labels[aiv1alpha1.LabelWarmPool]).NotTo(Equal("true"))
-			Expect(ephemeralKnight.Labels[aiv1alpha1.LabelMission]).To(Equal(missionName))
-
-			By("Verifying mission status shows cold start")
-			mission = &aiv1alpha1.Mission{}
-			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
-
-			foundKnight := false
-			for _, ks := range mission.Status.KnightStatuses {
-				if ks.Name == "knight1" {
-					foundKnight = true
-					Expect(ks.Ephemeral).To(BeTrue())
-				}
-			}
-			Expect(foundKnight).To(BeTrue())
-		})
-
-		It("should prevent double claim of warm knights", func() {
-			By("Creating a ready warm pool knight")
-			warmKnight := &aiv1alpha1.Knight{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      rtName + "-warm-double",
-					Namespace: namespace,
-					Labels: map[string]string{
-						aiv1alpha1.LabelRoundTable:      rtName,
-						aiv1alpha1.LabelWarmPool:        "true",
-						aiv1alpha1.LabelWarmPoolClaimed: "false",
-					},
-					Annotations: map[string]string{
-						aiv1alpha1.AnnotationWarmPoolCreatedAt: time.Now().Format(time.RFC3339),
-					},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: aiv1alpha1.GroupVersion.String(),
-							Kind:       "RoundTable",
-							Name:       rtName,
-							UID:        rt.UID,
-							Controller: func() *bool { b := true; return &b }(),
-						},
-					},
-				},
-				Spec: aiv1alpha1.KnightSpec{
-					Domain: "general",
-					Model:  "claude-sonnet-4-20250514",
-					Skills: []string{"general"},
-					NATS: aiv1alpha1.KnightNATS{
-						URL:           "nats://nats.test:4222",
-						Subjects:      []string{"warmpool.tasks.general.>"},
-						Stream:        "warmpool_tasks",
-						ResultsStream: "warmpool_results",
-					},
-					Concurrency:        2,
-					TaskTimeoutSeconds: 120,
-				},
-			}
-			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
-			warmKnight.Status.Ready = true
-			warmKnight.Status.Phase = aiv1alpha1.KnightPhaseReady
-			Expect(k8sClient.Status().Update(ctx, warmKnight)).To(Succeed())
-
-			By("Simulating a claimed warm knight")
-			warmKnight.Labels[aiv1alpha1.LabelWarmPoolClaimed] = "true"
-			warmKnight.Labels[aiv1alpha1.LabelMission] = "other-mission"
-			Expect(k8sClient.Update(ctx, warmKnight)).To(Succeed())
-
-			By("Creating a mission that tries to claim the knight")
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      missionName,
-					Namespace: namespace,
-				},
-				Spec: aiv1alpha1.MissionSpec{
-					Objective:     "Test double claim prevention",
-					RoundTableRef: aiv1alpha1.LocalRef(rtName),
-					Knights: []aiv1alpha1.MissionKnight{
-						{
-							Name:         "knight1",
-							Ephemeral:    true,
-							TemplateName: templateName,
-						},
-					},
-					TimeoutSeconds: 600,
-					TTLSeconds:     900,
-				},
-			}
-			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
-
-			By("Reconciling the mission")
-			reconciler := &MissionReconciler{
-				Client:      k8sClient,
-				Scheme:      k8sClient.Scheme(),
-				Recorder:    record.NewFakeRecorder(100),
-				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
-				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
-				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
-				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
-				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
-			}
-
-			// Drive to assembling phase
-			for range 10 {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
-				Expect(err).NotTo(HaveOccurred())
-				mission := &aiv1alpha1.Mission{}
-				_ = k8sClient.Get(ctx, missionNN, mission)
-				// Keep reconciling through Assembling — assembly work happens
-				// during the Assembling reconcile, not on entry to it. These
-				// missions stay in Assembling (their cold-start knights never
-				// become ready in envtest), so all iterations run.
-				if mission.Status.Phase == aiv1alpha1.MissionPhaseBriefing ||
-					mission.Status.Phase == aiv1alpha1.MissionPhaseActive {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-
-			By("Verifying the already-claimed knight was not re-claimed")
+			// Drive into Assembling. The knight never becomes ready in envtest,
+			// so the mission stays there once the knight exists.
+			knightNN := types.NamespacedName{Name: missionName + "-knight1", Namespace: namespace}
 			knight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      rtName + "-warm-double",
-				Namespace: namespace,
-			}, knight)).To(Succeed())
-
-			Expect(knight.Labels[aiv1alpha1.LabelMission]).To(Equal("other-mission"))
-
-			By("Verifying a new cold start knight was created instead")
-			ephemeralKnightName := fmt.Sprintf("%s-%s", missionName, "knight1")
-			ephemeralKnight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      ephemeralKnightName,
-				Namespace: namespace,
-			}, ephemeralKnight)).To(Succeed())
-		})
-
-		It("should apply spec overrides when claiming warm knights", func() {
-			By("Creating a ready warm pool knight")
-			warmKnight := &aiv1alpha1.Knight{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      rtName + "-warm-override",
-					Namespace: namespace,
-					Labels: map[string]string{
-						aiv1alpha1.LabelRoundTable:      rtName,
-						aiv1alpha1.LabelWarmPool:        "true",
-						aiv1alpha1.LabelWarmPoolClaimed: "false",
-					},
-					Annotations: map[string]string{
-						aiv1alpha1.AnnotationWarmPoolCreatedAt: time.Now().Format(time.RFC3339),
-					},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: aiv1alpha1.GroupVersion.String(),
-							Kind:       "RoundTable",
-							Name:       rtName,
-							UID:        rt.UID,
-							Controller: func() *bool { b := true; return &b }(),
-						},
-					},
-				},
-				Spec: aiv1alpha1.KnightSpec{
-					Domain: "general",
-					Model:  "claude-sonnet-4-20250514",
-					Skills: []string{"general"},
-					NATS: aiv1alpha1.KnightNATS{
-						URL:           "nats://nats.test:4222",
-						Subjects:      []string{"warmpool.tasks.general.>"},
-						Stream:        "warmpool_tasks",
-						ResultsStream: "warmpool_results",
-					},
-					Concurrency:        2,
-					TaskTimeoutSeconds: 120,
-				},
-			}
-			Expect(k8sClient.Create(ctx, warmKnight)).To(Succeed())
-			warmKnight.Status.Ready = true
-			warmKnight.Status.Phase = aiv1alpha1.KnightPhaseReady
-			Expect(k8sClient.Status().Update(ctx, warmKnight)).To(Succeed())
-
-			By("Creating a mission with spec overrides")
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      missionName,
-					Namespace: namespace,
-				},
-				Spec: aiv1alpha1.MissionSpec{
-					Objective:     "Test spec overrides",
-					RoundTableRef: aiv1alpha1.LocalRef(rtName),
-					Knights: []aiv1alpha1.MissionKnight{
-						{
-							Name:         "knight1",
-							Ephemeral:    true,
-							TemplateName: templateName,
-							SpecOverrides: &aiv1alpha1.KnightSpecOverrides{
-								Concurrency: func() *int32 { i := int32(5); return &i }(),
-								Env: []corev1.EnvVar{
-									{Name: "CUSTOM_VAR", Value: "custom-value"},
-								},
-							},
-						},
-					},
-					TimeoutSeconds: 600,
-					TTLSeconds:     900,
-				},
-			}
-			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
-
-			By("Reconciling the mission")
-			reconciler := &MissionReconciler{
-				Client:      k8sClient,
-				Scheme:      k8sClient.Scheme(),
-				Recorder:    record.NewFakeRecorder(100),
-				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
-				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
-				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
-				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
-				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
-			}
-
-			// Drive to assembling phase
-			for range 10 {
+			Eventually(func() error {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				Expect(err).NotTo(HaveOccurred())
-				mission := &aiv1alpha1.Mission{}
-				_ = k8sClient.Get(ctx, missionNN, mission)
-				// Keep reconciling through Assembling — the warm pool claim
-				// happens during the Assembling reconcile, not on entry to it.
-				if mission.Status.Phase == aiv1alpha1.MissionPhaseBriefing {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
+				return k8sClient.Get(ctx, knightNN, knight)
+			}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
-			By("Verifying spec overrides were applied to the mission-prefixed knight")
-			// The claim recreates the knight under "<mission>-<knight>" (the name
-			// chain steps reference); overrides land on that CR.
-			claimedKnight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      missionName + "-knight1",
-				Namespace: namespace,
-			}, claimedKnight)).To(Succeed())
+			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+			Expect(mission.Status.StartedAt).NotTo(BeNil())
+			Expect(mission.Status.ExpiresAt).NotTo(BeNil())
+			wantShutdown := mission.Status.StartedAt.Add(900 * time.Second).UTC().Format(time.RFC3339)
+			Expect(mission.Status.ExpiresAt.UTC().Format(time.RFC3339)).To(Equal(wantShutdown))
 
-			Expect(claimedKnight.Spec.Concurrency).To(Equal(int32(5)))
-			foundEnv := false
-			for _, env := range claimedKnight.Spec.Env {
-				if env.Name == "CUSTOM_VAR" && env.Value == "custom-value" {
-					foundEnv = true
-					break
-				}
-			}
-			Expect(foundEnv).To(BeTrue())
+			By("Verifying the knight is a direct mission knight on the sandbox runtime")
+			Expect(knight.Spec.Runtime).To(Equal("sandbox"))
+			Expect(knight.Labels[aiv1alpha1.LabelMission]).To(Equal(missionName))
+			Expect(knight.Annotations[aiv1alpha1.AnnotationShutdownTime]).To(Equal(wantShutdown))
+			Expect(metav1.IsControlledBy(knight, mission)).To(BeTrue(),
+				"deleting the mission must delete the knight")
+
+			By("Verifying the knight's Sandbox carries shutdownTime")
+			// envtest has no agent-sandbox CRDs: store the Sandbox in a fake client.
+			s := k8sruntime.NewScheme()
+			Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+			sandboxClient := fake.NewClientBuilder().WithScheme(s).Build()
+			backend := rtruntime.NewSandboxBackend(sandboxClient, s, "",
+				func(context.Context, *aiv1alpha1.Knight) corev1.PodSpec { return corev1.PodSpec{} })
+			Expect(backend.Reconcile(ctx, knight)).To(Succeed())
+			sb := rtruntime.NewSandboxObject("", "")
+			Expect(sandboxClient.Get(ctx, knightNN, sb)).To(Succeed())
+			shutdown, found, err := unstructured.NestedString(sb.Object, "spec", "shutdownTime")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(found).To(BeTrue())
+			Expect(shutdown).To(Equal(wantShutdown))
 		})
 	})
 })
