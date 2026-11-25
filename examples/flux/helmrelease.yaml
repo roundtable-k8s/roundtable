@@ -7,7 +7,7 @@ metadata:
   namespace: roundtable
 spec:
   interval: 10m
-  releaseName: roundtable-operator
+  releaseName: roundtable
   targetNamespace: roundtable
   chartRef:
     kind: OCIRepository

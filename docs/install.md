@@ -18,9 +18,13 @@ Use this if your cluster is managed by Flux. The manifests are in
 | [`ocirepository.yaml`](../examples/flux/ocirepository.yaml) | `OCIRepository` (`source.toolkit.fluxcd.io/v1`) that tracks the chart's semver range |
 | [`helmrelease.yaml`](../examples/flux/helmrelease.yaml) | `HelmRelease` (`helm.toolkit.fluxcd.io/v2`) that installs the chart via `chartRef` |
 
-The `OCIRepository` uses a `layerSelector` so Flux takes the Helm chart
-tarball layer (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) out of
-the OCI artifact. Without it, Flux cannot find the chart.
+Flux v2.3 or later is required: `chartRef` pointing at an `OCIRepository` and
+the `helm.toolkit.fluxcd.io/v2` API are not available in older releases.
+
+The `OCIRepository` uses a `layerSelector` so Flux extracts the Helm chart
+tarball layer (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) from
+the OCI artifact. Flux finds the artifact either way, but without the selector
+helm-controller cannot load it as a chart.
 
 ```bash
 kubectl apply -f examples/flux/namespace.yaml \
@@ -44,7 +48,7 @@ notes first, since minor releases can change the CRDs.
 ## 2. Helm (`helm install`)
 
 ```bash
-helm install roundtable-operator \
+helm install roundtable \
   oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   --version 0.22.0 \
   --namespace roundtable --create-namespace
@@ -65,13 +69,17 @@ you apply the new one.
   `CreateReplace`, so Flux applies the chart's CRDs on install and on every
   upgrade. CRDs are replaced, not deleted, so existing Knights, Chains,
   Missions and RoundTables are kept.
-- **Helm:** apply the CRDs yourself before `helm upgrade`:
+- **Helm:** apply the CRDs yourself before `helm upgrade`. Helm created the
+  CRDs under the field manager `helm`, so a server-side apply of changed CRDs
+  conflicts on fields such as `.spec.versions`. `--force-conflicts` takes
+  ownership of those fields; without it the command fails exactly when the CRDs
+  changed:
 
   ```bash
   helm pull oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
     --version <new-version> --untar --untardir /tmp/rt
-  kubectl apply --server-side -f /tmp/rt/roundtable-operator/crds/
-  helm upgrade roundtable-operator \
+  kubectl apply --server-side --force-conflicts -f /tmp/rt/roundtable-operator/crds/
+  helm upgrade roundtable \
     oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
     --version <new-version> --namespace roundtable
   ```
