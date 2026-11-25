@@ -40,6 +40,10 @@ type TriggerEvent struct {
 	Headers map[string]string
 	// Time is when the event was published, or the scheduled time.
 	Time time.Time
+
+	// legacyKey is the pre-stream-creation default key ("seq-<n>") of a
+	// message whose default key is the stream position; not a template field.
+	legacyKey string
 }
 
 // triggerTemplateData is the root object of a Trigger's templates.

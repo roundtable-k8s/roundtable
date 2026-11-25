@@ -9,8 +9,8 @@ Four sources exist today:
 
 | Source | Fires on | Default dedupe key |
 |---|---|---|
-| `nats` | each message on a subject under the table's `<subjectPrefix>.events.` | `Nats-Msg-Id` header, else the stream sequence |
-| `webhook` | each authenticated `POST` to the gateway's `/v1/hooks/<namespace>/<name>` | the sender's delivery id (see [Webhook source](#webhook-source)), else the stream sequence |
+| `nats` | each message on a subject under the table's `<subjectPrefix>.events.` | `Nats-Msg-Id` header, else `<stream creation time>/<stream sequence>` |
+| `webhook` | each authenticated `POST` to the gateway's `/v1/hooks/<namespace>/<name>` | the sender's delivery id (see [Webhook source](#webhook-source)), else `<stream creation time>/<stream sequence>` |
 | `schedule` | each cron time, run by an operator-owned CronJob (see [Schedule source](#schedule-source)) | the schedule time (RFC 3339, UTC) |
 | `github` | each issue or pull request matching a label query, polled | `<owner/name>#<number>` |
 
@@ -806,8 +806,12 @@ it, `trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:
 `<subjectPrefix>.events.webhook.<namespace>.<name>`, github:
 `<subjectPrefix>.events.github.<namespace>.<name>`, schedule:
 `<subjectPrefix>.events.schedule.<namespace>.<name>`). A message's default
-dedupe key is its `Roundtable-Event-Key` header, else `Nats-Msg-Id`, else the
-stream sequence. A new consumer
+dedupe key is its `Roundtable-Event-Key` header, else `Nats-Msg-Id`, else
+`<stream creation unix nanoseconds>/<stream sequence>`: the creation time keeps a
+recreated events stream, whose sequence restarts at 1, from matching the runs
+of the old one. A message delivered before an upgrade under the former
+`seq-<n>` key still counts as a duplicate when a chain or mission run exists
+under that key. A new consumer
 starts at new messages (not the stream's backlog). From then on, events
 published while the operator is down fire when it comes back.
 
