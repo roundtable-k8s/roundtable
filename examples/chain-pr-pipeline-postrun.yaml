@@ -1,0 +1,487 @@
+# PR pipeline with post-run steps (#538): prPipeline.postRun: chain, for a
+# table with spec.issuePickup.postRun: chain. The chain, not the operator,
+# checks the run on GitHub:
+#
+#   ... → merge → verify (rt-verify: PRs merged or queued, review posted)
+#               → close_parent (split runs: rt-close-parent)
+#   any failed step → handback (rt-handback: needs-human, in-progress off)
+#
+# Every work step has continueOnFailure so a failure reaches handback;
+# verify, close_parent and handback are one-round loops whose until checks the
+# script's "ok" line, so a missing script fails the step. If handback fails the
+# run fails and the operator releases the issue (docs/pr-pipeline.md).
+#
+# Rendered from the Helm chart (templates/pr-pipeline.yaml with
+# prPipeline.coders=[rt-operator, rt-ui] and prPipeline.postRun=chain). Change
+# the template and re-render (docs/pr-pipeline.md) rather than editing this file.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: pr-pipeline
+  namespace: roundtable
+spec:
+  description: "PR pipeline: plan → implement → review → fix loop → merge, or escalate to a human"
+  roundTableRef:
+    name: roundtable-dev
+  timeoutSeconds: 86400
+  maxQueueWaitSeconds: 3600
+  input: '{"repo": "roundtable-k8s/roundtable", "issue": 225}'
+  steps:
+    - name: plan
+      knightRef:
+        name: rt-lead
+      timeoutSeconds: 1800
+      continueOnFailure: true
+      task: |
+        Plan the work for a GitHub issue. Input (JSON with repo and issue): {{ .Input }}
+
+        1. Read the issue (gh issue view <issue> --repo <repo>) and the repo's AGENTS.md / README.
+        2. Pick the coder knight that owns this repo or area. It must be one of: rt-operator, rt-ui.
+        3. Pick the model alias for the implementation (cheapest tier that fits;
+           a weaker draft is fixed by the stronger "deep" model in the fix loop).
+           Allowed: deep, fast.
+           - "fast": the default.
+           - "deep": design-heavy, cross-cutting or risky work.
+           Record why in "reason", naming the tier and the criteria that decided it.
+        4. If the issue is too large for one reviewable PR, split it: create
+           sub-issues in the same repo (gh issue create, body starting
+           "Part of #<issue>"), comment the list on the issue and set split to
+           true. "issues" then lists each sub-issue exactly once and never the
+           parent issue: every entry becomes one implement task and one PR.
+           Reuse sub-issues that already exist (gh issue list --search
+           "Part of #<issue>") instead of creating duplicates.
+           Otherwise set split to false and list just the input issue.
+        5. Breaking changes: if the work changes an API type, a CRD, the task
+           contract or another interface other repos or live resources depend
+           on, set "breaking" to true. The implementing PR gets the `breaking`
+           label and a migration note.
+        6. Check for open breaking PRs (gh pr list --repo <repo> --label breaking
+           --state open --json number,headRefName,files). If one touches the
+           packages this issue touches, do not start parallel work: reply with
+           coder "none" and a reason "blocked by #<pr>" (the chain then
+           escalates and the issue waits for a human). Only if the issue
+           depends on that PR's change, name its branch in "base" so the coder
+           branches from it instead of origin/main.
+
+        Reply with ONLY a fenced ```json block of exactly this shape:
+        {"coder": "<knight>", "model": "<alias>", "split": false, "breaking": false,
+         "base": "", "issues": [{"number": <n>, "title": "<title>"}], "reason": "<one sentence>"}
+
+    - name: implement_rt_operator_deep
+      knightRef:
+        name: rt-operator
+      model: deep
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).model == "deep" && !json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      task: |
+        Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
+        Plan: {{ .Steps.plan.Output }}
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
+        If the plan's "base" is set, branch from that branch instead of origin/main
+        and open the PR against it. If the plan's "breaking" is true, label the PR
+        `breaking` (create the label if missing) and add a "Migration" section to
+        the body: who must change what, and in which order to roll it out.
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: implement_rt_operator_fast
+      knightRef:
+        name: rt-operator
+      model: fast
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).model == "fast" && !json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      task: |
+        Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
+        Plan: {{ .Steps.plan.Output }}
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
+        If the plan's "base" is set, branch from that branch instead of origin/main
+        and open the PR against it. If the plan's "breaking" is true, label the PR
+        `breaking` (create the label if missing) and add a "Migration" section to
+        the body: who must change what, and in which order to roll it out.
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: split_rt_operator
+      knightRef:
+        name: rt-operator
+      model: deep
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-operator" && json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      forEach:
+        from: steps.plan
+        path: .issues
+        uniqueBy: number
+        maxItems: 10
+      maxParallel: 2
+      failurePolicy: failFast
+      task: |
+        Implement sub-issue #{{ .Item.number }} ({{ .Item.title }}) of {{ .Input }}.
+
+        This task owns sub-issue #{{ .Item.number }} only: do not implement
+        the parent issue or other sub-issues.
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        named after the sub-issue, rt/{{ .Item.number }}-<short-slug> (never the
+        parent issue's number), keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per sub-issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #{{ .Item.number }} in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/{{ .Item.number }}-"). If one exists, check out its branch, push your
+        work there and update that PR instead of opening a new one. Otherwise open
+        one PR whose body ends "Closes #{{ .Item.number }}".
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: implement_rt_ui_deep
+      knightRef:
+        name: rt-ui
+      model: deep
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).model == "deep" && !json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      task: |
+        Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
+        Plan: {{ .Steps.plan.Output }}
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
+        If the plan's "base" is set, branch from that branch instead of origin/main
+        and open the PR against it. If the plan's "breaking" is true, label the PR
+        `breaking` (create the label if missing) and add a "Migration" section to
+        the body: who must change what, and in which order to roll it out.
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: implement_rt_ui_fast
+      knightRef:
+        name: rt-ui
+      model: fast
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).model == "fast" && !json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      task: |
+        Implement this GitHub issue. Input (JSON with repo and issue): {{ .Input }}
+        Plan: {{ .Steps.plan.Output }}
+
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        rt/<issue>-<short-slug>, keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #<issue> in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/<issue>-"). If one exists, check out its branch, push your work there
+        and update that PR instead of opening a new one. Otherwise open one PR
+        whose body ends "Closes #<issue>".
+        If the plan's "base" is set, branch from that branch instead of origin/main
+        and open the PR against it. If the plan's "breaking" is true, label the PR
+        `breaking` (create the label if missing) and add a "Migration" section to
+        the body: who must change what, and in which order to roll it out.
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: split_rt_ui
+      knightRef:
+        name: rt-ui
+      model: deep
+      dependsOn: [plan]
+      when: 'steps.plan.phase == "Succeeded" && json(steps.plan.output).coder == "rt-ui" && json(steps.plan.output).split'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      forEach:
+        from: steps.plan
+        path: .issues
+        uniqueBy: number
+        maxItems: 10
+      maxParallel: 2
+      failurePolicy: failFast
+      task: |
+        Implement sub-issue #{{ .Item.number }} ({{ .Item.title }}) of {{ .Input }}.
+
+        This task owns sub-issue #{{ .Item.number }} only: do not implement
+        the parent issue or other sub-issues.
+        Follow the repo's AGENTS.md / README. Work in a fresh clone on a branch
+        named after the sub-issue, rt/{{ .Item.number }}-<short-slug> (never the
+        parent issue's number), keep the change focused, add tests and run the
+        repo's build, test and lint.
+        One PR per sub-issue: first look for an open PR for it
+        (gh pr list --repo <repo> --state open --search "Closes #{{ .Item.number }} in:body"
+        --json number,url,headRefName, and any open PR whose branch starts with
+        "rt/{{ .Item.number }}-"). If one exists, check out its branch, push your
+        work there and update that PR instead of opening a new one. Otherwise open
+        one PR whose body ends "Closes #{{ .Item.number }}".
+        Never merge. Reply with the PR URL on the first line.
+
+    - name: review
+      knightRef:
+        name: rt-lead
+      dependsOn: [implement_rt_operator_deep, implement_rt_operator_fast, split_rt_operator, implement_rt_ui_deep, implement_rt_ui_fast, split_rt_ui]
+      when: '["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded")'
+      timeoutSeconds: 1800
+      continueOnFailure: true
+      task: |
+        Review the pull request(s) for {{ .Input }}.
+        Implementation report:
+        {{ .Steps.implement_rt_operator_deep.Output }}
+        {{ .Steps.implement_rt_operator_fast.Output }}
+        {{ .Steps.split_rt_operator.Output }}
+        {{ .Steps.implement_rt_ui_deep.Output }}
+        {{ .Steps.implement_rt_ui_fast.Output }}
+        {{ .Steps.split_rt_ui.Output }}
+
+        Check correctness, tests, scope and that each PR body ends "Closes #<n>".
+        Start your reply with one line "PRs: <url> [<url> ...]" listing every PR.
+        End it with exactly one line, either
+        "Verdict: ship it" or "Verdict: needs changes".
+
+    - name: fixloop_rt_operator
+      dependsOn: [review]
+      when: 'steps.review.phase == "Succeeded" && json(steps.plan.output).coder == "rt-operator"'
+      continueOnFailure: true
+      loop:
+        from: review
+        until: 'last.output.matches("(?mi)^\\W*verdict:\\s*ship it\\W*$")'
+        maxIterations: 3
+        onExhausted: continue
+        steps:
+          - name: fix
+            knightRef:
+              name: rt-operator
+            model: deep
+            timeoutSeconds: 3600
+            retry:
+              maxAttempts: 1
+              backoffSeconds: 60
+            task: |
+              Fix round {{ .Loop.Iteration }}/{{ .Loop.MaxIterations }} for {{ .Input }}.
+              The reviewer asked for changes:
+
+              {{ .Loop.Last.Output }}
+
+              Address every point on the same branch(es), run the repo's build, test
+              and lint, push, and reply with a short summary of what changed.
+              Do not open new PRs and never merge.
+          - name: review
+            knightRef:
+              name: rt-lead
+            timeoutSeconds: 1800
+            task: |
+              The author pushed fixes for {{ .Input }}:
+
+              {{ .Loop.Last.Output }}
+
+              Re-review the PR(s) listed in the previous review:
+              {{ .Steps.review.Output }}
+
+              Start your reply with one line "PRs: <url> [<url> ...]" listing every PR.
+              End it with exactly one line, either
+              "Verdict: ship it" or "Verdict: needs changes".
+
+    - name: fixloop_rt_ui
+      dependsOn: [review]
+      when: 'steps.review.phase == "Succeeded" && json(steps.plan.output).coder == "rt-ui"'
+      continueOnFailure: true
+      loop:
+        from: review
+        until: 'last.output.matches("(?mi)^\\W*verdict:\\s*ship it\\W*$")'
+        maxIterations: 3
+        onExhausted: continue
+        steps:
+          - name: fix
+            knightRef:
+              name: rt-ui
+            model: deep
+            timeoutSeconds: 3600
+            retry:
+              maxAttempts: 1
+              backoffSeconds: 60
+            task: |
+              Fix round {{ .Loop.Iteration }}/{{ .Loop.MaxIterations }} for {{ .Input }}.
+              The reviewer asked for changes:
+
+              {{ .Loop.Last.Output }}
+
+              Address every point on the same branch(es), run the repo's build, test
+              and lint, push, and reply with a short summary of what changed.
+              Do not open new PRs and never merge.
+          - name: review
+            knightRef:
+              name: rt-lead
+            timeoutSeconds: 1800
+            task: |
+              The author pushed fixes for {{ .Input }}:
+
+              {{ .Loop.Last.Output }}
+
+              Re-review the PR(s) listed in the previous review:
+              {{ .Steps.review.Output }}
+
+              Start your reply with one line "PRs: <url> [<url> ...]" listing every PR.
+              End it with exactly one line, either
+              "Verdict: ship it" or "Verdict: needs changes".
+
+    - name: merge
+      knightRef:
+        name: rt-lead
+      dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
+      when: '["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Converged")'
+      timeoutSeconds: 3600
+      continueOnFailure: true
+      task: |
+        The review of {{ .Input }} passed.
+        {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Converged" }}Fix rounds: {{ .Iterations }}
+        Final review:
+        {{ .Output }}{{ end }}{{ end }}
+        {{ with .Steps.fixloop_rt_ui }}{{ if eq .Outcome "Converged" }}Fix rounds: {{ .Iterations }}
+        Final review:
+        {{ .Output }}{{ end }}{{ end }}
+
+        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`.
+        Then wait until each one is merged, closed, or blocked by a failing required
+        check (check every few minutes, give up after 50 minutes).
+        Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
+        then a line "Fix rounds: <n>" and a last line
+        "Tiering: implement=<alias the plan chose> fix=deep review rounds=<n>"
+        (the alias is in the plan: {{ .Steps.plan.Output }}).
+
+    - name: escalate
+      knightRef:
+        name: rt-lead
+      dependsOn: [fixloop_rt_operator, fixloop_rt_ui]
+      when: '!["plan", "implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui", "review", "fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].phase == "Failed") && (["fixloop_rt_operator", "fixloop_rt_ui"].exists(s, steps[s].outcome == "Exhausted") || !["implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui"].exists(s, steps[s].phase == "Succeeded"))'
+      timeoutSeconds: 600
+      continueOnFailure: true
+      task: |
+        Escalate {{ .Input }} to a human.
+        {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Exhausted" }}The PR(s) still need changes after {{ .Iterations }} fix rounds. Last review:
+        {{ .Output }}{{ end }}{{ end }}
+        {{ with .Steps.fixloop_rt_ui }}{{ if eq .Outcome "Exhausted" }}The PR(s) still need changes after {{ .Iterations }} fix rounds. Last review:
+        {{ .Output }}{{ end }}{{ end }}
+        {{ if eq .Steps.review.Phase "Skipped" }}No implementation ran: the plan named no known coder/model. Plan:
+        {{ .Steps.plan.Output }}{{ end }}
+
+        Add the label `needs-human` (create it if missing) to the issue and to
+        every PR on the last review's "PRs:" line, and comment on each with the
+        last review (or the plan) and why it was escalated. Do not merge.
+        Reply with the URLs you labelled.
+
+    - name: verify
+      dependsOn: [merge]
+      when: 'steps.merge.phase == "Succeeded"'
+      continueOnFailure: true
+      loop:
+        until: 'last.output.contains("rt-verify: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: rt-lead
+            timeoutSeconds: 1800
+            task: |
+              Verify on GitHub that every pull request of {{ .Input }} is merged or queued.
+              The merge step reported:
+              {{ .Steps.merge.Output }}
+              The final review (its structured "prs" and "verdict", shown here as the
+              "PRs:" and "Verdict:" lines):
+              {{ with .Steps.fixloop_rt_operator }}{{ if eq .Outcome "Converged" }}{{ .Output }}{{ end }}{{ end }}
+              {{ with .Steps.fixloop_rt_ui }}{{ if eq .Outcome "Converged" }}{{ .Output }}{{ end }}{{ end }}
+
+              Use the arsenal script, never gh by hand:
+              1. Write the final review above to /tmp/review-<issue>.md.
+              2. Run: bash /skills/project/pr-postrun/scripts/rt-verify <repo> <issue> <ship_it|needs_changes> /tmp/review-<issue>.md <pr-url> [<pr-url> ...]
+                 with the review's verdict and every PR it lists. It posts the
+                 review when the PR has none with that verdict (rt-review),
+                 queues a ship-it PR that is still open, and hands the issue back
+                 (needs-human) when a PR is closed, a draft, held or not queueable.
+              If /skills/project/pr-postrun/scripts/rt-verify does not exist, do not do its work yourself:
+              reply with exactly "rt-verify: missing script /skills/project/pr-postrun/scripts/rt-verify" and stop.
+              Reply with the script's last output line.
+
+    - name: close_parent
+      dependsOn: [verify]
+      when: 'steps.verify.phase == "Succeeded" && json(steps.plan.output).split'
+      continueOnFailure: true
+      loop:
+        until: 'last.output.contains("rt-close-parent: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: rt-lead
+            timeoutSeconds: 3600
+            task: |
+              {{ .Input }} was split into sub-issues; settle the parent issue.
+              Plan (its "issues" are the sub-issues): {{ .Steps.plan.Output }}
+
+              Run: bash /skills/project/pr-postrun/scripts/rt-close-parent <repo> <issue> <sub-issue> [<sub-issue> ...]
+              It waits for the sub-issues to close, closes the parent when every one
+              was completed and hands the parent back (needs-human) when one was
+              closed as not planned, needs a human or is still open at its timeout.
+              If /skills/project/pr-postrun/scripts/rt-close-parent does not exist, do not do its work yourself:
+              reply with exactly "rt-close-parent: missing script /skills/project/pr-postrun/scripts/rt-close-parent" and stop.
+              Reply with the script's last output line.
+
+    - name: handback
+      dependsOn: [verify, close_parent, escalate]
+      when: '["plan", "implement_rt_operator_deep", "implement_rt_operator_fast", "split_rt_operator", "implement_rt_ui_deep", "implement_rt_ui_fast", "split_rt_ui", "review", "fixloop_rt_operator", "fixloop_rt_ui", "merge", "escalate", "verify", "close_parent"].exists(s, steps[s].phase == "Failed")'
+      loop:
+        until: 'last.output.contains("rt-handback: ok")'
+        maxIterations: 1
+        steps:
+          - name: run
+            knightRef:
+              name: rt-lead
+            timeoutSeconds: 600
+            task: |
+              A step of the PR pipeline for {{ .Input }} failed. Failed steps:
+              {{ with .Steps.plan }}{{ if eq .Phase "Failed" }}- plan: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.implement_rt_operator_deep }}{{ if eq .Phase "Failed" }}- implement_rt_operator_deep: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.implement_rt_operator_fast }}{{ if eq .Phase "Failed" }}- implement_rt_operator_fast: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.split_rt_operator }}{{ if eq .Phase "Failed" }}- split_rt_operator: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.implement_rt_ui_deep }}{{ if eq .Phase "Failed" }}- implement_rt_ui_deep: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.implement_rt_ui_fast }}{{ if eq .Phase "Failed" }}- implement_rt_ui_fast: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.split_rt_ui }}{{ if eq .Phase "Failed" }}- split_rt_ui: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.review }}{{ if eq .Phase "Failed" }}- review: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.fixloop_rt_operator }}{{ if eq .Phase "Failed" }}- fixloop_rt_operator: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.fixloop_rt_ui }}{{ if eq .Phase "Failed" }}- fixloop_rt_ui: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.merge }}{{ if eq .Phase "Failed" }}- merge: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.escalate }}{{ if eq .Phase "Failed" }}- escalate: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.verify }}{{ if eq .Phase "Failed" }}- verify: {{ .Error }}{{ end }}{{ end }}
+              {{ with .Steps.close_parent }}{{ if eq .Phase "Failed" }}- close_parent: {{ .Error }}{{ end }}{{ end }}
+
+              Hand the issue back to a human with the arsenal script, never gh by hand:
+              1. Write the failed steps above to /tmp/handback-<issue>.md.
+              2. Run: bash /skills/project/pr-postrun/scripts/rt-handback <repo> <issue> /tmp/handback-<issue>.md
+                 It adds needs-human, comments the failed steps and removes the
+                 in-progress label, and does nothing for an issue that is closed or
+                 no longer in progress.
+              If /skills/project/pr-postrun/scripts/rt-handback does not exist, do not do its work yourself:
+              reply with exactly "rt-handback: missing script /skills/project/pr-postrun/scripts/rt-handback" and stop.
+              Reply with the script's last output line.

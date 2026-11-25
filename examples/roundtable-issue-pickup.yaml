@@ -33,6 +33,10 @@ spec:
     # pickup on a generated Trigger "<table>-issue-pickup" (needs
     # nats.createStreams or an events stream). See docs/issue-pickup.md#engines.
     # engine: trigger
+    # builtin (default): the operator verifies merges, hands failed runs back
+    # and closes split parents. chain: the pipeline's steps do it (render it
+    # with prPipeline.postRun: chain). See docs/pr-pipeline.md.
+    # postRun: chain
     repos:
       - roundtable-k8s/roundtable
       - roundtable-k8s/roundtable-ui

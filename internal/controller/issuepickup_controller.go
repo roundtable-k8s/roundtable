@@ -184,6 +184,7 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 	log := logf.FromContext(ctx)
 	res := pickupResult{}
 	triggerEngine := pickupEngine(spec) == aiv1alpha1.IssuePickupEngineTrigger
+	postRun := pickupPostRun(spec)
 
 	chains := &aiv1alpha1.ChainList{}
 	if err := r.List(ctx, chains, client.InNamespace(rt.Namespace),
@@ -198,7 +199,7 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		if pickupChainActive(c) {
 			res.active++
 			activeByRepo[c.Annotations[aiv1alpha1.AnnotationPickupRepo]]++
-		} else if pickupChainExpired(c, spec, now) && !pickupNeedsVerify(c) && !pickupNeedsHandBack(c) && !pickupNeedsSplitClose(c) {
+		} else if pickupChainExpired(c, spec, now) && !pickupPostRunPending(c, postRun) {
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				res.fail("delete finished chain %s: %v", c.Name, err)
 			} else {
@@ -239,6 +240,14 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 	labels := pickupLabels(spec)
 	for _, c := range byName {
 		switch {
+		case postRun == aiv1alpha1.IssuePickupPostRunChain:
+			// The chain's steps verified, handed back and closed the
+			// parent; only release an issue the run left in progress.
+			if pickupNeedsRelease(c) {
+				if err := r.releaseIssue(ctx, gh, rt, c, labels); err != nil {
+					res.fail("release issue of chain %s: %v", c.Name, err)
+				}
+			}
 		case pickupNeedsVerify(c):
 			if err := r.verifyMerge(ctx, gh, rt, c, labels); err != nil {
 				res.fail("verify merge for chain %s: %v", c.Name, err)

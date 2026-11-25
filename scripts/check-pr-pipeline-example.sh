@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Renders the PR pipeline and PR feedback Chains from the Helm chart with
 # prPipeline.enabled and prPipeline.feedback.enabled and checks that
-# examples/chain-pr-pipeline.yaml and examples/chain-pr-feedback.yaml are that output, minus comments,
+# examples/chain-pr-pipeline.yaml, examples/chain-pr-pipeline-postrun.yaml
+# (prPipeline.postRun: chain) and examples/chain-pr-feedback.yaml are that output, minus comments,
 # document separators and the Helm labels. The example itself is decoded
 # strictly against the API types by api/v1alpha1/examples_test.go and applied in
 # internal/controller/chain_pr_pipeline_test.go, so together they check that the
@@ -32,24 +33,27 @@ EOV
 # Trailing blank lines are dropped: Helm versions differ in how many they emit.
 strip() { { grep -v -e '^#' -e '^---$' "$1" || true; } | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'; }
 
-# check <template> <example>: the example is the rendered template.
+# check <template> <example> [helm args...]: the example is the rendered template.
 check() {
-  local template="$1" example="$root/examples/$2"
-  "$HELM" template rt "$chart" -n roundtable -f "$tmp/values.yaml" \
+  local template="$1" name="$2" example="$root/examples/$2"
+  shift 2
+  "$HELM" template rt "$chart" -n roundtable -f "$tmp/values.yaml" "$@" \
     --show-only "templates/$template" > "$tmp/rendered.yaml"
   strip "$tmp/rendered.yaml" |
     grep -v -e '^  labels:$' -e '^    helm.sh/chart:' -e '^    app.kubernetes.io/' > "$tmp/chart.yaml"
   strip "$example" > "$tmp/example.yaml"
   if ! diff -u "$tmp/example.yaml" "$tmp/chart.yaml"; then
-    echo "examples/$2 differs from the chart output (diff above: - example, + chart)." >&2
+    echo "examples/$name differs from the chart output (diff above: - example, + chart)." >&2
     echo "Re-render it as described in docs/pr-pipeline.md / docs/pr-feedback.md." >&2
     exit 1
   fi
-  echo "examples/$2 matches the chart output."
+  echo "examples/$name matches the chart output."
 }
 
 check pr-pipeline.yaml chain-pr-pipeline.yaml
 check pr-feedback.yaml chain-pr-feedback.yaml
+# postRun: chain (#538) adds the verify, close_parent and handback steps.
+check pr-pipeline.yaml chain-pr-pipeline-postrun.yaml --set prPipeline.postRun=chain
 
 # The plan prompt describes only the model tiers the implement steps can run
 # (#360): a tier it never describes is one it never picks, and the planner's

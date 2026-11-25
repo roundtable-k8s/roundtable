@@ -601,6 +601,25 @@ spec:
                     maxLength: 50
                     minLength: 1
                     type: string
+                  postRun:
+                    default: builtin
+                    description: |-
+                      postRun selects who checks a finished run on GitHub. builtin (the
+                      default): the operator parses the run's "PRs:" and "Verdict:" lines,
+                      checks every PR is merged or queued (queueing it or posting the
+                      missing review when it can), hands failed runs back with
+                      needsHumanLabel and closes the parent issue of a split run once its
+                      sub-issues are done. chain: the chain's own steps do all of that (the
+                      chart's PR pipeline with prPipeline.postRun: chain) and the operator
+                      only releases the issue: when a finished run did not succeed, or left
+                      needsHumanLabel on the issue, and the issue is still open with
+                      inProgressLabel, it gets needsHumanLabel and loses inProgressLabel, so
+                      a failed verify or handback step never leaves it in progress. See
+                      docs/pr-pipeline.md.
+                    enum:
+                    - builtin
+                    - chain
+                    type: string
                   readyLabel:
                     default: rt:ready
                     description: readyLabel marks issues to pick up.
