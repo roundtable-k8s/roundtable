@@ -28,9 +28,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Managed resources — tools image build Jobs
+  # Managed resources — tools image build Jobs, and the CronJobs of
+  # scheduled Triggers (with their ServiceAccounts, below)
   - apiGroups: ["batch"]
-    resources: ["jobs"]
+    resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Managed resources — Agent Sandbox
   - apiGroups: ["agents.x-k8s.io"]

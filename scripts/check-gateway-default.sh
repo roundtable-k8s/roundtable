@@ -71,8 +71,17 @@ has "$def" '--schedule-runs=true' "schedule run history not enabled by default"
 ret="$(render --set gateway.scheduleRuns.resultRetention=48h)"
 [ "$(grep -c -- '--schedule-result-retention=48h' <<<"$ret")" = 2 ] || fail "gateway.scheduleRuns.resultRetention ignored"
 has "$(render --set gateway.scheduleRuns.enabled=false)" '--schedule-runs=false' "schedule-runs flag not passed when disabled"
+# Scheduled Triggers: the firing pod calls the chart's gateway Service with
+# the gateway's ServiceAccount audience, or triggers.gatewayURL.
+has "$def" '--trigger-gateway-url=http://rt-roundtable-operator-gateway.roundtable.svc:80$' "trigger gateway URL not the gateway Service"
+has "$def" '--trigger-gateway-audience=roundtable-gateway$' "trigger gateway audience not passed"
+has "$def" '--trigger-image=' "trigger image not passed"
+has "$sa" '--trigger-gateway-audience=other$' "trigger audience does not follow serviceAccountAuth.audience"
+ext="$(render --set gateway.enabled=false --set triggers.gatewayURL=https://gw.example)"
+has "$ext" '--trigger-gateway-url=https://gw.example$' "triggers.gatewayURL ignored"
 
 off="$(render --set gateway.enabled=false)"
+lacks "$off" '--trigger-gateway-url' "trigger gateway URL passed with the gateway disabled"
 # The operator still records knight-target Trigger tasks in the gateway's task
 # bucket (--trigger-task-bucket), whose default name says gateway.
 has "$off" '--trigger-task-bucket=roundtable_gateway_tasks' "operator not given the task bucket with the gateway disabled"

@@ -166,7 +166,13 @@ type TriggerSource struct {
 	// +optional
 	NATS *TriggerNATSSource `json:"nats,omitempty"`
 
-	// schedule fires on a cron schedule.
+	// schedule fires on a cron schedule. The operator renders a batch/v1
+	// CronJob trigger-<name> (and the ServiceAccount trigger-<name> it runs
+	// as) owned by the Trigger; each CronJob run asks the gateway to publish
+	// a firing to <subjectPrefix>.events.schedule.<namespace>.<name> on the
+	// events stream of the Trigger's RoundTable (roundTableRef, else the
+	// target's), which the Trigger reads like a NATS source. Needs the
+	// gateway.
 	// +optional
 	Schedule *TriggerScheduleSource `json:"schedule,omitempty"`
 
@@ -524,9 +530,10 @@ type TriggerScheduleSource struct {
 	// +optional
 	TimeZone string `json:"timeZone,omitempty"`
 
-	// startingDeadlineSeconds bounds catch-up: a missed fire still runs only
-	// if fewer than this many seconds have passed since it was due. Unset
-	// always catches up (at most one run).
+	// startingDeadlineSeconds is the CronJob's: a missed fire still runs
+	// only if fewer than this many seconds have passed since it was due.
+	// Unset leaves it to the CronJob controller (catch up once, unless more
+	// than 100 times were missed).
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
@@ -769,7 +776,9 @@ type TriggerSpec struct {
 	// roundTableRef names the RoundTable (same namespace) whose events
 	// stream a NATS, webhook or github source reads, and whose
 	// spec.github.tokenSecretRef a github source polls with. Required for
-	// source.nats, source.webhook and source.github.
+	// source.nats, source.webhook and source.github. A schedule source
+	// without it reads its target Chain's roundTableRef, else its target
+	// knight's RoundTable, else the RoundTable named "default".
 	// +optional
 	RoundTableRef *corev1.LocalObjectReference `json:"roundTableRef,omitempty"`
 
@@ -824,11 +833,13 @@ type TriggerStatus struct {
 	// +optional
 	LastFiredAt *metav1.Time `json:"lastFiredAt,omitempty"`
 
-	// lastScheduledAt is the last schedule time handled (schedule source).
+	// lastScheduledAt is the schedule time the CronJob last ran a job for
+	// (its status.lastScheduleTime; schedule source).
 	// +optional
 	LastScheduledAt *metav1.Time `json:"lastScheduledAt,omitempty"`
 
-	// nextScheduledAt is the next schedule time (schedule source).
+	// nextScheduledAt is the next schedule time, computed for display
+	// (schedule source; the CronJob decides when it fires).
 	// +optional
 	NextScheduledAt *metav1.Time `json:"nextScheduledAt,omitempty"`
 
