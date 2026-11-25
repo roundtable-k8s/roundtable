@@ -46,22 +46,37 @@ var _ = Describe("Helper Functions", func() {
 		})
 
 		It("returns Provisioning when total is 0", func() {
-			phase := reconciler.computePhase(rt, 0, 0, 0)
+			phase := reconciler.computePhase(rt, knightCounts{ready: 0, notReady: 0}, 0)
 			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseProvisioning))
 		})
 
-		It("returns Ready when readyCount equals total", func() {
-			phase := reconciler.computePhase(rt, 3, 3, 0)
+		It("returns Ready when every knight is ready", func() {
+			phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 0)
 			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 		})
 
-		It("returns Degraded when readyCount is less than total", func() {
-			phase := reconciler.computePhase(rt, 1, 3, 0)
+		It("returns Degraded when some knights are not ready", func() {
+			phase := reconciler.computePhase(rt, knightCounts{ready: 1, notReady: 2}, 0)
 			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseDegraded))
 		})
 
-		It("returns Degraded when readyCount is 0 but total > 0", func() {
-			phase := reconciler.computePhase(rt, 0, 3, 0)
+		It("returns Ready when the rest are scaled to zero or suspended", func() {
+			phase := reconciler.computePhase(rt, knightCounts{ready: 1, scaledToZero: 4, suspended: 1}, 0)
+			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
+		})
+
+		It("returns Ready when every knight is scaled to zero", func() {
+			phase := reconciler.computePhase(rt, knightCounts{scaledToZero: 6}, 0)
+			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
+		})
+
+		It("returns Degraded when one knight that should run is not ready", func() {
+			phase := reconciler.computePhase(rt, knightCounts{scaledToZero: 5, notReady: 1}, 0)
+			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseDegraded))
+		})
+
+		It("returns Degraded when no knight is ready", func() {
+			phase := reconciler.computePhase(rt, knightCounts{ready: 0, notReady: 3}, 0)
 			Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseDegraded))
 		})
 
@@ -73,17 +88,17 @@ var _ = Describe("Helper Functions", func() {
 			})
 
 			It("returns OverBudget when cost exceeds budget", func() {
-				phase := reconciler.computePhase(rt, 3, 3, 150.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 150.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseOverBudget))
 			})
 
 			It("returns Ready when cost is within budget", func() {
-				phase := reconciler.computePhase(rt, 3, 3, 50.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 50.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 			})
 
 			It("returns OverBudget even when all knights ready", func() {
-				phase := reconciler.computePhase(rt, 3, 3, 100.01)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 100.01)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseOverBudget))
 			})
 		})
@@ -93,7 +108,7 @@ var _ = Describe("Helper Functions", func() {
 				rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{
 					CostBudgetUSD: "0",
 				}
-				phase := reconciler.computePhase(rt, 3, 3, 999.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 999.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 			})
 
@@ -101,13 +116,13 @@ var _ = Describe("Helper Functions", func() {
 				rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{
 					CostBudgetUSD: "",
 				}
-				phase := reconciler.computePhase(rt, 3, 3, 999.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 999.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 			})
 
 			It("ignores budget when policies is nil", func() {
 				rt.Spec.Policies = nil
-				phase := reconciler.computePhase(rt, 3, 3, 999.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 999.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 			})
 		})
@@ -117,7 +132,7 @@ var _ = Describe("Helper Functions", func() {
 				rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{
 					CostBudgetUSD: "not-a-number",
 				}
-				phase := reconciler.computePhase(rt, 3, 3, 999.0)
+				phase := reconciler.computePhase(rt, knightCounts{ready: 3, notReady: 0}, 999.0)
 				Expect(phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
 			})
 		})

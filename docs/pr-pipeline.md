@@ -141,9 +141,18 @@ get per-item runIds, so after a split the fix rounds start a new session (the
 review lists the PRs to work on).
 
 **Merge.** The lead queues every PR from the final review with
-`gh pr merge --auto --squash` and waits up to 50 minutes for each to be merged,
-closed or blocked by a failing required check. Its output has one line per PR
-and the number of fix rounds. A merge-queue rejection or a red CI run after
+`gh pr merge --auto --squash` and stops: a queued PR is a finished merge
+(#591), so the step never waits on CI or the merge queue. Its output has one
+line per PR, `<url> queued` (with the queue position when known), `<url>
+merged` or `<url> closed|blocked: <reason>`, plus the number of fix rounds;
+the structured `prs[]` carry action `queued` or `merged`, which CEL can check
+(`steps.merge.prs.all(p, p.action in ["queued", "merged"])`). If the step
+still times out and GitHub shows every PR of the run merged or queued when the
+chain finishes, the operator records the step as `Succeeded` (reason
+`QueuedAtTimeout`, a note in its output), resolves the step's `timeout`
+dead-letter entry and does not hand the issue back; with `postRun: chain`
+the verify step also runs after a merge timeout, and handback skips a merge
+timeout that verify passed. A merge-queue rejection or a red CI run after
 the pipeline ended goes back to the PR's author through the feedback Chain
 ([pr-feedback.md](pr-feedback.md)). Like issue pickup, PR feedback runs on one
 of two engines, chosen per table with `spec.prFeedback.engine`: `builtin` (the

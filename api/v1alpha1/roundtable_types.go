@@ -512,6 +512,22 @@ type RoundTableStatus struct {
 	// +optional
 	KnightsTotal int32 `json:"knightsTotal,omitempty"`
 
+	// knightsScaledToZero is the number of autoscaled knights that KEDA
+	// scaled to zero (idle or waking). They wake on demand and do not
+	// degrade the table.
+	// +optional
+	KnightsScaledToZero int32 `json:"knightsScaledToZero,omitempty"`
+
+	// knightsSuspended is the number of knights suspended by spec.suspend.
+	// They do not degrade the table.
+	// +optional
+	KnightsSuspended int32 `json:"knightsSuspended,omitempty"`
+
+	// knightsNotReady is the number of knights that should be running but
+	// are not ready. Any such knight makes the table Degraded.
+	// +optional
+	KnightsNotReady int32 `json:"knightsNotReady,omitempty"`
+
 	// knights provides a summary of each knight's status.
 	// +optional
 	Knights []RoundTableKnightSummary `json:"knights,omitempty"`
@@ -558,6 +574,7 @@ type RoundTableStatus struct {
 // +kubebuilder:resource:shortName=rt,categories=roundtable
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.knightsReady`,description="Knights in phase Ready"
+// +kubebuilder:printcolumn:name="Idle",type=integer,JSONPath=`.status.knightsScaledToZero`,description="Knights scaled to zero; they wake on demand"
 // +kubebuilder:printcolumn:name="Total",type=integer,JSONPath=`.status.knightsTotal`
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.totalTasksCompleted`
 // +kubebuilder:printcolumn:name="Cost",type=string,JSONPath=`.status.totalCost`

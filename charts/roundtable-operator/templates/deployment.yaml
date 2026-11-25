@@ -56,6 +56,8 @@ spec:
             - --enable-keda={{ if kindIs "bool" .Values.keda }}{{ .Values.keda }}{{ else }}{{ .Values.keda | default "auto" }}{{ end }}
             - --provider-overload-max-retries={{ .Values.providerOverload.maxRetries }}
             - --mission-results-ttl={{ .Values.mission.resultsTTL | default "720h" }}
+            - --trigger-task-bucket={{ .Values.gateway.taskBucket | default "roundtable_gateway_tasks" }}
+            - --trigger-task-ttl={{ .Values.gateway.taskTTL | default "168h" }}
             {{- with .Values.natsMonitoringEndpoint }}
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}

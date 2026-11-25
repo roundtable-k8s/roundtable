@@ -69,7 +69,7 @@ spec:
   model: claude-sonnet-4-20250514
   skills: [security, opencti, shared]
   tools:
-    apt: [nmap, whois, dnsutils]
+    nix: [nmap, whois, bind]
   nats:
     subjects: ["fleet-a.tasks.security.>"]
   concurrency: 2

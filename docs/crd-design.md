@@ -264,7 +264,7 @@ the operator does not commit results to git.
    - Count total concurrent tasks across knights. If exceeding `maxConcurrentTasks`, pause NATS consumers on lowest-priority knights.
    - Aggregate costs. If exceeding `costBudgetUSD`, suspend all knights (set annotation `roundtable.ai.roundtable.io/budget-suspended=true`).
    - Check cost reset schedule, reset counter when due.
-5. **Health Aggregation** — Compute phase: Ready (all knights ready), Degraded (some not ready), Suspended, OverBudget.
+5. **Health Aggregation** — Count knights as ready, scaled to zero (KEDA, `ScaledToZero` or `Waking`), suspended (`spec.suspend`) or not ready (`status.knightsReady`, `knightsScaledToZero`, `knightsSuspended`, `knightsNotReady`; `kubectl get rt` shows the `Idle` column). Compute phase: Ready (no knight that should run is down; scaled-to-zero and suspended knights count as healthy), Degraded (some not ready), Suspended, OverBudget.
 6. **Mission Counting** — Count active Missions referencing this table.
 
 **NATS Subjects:**
@@ -735,3 +735,15 @@ no headers are rendered.
   pod credential is), including the agent's shell.
 
 Example: [`examples/knight-mcp-headers.yaml`](../examples/knight-mcp-headers.yaml).
+
+## 8. Deprecated fields
+
+These fields still work in this release but are reported on the Knight as
+`DeprecatedFieldsUsed=True` (with one Warning event per field per generation)
+and will be removed one release later:
+
+| Field | Replacement | Why |
+|---|---|---|
+| `spec.tools.apt` | `spec.tools.nix`, `spec.tools.flakes` | Knight containers run as non-root, so apt installs cannot succeed. |
+| `spec.tools.mise` | `spec.tools.nix`, `spec.tools.flakes` | Tools are written as `latest`, never pinned, and downloaded at every cold start. |
+| `spec.nats.maxDeliver` | none | Ignored; tasks run at most once. |

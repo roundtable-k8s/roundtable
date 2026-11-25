@@ -39,6 +39,26 @@ nohooks="$(render --set gateway.hooks.enabled=false)"
 lacks "$nohooks" 'gateway-hook-secrets' "webhook secret Role rendered with hooks disabled"
 has "$nohooks" '--hooks=false' "hooks flag not passed when disabled"
 
+# ServiceAccount auth: on by default with a TokenReview-only ClusterRole.
+has "$def" '--service-account-auth=true' "ServiceAccount auth not enabled by default"
+has "$def" '--service-account-audience=roundtable-gateway' "default ServiceAccount audience not passed"
+has "$def" '--service-account-namespaces=\*' "ServiceAccounts not allowed from any namespace by default"
+tr_role="$(awk 'BEGIN{RS="\n---\n"} /kind: ClusterRole\n/ && /name: rt-roundtable-operator-gateway-sa-auth/' <<<"$def")"
+has "$tr_role" 'resources: \["tokenreviews"\]' "TokenReview ClusterRole missing by default"
+[ "$(grep 'verbs:' <<<"$tr_role")" = '    verbs: ["create"]' ] || fail "TokenReview ClusterRole must grant create only"
+# ClusterRole name, ClusterRoleBinding name and its roleRef.
+[ "$(grep -c 'name: rt-roundtable-operator-gateway-sa-auth$' <<<"$def")" = 3 ] || fail "TokenReview ClusterRoleBinding missing"
+sa="$(render --set gateway.serviceAccountAuth.audience=other --set 'gateway.serviceAccountAuth.allowedNamespaces={jobs,ops}')"
+has "$sa" '--service-account-audience=other' "serviceAccountAuth.audience ignored"
+has "$sa" '--service-account-namespaces=jobs,ops' "serviceAccountAuth.allowedNamespaces ignored"
+nosa="$(render --set gateway.serviceAccountAuth.enabled=false)"
+lacks "$nosa" 'gateway-sa-auth' "TokenReview ClusterRole rendered with ServiceAccount auth disabled"
+lacks "$nosa" 'tokenreviews' "tokenreviews granted with ServiceAccount auth disabled"
+has "$nosa" '--service-account-auth=false' "ServiceAccount auth flag not passed when disabled"
+
 off="$(render --set gateway.enabled=false)"
-lacks "$off" 'gateway' "gateway resources rendered when disabled"
+# The operator still records knight-target Trigger tasks in the gateway's task
+# bucket (--trigger-task-bucket), whose default name says gateway.
+has "$off" '--trigger-task-bucket=roundtable_gateway_tasks' "operator not given the task bucket with the gateway disabled"
+lacks "$(grep -v -- '--trigger-task-' <<<"$off")" 'gateway' "gateway resources rendered when disabled"
 echo "gateway defaults OK"

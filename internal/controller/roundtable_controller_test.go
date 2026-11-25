@@ -21,8 +21,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -95,5 +100,111 @@ var _ = Describe("RoundTable usage totals", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tasks).To(Equal(int64(6)))
 		Expect(cost).To(BeNumerically("~", 1.75, 1e-9))
+	})
+})
+
+var _ = Describe("RoundTable health with knights at rest", func() {
+	const (
+		namespace = "default"
+		table     = "idle-rt"
+	)
+	member := map[string]string{"idle-test": table}
+
+	reconcileTable := func() *aiv1alpha1.RoundTable {
+		r := &RoundTableReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		key := types.NamespacedName{Name: table, Namespace: namespace}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		return rt
+	}
+
+	// newKnight creates a member knight and writes its status: phase plus an
+	// Available condition with the given reason ("" for none).
+	newKnight := func(name string, suspend bool, phase aiv1alpha1.KnightPhase, ready bool, reason string) {
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: member},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain:  "ops",
+				Model:   "model-a",
+				Skills:  []string{"ops"},
+				Suspend: suspend,
+				NATS:    aiv1alpha1.KnightNATS{Subjects: []string{"idle.tasks.ops.>"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		k.Status.Phase = phase
+		k.Status.Ready = ready
+		if reason != "" {
+			status := metav1.ConditionFalse
+			if ready {
+				status = metav1.ConditionTrue
+			}
+			meta.SetStatusCondition(&k.Status.Conditions, metav1.Condition{
+				Type: aiv1alpha1.ConditionKnightAvailable, Status: status, Reason: reason, Message: "test",
+			})
+		}
+		Expect(k8sClient.Status().Update(ctx, k)).To(Succeed())
+	}
+
+	BeforeEach(func() {
+		Expect(k8sClient.Create(ctx, &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: table, Namespace: namespace},
+			Spec: aiv1alpha1.RoundTableSpec{
+				NATS:           aiv1alpha1.RoundTableNATS{SubjectPrefix: "idle", TasksStream: "idle_tasks", ResultsStream: "idle_results"},
+				KnightSelector: &metav1.LabelSelector{MatchLabels: member},
+				// No owned planner: these specs count exactly the knights they create.
+				Planner: &aiv1alpha1.RoundTablePlanner{Enabled: new(false)},
+			},
+		})).To(Succeed())
+	})
+
+	AfterEach(func() {
+		Expect(k8sClient.DeleteAllOf(ctx, &aiv1alpha1.Knight{},
+			client.InNamespace(namespace), client.MatchingLabels(member))).To(Succeed())
+		Expect(k8sClient.Delete(ctx, &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: table, Namespace: namespace},
+		})).To(Succeed())
+	})
+
+	It("reports Ready when every knight is scaled to zero", func() {
+		for _, name := range []string{"idle-a", "idle-b", "idle-c"} {
+			newKnight(name, false, aiv1alpha1.KnightPhaseSuspended, false, aiv1alpha1.ReasonKnightScaledToZero)
+		}
+		rt := reconcileTable()
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
+		Expect(rt.Status.KnightsTotal).To(Equal(int32(3)))
+		Expect(rt.Status.KnightsReady).To(BeZero())
+		Expect(rt.Status.KnightsScaledToZero).To(Equal(int32(3)))
+		Expect(rt.Status.KnightsNotReady).To(BeZero())
+		cond := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableAvailable)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Message).To(Equal("3 knights: 0 ready, 3 scaled to zero, 0 suspended, 0 not ready"))
+	})
+
+	It("counts ready, waking, user-suspended knights as healthy and a crashed one as Degraded", func() {
+		newKnight("idle-ready", false, aiv1alpha1.KnightPhaseReady, true, aiv1alpha1.ReasonKnightReady)
+		newKnight("idle-zero", false, aiv1alpha1.KnightPhaseSuspended, false, aiv1alpha1.ReasonKnightScaledToZero)
+		newKnight("idle-waking", false, aiv1alpha1.KnightPhaseSuspended, false, aiv1alpha1.ReasonKnightWaking)
+		newKnight("idle-off", true, aiv1alpha1.KnightPhaseSuspended, false, aiv1alpha1.ReasonKnightSuspended)
+
+		rt := reconcileTable()
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseReady))
+		Expect(rt.Status.KnightsReady).To(Equal(int32(1)))
+		Expect(rt.Status.KnightsScaledToZero).To(Equal(int32(2)))
+		Expect(rt.Status.KnightsSuspended).To(Equal(int32(1)))
+
+		By("a knight that should run crashing")
+		newKnight("idle-crashed", false, aiv1alpha1.KnightPhaseDegraded, false, aiv1alpha1.ReasonKnightReconcileError)
+		rt = reconcileTable()
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseDegraded))
+		Expect(rt.Status.KnightsNotReady).To(Equal(int32(1)))
+		cond := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableAvailable)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonKnightsDegraded))
+		Expect(cond.Message).To(Equal("5 knights: 1 ready, 2 scaled to zero, 1 suspended, 1 not ready"))
 	})
 })

@@ -355,11 +355,15 @@ spec:
         Final review:
         {{ .Output }}{{ end }}{{ end }}
 
-        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`.
-        Then wait until each one is merged, closed, or blocked by a failing required
-        check (check every few minutes, give up after 50 minutes).
-        Reply with one line per PR, "<url> merged|closed|blocked: <reason>",
-        then a line "Fix rounds: <n>" and a last line
+        Queue every PR on the review's "PRs:" line with `gh pr merge --auto --squash`
+        (approve it first if the repo requires an approval). A queued PR is a
+        finished merge: stop as soon as every PR is queued or already merged.
+        Never poll or wait for CI or the merge queue to finish.
+        Reply with one line per PR, "<url> queued", "<url> queued (position <n>)"
+        when the queue position is known, "<url> merged", or
+        "<url> closed|blocked: <reason>" when it could not be queued, and report
+        the same PRs in the structured prs[] with action "queued" or "merged".
+        Then a line "Fix rounds: <n>" and a last line
         "Tiering: implement=<alias the plan chose> fix=deep review rounds=<n>"
         (the alias is in the plan: {{ .Steps.plan.Output }}).
 

@@ -224,10 +224,13 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.defaultTimeout` | duration | `60s` | Wait when the caller passes no `timeoutSeconds` |
 | `gateway.maxTimeout` | duration | `10m` | Upper bound on a caller's wait |
 | `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
-| `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records |
+| `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records (also of Triggers with a knight target) |
 | `gateway.taskTTL` | duration | `168h` | How long task records are kept |
 | `gateway.auth.existingSecret` | string | `""` | Secret holding the bearer token(s); empty = chart generates one |
-| `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation) |
+| `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation), optionally `<name> <token>` to name the caller |
+| `gateway.serviceAccountAuth.enabled` | bool | `true` | Also accept in-cluster callers' own ServiceAccount tokens, checked with a TokenReview; grants the gateway `create` on `tokenreviews.authentication.k8s.io` (a ClusterRole, only when enabled) ([gateway.md](gateway.md#calling-from-a-workload)) |
+| `gateway.serviceAccountAuth.audience` | string | `roundtable-gateway` | Audience the projected ServiceAccount token must be issued for |
+| `gateway.serviceAccountAuth.allowedNamespaces` | list | `["*"]` | Namespaces whose ServiceAccounts may call (`"*"` or an empty list = any) |
 | `gateway.service.type` / `.port` | string / int | `ClusterIP` / `80` | Service |
 | `gateway.networkPolicy.enabled` | bool | `true` | Restrict ingress to the gateway |
 | `gateway.networkPolicy.from` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed in (default: release namespace). An empty list allows any source. |
@@ -300,7 +303,7 @@ knights:
     model: claude-sonnet-4-20250514
     skills: [security, threat-intel]
     tools:
-      apt: [nmap, whois]
+      nix: [nmap, whois]
     nats:
       subjects: ["fleet-a.tasks.security.>"]
     taskTimeoutSeconds: 300

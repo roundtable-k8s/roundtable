@@ -66,6 +66,24 @@ const (
 
 	// TriggerMaxRecentFirings bounds status.recentFirings.
 	TriggerMaxRecentFirings = 10
+
+	// DefaultTriggerKnightTimeoutSeconds is target.knight.timeoutSeconds
+	// when unset.
+	DefaultTriggerKnightTimeoutSeconds int32 = 3600
+)
+
+// TriggerFiringOutcome is how a firing's task ended (knight target).
+// +kubebuilder:validation:Enum=succeeded;failed;lost
+type TriggerFiringOutcome string
+
+const (
+	// TriggerFiringSucceeded: the knight returned a result.
+	TriggerFiringSucceeded TriggerFiringOutcome = "succeeded"
+	// TriggerFiringFailed: the knight reported an error or empty output.
+	TriggerFiringFailed TriggerFiringOutcome = "failed"
+	// TriggerFiringLost: no result arrived within timeoutSeconds, or the
+	// task record is gone.
+	TriggerFiringLost TriggerFiringOutcome = "lost"
 )
 
 // TriggerConcurrencyPolicy says what a firing does while earlier runs of the
@@ -458,11 +476,60 @@ type TriggerScheduleSource struct {
 	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
 }
 
-// TriggerTarget is what a firing starts.
+// TriggerTarget is what a firing starts: a run of a Chain, or one task sent
+// to a knight. Exactly one is set.
+// +kubebuilder:validation:XValidation:rule="[has(self.chainRef), has(self.knight)].filter(x, x).size() == 1",message="set exactly one of target.chainRef or target.knight"
 type TriggerTarget struct {
 	// chainRef names the Chain (same namespace) a firing starts a copy of.
+	// +optional
+	ChainRef *corev1.LocalObjectReference `json:"chainRef,omitempty"`
+
+	// knight sends one task to a knight per firing, through the gateway's
+	// single-task path: the task is recorded with the gateway's tasks (task
+	// KV bucket), and status.recentFirings[].run is its task ID.
+	// +optional
+	Knight *TriggerKnightTarget `json:"knight,omitempty"`
+}
+
+// TriggerKnightTarget is one task sent to a knight per firing.
+type TriggerKnightTarget struct {
+	// name of the Knight (same namespace). With roundTableRef set, the
+	// knight must sit at that RoundTable.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	// +required
-	ChainRef corev1.LocalObjectReference `json:"chainRef"`
+	Name string `json:"name"`
+
+	// task is a Go template rendered into the task text, with the same data
+	// as spec.input (.Event, .Trigger). A task that renders empty fires
+	// nothing.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=65536
+	// +required
+	Task string `json:"task"`
+
+	// model overrides the knight's model for this task only (a model ID or
+	// a RoundTable model alias).
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// timeoutSeconds is how long a task may run: a task without a result
+	// after this long is recorded as lost and no longer counts as active.
+	// Defaults to 3600.
+	// +kubebuilder:default=3600
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=604800
+	// +optional
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+}
+
+// EffectiveTimeoutSeconds is timeoutSeconds, defaulted.
+func (k *TriggerKnightTarget) EffectiveTimeoutSeconds() int32 {
+	if k == nil || k.TimeoutSeconds == nil || *k.TimeoutSeconds <= 0 {
+		return DefaultTriggerKnightTimeoutSeconds
+	}
+	return *k.TimeoutSeconds
 }
 
 // TriggerConcurrency bounds how many runs of a Trigger are active at once.
@@ -485,6 +552,9 @@ type TriggerConcurrency struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.source.nats) || has(self.roundTableRef)",message="roundTableRef is required for source.nats"
 // +kubebuilder:validation:XValidation:rule="!has(self.source.webhook) || has(self.roundTableRef)",message="roundTableRef is required for source.webhook"
 // +kubebuilder:validation:XValidation:rule="!has(self.source.github) || has(self.roundTableRef)",message="roundTableRef is required for source.github"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.source.github)",message="target.knight is not supported with source.github: use target.chainRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.input) || size(self.input) == 0",message="spec.input is for target.chainRef: put a knight's text in target.knight.task"
+// +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.concurrency) || !has(self.concurrency.policy) || self.concurrency.policy != 'Replace'",message="concurrency.policy Replace is not supported with target.knight: a sent task cannot be withdrawn"
 type TriggerSpec struct {
 	// source is where events come from.
 	// +required
@@ -494,7 +564,8 @@ type TriggerSpec struct {
 	// +required
 	Target TriggerTarget `json:"target"`
 
-	// input is a Go template rendered into the run's spec.input. The event
+	// input is a Go template rendered into the run's spec.input (chainRef
+	// target; a knight target renders target.knight.task instead). The event
 	// is available as .Event: .Event.Subject, .Event.Data (the payload
 	// parsed as JSON, or the raw string), .Event.Headers (map of header name
 	// to value) and .Event.Time; .Trigger has .Name and .Namespace. A
@@ -505,7 +576,8 @@ type TriggerSpec struct {
 
 	// dedupeKey is a Go template (same data as input) whose result
 	// identifies the event: an event whose key matches a run that still
-	// exists starts nothing. Defaults to the Nats-Msg-Id header (else the
+	// exists starts nothing (knight target: a task sent for the key while
+	// the gateway keeps its task records). Defaults to the Nats-Msg-Id header (else the
 	// stream sequence) for NATS and webhook, the scheduled time for
 	// schedule, and "<owner/name>#<number>" for github.
 	// +optional
@@ -531,6 +603,8 @@ type TriggerSpec struct {
 
 	// ttlSecondsAfterFinished deletes a finished run this long after it
 	// completed. Its dedupe key is forgotten then too. 0 keeps finished runs.
+	// A knight target's tasks are kept as long as the gateway keeps task
+	// records (gateway.taskTTL) instead.
 	// +kubebuilder:default=86400
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -546,9 +620,15 @@ type TriggerFiring struct {
 	// +optional
 	Key string `json:"key,omitempty"`
 
-	// run is the Chain the firing started.
+	// run is the Chain the firing started, or the task ID of the task it
+	// sent (knight target).
 	// +optional
 	Run string `json:"run,omitempty"`
+
+	// outcome is how the firing's task ended, once known (knight target):
+	// succeeded, failed or lost.
+	// +optional
+	Outcome TriggerFiringOutcome `json:"outcome,omitempty"`
 
 	// skipReason says why the firing started nothing.
 	// +optional
@@ -578,7 +658,7 @@ type TriggerStatus struct {
 	RecentFirings []TriggerFiring `json:"recentFirings,omitempty"`
 
 	// activeRuns are the names of the Trigger's runs that are running or
-	// pending.
+	// pending (knight target: the IDs of its tasks without a result).
 	// +optional
 	ActiveRuns []string `json:"activeRuns,omitempty"`
 
@@ -608,16 +688,17 @@ type TriggerStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=trg,categories=roundtable
 // +kubebuilder:printcolumn:name="Chain",type=string,JSONPath=`.spec.target.chainRef.name`
+// +kubebuilder:printcolumn:name="Knight",type=string,JSONPath=`.spec.target.knight.name`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Last Fired",type=date,JSONPath=`.status.lastFiredAt`
 // +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be at most 63 characters: it labels the Trigger's runs"
 
-// Trigger starts a run of a Chain with input rendered from an event: a
-// message on the RoundTable's events stream, a webhook delivered through the
-// gateway, a cron schedule, or a GitHub issue or pull request matching a
-// query.
+// Trigger starts a run of a Chain, or sends one task to a knight, with input
+// rendered from an event: a message on the RoundTable's events stream, a
+// webhook delivered through the gateway, a cron schedule, or a GitHub issue
+// or pull request matching a query.
 type Trigger struct {
 	metav1.TypeMeta `json:",inline"`
 

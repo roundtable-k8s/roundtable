@@ -121,11 +121,11 @@ roundtable_trigger_last_fired_timestamp_seconds{table="t1",trigger="nightly"} 1.
 
 func TestGatewayRequestsNameAndLabels(t *testing.T) {
 	GatewayRequestsTotal.Reset()
-	GatewayRequestsTotal.WithLabelValues("GET /v1/knights", "200", "none").Inc()
+	GatewayRequestsTotal.WithLabelValues("GET /v1/knights", "200", "none", "serviceaccount").Inc()
 	const want = `
-# HELP roundtable_gateway_requests_total Invoke gateway HTTP requests by route template, status code and table
+# HELP roundtable_gateway_requests_total Invoke gateway HTTP requests by route, status code, table and caller kind
 # TYPE roundtable_gateway_requests_total counter
-roundtable_gateway_requests_total{code="200",route="GET /v1/knights",table="none"} 1
+roundtable_gateway_requests_total{caller_kind="serviceaccount",code="200",route="GET /v1/knights",table="none"} 1
 `
 	if err := testutil.CollectAndCompare(GatewayRequestsTotal, strings.NewReader(want)); err != nil {
 		t.Error(err)

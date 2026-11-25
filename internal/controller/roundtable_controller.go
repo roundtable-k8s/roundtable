@@ -144,20 +144,15 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// 2. Health Aggregation
-	var readyCount int32
 	knightSummaries := make([]aiv1alpha1.RoundTableKnightSummary, 0, len(knights))
-
 	for _, k := range knights {
-		summary := aiv1alpha1.RoundTableKnightSummary{
+		knightSummaries = append(knightSummaries, aiv1alpha1.RoundTableKnightSummary{
 			Name:  k.Name,
 			Phase: k.Status.Phase,
 			Ready: k.Status.Ready,
-		}
-		knightSummaries = append(knightSummaries, summary)
-		if k.Status.Ready {
-			readyCount++
-		}
+		})
 	}
+	counts := countKnights(knights)
 
 	// Cost and task totals come from Chains and Missions; the Knight status
 	// fields are not written by anything (#547).
@@ -168,7 +163,10 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	total := int32(len(knights))
 	rt.Status.KnightsTotal = total
-	rt.Status.KnightsReady = readyCount
+	rt.Status.KnightsReady = counts.ready
+	rt.Status.KnightsScaledToZero = counts.scaledToZero
+	rt.Status.KnightsSuspended = counts.suspended
+	rt.Status.KnightsNotReady = counts.notReady
 	rt.Status.Knights = knightSummaries
 	rt.Status.TotalTasksCompleted = totalTasksCompleted
 	rt.Status.TotalCost = fmt.Sprintf("%.4f", totalCost)
@@ -199,7 +197,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	r.reconcileCards(ctx, rt, knights)
 
 	// 4. Cost Budget Check
-	phase := r.computePhase(rt, readyCount, total, totalCost)
+	phase := r.computePhase(rt, counts, totalCost)
 	rt.Status.Phase = phase
 
 	// 5. Active Missions count
@@ -216,7 +214,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
 			Status:             metav1.ConditionTrue,
 			Reason:             aiv1alpha1.ReasonAllKnightsReady,
-			Message:            fmt.Sprintf("All %d knights are ready", total),
+			Message:            counts.String(),
 			ObservedGeneration: rt.Generation,
 		})
 	case aiv1alpha1.RoundTablePhaseDegraded:
@@ -224,7 +222,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
 			Status:             metav1.ConditionFalse,
 			Reason:             aiv1alpha1.ReasonKnightsDegraded,
-			Message:            fmt.Sprintf("%d/%d knights ready", readyCount, total),
+			Message:            counts.String(),
 			ObservedGeneration: rt.Generation,
 		})
 	case aiv1alpha1.RoundTablePhaseOverBudget:
@@ -325,8 +323,60 @@ func (r *RoundTableReconciler) appendOwnedPlanner(ctx context.Context, rt *aiv1a
 	}
 }
 
-// computePhase determines the RoundTable phase based on knight health and cost.
-func (r *RoundTableReconciler) computePhase(rt *aiv1alpha1.RoundTable, readyCount, total int32, totalCost float64) aiv1alpha1.RoundTablePhase {
+// knightCounts splits a table's knights by health. Knights scaled to zero by
+// KEDA and knights suspended by spec.suspend are at rest on purpose; only
+// notReady knights (should be running but are not) degrade the table.
+type knightCounts struct {
+	ready, scaledToZero, suspended, notReady int32
+}
+
+func (c knightCounts) total() int32 {
+	return c.ready + c.scaledToZero + c.suspended + c.notReady
+}
+
+// String is the Available condition message, e.g.
+// "6 knights: 1 ready, 4 scaled to zero, 1 suspended, 0 not ready".
+func (c knightCounts) String() string {
+	return fmt.Sprintf("%d knights: %d ready, %d scaled to zero, %d suspended, %d not ready",
+		c.total(), c.ready, c.scaledToZero, c.suspended, c.notReady)
+}
+
+// countKnights classifies each knight as ready, scaled to zero (an autoscaled
+// knight at zero, idle or waking), suspended (spec.suspend) or not ready.
+func countKnights(knights []aiv1alpha1.Knight) knightCounts {
+	var c knightCounts
+	for i := range knights {
+		k := &knights[i]
+		switch {
+		case k.Status.Ready:
+			c.ready++
+		case k.Spec.Suspend:
+			c.suspended++
+		case isScaledToZero(k):
+			c.scaledToZero++
+		default:
+			c.notReady++
+		}
+	}
+	return c
+}
+
+// isScaledToZero reports whether KEDA scaled the knight to zero: phase
+// Suspended with Available reason ScaledToZero (idle) or Waking (a task is
+// queued and its pod is starting).
+func isScaledToZero(k *aiv1alpha1.Knight) bool {
+	if k.Status.Phase != aiv1alpha1.KnightPhaseSuspended {
+		return false
+	}
+	cond := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+	return cond != nil &&
+		(cond.Reason == aiv1alpha1.ReasonKnightScaledToZero || cond.Reason == aiv1alpha1.ReasonKnightWaking)
+}
+
+// computePhase determines the RoundTable phase based on knight health and
+// cost. The table is Degraded only when a knight that should be running is
+// not; knights scaled to zero or suspended on purpose keep it Ready.
+func (r *RoundTableReconciler) computePhase(rt *aiv1alpha1.RoundTable, counts knightCounts, totalCost float64) aiv1alpha1.RoundTablePhase {
 	// Check cost budget
 	if rt.Spec.Policies != nil && rt.Spec.Policies.CostBudgetUSD != "" && rt.Spec.Policies.CostBudgetUSD != "0" {
 		budget, err := strconv.ParseFloat(rt.Spec.Policies.CostBudgetUSD, 64)
@@ -335,11 +385,11 @@ func (r *RoundTableReconciler) computePhase(rt *aiv1alpha1.RoundTable, readyCoun
 		}
 	}
 
-	if total == 0 {
+	if counts.total() == 0 {
 		return aiv1alpha1.RoundTablePhaseProvisioning
 	}
 
-	if readyCount == total {
+	if counts.notReady == 0 {
 		return aiv1alpha1.RoundTablePhaseReady
 	}
 

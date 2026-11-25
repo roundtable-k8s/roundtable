@@ -21,8 +21,10 @@ Real-world examples of Round Table resources.
 | [`roundtable-issue-pickup.yaml`](roundtable-issue-pickup.yaml) | Issue pickup: poll `rt:ready` issues and start one PR pipeline Chain per issue ([docs](../docs/issue-pickup.md)) |
 | [`trigger-nats.yaml`](trigger-nats.yaml) | Trigger: start a Chain run per message on `fleet-a.events.deploys.>`, input rendered from the event ([docs](../docs/triggers.md)) |
 | [`trigger-webhook.yaml`](trigger-webhook.yaml) | Trigger: start a Chain run per Alertmanager webhook delivered through the gateway, authenticated with the Trigger's own token ([docs](../docs/triggers.md#webhook-source)) |
+| [`gateway-serviceaccount-cronjob.yaml`](gateway-serviceaccount-cronjob.yaml) | A CronJob that runs a chain through the gateway and waits, authenticated with its own projected ServiceAccount token instead of a stored one ([docs](../docs/gateway.md#calling-from-a-workload)) |
 | [`trigger-github.yaml`](trigger-github.yaml) | Trigger: start a Chain run per open issue labelled `security-review` in two repositories, then relabel it ([docs](../docs/triggers.md#github-source)) |
 | [`trigger-schedule.yaml`](trigger-schedule.yaml) | Trigger: start a Chain on a cron schedule with input computed from the schedule time ([docs](../docs/triggers.md)) |
+| [`trigger-knight-task.yaml`](trigger-knight-task.yaml) | Trigger: send one task straight to a knight, nightly and per alert, without a Chain ([docs](../docs/triggers.md#knight-target)) |
 | [`recipes/`](recipes/) | Copyable fleets: [`homelab-watch/`](recipes/homelab-watch/) starts a read-only triage chain from an Alertmanager webhook |
 | [`observability/`](observability/) | Try-it-out tracing: Jaeger all-in-one plus the chart's OTel collector (`values-telemetry.yaml`), see [README](observability/README.md) and [docs](../docs/helm-values.md) |
 | [`chain-pr-feedback.yaml`](chain-pr-feedback.yaml) | PR pipeline feedback: the operator feeds a red CI run or merge-queue rejection to the PR's author knight (`resumeRunId` resumes its session), then the lead re-queues, or escalates. Rendered from the chart's `prPipeline.feedback` values ([docs](../docs/pr-feedback.md)) |

@@ -148,6 +148,9 @@ type MissionView struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Phase     string `json:"phase"`
+	// Caller is who started the mission through the gateway (the
+	// ai.roundtable.io/caller annotation).
+	Caller string `json:"caller,omitempty"`
 	// Done is true once the mission reached a terminal phase.
 	Done bool `json:"done"`
 	// CreatedByGateway is true for missions this gateway launched (and may
@@ -247,11 +250,14 @@ func (s *Service) StartMission(ctx context.Context, req StartMissionRequest) (*M
 	if err != nil {
 		return nil, err
 	}
+	if c := callerName(ctx); c != "" {
+		m.Annotations = map[string]string{aiv1alpha1.AnnotationCaller: c}
+	}
 	if err := s.Missions.Create(ctx, m); err != nil {
 		return nil, k8sError("create mission", err)
 	}
 	s.Log.Info("Started mission", "mission", m.Name, "namespace", ns, "roundTable", req.RoundTable,
-		"metaMission", m.Spec.MetaMission, "budgetUSD", m.Spec.CostBudgetUSD)
+		"metaMission", m.Spec.MetaMission, "budgetUSD", m.Spec.CostBudgetUSD, "caller", callerName(ctx))
 	if wait > 0 {
 		return s.waitMission(ctx, ns, m.Name, wait)
 	}
@@ -575,6 +581,7 @@ func (s *Service) missionView(ctx context.Context, m *aiv1alpha1.Mission, withSt
 		Name:             m.Name,
 		Namespace:        m.Namespace,
 		Phase:            string(st.Phase),
+		Caller:           m.Annotations[aiv1alpha1.AnnotationCaller],
 		Done:             missionDone(st.Phase),
 		CreatedByGateway: m.Labels[aiv1alpha1.LabelCreatedBy] == aiv1alpha1.CreatedByGateway,
 		Result:           st.Result,

@@ -205,13 +205,15 @@ var TriggerLastFiredTimestampSeconds = prometheus.NewGaugeVec(
 
 // GatewayRequestsTotal counts invoke gateway HTTP requests. route is the
 // registered route pattern (never the raw path), code the HTTP status, table
-// the request's RoundTable (none when not known).
+// the request's RoundTable (none when not known), caller_kind how the caller
+// authenticated (serviceaccount, token, or none). Never the caller's name:
+// one series per ServiceAccount would grow without bound.
 var GatewayRequestsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "roundtable_gateway_requests_total",
-		Help: "Invoke gateway HTTP requests by route template, status code and table",
+		Help: "Invoke gateway HTTP requests by route, status code, table and caller kind",
 	},
-	[]string{"route", "code", "table"},
+	[]string{"route", "code", "table", "caller_kind"},
 )
 
 // GatewayRequestDurationSeconds observes invoke gateway request duration.

@@ -173,6 +173,7 @@ func (k *fakeKnight) lastPayload() natspkg.TaskPayload {
 
 type env struct {
 	svc    *Service
+	auth   *TokenAuth
 	server *httptest.Server
 	knight *fakeKnight
 	nc     *nats.Conn
@@ -243,7 +244,7 @@ func newEnv(t *testing.T, opts Options) *env {
 	}
 	srv := httptest.NewServer(Handler(svc, auth))
 	t.Cleanup(srv.Close)
-	return &env{svc: svc, server: srv, knight: startFakeKnight(t, ns.ClientURL()), nc: nc}
+	return &env{svc: svc, auth: auth, server: srv, knight: startFakeKnight(t, ns.ClientURL()), nc: nc}
 }
 
 func knight(name, domain, image string, suspended bool) *aiv1alpha1.Knight {
@@ -788,13 +789,16 @@ func TestRequestMetrics(t *testing.T) {
 		{"POST /v1/knights/{name}/invoke", "404", "none", 1},
 		{"GET /v1/knights", "200", "none", 1},
 		{"GET /v1/tasks/{taskId}", "404", "none", 1},
-		// A refused token and unknown paths share one route label.
-		{"unmatched", "401", "none", 1},
+		// Unknown paths share one route label.
 		{"unmatched", "404", "none", 2},
 	} {
-		if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(c.route, c.code, c.table)); got != c.want {
+		if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(c.route, c.code, c.table, CallerToken)); got != c.want {
 			t.Errorf("requests{%s,%s,%s} = %v, want %v", c.route, c.code, c.table, got, c.want)
 		}
+	}
+	// A refused token has no caller.
+	if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(unmatchedRoute, "401", noTable, callerNone)); got != 1 {
+		t.Errorf("refused requests = %v, want 1", got)
 	}
 	if n := testutil.CollectAndCount(metrics.GatewayRequestDurationSeconds); n != 4 {
 		t.Errorf("duration series = %d, want 4 (one per route template)", n)

@@ -520,7 +520,7 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 				problems = append(problems, fmt.Sprintf("%s: %v", item.key(), err))
 				continue
 			}
-			name := triggerRunName(trg, trg.Spec.Target.ChainRef.Name, key, &item)
+			name := triggerRunName(trg, aiv1alpha1.RefName(trg.Spec.Target.ChainRef), key, &item)
 			run := existing[name]
 			if run != nil && pickupTable(trg) != "" {
 				// Two repos with the same name in different orgs map to

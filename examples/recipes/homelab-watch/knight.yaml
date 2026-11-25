@@ -43,19 +43,9 @@ spec:
 
   # Isolated under the defaults (#387): gVisor and default-deny egress. The
   # baseline (DNS, NATS, Kubernetes API, model providers) is always allowed.
-  # kubectl is downloaded when the pod starts, so those hosts are allowed
-  # and nothing else is. Alternative: move the tools to tools.nix, which needs
-  # no egress at start, and drop allowedHosts.
-  egress:
-    allowedHosts:
-      - "mise-versions.jdx.dev"
-      - "github.com"
-      - "api.github.com"
-      - "*.githubusercontent.com"
-      - "dl.k8s.io"
-
+  # tools.nix needs no egress at pod start, so no allowedHosts are needed.
   tools:
-    mise:
+    nix:
       - kubectl
       - stern
 

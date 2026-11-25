@@ -151,6 +151,30 @@ spec:
 - Mission knights get `allowedServices` from their template or inline spec,
   like the rest of `egress`.
 
+### Services on the host network
+
+Some Services are backed by pods with `hostNetwork: true` (home-automation
+software that needs mDNS or device discovery, for example). Such a pod has no
+Cilium endpoint identity: traffic to it is traffic to its node (`host` on the
+same node, `remote-node` on the others), so a `toEndpoints` selector never
+matches it. The operator reads the Service's ready EndpointSlice endpoints and,
+when every ready endpoint is a pod with `hostNetwork: true`, renders the
+allowance differently:
+
+- Cilium: `toEntities: [host, remote-node]` limited to the Service's listed
+  ports, resolved to the port numbers in the EndpointSlices.
+- Fallback `NetworkPolicy`: the endpoint addresses as `/32` (`/128`) `ipBlock`
+  peers on those ports, refreshed when the EndpointSlice changes.
+
+**This is wider than one Service**: on Cilium the knight can reach *every node*
+on those ports, not only the node running the pod. The `EgressRestricted`
+message says so (`Service ns/name uses the host network: reaches every node on
+port N`). The operator watches EndpointSlices, so the rule changes back to
+`toEndpoints` when the Service's pods move to the pod network, and the other
+way round. A Service with a mix of host-network and ordinary pods, or with no
+ready endpoint, keeps the pod-selector rule. Node addresses or CIDRs listed
+directly and selector-less Services with manual endpoints are not covered.
+
 See [`examples/egress/in-cluster-services.yaml`](../examples/egress/in-cluster-services.yaml).
 
 ## MCP servers: listing the server is enough
@@ -217,15 +241,14 @@ kubectl get knight galahad -o jsonpath='{.status.conditions[?(@.type=="EgressRes
 
 ## Tool installs need egress
 
-`tools.apt`, `tools.pip` and `tools.mise` download their packages **when the
-pod starts**, and a failed install is only a warning: the knight still starts
-and reports Ready, but without the tools. Under default-deny, allow the package
-hosts in `allowedHosts` (for example your apt mirrors, `pypi.org` and
-`files.pythonhosted.org` for pip, and for mise `mise-versions.jdx.dev`,
-`github.com`, `api.github.com`, `*.githubusercontent.com` plus the tool's own
-download host such as `dl.k8s.io` or `get.helm.sh`), or move the tools to
-`tools.nix`, which needs no egress at pod start. When enabling isolation on an
-existing knight, check its `tools` first; see `examples/tristan.yaml`.
+`tools.pip` downloads its packages **when the pod starts**, and a failed
+install is only a warning: the knight still starts and reports Ready, but
+without the tools. Under default-deny, allow the package hosts in
+`allowedHosts` (for example `pypi.org` and `files.pythonhosted.org`), or use
+`tools.nix`, which needs no egress at pod start. `tools.apt` and `tools.mise`
+are deprecated (see [CRD design](crd-design.md#deprecated-fields)); move them to
+`tools.nix` or `tools.flakes`. When enabling isolation on an existing knight,
+check its `tools` first; see `examples/tristan.yaml`.
 
 ## Finding the hosts a knight needs
 

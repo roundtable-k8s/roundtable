@@ -80,10 +80,10 @@ roundtable_knight_isolated{reason!="Isolated"} == 1
 
 ## Tool installs need egress
 
-Isolation also turns on default-deny egress. `tools.apt`, `tools.pip` and
-`tools.mise` download at pod start and a failed install is only a warning, so
-a knight whose package hosts are not allowed starts Ready but without its
-tools. Allow the hosts or use `tools.nix`; see
+Isolation also turns on default-deny egress. `tools.pip` downloads at pod
+start and a failed install is only a warning, so a knight whose package hosts
+are not allowed starts Ready but without its tools. Allow the hosts or use
+`tools.nix` (the deprecated `tools.apt` and `tools.mise` behave like `pip`); see
 [Tool installs need egress](egress.md#tool-installs-need-egress).
 
 ## Upgrading a cluster without gVisor

@@ -26,6 +26,10 @@ spec:
       jsonPath: .status.knightsReady
       name: Ready
       type: integer
+    - description: Knights scaled to zero; they wake on demand
+      jsonPath: .status.knightsScaledToZero
+      name: Idle
+      type: integer
     - jsonPath: .status.knightsTotal
       name: Total
       type: integer
@@ -3819,8 +3823,12 @@ spec:
                         the knight needs.
                       properties:
                         apt:
-                          description: apt is a list of apt packages to install (fallback,
-                            requires root — prefer nix).
+                          description: |-
+                            apt is a list of apt packages to install.
+
+                            Deprecated: use tools.nix or tools.flakes. Knight containers run as a
+                            non-root user, so apt installs cannot succeed. The field will be removed
+                            in a future release.
                           items:
                             type: string
                           type: array
@@ -3862,8 +3870,12 @@ spec:
                           type: array
                           x-kubernetes-list-type: atomic
                         mise:
-                          description: mise is a list of tools to install via mise
-                            (e.g., "shodan", "kubectl").
+                          description: |-
+                            mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
+
+                            Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
+                            are downloaded at every cold start. The field will be removed in a
+                            future release.
                           items:
                             type: string
                           type: array
@@ -5036,8 +5048,27 @@ spec:
                   - name
                   type: object
                 type: array
+              knightsNotReady:
+                description: |-
+                  knightsNotReady is the number of knights that should be running but
+                  are not ready. Any such knight makes the table Degraded.
+                format: int32
+                type: integer
               knightsReady:
                 description: knightsReady is the number of knights in Ready phase.
+                format: int32
+                type: integer
+              knightsScaledToZero:
+                description: |-
+                  knightsScaledToZero is the number of autoscaled knights that KEDA
+                  scaled to zero (idle or waking). They wake on demand and do not
+                  degrade the table.
+                format: int32
+                type: integer
+              knightsSuspended:
+                description: |-
+                  knightsSuspended is the number of knights suspended by spec.suspend.
+                  They do not degrade the table.
                 format: int32
                 type: integer
               knightsTotal:

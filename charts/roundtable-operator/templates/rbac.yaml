@@ -66,9 +66,16 @@ rules:
   - apiGroups: ["node.k8s.io"]
     resources: ["runtimeclasses"]
     verbs: ["get", "list", "watch"]
-  # Read-only: spec.egress.allowedServices selects each Service's pods
+  # Read-only: spec.egress.allowedServices selects each Service's pods, and
+  # reads its EndpointSlices and endpoint pods to tell host-network Services apart
   - apiGroups: [""]
     resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
   # Notification webhook bearer tokens (spec.notify.webhook.tokenSecretRef)
   - apiGroups: [""]

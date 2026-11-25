@@ -32,6 +32,10 @@ const (
 const (
 	PRActionOpened  = "opened"
 	PRActionUpdated = "updated"
+	// PRActionQueued and PRActionMerged are the PR pipeline merge step's
+	// success shape (#591): a PR in the merge queue (auto-merge on) is done.
+	PRActionQueued = "queued"
+	PRActionMerged = "merged"
 )
 
 // PRRef is a pull request a task opened or updated.
@@ -86,12 +90,31 @@ var (
 	// number space, so an issue reference in prose can match too; it is only
 	// used when no URL or owner/repo#N reference was found.
 	prBareRefRe = regexp.MustCompile(`(?:^|[^\w/#&])#(\d+)\b`)
+	// prStateLineRe matches the merge step's per-PR line, "<url> queued" or
+	// "<url> merged" (#591); the word after the URL is the PR's action.
+	prStateLineRe = regexp.MustCompile(`(?im)(https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+)` +
+		`[\s*_` + "`" + `:-]+(queued|merged)\b`)
 )
+
+// PRsLanded reports whether every PR is queued or merged: the merge step's
+// success shape. A list with no PRs has not landed.
+func PRsLanded(prs []PRRef) bool {
+	if len(prs) == 0 {
+		return false
+	}
+	for _, p := range prs {
+		if p.Action != PRActionQueued && p.Action != PRActionMerged {
+			return false
+		}
+	}
+	return true
+}
 
 // ParseStructured is the prose fallback: it extracts a verdict (from a
 // "Verdict: SHIP IT" line) and PR references (GitHub PR URLs, owner/repo#N,
 // or bare #N) from free text. Bare #N carries no repo or URL. Order of first
-// appearance is kept and duplicates are dropped.
+// appearance is kept and duplicates are dropped. A PR URL followed by
+// "queued" or "merged" (the merge step's reply lines) gets that action.
 func ParseStructured(output string) Structured {
 	var s Structured
 	if ms := verdictLineRe.FindAllStringSubmatch(output, -1); len(ms) > 0 {
@@ -112,6 +135,15 @@ func ParseStructured(output string) Structured {
 	for _, m := range prURLRe.FindAllStringSubmatch(output, -1) {
 		n, _ := strconv.Atoi(m[2])
 		add(m[1], n, m[0])
+	}
+	actions := map[string]string{}
+	for _, m := range prStateLineRe.FindAllStringSubmatch(output, -1) {
+		actions[m[1]] = strings.ToLower(m[2])
+	}
+	for i := range s.PRs {
+		if a, ok := actions[s.PRs[i].URL]; ok {
+			s.PRs[i].Action = a
+		}
 	}
 	for _, m := range prRepoRefRe.FindAllStringSubmatch(output, -1) {
 		n, _ := strconv.Atoi(m[2])

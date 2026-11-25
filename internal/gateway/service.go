@@ -235,6 +235,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		Namespace:      ns,
 		RoundTable:     t.RoundTable,
 		Status:         TaskPending,
+		Caller:         callerName(ctx),
 		RequestedModel: model,
 		CreatedAt:      s.now().UTC(),
 		ResultSubject:  natspkg.ResultSubject(t.SubjectPrefix, taskID),
@@ -468,9 +469,12 @@ func (s *Service) complete(ctx context.Context, rec *TaskRecord, data []byte) {
 	}
 }
 
+// TaskIDPrefix starts every task ID the gateway's single-task path makes.
+const TaskIDPrefix = "invoke-"
+
 // newTaskID returns "invoke-<knight>-<unix ms>-<random>".
 func newTaskID(knight string) string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("invoke-%s-%d-%s", knight, time.Now().UnixMilli(), hex.EncodeToString(b[:]))
+	return fmt.Sprintf("%s%s-%d-%s", TaskIDPrefix, knight, time.Now().UnixMilli(), hex.EncodeToString(b[:]))
 }

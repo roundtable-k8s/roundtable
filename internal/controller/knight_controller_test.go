@@ -432,13 +432,14 @@ var _ = Describe("Knight Controller", func() {
 var _ = Describe("Knight deprecated maxDeliver", func() {
 	ctx := context.Background()
 
-	run := func(name string, maxDeliver int32) (*aiv1alpha1.Knight, *record.FakeRecorder) {
+	runTools := func(name string, maxDeliver int32, tools aiv1alpha1.KnightTools) (*aiv1alpha1.Knight, *record.FakeRecorder) {
 		k := &aiv1alpha1.Knight{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec:       aiv1alpha1.KnightSpec{Domain: "security", Skills: []string{"shared"}},
 		}
 		k.Spec.NATS.Subjects = []string{"roundtable.tasks.security.>"}
 		k.Spec.NATS.MaxDeliver = maxDeliver //nolint:staticcheck // exercising the deprecated field
+		k.Spec.Tools = &tools
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		DeferCleanup(func() {
 			cur := &aiv1alpha1.Knight{}
@@ -457,18 +458,11 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), got)).To(Succeed())
 		return got, rec
 	}
-
-	drain := func(rec *record.FakeRecorder) []string {
-		var out []string
-		for {
-			select {
-			case e := <-rec.Events:
-				out = append(out, e)
-			default:
-				return out
-			}
-		}
+	run := func(name string, maxDeliver int32) (*aiv1alpha1.Knight, *record.FakeRecorder) {
+		return runTools(name, maxDeliver, aiv1alpha1.KnightTools{})
 	}
+
+	drain := drainEvents
 
 	It("warns once and sets the condition when maxDeliver is above 1", func() {
 		got, rec := run("maxdeliver-three", 3)
@@ -500,6 +494,54 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 			Expect(e).NotTo(ContainSubstring("MaxDeliverIgnored"))
 		}
 	})
+	It("reports spec.tools.apt", func() {
+		got, rec := runTools("tools-apt", 0, aiv1alpha1.KnightTools{Apt: []string{"nmap"}}) //nolint:staticcheck // exercising the deprecated field
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(ContainSubstring("spec.tools.apt"))
+		Expect(c.Message).NotTo(ContainSubstring("spec.tools.mise"))
+		Expect(countEvents(rec, "ToolsAptDeprecated")).To(Equal(1))
+	})
+
+	It("reports spec.tools.mise", func() {
+		got, rec := runTools("tools-mise", 0, aiv1alpha1.KnightTools{Mise: []string{"jq"}}) //nolint:staticcheck // exercising the deprecated field
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(ContainSubstring("spec.tools.mise"))
+		Expect(countEvents(rec, "ToolsMiseDeprecated")).To(Equal(1))
+	})
+
+	It("lists every deprecated field in use", func() {
+		got, rec := runTools("tools-all", 3, aiv1alpha1.KnightTools{ //nolint:staticcheck // exercising the deprecated fields
+			Apt: []string{"nmap"}, Mise: []string{"jq"},
+		})
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Message).To(ContainSubstring("spec.nats.maxDeliver"))
+		Expect(c.Message).To(ContainSubstring("spec.tools.apt"))
+		Expect(c.Message).To(ContainSubstring("spec.tools.mise"))
+		events := drainEvents(rec)
+		for _, reason := range []string{"MaxDeliverIgnored", "ToolsAptDeprecated", "ToolsMiseDeprecated"} {
+			n := 0
+			for _, e := range events {
+				if strings.Contains(e, reason) {
+					n++
+				}
+			}
+			Expect(n).To(Equal(1), reason)
+		}
+	})
+
+	It("is silent when only nix and flakes are set", func() {
+		got, rec := runTools("tools-nix", 0, aiv1alpha1.KnightTools{Nix: []string{"jq"}})
+		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
+		for _, e := range drainEvents(rec) {
+			Expect(e).NotTo(ContainSubstring("Deprecated"))
+		}
+	})
+
 })
 
 var _ = Describe("Knight mcpServers on an unsupported runtime", func() {
@@ -677,3 +719,25 @@ var _ = Describe("Knight mcpServers headersFrom", func() {
 		Expect(errors.IsInvalid(err)).To(BeTrue(), "%v", err)
 	})
 })
+
+func drainEvents(rec *record.FakeRecorder) []string {
+	var out []string
+	for {
+		select {
+		case e := <-rec.Events:
+			out = append(out, e)
+		default:
+			return out
+		}
+	}
+}
+
+func countEvents(rec *record.FakeRecorder, reason string) int {
+	n := 0
+	for _, e := range drainEvents(rec) {
+		if strings.Contains(e, reason) {
+			n++
+		}
+	}
+	return n
+}

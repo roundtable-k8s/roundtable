@@ -22,6 +22,9 @@ spec:
     - jsonPath: .spec.target.chainRef.name
       name: Chain
       type: string
+    - jsonPath: .spec.target.knight.name
+      name: Knight
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -38,10 +41,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Trigger starts a run of a Chain with input rendered from an event: a
-          message on the RoundTable's events stream, a webhook delivered through the
-          gateway, a cron schedule, or a GitHub issue or pull request matching a
-          query.
+          Trigger starts a run of a Chain, or sends one task to a knight, with input
+          rendered from an event: a message on the RoundTable's events stream, a
+          webhook delivered through the gateway, a cron schedule, or a GitHub issue
+          or pull request matching a query.
         properties:
           apiVersion:
             description: |-
@@ -89,13 +92,15 @@ spec:
                 description: |-
                   dedupeKey is a Go template (same data as input) whose result
                   identifies the event: an event whose key matches a run that still
-                  exists starts nothing. Defaults to the Nats-Msg-Id header (else the
+                  exists starts nothing (knight target: a task sent for the key while
+                  the gateway keeps its task records). Defaults to the Nats-Msg-Id header (else the
                   stream sequence) for NATS and webhook, the scheduled time for
                   schedule, and "<owner/name>#<number>" for github.
                 type: string
               input:
                 description: |-
-                  input is a Go template rendered into the run's spec.input. The event
+                  input is a Go template rendered into the run's spec.input (chainRef
+                  target; a knight target renders target.knight.task instead). The event
                   is available as .Event: .Event.Subject, .Event.Data (the payload
                   parsed as JSON, or the raw string), .Event.Headers (map of header name
                   to value) and .Event.Time; .Trigger has .Name and .Namespace. A
@@ -579,14 +584,59 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
-                required:
-                - chainRef
+                  knight:
+                    description: |-
+                      knight sends one task to a knight per firing, through the gateway's
+                      single-task path: the task is recorded with the gateway's tasks (task
+                      KV bucket), and status.recentFirings[].run is its task ID.
+                    properties:
+                      model:
+                        description: |-
+                          model overrides the knight's model for this task only (a model ID or
+                          a RoundTable model alias).
+                        maxLength: 253
+                        type: string
+                      name:
+                        description: |-
+                          name of the Knight (same namespace). With roundTableRef set, the
+                          knight must sit at that RoundTable.
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                      task:
+                        description: |-
+                          task is a Go template rendered into the task text, with the same data
+                          as spec.input (.Event, .Trigger). A task that renders empty fires
+                          nothing.
+                        maxLength: 65536
+                        minLength: 1
+                        type: string
+                      timeoutSeconds:
+                        default: 3600
+                        description: |-
+                          timeoutSeconds is how long a task may run: a task without a result
+                          after this long is recorded as lost and no longer counts as active.
+                          Defaults to 3600.
+                        format: int32
+                        maximum: 604800
+                        minimum: 1
+                        type: integer
+                    required:
+                    - name
+                    - task
+                    type: object
                 type: object
+                x-kubernetes-validations:
+                - message: set exactly one of target.chainRef or target.knight
+                  rule: '[has(self.chainRef), has(self.knight)].filter(x, x).size()
+                    == 1'
               ttlSecondsAfterFinished:
                 default: 86400
                 description: |-
                   ttlSecondsAfterFinished deletes a finished run this long after it
                   completed. Its dedupe key is forgotten then too. 0 keeps finished runs.
+                  A knight target's tasks are kept as long as the gateway keeps task
+                  records (gateway.taskTTL) instead.
                 format: int32
                 minimum: 0
                 type: integer
@@ -601,13 +651,23 @@ spec:
               rule: '!has(self.source.webhook) || has(self.roundTableRef)'
             - message: roundTableRef is required for source.github
               rule: '!has(self.source.github) || has(self.roundTableRef)'
+            - message: 'target.knight is not supported with source.github: use target.chainRef'
+              rule: '!has(self.target.knight) || !has(self.source.github)'
+            - message: 'spec.input is for target.chainRef: put a knight''s text in
+                target.knight.task'
+              rule: '!has(self.target.knight) || !has(self.input) || size(self.input)
+                == 0'
+            - message: 'concurrency.policy Replace is not supported with target.knight:
+                a sent task cannot be withdrawn'
+              rule: '!has(self.target.knight) || !has(self.concurrency) || !has(self.concurrency.policy)
+                || self.concurrency.policy != ''Replace'''
           status:
             description: status defines the observed state of Trigger
             properties:
               activeRuns:
                 description: |-
                   activeRuns are the names of the Trigger's runs that are running or
-                  pending.
+                  pending (knight target: the IDs of its tasks without a result).
                 items:
                   type: string
                 type: array
@@ -709,8 +769,19 @@ spec:
                     key:
                       description: key is the event's dedupe key.
                       type: string
+                    outcome:
+                      description: |-
+                        outcome is how the firing's task ended, once known (knight target):
+                        succeeded, failed or lost.
+                      enum:
+                      - succeeded
+                      - failed
+                      - lost
+                      type: string
                     run:
-                      description: run is the Chain the firing started.
+                      description: |-
+                        run is the Chain the firing started, or the task ID of the task it
+                        sent (knight target).
                       type: string
                     skipReason:
                       description: skipReason says why the firing started nothing.

@@ -337,6 +337,44 @@ func TestLaterSuccessResolvesEntry(t *testing.T) {
 	}
 }
 
+// TestResolveByCaller covers #591: the issue pickup resolves a merge step's
+// timeout entry once its PRs are queued, whether the timeout result was
+// captured before or arrives after.
+func TestResolveByCaller(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.publishResult(map[string]any{"task_id": "t-merge", "knight": "Galahad", "success": false, "error": "Task timed out after 3600s"})
+	eventually(t, 5*time.Second, "open timeout entry", func() bool {
+		r, ok := e.record("t-merge")
+		return ok && r.State == StateOpen && r.Reason == ReasonTimeout
+	})
+	if err := e.m.Resolve(ctx, "roundtable/"+testTable, "t-merge"); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := e.record("t-merge"); r.State != StateResolved {
+		t.Fatalf("state = %s, want resolved", r.State)
+	}
+
+	// Resolved before the failure result arrives: captured resolved.
+	if err := e.m.Resolve(ctx, "roundtable/"+testTable, "t-late"); err != nil {
+		t.Fatal(err)
+	}
+	e.publishResult(map[string]any{"task_id": "t-late", "knight": "Galahad", "success": false, "error": "timeout"})
+	eventually(t, 5*time.Second, "late entry", func() bool {
+		r, ok := e.record("t-late")
+		return ok && r.State == StateResolved
+	})
+
+	// Unknown table and nil manager are no-ops.
+	if err := e.m.Resolve(ctx, "roundtable/other", "t-x"); err != nil {
+		t.Fatal(err)
+	}
+	var nilM *Manager
+	if err := nilM.Resolve(ctx, "roundtable/"+testTable, "t-x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSuccessResultsAreNotDeadLettered(t *testing.T) {
 	e := newEnv(t)
 	e.publishResult(map[string]any{"task_id": "t-ok", "knight": "Galahad", "success": true, "result": "ok"})
