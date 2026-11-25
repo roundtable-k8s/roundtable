@@ -121,6 +121,7 @@ helm-check: helm ## Lint the Helm chart and check examples/chain-pr-pipeline.yam
 	HELM="$(HELM)" scripts/check-pr-pipeline-example.sh
 	HELM="$(HELM)" scripts/check-dashboard-rbac.sh
 	HELM="$(HELM)" scripts/check-gateway-default.sh
+	HELM="$(HELM)" scripts/check-leader-election.sh
 	HELM="$(HELM)" scripts/check-networkpolicy.sh
 	HELM="$(HELM)" scripts/check-metrics.sh
 	HELM="$(HELM)" scripts/check-prometheusrule.sh

@@ -82,6 +82,7 @@ func main() {
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
+	var leTimings leaderElectionTimings
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
@@ -104,6 +105,13 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.DurationVar(&leTimings.LeaseDuration, "leader-election-lease-duration", 60*time.Second,
+		"How long a non-leader waits before taking over an unrenewed lease.")
+	flag.DurationVar(&leTimings.RenewDeadline, "leader-election-renew-deadline", 40*time.Second,
+		"How long the leader keeps retrying to renew the lease before giving up and exiting. "+
+			"Must be less than --leader-election-lease-duration.")
+	flag.DurationVar(&leTimings.RetryPeriod, "leader-election-retry-period", 5*time.Second,
+		"How often the leader election client retries acquiring or renewing the lease.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
@@ -286,6 +294,13 @@ func main() {
 	}
 	setupLog.Info("Knight workspace snapshots", "volumeSnapshotAPI", snapshotsEnabled)
 
+	if enableLeaderElection {
+		if err := leTimings.Validate(); err != nil {
+			setupLog.Error(err, "Invalid leader election configuration")
+			os.Exit(1)
+		}
+	}
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		// Secrets are read uncached (no cluster-wide Secret informer).
@@ -295,6 +310,9 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dcc66784.roundtable.io",
+		LeaseDuration:          &leTimings.LeaseDuration,
+		RenewDeadline:          &leTimings.RenewDeadline,
+		RetryPeriod:            &leTimings.RetryPeriod,
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -494,6 +512,14 @@ func main() {
 
 	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+		if isLeaderElectionLost(err) {
+			setupLog.Error(err, "Leader election lease lost: could not renew the lease within the renew deadline "+
+				"(the Kubernetes API was slow or unreachable); exiting so a fresh leader can start",
+				"leaseDuration", leTimings.LeaseDuration.String(),
+				"renewDeadline", leTimings.RenewDeadline.String(),
+				"retryPeriod", leTimings.RetryPeriod.String())
+			os.Exit(1)
+		}
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}

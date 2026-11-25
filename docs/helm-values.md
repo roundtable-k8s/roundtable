@@ -25,6 +25,10 @@ For Flux (`OCIRepository` + `HelmRelease`) and CRD upgrade notes, see [installin
 | `image.tag` | string | `latest` | Operator image tag |
 | `image.pullPolicy` | string | `Always` | Image pull policy |
 | `leaderElect` | bool | `true` | Enable leader election for HA |
+| `leaderElection.enabled` | bool | `true` | Set `false` to turn leader election off. Requires `replicaCount: 1` (the chart fails otherwise) and switches the Deployment to `Recreate`, because a rolling update would otherwise run a second operator concurrently with the old one. Trade-off: updates have a short gap with no operator running |
+| `leaderElection.leaseDuration` | duration | `60s` | How long a non-leader waits before taking over an unrenewed lease |
+| `leaderElection.renewDeadline` | duration | `40s` | How long the leader retries renewing before giving up and restarting. Must be less than `leaseDuration` and greater than 1.2 × `retryPeriod`; invalid values fail operator start-up. A slow API for less than this does not restart the operator |
+| `leaderElection.retryPeriod` | duration | `5s` | Retry interval for acquiring/renewing the lease |
 | `resources.requests.cpu` | string | `50m` | CPU request |
 | `resources.requests.memory` | string | `64Mi` | Memory request |
 | `resources.limits.cpu` | string | `200m` | CPU limit |

@@ -5,8 +5,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "roundtable-operator.labels" . | nindent 4 }}
+{{- $leaderElect := and .Values.leaderElect .Values.leaderElection.enabled }}
+{{- if and (not $leaderElect) (gt (int .Values.replicaCount) 1) }}
+{{- fail "leader election is disabled (leaderElect/leaderElection.enabled=false): replicaCount must be 1" }}
+{{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if not $leaderElect }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "roundtable-operator.selectorLabels" . | nindent 6 }}
@@ -39,8 +47,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            {{- if .Values.leaderElect }}
+            {{- if $leaderElect }}
             - --leader-elect
+            - --leader-election-lease-duration={{ .Values.leaderElection.leaseDuration }}
+            - --leader-election-renew-deadline={{ .Values.leaderElection.renewDeadline }}
+            - --leader-election-retry-period={{ .Values.leaderElection.retryPeriod }}
             {{- end }}
             {{- /* YAML may parse true/false as bools; keep them, default only when unset */}}
             - --enable-sandbox-backend={{ if kindIs "bool" .Values.sandboxBackend }}{{ .Values.sandboxBackend }}{{ else }}{{ .Values.sandboxBackend | default "auto" }}{{ end }}

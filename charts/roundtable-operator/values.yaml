@@ -22,6 +22,18 @@ resources:
 # Leader election for HA
 leaderElect: true
 
+# Leader election lease timings. The defaults tolerate a Kubernetes API that is
+# slow for tens of seconds with a single replica. renewDeadline must be less
+# than leaseDuration, and greater than 1.2 x retryPeriod.
+leaderElection:
+  # Set false to run without leader election. Only allowed with replicaCount: 1,
+  # and the Deployment then uses the Recreate strategy so a rolling update never
+  # runs two operators at once (this makes updates briefly unavailable).
+  enabled: true
+  leaseDuration: 60s
+  renewDeadline: 40s
+  retryPeriod: 5s
+
 # Node selector, tolerations, affinity
 nodeSelector: {}
 tolerations: []
