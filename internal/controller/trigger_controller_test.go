@@ -339,6 +339,30 @@ var _ = Describe("Trigger controller", func() {
 			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "outside"))).To(BeFalse())
 		})
 
+		It("restarts its message loop after the consumer is deleted", func() {
+			t := natsTrigger("revive", prefix+".events.revive", nil)
+			Expect(reconcileTrigger("revive").RequeueAfter).To(Equal(RequeueVerySlow))
+			Expect(js.DeleteConsumer(ctx, stream, t.Status.Consumer)).To(Succeed())
+			// The loop exits once its consumer is gone.
+			Eventually(func() bool {
+				r.consumers.mu.Lock()
+				defer r.consumers.mu.Unlock()
+				for _, l := range r.consumers.loops {
+					select {
+					case <-l.done:
+						return true
+					default:
+					}
+				}
+				return false
+			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			reconcileTrigger("revive")
+			Expect(consumerExists(t.Status.Consumer)).To(BeTrue())
+			publish(prefix+".events.revive", "r1", `{"service":"api"}`)
+			Eventually(func() int { return len(runsOf("revive")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+		})
+
 		It("deletes its consumer when suspended and when deleted", func() {
 			t := natsTrigger("cleanup", prefix+".events.c", nil)
 			durable := t.Status.Consumer
