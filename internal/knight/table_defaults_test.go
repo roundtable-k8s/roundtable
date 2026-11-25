@@ -143,6 +143,68 @@ var _ = Describe("ApplyTableDefaults (#372)", func() {
 		}),
 	)
 
+	Describe("egress", func() {
+		tableEgress := func() *aiv1alpha1.KnightEgress {
+			return &aiv1alpha1.KnightEgress{AllowedHosts: []string{"github.com", "*.githubusercontent.com"}, AllowedPorts: []int32{443}}
+		}
+		withEgress := func() *aiv1alpha1.RoundTable {
+			rt := table()
+			rt.Spec.Defaults.Egress = tableEgress()
+			return rt
+		}
+
+		It("inherits the table's egress when the knight leaves it unset", func() {
+			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
+			ApplyTableDefaults(ctx, reader(withEgress()), k)
+			Expect(k.Spec.Egress).To(Equal(tableEgress()))
+		})
+
+		It("inherits egress from a table whose only default is egress", func() {
+			rt := table()
+			rt.Spec.Vault = nil
+			rt.Spec.Defaults = &aiv1alpha1.RoundTableDefaults{Egress: tableEgress()}
+			k := newKnight(aiv1alpha1.LabelRoundTable, func(s *aiv1alpha1.KnightSpec) {
+				s.Model = "m"
+				s.Image = "i"
+				s.TaskTimeoutSeconds = 1
+				s.Concurrency = 1
+				s.Resources = &corev1.ResourceRequirements{}
+				s.Workspace = &aiv1alpha1.KnightWorkspace{}
+				s.RuntimeClassName = new(string)
+				s.Vault = &aiv1alpha1.KnightVault{ClaimName: "v"}
+			})
+			ApplyTableDefaults(ctx, reader(rt), k)
+			Expect(k.Spec.Egress).To(Equal(tableEgress()))
+		})
+
+		It("keeps the knight's own egress without merging", func() {
+			own := &aiv1alpha1.KnightEgress{AllowedHosts: []string{"api.anthropic.com"}}
+			k := newKnight(aiv1alpha1.LabelRoundTable, func(s *aiv1alpha1.KnightSpec) { s.Egress = own.DeepCopy() })
+			ApplyTableDefaults(ctx, reader(withEgress()), k)
+			Expect(k.Spec.Egress).To(Equal(own))
+		})
+
+		It("keeps an explicit empty allowlist (DNS and NATS only)", func() {
+			k := newKnight(aiv1alpha1.LabelRoundTable, func(s *aiv1alpha1.KnightSpec) { s.Egress = &aiv1alpha1.KnightEgress{} })
+			ApplyTableDefaults(ctx, reader(withEgress()), k)
+			Expect(k.Spec.Egress).To(Equal(&aiv1alpha1.KnightEgress{}))
+		})
+
+		It("does not share the table's egress with the knight", func() {
+			rt := withEgress()
+			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
+			ApplyTableDefaults(ctx, reader(rt), k)
+			k.Spec.Egress.AllowedHosts[0] = "changed.example"
+			Expect(rt.Spec.Defaults.Egress.AllowedHosts[0]).To(Equal("github.com"))
+		})
+
+		It("leaves egress unset without a table default", func() {
+			k := newKnight(aiv1alpha1.LabelRoundTable, nil)
+			ApplyTableDefaults(ctx, reader(table()), k)
+			Expect(k.Spec.Egress).To(BeNil())
+		})
+	})
+
 	It("finds the table through the legacy ai.roundtable.io/table label", func() {
 		k := newKnight(LegacyTableLabel, nil)
 		ApplyTableDefaults(ctx, reader(table()), k)

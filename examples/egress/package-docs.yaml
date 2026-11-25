@@ -1,0 +1,25 @@
+# Package documentation and registries.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: package-docs
+  namespace: roundtable
+spec:
+  domain: package-docs
+  skills:
+    - package-docs
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.package-docs.>"
+  egress:
+    allowedHosts:
+      - "pkg.go.dev"
+      - "proxy.golang.org"
+      - "registry.npmjs.org"
+      - "docs.python.org"
+      - "pypi.org"
+      - "docs.rs"
+      - "crates.io"

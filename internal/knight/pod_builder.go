@@ -377,7 +377,7 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 		return true
 	}
 	d := rt.Spec.Defaults
-	return d != nil && (d.Resources != nil || d.Workspace != nil || d.RuntimeClassName != nil ||
+	return d != nil && (d.Resources != nil || d.Egress != nil || d.Workspace != nil || d.RuntimeClassName != nil ||
 		d.Model != "" || d.Image != "" || d.TaskTimeoutSeconds > 0 || d.Concurrency > 0)
 }
 
@@ -385,13 +385,13 @@ func tableHasDefaults(rt *aiv1alpha1.RoundTable) bool {
 // default, so no table lookup is needed.
 func knightInheritsNothing(k *aiv1alpha1.Knight) bool {
 	s := &k.Spec
-	return s.Resources != nil && s.Workspace != nil && s.RuntimeClassName != nil &&
+	return s.Resources != nil && s.Egress != nil && s.Workspace != nil && s.RuntimeClassName != nil &&
 		s.Model != "" && s.Image != "" && s.TaskTimeoutSeconds > 0 && s.Concurrency > 0 &&
 		s.Vault != nil
 }
 
 // ApplyTableDefaults fills the knight's unset spec fields in memory from its
-// RoundTable (found via findTable): resources, workspace, runtimeClassName,
+// RoundTable (found via findTable): resources, egress, workspace, runtimeClassName,
 // model, image, taskTimeoutSeconds and concurrency from spec.defaults, and
 // vault from spec.vault. A value on the knight always wins; nothing is merged.
 // A table's workspace existingClaim is not inherited. Afterwards model,
@@ -437,6 +437,9 @@ func inheritTable(k *aiv1alpha1.Knight, rt *aiv1alpha1.RoundTable) {
 	}
 	if k.Spec.Resources == nil && d.Resources != nil {
 		k.Spec.Resources = d.Resources.DeepCopy()
+	}
+	if k.Spec.Egress == nil && d.Egress != nil {
+		k.Spec.Egress = d.Egress.DeepCopy()
 	}
 	if k.Spec.RuntimeClassName == nil && d.RuntimeClassName != nil {
 		k.Spec.RuntimeClassName = new(string)

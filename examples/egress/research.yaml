@@ -1,0 +1,23 @@
+# Search plus a short list of reference sites. Replace html.duckduckgo.com with your search provider.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: research
+  namespace: roundtable
+spec:
+  domain: research
+  skills:
+    - research
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.research.>"
+  egress:
+    allowedHosts:
+      - "html.duckduckgo.com"
+      - "en.wikipedia.org"
+      - "arxiv.org"
+      - "docs.python.org"
+      - "developer.mozilla.org"

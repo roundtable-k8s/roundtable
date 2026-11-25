@@ -1,0 +1,12 @@
+# Table default: every standing knight without its own egress gets this allowlist.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: model-providers
+  namespace: roundtable
+spec:
+  defaults:
+    egress:
+      allowedHosts:
+        - "openrouter.ai"
+        - "api.anthropic.com"
