@@ -599,9 +599,48 @@ func (b *PodBuilder) WithArsenal() *PodBuilder {
 	)
 	b.mounts = append(b.mounts,
 		corev1.VolumeMount{Name: "arsenal", MountPath: "/arsenal", ReadOnly: true},
+	)
+	// OCI arsenals are image volumes nested under /arsenal.
+	for _, a := range b.arsenals() {
+		if a.OCI == nil {
+			continue
+		}
+		b.volumes = append(b.volumes, ociArsenalVolume(a))
+		b.mounts = append(b.mounts, ociArsenalMount(a))
+	}
+	b.mounts = append(b.mounts,
 		corev1.VolumeMount{Name: "skills", MountPath: "/skills", ReadOnly: true},
 	)
 	return b
+}
+
+func ociArsenalVolume(a resolvedArsenal) corev1.Volume {
+	pull := a.OCI.PullPolicy
+	if pull == "" {
+		pull = corev1.PullIfNotPresent
+	}
+	return corev1.Volume{
+		Name: "arsenal-oci-" + a.Name,
+		VolumeSource: corev1.VolumeSource{
+			Image: &corev1.ImageVolumeSource{Reference: a.OCI.Reference, PullPolicy: pull},
+		},
+	}
+}
+
+func ociArsenalMount(a resolvedArsenal) corev1.VolumeMount {
+	return corev1.VolumeMount{Name: "arsenal-oci-" + a.Name, MountPath: a.path, ReadOnly: true}
+}
+
+// ociArsenalName derives a name from an image reference's repository basename.
+func ociArsenalName(ref string) string {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	base := ref[strings.LastIndex(ref, "/")+1:]
+	if i := strings.Index(base, ":"); i >= 0 {
+		base = base[:i]
+	}
+	return arsenalName(base)
 }
 
 const (
@@ -655,20 +694,26 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 	out := make([]resolvedArsenal, 0, len(in))
 	seen := map[string]int{}
 	for i, a := range in {
-		if a.Repo == "" {
-			a.Repo = defaultArsenalRepo
-		}
-		if a.Ref == "" {
-			a.Ref = defaultArsenalRef
-		}
-		if a.PeriodSeconds <= 0 {
-			a.PeriodSeconds = defaultArsenalPeriodSeconds
-		}
-		if a.Image == "" {
-			a.Image = defaultGitSyncImage
-		}
-		if a.Name == "" {
-			a.Name = arsenalName(a.Repo)
+		if a.OCI != nil {
+			if a.Name == "" {
+				a.Name = ociArsenalName(a.OCI.Reference)
+			}
+		} else {
+			if a.Repo == "" {
+				a.Repo = defaultArsenalRepo
+			}
+			if a.Ref == "" {
+				a.Ref = defaultArsenalRef
+			}
+			if a.PeriodSeconds <= 0 {
+				a.PeriodSeconds = defaultArsenalPeriodSeconds
+			}
+			if a.Image == "" {
+				a.Image = defaultGitSyncImage
+			}
+			if a.Name == "" {
+				a.Name = arsenalName(a.Repo)
+			}
 		}
 		if n := seen[a.Name]; n > 0 {
 			seen[a.Name] = n + 1
@@ -759,6 +804,16 @@ while true; do
   sync_skills
 done`
 
+	filterMounts := []corev1.VolumeMount{
+		{Name: "arsenal", MountPath: "/arsenal", ReadOnly: true},
+	}
+	for _, a := range arsenals {
+		if a.OCI != nil {
+			filterMounts = append(filterMounts, ociArsenalMount(a))
+		}
+	}
+	filterMounts = append(filterMounts, corev1.VolumeMount{Name: "skills", MountPath: "/skills"})
+
 	skillFilterContainer := corev1.Container{
 		Name:    "skill-filter",
 		Image:   "alpine:3.21",
@@ -777,10 +832,7 @@ done`
 				corev1.ResourceCPU:    resource.MustParse("50m"),
 			},
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: "arsenal", MountPath: "/arsenal", ReadOnly: true},
-			{Name: "skills", MountPath: "/skills"},
-		},
+		VolumeMounts: filterMounts,
 	}
 
 	b.sidecars = append(b.sidecars, skillFilterContainer)
@@ -793,6 +845,9 @@ done`
 // keeps the name "git-sync"; spec.arsenals entries are "git-sync-<name>".
 func (b *PodBuilder) WithGitSync() *PodBuilder {
 	for _, a := range b.arsenals() {
+		if a.OCI != nil {
+			continue
+		}
 		name := "git-sync-" + a.Name
 		if a.primary {
 			name = "git-sync"

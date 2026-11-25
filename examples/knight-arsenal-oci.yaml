@@ -1,0 +1,25 @@
+# Load skills from an OCI image volume instead of a git-sync sidecar.
+# The reference must be pinned by digest. Needs a cluster with image volumes
+# (Kubernetes 1.35+, or the ImageVolume feature gate on 1.31+).
+# Mixed lists work: spec.arsenal (git) plus spec.arsenals (OCI).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: arsenal-oci
+  namespace: roundtable
+spec:
+  domain: security
+  model: claude-sonnet-4-20250514
+  skills:
+    - security
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.security.>"
+  arsenals:
+    - name: platform
+      oci:
+        reference: registry.example.com/roundtable/arsenal@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        pullPolicy: IfNotPresent

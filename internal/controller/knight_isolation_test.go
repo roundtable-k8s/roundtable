@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -204,3 +205,26 @@ func TestDefaultDenyPolicyHasBaseline(t *testing.T) {
 	assert.Equal(t, map[string]any{"toEntities": []any{"kube-apiserver"}}, egress[2])
 	assert.Equal(t, ciliumFQDNRule([]string{"api.anthropic.com", "github.com", "openrouter.ai"}, []int32{443}), egress[3])
 }
+
+var _ = Describe("Knight arsenal OCI validation", func() {
+	const digest = "registry.example.com/arsenal@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	It("requires a digest-pinned reference and excludes a custom repo", func() {
+		bad := egressKnight("arsenal-oci-nodigest", nil)
+		bad.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: "registry.example.com/arsenal:latest"}}
+		err := k8sClient.Create(ctx, bad)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("sha256"))
+
+		both := egressKnight("arsenal-oci-repo", nil)
+		both.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Repo: "https://github.com/x/y", OCI: &aiv1alpha1.KnightArsenalOCI{Reference: digest}}}
+		err = k8sClient.Create(ctx, both)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
+
+		ok := egressKnight("arsenal-oci-ok", nil)
+		ok.Spec.Arsenal = &aiv1alpha1.KnightArsenal{OCI: &aiv1alpha1.KnightArsenalOCI{Reference: digest}}
+		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
+		Expect(ok.Spec.Arsenal.OCI.PullPolicy).To(Equal(corev1.PullIfNotPresent))
+	})
+})

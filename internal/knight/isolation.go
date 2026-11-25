@@ -129,11 +129,14 @@ type GitHost struct {
 // pod's network, so the egress policy must allow them.
 func ArsenalGitHosts(k *aiv1alpha1.Knight) []GitHost {
 	var repos []string
-	if k.Spec.Arsenal != nil {
+	// OCI arsenals are image volumes pulled by the kubelet: no git egress.
+	if k.Spec.Arsenal != nil && k.Spec.Arsenal.OCI == nil {
 		repos = append(repos, k.Spec.Arsenal.Repo)
 	}
 	for _, a := range k.Spec.Arsenals {
-		repos = append(repos, a.Repo)
+		if a.OCI == nil {
+			repos = append(repos, a.Repo)
+		}
 	}
 	var out []GitHost
 	for _, r := range repos {
