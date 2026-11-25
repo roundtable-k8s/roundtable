@@ -5400,6 +5400,10 @@ spec:
                       created.
                     format: int32
                     type: integer
+                  startedAt:
+                    description: startedAt is when the planning task was dispatched.
+                    format: date-time
+                    type: string
                 type: object
               planningTaskID:
                 description: |-
@@ -5425,6 +5429,27 @@ spec:
               totalCost:
                 description: totalCost is the cumulative cost in USD of all tasks
                   during this mission.
+                type: string
+              traceContext:
+                description: |-
+                  traceContext is the W3C trace context of the mission's root span.
+                  The plan, the briefing tasks and every chain the mission starts are
+                  spans of this one trace. Unset when tracing is off.
+                properties:
+                  traceparent:
+                    description: |-
+                      traceparent is the W3C traceparent value, e.g.
+                      00-<32 hex trace id>-<16 hex span id>-<2 hex flags>.
+                    type: string
+                  tracestate:
+                    description: tracestate is the W3C tracestate value (vendor-specific
+                      trace data).
+                    type: string
+                type: object
+              traceID:
+                description: |-
+                  traceID is the trace ID of the mission's trace (32 hex characters), for
+                  linking to a trace backend. Unset when tracing is off.
                 type: string
             type: object
         required:
