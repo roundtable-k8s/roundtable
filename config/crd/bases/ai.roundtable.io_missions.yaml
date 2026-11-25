@@ -5849,9 +5849,11 @@ spec:
                     description: |-
                       knightRef names an existing Knight to use as the planner. It should
                       have planning, reasoning, and orchestration skills. One of knightRef,
-                      templateName or ephemeralSpec is used. When spec.planner is omitted on a
-                      meta-mission, the operator fills in a knight labelled
-                      ai.roundtable.io/role=planner.
+                      templateName or ephemeralSpec is used. When a meta-mission's
+                      spec.planner is omitted, or sets only options (timeoutSeconds, maxChains,
+                      context and so on) and none of the three, the operator fills in a knight
+                      labelled ai.roundtable.io/role=planner and keeps the given options. With
+                      no such knight the mission fails.
                     properties:
                       name:
                         default: ""

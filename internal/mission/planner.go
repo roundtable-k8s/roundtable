@@ -63,6 +63,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	}
 
 	// Auto-initialize Planner spec with defaults if metaMission but no explicit planner config
+	plannerChanged := false
 	if mission.Spec.Planner == nil {
 		log.Info("MetaMission enabled without explicit planner config, using defaults")
 		mission.Spec.Planner = &aiv1alpha1.MissionPlanner{
@@ -70,12 +71,17 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 			MaxChains:      10,
 			MaxKnights:     10,
 		}
-		// Find the built-in planner knight
-		plannerKnights := &aiv1alpha1.KnightList{}
-		if err := p.Client.List(ctx, plannerKnights, client.InNamespace(mission.Namespace), client.MatchingLabels{"ai.roundtable.io/role": "planner"}); err == nil && len(plannerKnights.Items) > 0 {
-			mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(plannerKnights.Items[0].Name)
-			log.Info("Auto-discovered planner knight", "name", plannerKnights.Items[0].Name)
-		}
+		plannerChanged = true
+	}
+	// A planner that names no knight, template or inline spec (absent, or
+	// options only) uses the knight labelled ai.roundtable.io/role=planner.
+	// The given options (timeout, limits, context) are kept.
+	if found, err := p.defaultPlannerKnight(ctx, mission); err != nil {
+		return ctrl.Result{}, err
+	} else if found {
+		plannerChanged = true
+	}
+	if plannerChanged {
 		if err := p.Client.Update(ctx, mission); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to initialize planner config: %w", err)
 		}
@@ -289,6 +295,44 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	return ctrl.Result{}, nil
 }
 
+// plannerHasSource reports whether the planner names a knight, a template or
+// an inline spec.
+func plannerHasSource(planner *aiv1alpha1.MissionPlanner) bool {
+	return aiv1alpha1.RefName(planner.KnightRef) != "" || planner.TemplateName != "" || planner.EphemeralSpec != nil
+}
+
+// defaultPlannerKnight sets spec.planner.knightRef to the knight labelled
+// ai.roundtable.io/role=planner when the planner names no source. It reports
+// whether it changed the spec. With no labelled knight the spec is left as it
+// is and ensurePlannerKnight fails with errNoPlanner.
+func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.Mission) (bool, error) {
+	if plannerHasSource(mission.Spec.Planner) {
+		return false, nil
+	}
+	plannerKnights := &aiv1alpha1.KnightList{}
+	if err := p.Client.List(ctx, plannerKnights, client.InNamespace(mission.Namespace),
+		client.MatchingLabels{aiv1alpha1.LabelRole: "planner"}); err != nil {
+		return false, fmt.Errorf("failed to list planner knights: %w", err)
+	}
+	for i := range plannerKnights.Items {
+		k := &plannerKnights.Items[i]
+		// Skip another mission's ephemeral planner knight.
+		if k.Labels[aiv1alpha1.LabelEphemeral] == "true" {
+			continue
+		}
+		mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(k.Name)
+		logf.FromContext(ctx).Info("Using role-labelled planner knight", "name", k.Name)
+		return true, nil
+	}
+	return false, nil
+}
+
+// errNoPlanner is the error for a meta-mission with no planner to use.
+func errNoPlanner(namespace string) error {
+	return fmt.Errorf("no planner knight: set spec.planner.knightRef (or templateName or ephemeralSpec), "+
+		"or label a Knight in namespace %q with %s=planner", namespace, aiv1alpha1.LabelRole)
+}
+
 // ensurePlannerKnight creates or retrieves the planner knight.
 func (p *Planner) ensurePlannerKnight(ctx context.Context, mission *aiv1alpha1.Mission) (*aiv1alpha1.Knight, error) {
 	log := logf.FromContext(ctx)
@@ -358,7 +402,7 @@ func (p *Planner) ensurePlannerKnight(ctx context.Context, mission *aiv1alpha1.M
 		spec = planner.EphemeralSpec.DeepCopy()
 		log.Info("Using inline spec for planner")
 	} else {
-		return nil, fmt.Errorf("planner must have knightRef, templateName, or ephemeralSpec")
+		return nil, errNoPlanner(mission.Namespace)
 	}
 
 	// Create knight CR
