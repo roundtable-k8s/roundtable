@@ -28,7 +28,7 @@ This creates the kind cluster `roundtable-dev` if it is missing (override with
 4. applies `examples/dev/`: one RoundTable (`dev`) and one Knight (`dev-knight`).
 
 Open the Tilt UI at <http://localhost:10350>. For a non-interactive run, e.g. in CI:
-`make tilt-up TILT_ARGS=ci`.
+`make tilt-up TILT_ARGS="ci --timeout 15m"` (the `Tilt` workflow does this on every change to the dev setup).
 
 The knight's API key Secret is optional, so its Deployment exists without one but the pod
 does not start. To run a knight, create `llm-api-keys` with your provider key:

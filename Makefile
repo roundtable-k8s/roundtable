@@ -85,7 +85,7 @@ test: manifests generate fmt vet $(if $(KUBEBUILDER_ASSETS),,setup-envtest) ## R
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= roundtable-operator-test-e2e
 TILT_KIND_CLUSTER ?= roundtable-dev
-TILT_ARGS ?=
+TILT_ARGS ?= up
 
 .PHONY: tilt-up
 tilt-up: ## Create the dev kind cluster if missing and run tilt up (docs/local-development.md)
@@ -97,7 +97,7 @@ tilt-up: ## Create the dev kind cluster if missing and run tilt up (docs/local-d
 		$(KIND) create cluster --name $(TILT_KIND_CLUSTER) --wait 120s; \
 	fi
 	kubectl config use-context kind-$(TILT_KIND_CLUSTER)
-	tilt up $(TILT_ARGS)
+	tilt $(TILT_ARGS)
 
 .PHONY: tilt-down
 tilt-down: ## Tear down the dev kind cluster created by tilt-up
