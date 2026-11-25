@@ -11,7 +11,7 @@ Four sources exist today:
 |---|---|---|
 | `nats` | each message on a subject under the table's `<subjectPrefix>.events.` | `Nats-Msg-Id` header, else the stream sequence |
 | `webhook` | each authenticated `POST` to the gateway's `/v1/hooks/<namespace>/<name>` | the sender's delivery id (see [Webhook source](#webhook-source)), else the stream sequence |
-| `schedule` | each cron time | the schedule time (RFC 3339, UTC) |
+| `schedule` | each cron time, run by an operator-owned CronJob (see [Schedule source](#schedule-source)) | the schedule time (RFC 3339, UTC) |
 | `github` | each issue or pull request matching a label query, polled | `<owner/name>#<number>` |
 
 Exactly one source is set.
@@ -534,11 +534,71 @@ their runs. See [pr-feedback.md](pr-feedback.md#engines).
 A poll that leaves the rate limit at 0 also waits for its reset.
 `status.lastPolledAt` is the last successful poll.
 
-## Example: schedule
+## Schedule source
 
 [`examples/trigger-schedule.yaml`](../examples/trigger-schedule.yaml) runs a
 Chain every weekday at 07:00 New York time with input computed from the
 schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
+
+A schedule runs on the cluster's own CronJob controller. For each Trigger with
+`source.schedule` the operator creates, in the Trigger's namespace and owned
+by it (deleting the Trigger deletes them):
+
+- a ServiceAccount `trigger-<name>` with no API permissions and no
+  automounted token;
+- a `batch/v1` CronJob `trigger-<name>` (a name longer than 52 characters is
+  shortened with a hash suffix): `schedule` = `cron`, `timeZone` (default
+  `Etc/UTC`), `startingDeadlineSeconds`, `concurrencyPolicy` from
+  `concurrency.policy`, `suspend` while the Trigger is suspended
+  (`spec.suspend` or the `ai.roundtable.io/suspended` annotation), and keeps
+  1 succeeded and 2 failed Jobs.
+
+Each run starts one pod from the operator's own image that runs
+`/manager fire-trigger --gateway <url> --trigger <namespace>/<name> --job-name $(ROUNDTABLE_JOB_NAME)`
+(the env var is the Job's `batch.kubernetes.io/job-name` label). It sends a
+projected ServiceAccount token for the gateway's audience
+(`gateway.serviceAccountAuth.audience`) to the gateway's
+`POST /v1/triggers/<namespace>/<name>/fire`, which accepts the call only from
+that Trigger's own ServiceAccount (or a static gateway token) and publishes
+the firing to `<subjectPrefix>.events.schedule.<namespace>.<name>` keyed by
+its schedule time, read from the Job's name (`<cronjob>-<unix minutes of the
+scheduled time>`), so a late start or a retry keeps its slot's key. The
+Trigger reads that subject through its consumer like any other source, so
+dedupe, concurrency and `status.recentFirings` work the same: a second firing
+with the same key starts nothing. The pod is restricted: non-root,
+no privilege escalation, all capabilities dropped, read-only root
+filesystem, `restartPolicy: Never`, 120 seconds at most (2 retries).
+
+The events stream is the one of `roundTableRef`, else of the target Chain's
+`roundTableRef`, else of the target knight's RoundTable, else of the
+RoundTable named `default`.
+
+Requirements:
+
+- The gateway is enabled with ServiceAccount auth
+  (`gateway.serviceAccountAuth.enabled`, the default) and allows the Trigger's
+  namespace (`gateway.serviceAccountAuth.allowedNamespaces`). With the gateway
+  disabled, set `triggers.gatewayURL`, or scheduled Triggers stay not Ready
+  (`CronJobError`).
+- Pods in the Trigger's namespace reach the gateway: add the namespace to
+  `gateway.networkPolicy.from` when it is not the release namespace.
+
+See and control a schedule with kubectl:
+
+```sh
+kubectl -n roundtable get cronjobs -l ai.roundtable.io/trigger   # schedules, last run, suspended
+kubectl -n roundtable get jobs -l ai.roundtable.io/trigger       # recent firing pods
+kubectl -n roundtable create job --from=cronjob/trigger-weekday-security-report now   # fire once now
+kubectl -n roundtable patch trigger weekday-security-report --type merge -p '{"spec":{"suspend":true}}'
+```
+
+Suspend the Trigger, not the CronJob: the operator keeps the CronJob in line
+with the Trigger, so a CronJob edited by hand is reset at the next reconcile.
+`status.lastScheduledAt` is the CronJob's `status.lastScheduleTime`;
+`status.nextScheduledAt` is computed for display only.
+
+`Chain.spec.schedule` still uses the operator's in-process scheduler until its
+own follow-up moves it onto this mechanism.
 
 ## Knight target
 
@@ -673,7 +733,7 @@ and the `Suspended` condition's message names it too.
 | `source.nats.subject` | Subject filter (wildcards allowed). Must sit under `<subjectPrefix>.events.` of `roundTableRef`. |
 | `source.webhook.auth` | `bearerTokenSecretRef` or `hmacSecretRef`: a key of a labelled Secret in the Trigger's namespace. |
 | `source.webhook.eventType` | Fire only on deliveries with this `Ce-Type` (else `X-GitHub-Event`). |
-| `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire. |
+| `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire: the CronJob's fields (see [Schedule source](#schedule-source)). |
 | `source.github.repositories` | `owner/name` of each repository polled (1 to 50). |
 | `source.github.kind` | `issue` (default) or `pullRequest`. |
 | `source.github.query.labels` / `state` | Labels an item must all carry (1 to 10), and `open` (default), `closed` or `all`. |
@@ -689,15 +749,15 @@ and the `Suspended` condition's message names it too.
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
 | `concurrency.policy` | `Allow` (default), `Forbid` or `Replace`. |
 | `concurrency.maxActive` | Under `Allow`, the most active runs; a firing at the cap is skipped. 0 means no cap. |
-| `suspend` | Stop firing (the `ai.roundtable.io/suspended` annotation does the same, see [above](#suspend-and-run-now-without-editing-the-spec)). A NATS, webhook or github source's consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them; a github source stops polling and picks up matching items again on resume). |
-| `roundTableRef` | The RoundTable whose events stream a NATS, webhook or github source reads (and whose GitHub token a github source uses). Required for `nats`, `webhook` and `github`. |
+| `suspend` | Stop firing (the `ai.roundtable.io/suspended` annotation does the same, see [above](#suspend-and-run-now-without-editing-the-spec)). The consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them; a github source stops polling and picks up matching items again on resume; a schedule source's CronJob is suspended). |
+| `roundTableRef` | The RoundTable whose events stream the source is read from (and whose GitHub token a github source uses). Required for `nats`, `webhook` and `github`; a `schedule` source without it uses its target's table. |
 | `ttlSecondsAfterFinished` | Delete a finished run this long after it completed (default 86400; 0 keeps runs). |
 
 ### Templates
 
 `input`, `target.knight.task` and `dedupeKey` see:
 
-- `.Event.Subject`: the NATS subject (empty for schedule)
+- `.Event.Subject`: the NATS subject
 - `.Event.Data`: the payload parsed as JSON, or the raw string when it is not JSON (github: see [The event](#the-event))
 - `.Event.Headers`: header name to value (multiple values joined with `, `)
 - `.Event.Time`: when the message was stored in the stream, or the schedule time (in the schedule's zone)
@@ -732,7 +792,7 @@ message, the redelivered message finds the run and is skipped.
 JetStream also drops a repeated `Nats-Msg-Id` within the stream's duplicate
 window (2 minutes) before the Trigger sees it.
 
-## Delivery (NATS, webhook and github sources)
+## Delivery
 
 `RoundTable.spec.nats.createStreams: true` creates an events stream next to the
 tasks and results streams:
@@ -741,10 +801,11 @@ tasks and results streams:
 - subjects: `<subjectPrefix>.events.>`
 - Limits retention, max age `spec.nats.eventsMaxAge` (default 168h)
 
-Each NATS-, webhook- or github-source Trigger gets one durable pull consumer on
+Each Trigger gets one durable pull consumer on
 it, `trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:
 `<subjectPrefix>.events.webhook.<namespace>.<name>`, github:
-`<subjectPrefix>.events.github.<namespace>.<name>`). A message's default
+`<subjectPrefix>.events.github.<namespace>.<name>`, schedule:
+`<subjectPrefix>.events.schedule.<namespace>.<name>`). A message's default
 dedupe key is its `Roundtable-Event-Key` header, else `Nats-Msg-Id`, else the
 stream sequence. A new consumer
 starts at new messages (not the stream's backlog). From then on, events
@@ -784,6 +845,8 @@ status:
 `Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject or
 cron), `TargetNotFound`, `TargetWrongTable` (knight target),
 `RoundTableNotFound`, `ConsumerError` (for example no
-events stream: set `createStreams` or create the stream yourself). A github
+events stream: set `createStreams` or create the stream yourself),
+`CronJobError` (schedule source: no gateway URL, or a CronJob or
+ServiceAccount of that name not owned by the Trigger). A github
 source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
 and `lastPolledAt`.

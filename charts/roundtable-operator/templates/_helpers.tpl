@@ -207,3 +207,16 @@ spec:
       app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Gateway URL the firing pod of a scheduled Trigger calls: triggers.gatewayURL,
+else the chart's gateway Service (when gateway.enabled), else empty (scheduled
+Triggers are then not Ready).
+*/}}
+{{- define "roundtable-operator.triggerGatewayURL" -}}
+{{- if .Values.triggers.gatewayURL -}}
+{{- .Values.triggers.gatewayURL -}}
+{{- else if .Values.gateway.enabled -}}
+{{- printf "http://%s-gateway.%s.svc:%v" (include "roundtable-operator.fullname" .) .Release.Namespace (.Values.gateway.service.port | default 80) -}}
+{{- end -}}
+{{- end }}

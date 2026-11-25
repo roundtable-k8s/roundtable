@@ -59,6 +59,13 @@ spec:
             - --trigger-task-bucket={{ .Values.gateway.taskBucket | default "roundtable_gateway_tasks" }}
             - --trigger-task-ttl={{ .Values.gateway.taskTTL | default "168h" }}
             - --schedule-result-retention={{ (.Values.gateway.scheduleRuns | default dict).resultRetention | default "720h" }}
+            {{- /* Scheduled Triggers: the CronJob pod runs this image's fire-trigger subcommand against the gateway. */}}
+            - --trigger-image={{ .Values.image.repository }}:{{ .Values.image.tag }}
+            - --trigger-image-pull-policy={{ .Values.image.pullPolicy }}
+            {{- with include "roundtable-operator.triggerGatewayURL" . }}
+            - --trigger-gateway-url={{ . }}
+            - --trigger-gateway-audience={{ $.Values.gateway.serviceAccountAuth.audience | default "roundtable-gateway" }}
+            {{- end }}
             {{- with .Values.natsMonitoringEndpoint }}
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}

@@ -41,6 +41,7 @@ import (
 	// Register custom Prometheus metrics
 	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/discovery"
@@ -109,6 +110,17 @@ func main() {
 	var missionResultsTTL time.Duration
 	var triggerTaskBucket string
 	var triggerTaskTTL, scheduleResultRetention time.Duration
+	var triggerSchedule controller.TriggerScheduleConfig
+	var triggerPullPolicy string
+	flag.StringVar(&triggerSchedule.Image, "trigger-image", os.Getenv("OPERATOR_IMAGE"),
+		"Image of the pod a scheduled Trigger's CronJob runs (the operator's own image; it runs "+
+			"`/manager fire-trigger`). Empty leaves scheduled Triggers not Ready.")
+	flag.StringVar(&triggerPullPolicy, "trigger-image-pull-policy", "",
+		"Image pull policy of a scheduled Trigger's firing pod (empty = the cluster default).")
+	flag.StringVar(&triggerSchedule.GatewayURL, "trigger-gateway-url", "",
+		"Gateway base URL a scheduled Trigger's firing pod calls. Empty leaves scheduled Triggers not Ready.")
+	flag.StringVar(&triggerSchedule.Audience, "trigger-gateway-audience", controller.DefaultTriggerGatewayAudience,
+		"Audience of the projected ServiceAccount token a scheduled Trigger's firing pod sends to the gateway.")
 	flag.StringVar(&triggerTaskBucket, "trigger-task-bucket", controller.DefaultGatewayTaskBucket,
 		"NATS KV bucket of the gateway's task records; Triggers with a knight target record their tasks there.")
 	flag.DurationVar(&triggerTaskTTL, "trigger-task-ttl", controller.DefaultGatewayTaskTTL,
@@ -164,6 +176,7 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	triggerSchedule.ImagePullPolicy = corev1.PullPolicy(triggerPullPolicy)
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -480,6 +493,7 @@ func main() {
 		TaskTTL:            gateway.EffectiveTaskTTL(triggerTaskTTL, scheduleResultRetention),
 		ScheduleRetention:  scheduleResultRetention,
 		DefaultKnightImage: defaultImage,
+		Schedule:           triggerSchedule,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Trigger")
 		os.Exit(1)

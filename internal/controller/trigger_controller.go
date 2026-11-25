@@ -29,6 +29,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -58,18 +59,17 @@ const (
 	// triggerNakDelay is how long a NATS event that could not be handled
 	// (API error, missing target) waits before it is redelivered.
 	triggerNakDelay = 15 * time.Second
-	// triggerMaxCatchUpSteps bounds the walk over missed schedule times.
-	triggerMaxCatchUpSteps = 100000
 	// triggerKeyAnnotationMax bounds the dedupe key stored on a run.
 	triggerKeyAnnotationMax = 1024
 )
 
 // TriggerReconciler runs Triggers: for a NATS source it keeps one durable
 // consumer on the RoundTable's events stream and a fetch loop that starts a
-// run per message; for a schedule source it fires at each cron time. Runs are
-// copies of the target Chain started through chainrun.Start. A github source
-// is a NATS source fed by a poll loop that publishes matching items to the
-// Trigger's own subject.
+// run per message. Runs are copies of the target Chain started through
+// chainrun.Start. A github source is a NATS source fed by a poll loop that
+// publishes matching items to the Trigger's own subject; a schedule source
+// one fed by an owned CronJob whose pod asks the gateway to publish each
+// firing to the Trigger's own subject.
 //
 // It only runs in the elected leader (controllers need leader election by
 // default), so fetch loops, which are started from Reconcile, do too.
@@ -97,6 +97,8 @@ type TriggerReconciler struct {
 	// DefaultKnightImage infers a knight's runtime to validate a knight
 	// target's model (the operator's DEFAULT_KNIGHT_IMAGE).
 	DefaultKnightImage string
+	// Schedule renders the CronJob of schedule-source Triggers.
+	Schedule TriggerScheduleConfig
 
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
@@ -122,6 +124,8 @@ type TriggerReconciler struct {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
+// +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile keeps a Trigger's consumer or schedule in line with its spec.
 func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -138,6 +142,14 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	if !trg.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, trg)
+	}
+	if trg.Spec.Source.Schedule == nil {
+		// The schedule source was removed (or never set): its CronJob and
+		// ServiceAccount go.
+		if err := r.deleteScheduleObjects(ctx, trg); err != nil {
+			return ctrl.Result{}, err
+		}
+		trg.Status.LastScheduledAt = nil
 	}
 	if usesConsumer(trg) && !controllerutil.ContainsFinalizer(trg, aiv1alpha1.FinalizerTrigger) {
 		controllerutil.AddFinalizer(trg, aiv1alpha1.FinalizerTrigger)
@@ -165,7 +177,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	// A schedule firing writes status itself: start from the latest object.
+	// A firing writes status itself: start from the latest object.
 	latest := &aiv1alpha1.Trigger{}
 	if err := r.reader().Get(ctx, req.NamespacedName, latest); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -200,6 +212,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	latest.Status.Stream = trg.Status.Stream
 	latest.Status.Consumer = trg.Status.Consumer
 	latest.Status.NextScheduledAt = trg.Status.NextScheduledAt
+	latest.Status.LastScheduledAt = trg.Status.LastScheduledAt
 	latest.Status.ObservedGeneration = latest.Generation
 	latest.Status.SuspendedBy = trg.SuspendedBy()
 	cond.ObservedGeneration = latest.Generation
@@ -311,13 +324,30 @@ func (r *TriggerReconciler) finalize(ctx context.Context, trg *aiv1alpha1.Trigge
 	return client.IgnoreNotFound(r.Update(ctx, trg))
 }
 
-// suspend stops the Trigger: its consumer is deleted and no schedule is due.
+// suspend stops the Trigger: its consumer is deleted and a schedule
+// source's CronJob is suspended.
 func (r *TriggerReconciler) suspend(ctx context.Context, trg *aiv1alpha1.Trigger) (metav1.Condition, error) {
 	if err := r.releaseConsumer(ctx, trg); err != nil {
 		return metav1.Condition{}, err
 	}
 	trg.Status.NextScheduledAt = nil
-	return triggerCondition(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerSuspended, suspendedMessage(trg)), nil
+	msg := suspendedMessage(trg)
+	if src := trg.Spec.Source.Schedule; src != nil {
+		if _, err := parseCron(src.Cron, src.TimeZone, "source.schedule.timeZone"); err == nil && r.scheduleConfigured() == nil {
+			cj, err := r.ensureScheduleObjects(ctx, trg, src)
+			var notOwned errNotOwned
+			switch {
+			case errors.As(err, &notOwned):
+				msg += "; " + notOwned.Error()
+			case err != nil:
+				return metav1.Condition{}, err
+			default:
+				trg.Status.LastScheduledAt = cj.Status.LastScheduleTime
+				msg += "; CronJob " + cj.Name + " is suspended"
+			}
+		}
+	}
+	return triggerCondition(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerSuspended, msg), nil
 }
 
 // suspendedMessage says what suspends the Trigger.
@@ -450,9 +480,6 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	case src.NATS != nil, src.Webhook != nil, src.GitHub != nil:
 		return r.reconcileNATS(ctx, trg, notReady)
 	case src.Schedule != nil:
-		if err := r.releaseConsumer(ctx, trg); err != nil {
-			return ctrl.Result{}, metav1.Condition{}, err
-		}
 		return r.reconcileSchedule(ctx, trg, src.Schedule, now, notReady)
 	default:
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "no supported source is set")
@@ -462,18 +489,30 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 type notReadyFunc func(reason, format string, args ...any) (ctrl.Result, metav1.Condition, error)
 
 // usesConsumer reports whether the Trigger reads the events stream through a
-// durable consumer (NATS, webhook and github sources).
+// durable consumer (all sources: a schedule source's firings arrive there
+// from the gateway).
 func usesConsumer(trg *aiv1alpha1.Trigger) bool {
 	src := trg.Spec.Source
-	return src.NATS != nil || src.Webhook != nil || src.GitHub != nil
+	return src.NATS != nil || src.Webhook != nil || src.GitHub != nil || src.Schedule != nil
 }
 
 // reconcileNATS ensures the durable consumer and its fetch loop. A webhook
 // source is a NATS source on the fixed subject the gateway publishes its
 // deliveries to; a github source one on the subject its poll loop publishes
-// matching items to.
+// matching items to; a schedule source one on the subject the gateway
+// publishes its CronJob's firings to.
 func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.Trigger, notReady notReadyFunc) (ctrl.Result, metav1.Condition, error) {
 	rtName := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
+	if trg.Spec.Source.Schedule != nil {
+		name, err := r.knightResolver().TriggerTable(ctx, trg)
+		if errors.Is(err, gateway.ErrNotFound) {
+			return notReady(aiv1alpha1.ReasonTriggerTargetNotFound, "%v", err)
+		}
+		if err != nil {
+			return ctrl.Result{}, metav1.Condition{}, err
+		}
+		rtName = name
+	}
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: rtName}, rt); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -483,13 +522,16 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	}
 	var subject string
 	switch src := trg.Spec.Source; {
-	case src.Webhook != nil, src.GitHub != nil:
+	case src.Webhook != nil, src.GitHub != nil, src.Schedule != nil:
 		if rt.Spec.NATS.SubjectPrefix == "" {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "RoundTable %q has no spec.nats.subjectPrefix", rtName)
 		}
-		if src.GitHub != nil {
+		switch {
+		case src.GitHub != nil:
 			subject = natspkg.GitHubEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
-		} else {
+		case src.Schedule != nil:
+			subject = natspkg.ScheduleEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
+		default:
 			subject = natspkg.WebhookEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
 		}
 	default:
@@ -540,60 +582,55 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	return ctrl.Result{RequeueAfter: RequeueVerySlow}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening, msg), nil
 }
 
-// reconcileSchedule fires when a schedule time has passed since the last one
-// handled (or since the Trigger was created) and requeues for the next one.
-// Like Chain.spec.schedule, missed times fire at most once, and only within
-// startingDeadlineSeconds.
+// scheduleConfigured reports why the operator cannot render a schedule
+// source's CronJob (nil when it can).
+func (r *TriggerReconciler) scheduleConfigured() error {
+	switch {
+	case r.Schedule.Image == "":
+		return errors.New("the operator has no image for the firing pod (--trigger-image)")
+	case r.Schedule.GatewayURL == "":
+		return errors.New("the operator has no gateway URL for the firing pod (--trigger-gateway-url): " +
+			"scheduled Triggers need the gateway")
+	}
+	return nil
+}
+
+// reconcileSchedule renders the Trigger's CronJob and ServiceAccount and
+// reads the firings the CronJob's pod publishes through the gateway. The
+// cluster's CronJob controller decides when to fire (time zone, missed runs
+// within startingDeadlineSeconds, concurrency); the operator only reports the
+// CronJob's last schedule time and computes the next one for display.
 func (r *TriggerReconciler) reconcileSchedule(ctx context.Context, trg *aiv1alpha1.Trigger, src *aiv1alpha1.TriggerScheduleSource, now time.Time, notReady notReadyFunc) (ctrl.Result, metav1.Condition, error) {
 	sched, err := parseCron(src.Cron, src.TimeZone, "source.schedule.timeZone")
 	if err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "%v", err)
 	}
-
-	// Read the last schedule time uncached: a fire a moment ago must not be
-	// seen as due again.
-	fresh := &aiv1alpha1.Trigger{}
-	if err := r.reader().Get(ctx, client.ObjectKeyFromObject(trg), fresh); err != nil {
+	if err := r.scheduleConfigured(); err != nil {
+		return notReady(aiv1alpha1.ReasonTriggerCronJobError, "%v", err)
+	}
+	cj, err := r.ensureScheduleObjects(ctx, trg, src)
+	var notOwned errNotOwned
+	if errors.As(err, &notOwned) {
+		return notReady(aiv1alpha1.ReasonTriggerCronJobError, "%v", err)
+	}
+	if err != nil {
+		if apierrors.IsInvalid(err) {
+			return notReady(aiv1alpha1.ReasonTriggerCronJobError, "%v", err)
+		}
 		return ctrl.Result{}, metav1.Condition{}, err
 	}
-	base := fresh.CreationTimestamp.Time
-	if fresh.Status.LastScheduledAt != nil {
-		base = fresh.Status.LastScheduledAt.Time
-	}
-	var due time.Time
-	for t, i := sched.Next(base), 0; !t.IsZero() && !t.After(now) && i < triggerMaxCatchUpSteps; t, i = sched.Next(t), i+1 {
-		due = t
-	}
-	if !due.IsZero() {
-		nn := client.ObjectKeyFromObject(trg)
-		markDue := func(st *aiv1alpha1.TriggerStatus) {
-			at := metav1.NewTime(due)
-			st.LastScheduledAt = &at
-		}
-		key := due.UTC().Format(time.RFC3339)
-		if dl := src.StartingDeadlineSeconds; dl != nil && now.Sub(due) > time.Duration(*dl)*time.Second {
-			firing := aiv1alpha1.TriggerFiring{Time: metav1.NewTime(now), Key: key,
-				SkipReason: fmt.Sprintf("missed schedule time %s by more than startingDeadlineSeconds", key)}
-			if err := r.recordFiring(ctx, nn, firing, markDue); err != nil {
-				return ctrl.Result{}, metav1.Condition{}, err
-			}
-			countTriggerFiring(r.triggerTable(ctx, trg), trg, triggerOutcomeSkipped)
-		} else {
-			out, err := r.fire(ctx, nn, TriggerEvent{Time: due, Headers: map[string]string{}}, key, "", markDue, nil)
-			if out == triggerRetry {
-				if err == nil {
-					err = errors.New("trigger is not ready to fire")
-				}
-				return ctrl.Result{}, metav1.Condition{}, err
-			}
-		}
-	}
+	trg.Status.LastScheduledAt = cj.Status.LastScheduleTime
 
+	res, cond, err := r.reconcileNATS(ctx, trg, notReady)
+	if err != nil || cond.Status != metav1.ConditionTrue {
+		return res, cond, err
+	}
 	next := sched.Next(now)
 	nextAt := metav1.NewTime(next)
 	trg.Status.NextScheduledAt = &nextAt
-	return ctrl.Result{RequeueAfter: next.Sub(now) + time.Second},
-		triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening, "Next fire at "+next.UTC().Format(time.RFC3339)), nil
+	cond.Message = fmt.Sprintf("CronJob %s fires %q (next at %s); %s",
+		cj.Name, src.Cron, next.UTC().Format(time.RFC3339), cond.Message)
+	return res, cond, nil
 }
 
 // messageHandler handles one NATS event: ack once a run started or the event
@@ -616,6 +653,10 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 			if key == "" {
 				key = "seq-" + strconv.FormatUint(md.Sequence.Stream, 10)
 			}
+		}
+		if at, err := time.Parse(time.RFC3339, msg.Headers().Get(natspkg.ScheduledTimeHeader)); err == nil {
+			// A scheduled firing: .Event.Time is the schedule time.
+			ev.Time = at
 		}
 		if ev.Time.IsZero() {
 			ev.Time = r.now()
@@ -1117,6 +1158,8 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&aiv1alpha1.Trigger{}).
 		Owns(&aiv1alpha1.Chain{}).
 		Owns(&aiv1alpha1.Mission{}).
+		// A CronJob's status.lastScheduleTime is the Trigger's lastScheduledAt.
+		Owns(&batchv1.CronJob{}).
 		Named("trigger").
 		Complete(r)
 }

@@ -248,6 +248,14 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.hooks.maxBodyBytes` | int | `1048576` | Largest webhook body (413 beyond) |
 | `gateway.hooks.rate` / `.burst` | number / int | `2` / `20` | Per-Trigger rate limit: deliveries per second and at once (429 beyond) |
 
+### Scheduled Triggers
+
+A Trigger with `source.schedule` runs as a CronJob `trigger-<name>` the operator creates in the Trigger's namespace (with a ServiceAccount of the same name); each run starts a pod from the operator image (`image.*`) that calls the gateway's fire endpoint with a projected token for `gateway.serviceAccountAuth.audience`. The operator gets `cronjobs` (batch) and `serviceaccounts` in its ClusterRole. Pods in the Triggers' namespaces must reach the gateway (`gateway.networkPolicy.from`). See [triggers.md](triggers.md#schedule-source).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `triggers.gatewayURL` | string | `""` | Gateway base URL the firing pod calls. Empty = the chart's gateway Service (`http://<fullname>-gateway.<namespace>.svc:<port>`) when `gateway.enabled`; with the gateway disabled and no URL, scheduled Triggers are not Ready |
+
 ### Knights
 
 Knights with `coder: true` get `codingKnightDefaults.resources` (including

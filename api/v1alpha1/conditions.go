@@ -520,6 +520,11 @@ const (
 	// be created or read.
 	ReasonTriggerConsumerError = "ConsumerError"
 
+	// ReasonTriggerCronJobError indicates a schedule source's CronJob or
+	// ServiceAccount could not be rendered: the operator has no gateway URL
+	// or image for it, or an object of that name belongs to something else.
+	ReasonTriggerCronJobError = "CronJobError"
+
 	// ConditionTriggerGitHubReady is True while a github-source Trigger's
 	// token resolves and its last poll succeeded.
 	ConditionTriggerGitHubReady = "GitHubReady"

@@ -455,6 +455,20 @@ gateway:
     rate: 2
     burst: 20
 
+# Scheduled Triggers (source.schedule) run as a CronJob trigger-<name> the
+# operator creates in the Trigger's namespace, with a ServiceAccount of the
+# same name. Each run starts a pod from the operator image that calls the
+# gateway's POST /v1/triggers/<namespace>/<name>/fire with a projected token
+# for gateway.serviceAccountAuth.audience. The pod must reach the gateway:
+# add the Triggers' namespaces to gateway.networkPolicy.from. See
+# docs/triggers.md.
+triggers:
+  # Gateway base URL the firing pod calls. Empty = the chart's gateway
+  # Service (http://<fullname>-gateway.<namespace>.svc:<port>) when
+  # gateway.enabled; with the gateway disabled and no URL, scheduled Triggers
+  # are not Ready.
+  gatewayURL: ""
+
 # Knights to create alongside the operator
 # Example:
 # knights:

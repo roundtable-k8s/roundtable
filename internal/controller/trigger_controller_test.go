@@ -31,6 +31,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -110,6 +111,30 @@ var _ = Describe("Trigger controller", func() {
 		reconcileTrigger(name)
 		return getTrigger(name)
 	}
+	getCronJob := func(name string) *batchv1.CronJob {
+		cj := &batchv1.CronJob{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, cj)).To(Succeed())
+		return cj
+	}
+	getSA := func(name string) *corev1.ServiceAccount {
+		sa := &corev1.ServiceAccount{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, sa)).To(Succeed())
+		return sa
+	}
+	// fireSchedule publishes a scheduled firing the way the gateway's fire
+	// endpoint does for the Trigger's CronJob: firing key = schedule time.
+	// msgID overrides the Nats-Msg-Id (a run after the duplicate window).
+	fireSchedule := func(trigger string, at time.Time, msgID string) {
+		key := at.UTC().Format(time.RFC3339)
+		msg := nats.NewMsg(natspkg.ScheduleEventSubject(prefix, ns, trigger))
+		msg.Header.Set(natspkg.ScheduledTimeHeader, key)
+		msg.Header.Set(natspkg.EventKeyHeader, key)
+		if msgID == "" {
+			msgID = key
+		}
+		_, err := js.PublishMsg(ctx, msg, jetstream.WithMsgID(msgID))
+		Expect(err).NotTo(HaveOccurred())
+	}
 	consumerExists := func(durable string) bool {
 		_, err := js.Consumer(ctx, stream, durable)
 		return err == nil
@@ -137,6 +162,8 @@ var _ = Describe("Trigger controller", func() {
 			Recorder: record.NewFakeRecorder(100),
 			NATS:     provider,
 			Now:      func() time.Time { return clock },
+			Schedule: TriggerScheduleConfig{
+				Image: "operator:test", GatewayURL: "http://gateway.test", Audience: "roundtable-gateway"},
 		}
 
 		rt := &aiv1alpha1.RoundTable{
@@ -171,6 +198,10 @@ var _ = Describe("Trigger controller", func() {
 			Expect(client.IgnoreNotFound(k8sClient.Update(ctx, t))).To(Succeed())
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, t))).To(Succeed())
 		}
+		Expect(k8sClient.DeleteAllOf(ctx, &batchv1.CronJob{}, client.InNamespace(ns),
+			client.HasLabels{aiv1alpha1.LabelTrigger})).To(Succeed())
+		Expect(k8sClient.DeleteAllOf(ctx, &corev1.ServiceAccount{}, client.InNamespace(ns),
+			client.HasLabels{aiv1alpha1.LabelTrigger})).To(Succeed())
 		Expect(k8sClient.DeleteAllOf(ctx, &aiv1alpha1.Chain{}, client.InNamespace(ns),
 			client.MatchingLabels{chainrun.LabelRunSource: chainrun.SourceTrigger})).To(Succeed())
 		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: ns}}))).To(Succeed())
@@ -528,72 +559,184 @@ var _ = Describe("Trigger controller", func() {
 			Expect(k8sClient.Create(ctx, t)).To(Succeed())
 			return getTrigger(name)
 		}
-		// nextFive is the first */5 minute strictly after t.
 		nextFive := func(t time.Time) time.Time {
 			return t.UTC().Truncate(5 * time.Minute).Add(5 * time.Minute)
 		}
 
-		It("fires once per schedule time with .Event.Time and requeues for the next", func() {
-			t := scheduleTrigger("cron", nil)
-			due := nextFive(t.CreationTimestamp.Time)
-
-			clock = due.Add(-time.Second)
-			res := reconcileTrigger("cron")
-			Expect(runsOf("cron")).To(BeEmpty())
-			Expect(res.RequeueAfter).To(BeNumerically("~", 2*time.Second, time.Second))
-			Expect(getTrigger("cron").Status.NextScheduledAt.Time).To(BeTemporally("==", due))
-			Expect(meta.IsStatusConditionTrue(getTrigger("cron").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
-
-			clock = due.Add(10 * time.Second)
-			res = reconcileTrigger("cron")
-			runs := runsOf("cron")
-			Expect(runs).To(HaveLen(1))
-			Expect(runs[0].Spec.Input).To(Equal(fmt.Sprintf(`{"at": "%s"}`, due.Format("15:04"))))
-			Expect(runs[0].Annotations[aiv1alpha1.AnnotationTriggerKey]).To(Equal(due.Format(time.RFC3339)))
-			st := getTrigger("cron").Status
-			Expect(st.LastScheduledAt.Time).To(BeTemporally("==", due))
-			Expect(st.NextScheduledAt.Time).To(BeTemporally("==", due.Add(5*time.Minute)))
-			Expect(st.RecentFirings).To(HaveLen(1))
-			Expect(st.RecentFirings[0].Run).To(Equal(runs[0].Name))
-			Expect(res.RequeueAfter).To(BeNumerically("~", 5*time.Minute-10*time.Second, 2*time.Second))
-
-			// Reconciling again before the next time starts nothing.
-			reconcileTrigger("cron")
-			Expect(runsOf("cron")).To(HaveLen(1))
-			Expect(getTrigger("cron").Status.RecentFirings).To(HaveLen(1))
-			Expect(firings("cron", "schedule", "started")).To(Equal(1.0))
-		})
-
-		It("catches up a missed time once, within startingDeadlineSeconds", func() {
-			t := scheduleTrigger("catchup", func(s *aiv1alpha1.TriggerSpec) {
-				s.Source.Schedule.StartingDeadlineSeconds = ptr.To[int64](120)
+		It("renders an owned CronJob and ServiceAccount and fires once per schedule time", func() {
+			t := scheduleTrigger("cron", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
 			})
 			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("cron")
+			t = getTrigger("cron")
 
-			// Down across three schedule times: one catch-up run for the latest.
-			latest := due.Add(10 * time.Minute)
-			clock = latest.Add(time.Minute)
-			reconcileTrigger("catchup")
-			runs := runsOf("catchup")
-			Expect(runs).To(HaveLen(1))
-			Expect(runs[0].Annotations[aiv1alpha1.AnnotationTriggerKey]).To(Equal(latest.Format(time.RFC3339)))
+			sa := getSA("trigger-cron")
+			Expect(metav1.IsControlledBy(sa, t)).To(BeTrue())
+			Expect(sa.AutomountServiceAccountToken).To(HaveValue(BeFalse()))
 
-			// Missed by more than the deadline: recorded, nothing started.
-			clock = latest.Add(5*time.Minute + 3*time.Minute)
-			reconcileTrigger("catchup")
-			Expect(runsOf("catchup")).To(HaveLen(1))
-			st := getTrigger("catchup").Status
-			Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("startingDeadlineSeconds"))
-			Expect(st.LastScheduledAt.Time).To(BeTemporally("==", latest.Add(5*time.Minute)))
+			cj := getCronJob("trigger-cron")
+			Expect(metav1.IsControlledBy(cj, t)).To(BeTrue())
+			Expect(cj.Spec.Schedule).To(Equal("*/5 * * * *"))
+			Expect(cj.Spec.TimeZone).To(HaveValue(Equal("Etc/UTC")))
+			Expect(cj.Spec.StartingDeadlineSeconds).To(BeNil())
+			Expect(cj.Spec.ConcurrencyPolicy).To(Equal(batchv1.ForbidConcurrent))
+			Expect(cj.Spec.Suspend).To(HaveValue(BeFalse()))
+			Expect(cj.Spec.SuccessfulJobsHistoryLimit).To(HaveValue(Equal(int32(1))))
+			Expect(cj.Spec.FailedJobsHistoryLimit).To(HaveValue(Equal(int32(2))))
+			job := cj.Spec.JobTemplate.Spec
+			Expect(job.ActiveDeadlineSeconds).To(HaveValue(BeNumerically(">", 0)))
+			pod := job.Template.Spec
+			Expect(pod.ServiceAccountName).To(Equal("trigger-cron"))
+			Expect(pod.AutomountServiceAccountToken).To(HaveValue(BeFalse()))
+			Expect(pod.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
+			Expect(pod.SecurityContext.RunAsNonRoot).To(HaveValue(BeTrue()))
+			Expect(pod.Containers).To(HaveLen(1))
+			c := pod.Containers[0]
+			Expect(c.Image).To(Equal("operator:test"))
+			Expect(c.Command).To(Equal([]string{"/manager"}))
+			Expect(c.Args).To(Equal([]string{"fire-trigger", "--gateway=http://gateway.test",
+				"--trigger=" + ns + "/cron", "--token-file=/var/run/secrets/roundtable/gateway/token",
+				"--job-name=$(ROUNDTABLE_JOB_NAME)"}))
+			Expect(c.Env).To(HaveLen(1))
+			Expect(c.Env[0].Name).To(Equal("ROUNDTABLE_JOB_NAME"))
+			Expect(c.Env[0].ValueFrom.FieldRef.FieldPath).To(Equal("metadata.labels['batch.kubernetes.io/job-name']"))
+			Expect(c.SecurityContext.AllowPrivilegeEscalation).To(HaveValue(BeFalse()))
+			Expect(c.SecurityContext.Capabilities.Drop).To(ConsistOf(corev1.Capability("ALL")))
+			Expect(pod.Volumes).To(HaveLen(1))
+			proj := pod.Volumes[0].Projected.Sources[0].ServiceAccountToken
+			Expect(proj.Audience).To(Equal("roundtable-gateway"))
+
+			// The firings arrive on the Trigger's own subject of the target
+			// Chain's table.
+			Expect(t.Finalizers).To(ContainElement(aiv1alpha1.FinalizerTrigger))
+			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "cron"))).To(BeTrue())
+			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Message).To(ContainSubstring("CronJob trigger-cron"))
+			Expect(cond.Message).To(ContainSubstring(natspkg.ScheduleEventSubject(prefix, ns, "cron")))
+			Expect(t.Status.NextScheduledAt.Time).To(BeTemporally("==", due))
+			Expect(runsOf("cron")).To(BeEmpty())
+
+			// A CronJob run: exactly one run, with .Event.Time the schedule time.
+			fireSchedule("cron", due, "")
+			Eventually(func() int { return len(runsOf("cron")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			run := runsOf("cron")[0]
+			Expect(run.Spec.Input).To(Equal(fmt.Sprintf(`{"at": "%s"}`, due.Format("15:04"))))
+			Expect(run.Annotations[aiv1alpha1.AnnotationTriggerKey]).To(Equal(due.Format(time.RFC3339)))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("cron").Status.RecentFirings }).Should(HaveLen(1))
+
+			// A second run for the same schedule time (after the stream's
+			// duplicate window) is deduplicated by the firing key.
+			fireSchedule("cron", due, "retry")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("cron").Status.RecentFirings }, 10*time.Second).Should(HaveLen(2))
+			Expect(getTrigger("cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))
+			Expect(runsOf("cron")).To(HaveLen(1))
+			Expect(firings("cron", "schedule", "started")).To(Equal(1.0))
+
+			// Reconciling again changes nothing on the CronJob.
+			rv := getCronJob("trigger-cron").ResourceVersion
+			reconcileTrigger("cron")
+			Expect(getCronJob("trigger-cron").ResourceVersion).To(Equal(rv))
+		})
+
+		It("updates the CronJob on a schedule change and suspend, and reads lastScheduledAt from it", func() {
+			scheduleTrigger("upd", nil)
+			reconcileTrigger("upd")
+
+			t := getTrigger("upd")
+			t.Spec.Source.Schedule = &aiv1alpha1.TriggerScheduleSource{
+				Cron: "0 7 * * 1-5", TimeZone: "America/New_York", StartingDeadlineSeconds: ptr.To[int64](3600)}
+			t.Spec.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyReplace
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("upd")
+			cj := getCronJob("trigger-upd")
+			Expect(cj.Spec.Schedule).To(Equal("0 7 * * 1-5"))
+			Expect(cj.Spec.TimeZone).To(HaveValue(Equal("America/New_York")))
+			Expect(cj.Spec.StartingDeadlineSeconds).To(HaveValue(Equal(int64(3600))))
+			Expect(cj.Spec.ConcurrencyPolicy).To(Equal(batchv1.ReplaceConcurrent))
+
+			// The CronJob's last schedule time is the Trigger's.
+			last := metav1.NewTime(clock.Add(-time.Hour).Truncate(time.Second))
+			cj.Status.LastScheduleTime = &last
+			Expect(k8sClient.Status().Update(ctx, cj)).To(Succeed())
+			reconcileTrigger("upd")
+			Expect(getTrigger("upd").Status.LastScheduledAt.Time).To(BeTemporally("==", last.Time))
+
+			t = getTrigger("upd")
+			t.Spec.Suspend = true
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("upd")
+			Expect(getCronJob("trigger-upd").Spec.Suspend).To(HaveValue(BeTrue()))
+			st := getTrigger("upd").Status
+			cond := meta.FindStatusCondition(st.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerSuspended))
+			Expect(cond.Message).To(ContainSubstring("CronJob trigger-upd is suspended"))
+			Expect(st.NextScheduledAt).To(BeNil())
+			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "upd"))).To(BeFalse())
+
+			t = getTrigger("upd")
+			t.Spec.Suspend = false
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("upd")
+			Expect(getCronJob("trigger-upd").Spec.Suspend).To(HaveValue(BeFalse()))
+			Expect(meta.IsStatusConditionTrue(getTrigger("upd").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+		})
+
+		It("deletes the CronJob and ServiceAccount when the schedule source is removed", func() {
+			scheduleTrigger("gone", nil)
+			reconcileTrigger("gone")
+			Expect(getCronJob("trigger-gone")).NotTo(BeNil())
+
+			t := getTrigger("gone")
+			t.Spec.Source = aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: prefix + ".events.gone"}}
+			t.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: rtName}
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("gone")
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "trigger-gone"}, &batchv1.CronJob{}))).To(BeTrue())
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "trigger-gone"}, &corev1.ServiceAccount{}))).To(BeTrue())
+			Expect(getTrigger("gone").Status.LastScheduledAt).To(BeNil())
+			Expect(meta.IsStatusConditionTrue(getTrigger("gone").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+		})
+
+		It("is not Ready without a gateway URL or when its names are taken, and leaves foreign objects alone", func() {
+			r.Schedule.GatewayURL = ""
+			scheduleTrigger("nogw", nil)
+			reconcileTrigger("nogw")
+			cond := meta.FindStatusCondition(getTrigger("nogw").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerCronJobError))
+			Expect(cond.Message).To(ContainSubstring("gateway URL"))
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "trigger-nogw"}, &batchv1.CronJob{}))).To(BeTrue())
+
+			r.Schedule.GatewayURL = "http://gateway.test"
+			Expect(k8sClient.Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "trigger-taken", Namespace: ns}})).To(Succeed())
+			DeferCleanup(func() {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &corev1.ServiceAccount{
+					ObjectMeta: metav1.ObjectMeta{Name: "trigger-taken", Namespace: ns}}))).To(Succeed())
+			})
+			scheduleTrigger("taken", nil)
+			reconcileTrigger("taken")
+			cond = meta.FindStatusCondition(getTrigger("taken").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerCronJobError))
+			Expect(cond.Message).To(ContainSubstring("not owned by this Trigger"))
+
+			// Switching away from the schedule does not delete what the
+			// Trigger never owned.
+			t := getTrigger("taken")
+			t.Spec.Source = aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: prefix + ".events.taken"}}
+			t.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: rtName}
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			reconcileTrigger("taken")
+			Expect(getSA("trigger-taken")).NotTo(BeNil())
 		})
 
 		It("keeps the target's input when spec.input is empty and reports a missing target", func() {
 			t := scheduleTrigger("noinput", func(s *aiv1alpha1.TriggerSpec) { s.Input = "" })
-			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
 			reconcileTrigger("noinput")
-			runs := runsOf("noinput")
-			Expect(runs).To(HaveLen(1))
-			Expect(runs[0].Spec.Input).To(Equal(`{"default": true}`))
+			fireSchedule("noinput", nextFive(t.CreationTimestamp.Time), "")
+			Eventually(func() int { return len(runsOf("noinput")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			Expect(runsOf("noinput")[0].Spec.Input).To(Equal(`{"default": true}`))
 
 			scheduleTrigger("missing", func(s *aiv1alpha1.TriggerSpec) { s.Target.ChainRef.Name = "nope" })
 			reconcileTrigger("missing")
@@ -617,20 +760,22 @@ var _ = Describe("Trigger controller", func() {
 		It("is suspended by the suspended annotation while spec.suspend is false, and resumes when it is removed", func() {
 			t := scheduleTrigger("annsuspend", nil)
 			Expect(t.Spec.Suspend).To(BeFalse())
-			due := nextFive(t.CreationTimestamp.Time)
+			reconcileTrigger("annsuspend")
+			Expect(getCronJob("trigger-annsuspend").Spec.Suspend).To(HaveValue(BeFalse()))
 			annotate("annsuspend", map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "token"})
 
-			clock = due.Add(10 * time.Second)
 			reconcileTrigger("annsuspend")
-			Expect(runsOf("annsuspend")).To(BeEmpty())
+			Expect(getCronJob("trigger-annsuspend").Spec.Suspend).To(HaveValue(BeTrue()))
 			t = getTrigger("annsuspend")
 			Expect(t.Status.SuspendedBy).To(Equal(aiv1alpha1.TriggerSuspendedByAnnotation))
 			Expect(t.Status.NextScheduledAt).To(BeNil())
+			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "annsuspend"))).To(BeFalse())
 			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerSuspended))
 			Expect(cond.Message).To(ContainSubstring(aiv1alpha1.AnnotationTriggerSuspended))
 			Expect(cond.Message).To(ContainSubstring("by token"))
+			Expect(cond.Message).To(ContainSubstring("CronJob trigger-annsuspend is suspended"))
 
 			// Both set: status names both sources.
 			t.Spec.Suspend = true
@@ -641,13 +786,15 @@ var _ = Describe("Trigger controller", func() {
 			t.Spec.Suspend = false
 			Expect(k8sClient.Update(ctx, t)).To(Succeed())
 
-			// Removing the annotation resumes firing.
+			// Removing the annotation resumes the CronJob and firing.
 			annotate("annsuspend", nil, aiv1alpha1.AnnotationTriggerSuspended)
 			reconcileTrigger("annsuspend")
-			Expect(runsOf("annsuspend")).To(HaveLen(1))
+			Expect(getCronJob("trigger-annsuspend").Spec.Suspend).To(HaveValue(BeFalse()))
 			t = getTrigger("annsuspend")
 			Expect(t.Status.SuspendedBy).To(BeEmpty())
 			Expect(meta.IsStatusConditionTrue(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+			fireSchedule("annsuspend", nextFive(t.CreationTimestamp.Time), "")
+			Eventually(func() int { return len(runsOf("annsuspend")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
 		})
 
 		It("fires once now for the run-now annotation, even while suspended, and records the caller", func() {
@@ -696,6 +843,15 @@ var _ = Describe("Trigger controller", func() {
 			Expect(st.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("b")))
 			Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
 			Expect(getTrigger("runnowforbid").Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+		})
+
+		It("shortens a CronJob name that would be too long", func() {
+			long := strings.Repeat("a", 63)
+			name := triggerCronJobName(long)
+			Expect(name).To(HaveLen(cronJobNameMax))
+			Expect(name).To(HavePrefix("trigger-aaa"))
+			Expect(triggerCronJobName(long[:44])).To(Equal("trigger-" + long[:44]))
+			Expect(triggerCronJobName(long)).NotTo(Equal(triggerCronJobName(long[:62])))
 		})
 	})
 	Context("knight target", func() {
@@ -806,10 +962,13 @@ var _ = Describe("Trigger controller", func() {
 			t := scheduleKnightTrigger("kt-cron", nil)
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(10 * time.Second)
-			res := reconcileTrigger("kt-cron")
+			reconcileTrigger("kt-cron")
+			fireSchedule("kt-cron", due, "")
 
 			var sent []natspkg.TaskPayload
-			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-cron").Status.RecentFirings }).Should(HaveLen(1))
+			res := reconcileTrigger("kt-cron")
 			Expect(sent[0].Task).To(Equal(fmt.Sprintf("Brief me for %s (kt-cron)", due.Format("15:04"))))
 			Expect(sent[0].TaskID).To(HavePrefix("invoke-" + knightName + "-"))
 			st := getTrigger("kt-cron").Status
@@ -858,12 +1017,15 @@ var _ = Describe("Trigger controller", func() {
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(time.Second)
 			reconcileTrigger("kt-forbid")
+			fireSchedule("kt-forbid", due, "")
 			var sent []natspkg.TaskPayload
-			Eventually(func() int { sent = got(); return len(sent) }).Should(Equal(1))
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-forbid").Status.RecentFirings }).Should(HaveLen(1))
 
 			// The next time finds the task active: nothing is sent.
 			clock = due.Add(5*time.Minute + time.Second)
-			reconcileTrigger("kt-forbid")
+			fireSchedule("kt-forbid", due.Add(5*time.Minute), "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-forbid").Status.RecentFirings }, "10s").Should(HaveLen(2))
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
 			st := getTrigger("kt-forbid").Status
 			Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
@@ -1051,9 +1213,11 @@ var _ = Describe("Trigger controller", func() {
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(10 * time.Second)
 			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due, "")
 
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-cron") }, "10s").Should(HaveLen(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }).Should(HaveLen(1))
 			ms := missionsOf("mt-cron")
-			Expect(ms).To(HaveLen(1))
 			m := ms[0]
 			Expect(m.Name).To(HavePrefix("mt-cron-"))
 			Expect(m.Spec.Objective).To(Equal("Review mt-cron at " + due.Format("15:04")))
@@ -1071,7 +1235,8 @@ var _ = Describe("Trigger controller", func() {
 
 			// The next time finds the Mission unfinished: nothing is created.
 			clock = due.Add(5*time.Minute + time.Second)
-			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due.Add(5*time.Minute), "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }, "10s").Should(HaveLen(2))
 			Expect(missionsOf("mt-cron")).To(HaveLen(1))
 			Expect(getTrigger("mt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("concurrency Forbid"))
 
@@ -1086,6 +1251,9 @@ var _ = Describe("Trigger controller", func() {
 			setPhase(&m, aiv1alpha1.MissionPhaseCleaningUp)
 			clock = due.Add(10*time.Minute + time.Second)
 			reconcileTrigger("mt-cron")
+			fireSchedule("mt-cron", due.Add(10*time.Minute), "")
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-cron") }, "10s").Should(HaveLen(2))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cron").Status.RecentFirings }).Should(HaveLen(3))
 			st = getTrigger("mt-cron").Status
 			Expect(st.ActiveRuns).To(ContainElement(Not(Equal(m.Name))))
 			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
@@ -1129,8 +1297,11 @@ var _ = Describe("Trigger controller", func() {
 			t := scheduleMissionTrigger("mt-bad", func(s *aiv1alpha1.TriggerSpec) {
 				s.Target.Mission.CostBudgetUSD = "1000000"
 			})
-			clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
 			reconcileTrigger("mt-bad")
+			fireSchedule("mt-bad", due, "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-bad").Status.RecentFirings }, "10s").Should(HaveLen(1))
 			Expect(missionsOf("mt-bad")).To(BeEmpty())
 			Expect(getTrigger("mt-bad").Status.RecentFirings[0].SkipReason).To(ContainSubstring("costBudgetUSD"))
 		})
@@ -1145,10 +1316,13 @@ var _ = Describe("Trigger controller", func() {
 			due := nextFive(t.CreationTimestamp.Time)
 			clock = due.Add(time.Second)
 			reconcileTrigger("mt-limit")
-			Expect(missionsOf("mt-limit")).To(HaveLen(1))
+			fireSchedule("mt-limit", due, "")
+			Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-limit") }, "10s").Should(HaveLen(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-limit").Status.RecentFirings }).Should(HaveLen(1))
 
 			clock = due.Add(5*time.Minute + time.Second)
-			reconcileTrigger("mt-limit")
+			fireSchedule("mt-limit", due.Add(5*time.Minute), "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-limit").Status.RecentFirings }, "10s").Should(HaveLen(2))
 			Expect(missionsOf("mt-limit")).To(HaveLen(1))
 			Expect(getTrigger("mt-limit").Status.RecentFirings[0].SkipReason).To(ContainSubstring("policies.maxMissions 1"))
 		})
