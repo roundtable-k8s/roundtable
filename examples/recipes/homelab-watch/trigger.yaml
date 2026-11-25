@@ -1,0 +1,45 @@
+# Webhook Trigger for Alertmanager. The Secret holds the bearer token; create
+# it as shown in README.md (do not commit a real token). The gateway only
+# accepts a Secret labelled ai.roundtable.io/webhook-secret: "true".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: homelab-alerts-hook
+  namespace: roundtable
+  labels:
+    ai.roundtable.io/webhook-secret: "true"
+type: Opaque
+stringData:
+  # At least 16 characters, e.g. $(openssl rand -hex 32).
+  token: replace-me-with-a-long-random-token
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: homelab-alerts
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    webhook:
+      auth:
+        bearerTokenSecretRef: {name: homelab-alerts-hook, key: token}
+  target:
+    chainRef: {name: cluster-triage}
+  # .Event.Data is Alertmanager's payload. A missing key fails the render, so
+  # `index` is used for labels that not every alert has (it renders empty
+  # values as <no value> rather than failing). Group alerts by alertname and
+  # namespace in Alertmanager so commonLabels carries both.
+  input: |
+    Alert: {{ index .Event.Data.commonLabels "alertname" }} ({{ .Event.Data.status }})
+    Severity: {{ index .Event.Data.commonLabels "severity" }}
+    Namespace: {{ index .Event.Data.commonLabels "namespace" }}
+    Summary: {{ index .Event.Data.commonAnnotations "summary" }}
+    Alerts (JSON): {{ toJson .Event.Data.alerts }}
+  # Alertmanager re-sends a group on every repeat_interval and for each change
+  # in it. The first alert's fingerprint identifies the alert; with the status
+  # it gives one run per firing and one per resolution, not one per delivery.
+  dedupeKey: "{{ (index .Event.Data.alerts 0).fingerprint }}/{{ .Event.Data.status }}"
+  concurrency:
+    policy: Allow
+    maxActive: 3

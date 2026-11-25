@@ -39,6 +39,11 @@ func TestExamplesDecodeStrictly(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, nested...)
+	recipes, err := filepath.Glob("../../examples/recipes/*/*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, recipes...)
 	if len(files) == 0 {
 		t.Fatal("no examples found")
 	}

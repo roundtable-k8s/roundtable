@@ -1,0 +1,23 @@
+# Alertmanager config snippet (not a Round Table object): merge it into your
+# alertmanager.yml. The token file is the `token` key of the homelab-alerts-hook
+# Secret, mounted into Alertmanager's pod (see README.md).
+route:
+  receiver: default
+  group_by: [alertname, namespace]
+  routes:
+    - receiver: roundtable
+      matchers:
+        - severity =~ "warning|critical"
+      continue: true
+receivers:
+  - name: default
+  - name: roundtable
+    webhook_configs:
+      # <fullname> is the Helm release's gateway Service prefix.
+      - url: http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/homelab-alerts
+        # Resolved notifications start a (cheap) run too. Set false to skip them.
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/homelab-alerts-hook/token

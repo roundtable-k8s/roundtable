@@ -20,6 +20,7 @@ Real-world examples of Round Table resources.
 | [`trigger-nats.yaml`](trigger-nats.yaml) | Trigger: start a Chain run per message on `fleet-a.events.deploys.>`, input rendered from the event ([docs](../docs/triggers.md)) |
 | [`trigger-webhook.yaml`](trigger-webhook.yaml) | Trigger: start a Chain run per Alertmanager webhook delivered through the gateway, authenticated with the Trigger's own token ([docs](../docs/triggers.md#webhook-source)) |
 | [`trigger-schedule.yaml`](trigger-schedule.yaml) | Trigger: start a Chain on a cron schedule with input computed from the schedule time ([docs](../docs/triggers.md)) |
+| [`recipes/`](recipes/) | Copyable fleets: [`homelab-watch/`](recipes/homelab-watch/) starts a read-only triage chain from an Alertmanager webhook |
 | [`observability/`](observability/) | Try-it-out tracing: Jaeger all-in-one plus the chart's OTel collector (`values-telemetry.yaml`), see [README](observability/README.md) and [docs](../docs/helm-values.md) |
 | [`chain-pr-feedback.yaml`](chain-pr-feedback.yaml) | PR pipeline feedback: the operator feeds a red CI run or merge-queue rejection to the PR's author knight (`resumeRunId` resumes its session), then the lead re-queues, or escalates. Rendered from the chart's `prPipeline.feedback` values ([docs](../docs/pr-feedback.md)) |
 | [`egress/`](egress/) | Starter egress allowlists (GitHub read, package docs, model providers, research, feeds); see [docs](../docs/egress.md) |
