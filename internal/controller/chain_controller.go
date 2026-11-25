@@ -30,6 +30,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"github.com/roundtable-k8s/roundtable/internal/util"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -80,8 +81,10 @@ type ChainReconciler struct {
 	// infer a knight's agent runtime (claude-knight/pi-knight) when the Knight
 	// has no spec.image, for per-step model validation.
 	DefaultKnightImage string
-	cron               *cron.Cron
-	mu                 sync.Mutex
+	// TracerProvider makes the chain run spans; nil uses the global one.
+	TracerProvider trace.TracerProvider
+	cron           *cron.Cron
+	mu             sync.Mutex
 	// cronEntries maps chain namespace/name to cron entry ID
 	cronEntries map[string]cron.EntryID
 	// cronSpecs maps chain namespace/name to the effective cron spec (with
@@ -150,6 +153,17 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 			return ctrl.Result{}, err
 		}
 	}
+
+	// Emit the run spans that finish during this reconcile, once the status
+	// that records it is written (its resourceVersion moved). A failed or
+	// conflicting write leaves them for the next reconcile.
+	prevRunSpans := chainRunSpans(chain, time.Now())
+	baseRV := chain.ResourceVersion
+	defer func() {
+		if chain.ResourceVersion != baseRV {
+			r.emitRunSpans(ctx, chain, prevRunSpans)
+		}
+	}()
 
 	// Validate roundTableRef is present
 	if aiv1alpha1.RefName(chain.Spec.RoundTableRef) == "" && aiv1alpha1.RefName(chain.Spec.MissionRef) == "" {
@@ -322,6 +336,7 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 		chain.Status.RunID = ""
 		chain.Status.StartedAt = nil
 		chain.Status.CompletedAt = nil
+		resetRunTrace(chain)
 
 		chain.Status.ObservedGeneration = chain.Generation
 		return r.updateStatus(ctx, chain, 0)
@@ -588,6 +603,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		// restore below only picks up outputs this run produced (none yet) —
 		// stale outputs from earlier runs can no longer masquerade as results.
 		chain.Status.RunID = string(uuid.NewUUID())
+		resetRunTrace(chain)
 
 		// Attempt to restore completed steps from NATS KV (resume capability)
 		restored := r.restoreStepOutputsFromKV(ctx, chain)
@@ -611,6 +627,10 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 		chain.Status.StartedAt = &now
 		r.Recorder.Event(chain, corev1.EventTypeNormal, "Started", "Chain execution started")
 	}
+
+	// The run's trace: its root span context is stored once, then every
+	// later reconcile parents its spans from it.
+	r.ensureRunTrace(ctx, chain)
 
 	// Check overall timeout
 	if chain.Status.StartedAt != nil {
@@ -988,7 +1008,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			Model:     model,
 		}
 
-		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, knightName, payload)
+		seq, err := r.publishTask(withRunSpan(ctx, chain, plainStepSpanKey(step.Name, taskID)), nc, knight.Spec.Domain, knightName, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish task", "step", step.Name)
 			continue
@@ -1311,6 +1331,7 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 		chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
 		chain.Status.StartedAt = &now
 		chain.Status.CompletedAt = nil
+		resetRunTrace(chain)
 		chain.Status.LastRunTrigger = runVal
 		if retryPending {
 			chain.Status.LastRetryTrigger = retryVal // run-now supersedes retry
@@ -1362,6 +1383,8 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 	// The overall timeout applies to the resumed leg, not the whole old run.
 	chain.Status.StartedAt = &now
 	chain.Status.CompletedAt = nil
+	// The previous leg's trace ended with it; the resumed leg gets its own.
+	resetRunTrace(chain)
 	chain.Status.ObservedGeneration = chain.Generation
 	r.Recorder.Eventf(chain, corev1.EventTypeNormal, "RetryTriggered", "Retrying %d failed step(s) of run %s", retried, chain.Status.RunID)
 	res, err := r.updateStatus(ctx, chain, RequeueFast)
@@ -1581,6 +1604,7 @@ func (r *ChainReconciler) triggerChain(ctx context.Context, nn types.NamespacedN
 		chain.Status.StartedAt = &now
 		chain.Status.CompletedAt = nil
 		chain.Status.LastScheduledAt = &now
+		resetRunTrace(chain)
 
 		if err := r.Status().Update(ctx, chain); err != nil {
 			return err

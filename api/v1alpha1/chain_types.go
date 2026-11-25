@@ -771,6 +771,19 @@ type ChainItemStatus struct {
 	Retries int32 `json:"retries,omitempty"`
 }
 
+// TraceContext is a W3C trace context (https://www.w3.org/TR/trace-context/)
+// in its header form.
+type TraceContext struct {
+	// traceparent is the W3C traceparent value, e.g.
+	// 00-<32 hex trace id>-<16 hex span id>-<2 hex flags>.
+	// +optional
+	Traceparent string `json:"traceparent,omitempty"`
+
+	// tracestate is the W3C tracestate value (vendor-specific trace data).
+	// +optional
+	Tracestate string `json:"tracestate,omitempty"`
+}
+
 // ChainStatus defines the observed state of Chain.
 type ChainStatus struct {
 	// phase is the current lifecycle phase of the chain.
@@ -811,6 +824,18 @@ type ChainStatus struct {
 	// a previous run can never be attributed to the current one.
 	// +optional
 	RunID string `json:"runId,omitempty"`
+
+	// traceContext is the W3C trace context of the current (or most recent)
+	// run's root span. Every reconcile of the run parents its spans from it,
+	// so the run is one trace. Unset when tracing is off. A new run (or a
+	// retry-failed resume) replaces it.
+	// +optional
+	TraceContext *TraceContext `json:"traceContext,omitempty"`
+
+	// traceID is the trace ID of the run's trace (32 hex characters), for
+	// linking to a trace backend. Unset when tracing is off.
+	// +optional
+	TraceID string `json:"traceID,omitempty"`
 
 	// lastRunTrigger is the last value of the ai.roundtable.io/run annotation
 	// that was handled. A run is only started when the annotation differs.

@@ -620,7 +620,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 			Task:      taskStr,
 			Model:     model,
 		}
-		seq, err := r.publishTask(ctx, nc, knight.Spec.Domain, spec.KnightRef.Name, payload)
+		seq, err := r.publishTask(withRunSpan(ctx, chain, itemSpanKey(taskID)), nc, knight.Spec.Domain, spec.KnightRef.Name, payload)
 		if err != nil {
 			log.Error(err, "Failed to publish item task", "item", idx)
 			return
