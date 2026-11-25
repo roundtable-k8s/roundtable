@@ -40,7 +40,7 @@ import (
 const Command = "fire-trigger"
 
 // DefaultTokenFile is where the CronJob pod mounts its projected token.
-const DefaultTokenFile = "/var/run/secrets/roundtable/trigger/token"
+const DefaultTokenFile = "/var/run/secrets/roundtable/gateway/token"
 
 // DefaultTimeout bounds the whole call.
 const DefaultTimeout = 30 * time.Second

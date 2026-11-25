@@ -1062,7 +1062,7 @@ no other image and no Kubernetes client:
 /manager fire-trigger \
   --gateway http://roundtable-gateway.roundtable.svc:8080 \
   --trigger roundtable/nightly \
-  --token-file /var/run/secrets/roundtable/trigger/token \
+  --token-file /var/run/secrets/roundtable/gateway/token \
   [--job-name "$JOB_NAME" | --scheduled-time 2026-11-25T02:00:00Z] [--timeout 30s]
 ```
 

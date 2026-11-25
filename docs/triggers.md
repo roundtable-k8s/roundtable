@@ -554,13 +554,15 @@ by it (deleting the Trigger deletes them):
   1 succeeded and 2 failed Jobs.
 
 Each run starts one pod from the operator's own image that runs
-`/manager fire-trigger --gateway <url> --trigger <namespace>/<name>`. It sends a
+`/manager fire-trigger --gateway <url> --trigger <namespace>/<name> --job-name $(ROUNDTABLE_JOB_NAME)`
+(the env var is the Job's `batch.kubernetes.io/job-name` label). It sends a
 projected ServiceAccount token for the gateway's audience
 (`gateway.serviceAccountAuth.audience`) to the gateway's
 `POST /v1/triggers/<namespace>/<name>/fire`, which accepts the call only from
 that Trigger's own ServiceAccount (or a static gateway token) and publishes
 the firing to `<subjectPrefix>.events.schedule.<namespace>.<name>` keyed by
-its schedule time (the minute of the call when the caller passes none). The
+its schedule time, read from the Job's name (`<cronjob>-<unix minutes of the
+scheduled time>`), so a late start or a retry keeps its slot's key. The
 Trigger reads that subject through its consumer like any other source, so
 dedupe, concurrency and `status.recentFirings` work the same: a second firing
 with the same key starts nothing. The pod is restricted: non-root,

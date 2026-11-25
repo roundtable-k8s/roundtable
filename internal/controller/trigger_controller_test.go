@@ -597,7 +597,11 @@ var _ = Describe("Trigger controller", func() {
 			Expect(c.Image).To(Equal("operator:test"))
 			Expect(c.Command).To(Equal([]string{"/manager"}))
 			Expect(c.Args).To(Equal([]string{"fire-trigger", "--gateway=http://gateway.test",
-				"--trigger=" + ns + "/cron", "--token-file=/var/run/secrets/roundtable/gateway/token"}))
+				"--trigger=" + ns + "/cron", "--token-file=/var/run/secrets/roundtable/gateway/token",
+				"--job-name=$(ROUNDTABLE_JOB_NAME)"}))
+			Expect(c.Env).To(HaveLen(1))
+			Expect(c.Env[0].Name).To(Equal("ROUNDTABLE_JOB_NAME"))
+			Expect(c.Env[0].ValueFrom.FieldRef.FieldPath).To(Equal("metadata.labels['batch.kubernetes.io/job-name']"))
 			Expect(c.SecurityContext.AllowPrivilegeEscalation).To(HaveValue(BeFalse()))
 			Expect(c.SecurityContext.Capabilities.Drop).To(ConsistOf(corev1.Capability("ALL")))
 			Expect(pod.Volumes).To(HaveLen(1))

@@ -54,6 +54,9 @@ const (
 	// ServiceAccount token the firing pod sends to the gateway.
 	triggerTokenDir  = "/var/run/secrets/roundtable/gateway"
 	triggerTokenFile = "token"
+	// triggerJobNameEnv carries the Job's name (the pod's
+	// batch.kubernetes.io/job-name label) into the firing pod.
+	triggerJobNameEnv = "ROUNDTABLE_JOB_NAME"
 	// triggerTokenExpiry is the projected token's lifetime (the shortest the
 	// API server accepts).
 	triggerTokenExpiry int64 = 600
@@ -148,7 +151,16 @@ func desiredTriggerCronJob(trg *aiv1alpha1.Trigger, src *aiv1alpha1.TriggerSched
 				"--gateway=" + cfg.GatewayURL,
 				"--trigger=" + trg.Namespace + "/" + trg.Name,
 				"--token-file=" + path.Join(triggerTokenDir, triggerTokenFile),
+				// The CronJob names each Job <cronjob>-<scheduled unix minutes>;
+				// fire-trigger reads the schedule time from it, so a late or
+				// retried run keeps its slot's firing key.
+				"--job-name=$(" + triggerJobNameEnv + ")",
 			},
+			Env: []corev1.EnvVar{{
+				Name: triggerJobNameEnv,
+				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['batch.kubernetes.io/job-name']"}},
+			}},
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("10m"),
