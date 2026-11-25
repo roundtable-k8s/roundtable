@@ -22,6 +22,15 @@ SHELL = /usr/bin/env bash -o pipefail
 .PHONY: all
 all: build
 
+# agent-sandbox release whose CRDs are vendored under test/crds/agent-sandbox/
+# for the sandbox envtest. This is the only place the version is pinned; bump
+# it and run `make update-agent-sandbox-crds`.
+AGENT_SANDBOX_VERSION ?= v1.0.12
+AGENT_SANDBOX_CRD_FILES = agents.x-k8s.io_sandboxes.yaml \
+	extensions.agents.x-k8s.io_sandboxclaims.yaml \
+	extensions.agents.x-k8s.io_sandboxtemplates.yaml \
+	extensions.agents.x-k8s.io_sandboxwarmpools.yaml
+
 ##@ General
 
 # The help target prints out all targets with their descriptions organized
@@ -56,6 +65,15 @@ fmt: ## Run go fmt against code.
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
+
+.PHONY: update-agent-sandbox-crds
+update-agent-sandbox-crds: ## Re-download the agent-sandbox CRDs ($(AGENT_SANDBOX_VERSION)) used by the sandbox envtest.
+	@mkdir -p test/crds/agent-sandbox
+	@for f in $(AGENT_SANDBOX_CRD_FILES); do \
+		echo "Downloading $$f ($(AGENT_SANDBOX_VERSION))"; \
+		curl -fsSL -o "test/crds/agent-sandbox/$$f" \
+			"https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/$(AGENT_SANDBOX_VERSION)/k8s/crds/$$f" || exit 1; \
+	done
 
 .PHONY: test
 test: manifests generate fmt vet $(if $(KUBEBUILDER_ASSETS),,setup-envtest) ## Run tests (uses KUBEBUILDER_ASSETS when set, e.g. by `nix develop`).
