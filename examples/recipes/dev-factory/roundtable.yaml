@@ -1,0 +1,62 @@
+# The dev table: issue pickup, post-run checks and PR feedback all run on
+# generic pieces (Triggers and the pr-pipeline Chain). See README.md.
+#
+# Apply this after the chart is installed with values.yaml (the pr-pipeline and
+# pr-pipeline-feedback Chains must exist) and after the token Secret exists.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: roundtable-dev
+  namespace: roundtable
+spec:
+  description: "Dev factory: knights take Ready issues to merged PRs"
+
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: roundtable-dev
+    tasksStream: roundtable_dev_tasks
+    resultsStream: roundtable_dev_results
+    # Triggers need the table's events stream, which createStreams creates.
+    createStreams: true
+
+  # Model tiers the planner picks from (implementModels in values.yaml).
+  modelAliases:
+    cheap: haiku
+    fast: sonnet
+    deep: opus
+
+  # One token for the knights, issue pickup and PR feedback.
+  github:
+    tokenSecretRef:
+      name: roundtable-github-token
+      key: token
+
+  issuePickup:
+    # The three switches of the recipe (README: "From the built-in pipeline
+    # to the recipe"): issue pickup on a Trigger, post-run checks as chain
+    # steps, PR feedback on Triggers.
+    engine: trigger
+    postRun: chain
+    repos:
+      - acme/api
+    chainRef:
+      name: pr-pipeline
+    readyLabel: "rt:ready"
+    inProgressLabel: "rt:in-progress"
+    needsHumanLabel: needs-human
+    maxActive: 2
+    maxActivePerRepo: 1
+    intervalSeconds: 300
+    ttlSecondsAfterFinished: 604800
+
+  prFeedback:
+    engine: trigger
+    enabled: true
+    repos:
+      - acme/api
+    # The GitHub logins the knights' token opens PRs as.
+    authors:
+      - "dunce-bot[bot]"
+    chainRef:
+      name: pr-pipeline-feedback
+    maxAttempts: 3
