@@ -83,6 +83,8 @@ type Options struct {
 	// Hooks configures the webhook endpoint (served when Service.Hooks is
 	// set).
 	Hooks HookOptions
+	// Version is reported as info.version of the OpenAPI document.
+	Version string
 }
 
 // Service implements the gateway operations shared by the HTTP API and MCP.

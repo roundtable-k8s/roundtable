@@ -265,6 +265,7 @@ spec:
           command: ["/gateway"]
           args:
             - --listen=:8080
+            - --api-version={{ .Chart.AppVersion }}
             - --nats-url={{ $gw.natsURL }}
             - --namespace={{ $gw.namespace | default .Release.Namespace }}
             {{- with $gw.allowedNamespaces }}
