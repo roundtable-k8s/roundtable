@@ -73,6 +73,9 @@ type ChainReconciler struct {
 	// infer a knight's agent runtime (claude-knight/pi-knight) when the Knight
 	// has no spec.image, for per-step model validation.
 	DefaultKnightImage string
+	// ProviderMaxRetries is how many times a step is retried after a
+	// transient model provider failure (#481). 0 disables the retry.
+	ProviderMaxRetries int
 	// TracerProvider makes the chain run spans; nil uses the global one.
 	TracerProvider trace.TracerProvider
 	cron           *cron.Cron

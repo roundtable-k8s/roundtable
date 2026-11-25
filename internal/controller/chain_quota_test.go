@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -472,4 +473,85 @@ func TestQuotaDeferUntilUnknownReset(t *testing.T) {
 
 func (f *quotaFakeNATS) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
 	return f.PublishJSONSeq(subject, v)
+}
+
+func TestTransientProviderFailure(t *testing.T) {
+	yes := []*natspkg.TaskResult{
+		{Error: "Claude Code error (success, is_error): API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment."},
+		{Error: "API Error: 503 Service Unavailable"},
+		{Error: "HTTP 502 bad gateway"},
+		{Error: "status code 500"},
+		{Error: `{"type":"overloaded_error"}`},
+		{Error: "boom", Transient: true},
+	}
+	for _, r := range yes {
+		if !transientProviderFailure(r) {
+			t.Errorf("want transient: %q", r.Error)
+		}
+	}
+	no := []*natspkg.TaskResult{
+		nil,
+		{},
+		{Error: "tests failed: 3 failures"},
+		{Error: "bad output: processed 500 lines"},
+		{Error: "Task refused: Claude plan five_hour window 91% used (resets 2026-11-24T18:00:00.000Z)"},
+		{Error: "Task refused", UsageLimited: true, Transient: true},
+	}
+	for _, r := range no {
+		if transientProviderFailure(r) {
+			t.Errorf("want not transient: %+v", r)
+		}
+	}
+}
+
+func TestProviderBackoff(t *testing.T) {
+	for n, want := range map[int32]time.Duration{1: time.Minute, 2: 2 * time.Minute, 3: 4 * time.Minute, 4: 8 * time.Minute} {
+		if got := providerBackoff(n); got != want {
+			t.Errorf("backoff(%d)=%v want %v", n, got, want)
+		}
+	}
+}
+
+func TestApplyStepErrorProviderOverloaded(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(20), ProviderMaxRetries: 4}
+	chain := &aiv1alpha1.Chain{}
+	spec := &aiv1alpha1.ChainStep{Name: "s", FallbackRef: corev1.LocalObjectReference{Name: "fb"}}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "s"}
+	res := &natspkg.TaskResult{Error: "API Error: 529 Overloaded"}
+	for i := int32(1); i <= 4; i++ {
+		r.applyStepError(context.Background(), chain, spec, ss, res, res.Error)
+		if ss.Phase != aiv1alpha1.ChainStepPhaseDeferred || ss.Reason != stepReasonProviderOverloaded || ss.ProviderRetries != i || ss.DeferUntil == nil {
+			t.Fatalf("retry %d: %+v", i, ss)
+		}
+		wantKnight := ""
+		if i >= 2 {
+			wantKnight = "fb"
+		}
+		if ss.Knight != wantKnight {
+			t.Fatalf("retry %d knight=%q want %q", i, ss.Knight, wantKnight)
+		}
+		// backoff elapsed: the step wakes, keeping the fallback knight.
+		wake := &aiv1alpha1.Chain{Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{*ss}}}
+		past := metav1.NewTime(time.Now().Add(-time.Second))
+		wake.Status.StepStatuses[0].DeferUntil = &past
+		wakeDeferredSteps(wake, time.Now())
+		*ss = wake.Status.StepStatuses[0]
+		if ss.Phase != aiv1alpha1.ChainStepPhasePending || ss.Knight != wantKnight {
+			t.Fatalf("wake %d: %+v", i, ss)
+		}
+	}
+	r.applyStepError(context.Background(), chain, spec, ss, res, res.Error)
+	if ss.Phase != aiv1alpha1.ChainStepPhaseFailed || !strings.Contains(ss.Error, "retried 4 times") {
+		t.Fatalf("want failed after 4 retries: %+v", ss)
+	}
+}
+
+func TestApplyStepErrorOrdinaryNotRetried(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(20), ProviderMaxRetries: 4}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "s"}
+	res := &natspkg.TaskResult{Error: "tests failed"}
+	r.applyStepError(context.Background(), &aiv1alpha1.Chain{}, &aiv1alpha1.ChainStep{Name: "s"}, ss, res, res.Error)
+	if ss.Phase != aiv1alpha1.ChainStepPhaseFailed || ss.ProviderRetries != 0 {
+		t.Fatalf("%+v", ss)
+	}
 }
