@@ -919,6 +919,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	})
 
 	r.setDeprecatedFieldsCondition(knight)
+	r.setMCPServersCondition(knight)
 
 	// Set NATS consumer name in status
 	consumerName := knight.Spec.NATS.ConsumerName
@@ -936,6 +937,28 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			Observe(r.now().Sub(wakingSince).Seconds())
 	}
 	return nil
+}
+
+// setMCPServersCondition sets Degraded=True (MCPServersUnsupported) when
+// spec.mcpServers is set on a runtime that is not claude-knight; the pod
+// builder renders nothing in that case. The condition is removed otherwise.
+func (r *KnightReconciler) setMCPServersCondition(knight *aiv1alpha1.Knight) {
+	c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
+	unsupported := len(knight.Spec.MCPServers) > 0 &&
+		knightpkg.AgentRuntimeForImage(knightpkg.EffectiveImage(knight, r.DefaultImage)) != knightpkg.AgentRuntimeClaude
+	if !unsupported {
+		if c != nil && c.Reason == aiv1alpha1.ReasonMCPServersUnsupported {
+			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
+		}
+		return
+	}
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightDegraded,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonMCPServersUnsupported,
+		Message:            "spec.mcpServers is only supported for claude-knight images; no MCP servers are rendered",
+		ObservedGeneration: knight.Generation,
+	})
 }
 
 // setDeprecatedFieldsCondition reports deprecated, ignored spec fields. A

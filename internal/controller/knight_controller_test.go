@@ -499,3 +499,48 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 		}
 	})
 })
+
+var _ = Describe("Knight mcpServers on an unsupported runtime", func() {
+	ctx := context.Background()
+
+	run := func(name, image string) *aiv1alpha1.Knight {
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain: "security", Skills: []string{"shared"}, Image: image,
+				MCPServers: []aiv1alpha1.KnightMCPServer{{Name: "vault", URL: "http://vault/mcp"}},
+			},
+		}
+		k.Spec.NATS.Subjects = []string{"roundtable.tasks.security.>"}
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		DeferCleanup(func() {
+			cur := &aiv1alpha1.Knight{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(k), cur); err == nil {
+				cur.Finalizers = nil
+				_ = k8sClient.Update(ctx, cur)
+				_ = k8sClient.Delete(ctx, cur)
+			}
+		})
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		for range 3 {
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		got := &aiv1alpha1.Knight{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), got)).To(Succeed())
+		return got
+	}
+
+	It("sets Degraded/MCPServersUnsupported for a pi-knight image", func() {
+		got := run("mcp-pi", "ghcr.io/roundtable-k8s/pi-knight:latest")
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonMCPServersUnsupported))
+	})
+
+	It("does not set it for a claude-knight image", func() {
+		got := run("mcp-claude", "ghcr.io/roundtable-k8s/claude-knight:latest")
+		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)).To(BeNil())
+	})
+})

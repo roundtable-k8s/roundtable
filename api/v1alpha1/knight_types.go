@@ -205,6 +205,16 @@ type KnightSpec struct {
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
+	// mcpServers declares remote MCP servers the knight uses. Rendered only
+	// for claude-knight images (into MCP_SERVERS_JSON and
+	// CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+	// the Degraded condition is set with reason MCPServersUnsupported.
+	// Prefer a CLI in the tools image; use MCP for services with no CLI.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	MCPServers []KnightMCPServer `json:"mcpServers,omitempty"`
+
 	// envFrom defines sources of environment variables (secrets, configmaps).
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
@@ -747,4 +757,37 @@ type GeneratedSkill struct {
 
 func init() {
 	SchemeBuilder.Register(&Knight{}, &KnightList{})
+}
+
+// KnightMCPServer is a remote MCP server wired into a claude-knight pod.
+type KnightMCPServer struct {
+	// name is the server name; tools are exposed as mcp__<name>__<tool>.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// url is the server endpoint.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+
+	// transport is the MCP transport.
+	// +kubebuilder:validation:Enum=streamable-http;sse
+	// +kubebuilder:default="streamable-http"
+	// +optional
+	Transport string `json:"transport,omitempty"`
+
+	// toolFilter restricts the tools the knight may call.
+	// +optional
+	ToolFilter *KnightMCPToolFilter `json:"toolFilter,omitempty"`
+}
+
+// KnightMCPToolFilter restricts a server's tools.
+type KnightMCPToolFilter struct {
+	// exclude lists tool names denied for this server (a deny list, because
+	// the Claude Code harness exposes a bound server whole).
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
 }

@@ -1090,6 +1090,55 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        mcpServers:
+                          description: |-
+                            mcpServers declares remote MCP servers the knight uses. Rendered only
+                            for claude-knight images (into MCP_SERVERS_JSON and
+                            CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+                            the Degraded condition is set with reason MCPServersUnsupported.
+                            Prefer a CLI in the tools image; use MCP for services with no CLI.
+                          items:
+                            description: KnightMCPServer is a remote MCP server wired
+                              into a claude-knight pod.
+                            properties:
+                              name:
+                                description: name is the server name; tools are exposed
+                                  as mcp__<name>__<tool>.
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              toolFilter:
+                                description: toolFilter restricts the tools the knight
+                                  may call.
+                                properties:
+                                  exclude:
+                                    description: |-
+                                      exclude lists tool names denied for this server (a deny list, because
+                                      the Claude Code harness exposes a bound server whole).
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              transport:
+                                default: streamable-http
+                                description: transport is the MCP transport.
+                                enum:
+                                - streamable-http
+                                - sse
+                                type: string
+                              url:
+                                description: url is the server endpoint.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            - url
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - name
+                          x-kubernetes-list-type: map
                         memory:
                           description: |-
                             memory gives the knight a persistent memory volume, separate from the
@@ -2294,6 +2343,55 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        mcpServers:
+                          description: |-
+                            mcpServers declares remote MCP servers the knight uses. Rendered only
+                            for claude-knight images (into MCP_SERVERS_JSON and
+                            CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+                            the Degraded condition is set with reason MCPServersUnsupported.
+                            Prefer a CLI in the tools image; use MCP for services with no CLI.
+                          items:
+                            description: KnightMCPServer is a remote MCP server wired
+                              into a claude-knight pod.
+                            properties:
+                              name:
+                                description: name is the server name; tools are exposed
+                                  as mcp__<name>__<tool>.
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              toolFilter:
+                                description: toolFilter restricts the tools the knight
+                                  may call.
+                                properties:
+                                  exclude:
+                                    description: |-
+                                      exclude lists tool names denied for this server (a deny list, because
+                                      the Claude Code harness exposes a bound server whole).
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              transport:
+                                default: streamable-http
+                                description: transport is the MCP transport.
+                                enum:
+                                - streamable-http
+                                - sse
+                                type: string
+                              url:
+                                description: url is the server endpoint.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            - url
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - name
+                          x-kubernetes-list-type: map
                         memory:
                           description: |-
                             memory gives the knight a persistent memory volume, separate from the
@@ -3217,6 +3315,55 @@ spec:
                           maximum: 50
                           minimum: 1
                           type: integer
+                        mcpServers:
+                          description: |-
+                            mcpServers declares remote MCP servers the knight uses. Rendered only
+                            for claude-knight images (into MCP_SERVERS_JSON and
+                            CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+                            the Degraded condition is set with reason MCPServersUnsupported.
+                            Prefer a CLI in the tools image; use MCP for services with no CLI.
+                          items:
+                            description: KnightMCPServer is a remote MCP server wired
+                              into a claude-knight pod.
+                            properties:
+                              name:
+                                description: name is the server name; tools are exposed
+                                  as mcp__<name>__<tool>.
+                                maxLength: 63
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              toolFilter:
+                                description: toolFilter restricts the tools the knight
+                                  may call.
+                                properties:
+                                  exclude:
+                                    description: |-
+                                      exclude lists tool names denied for this server (a deny list, because
+                                      the Claude Code harness exposes a bound server whole).
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              transport:
+                                default: streamable-http
+                                description: transport is the MCP transport.
+                                enum:
+                                - streamable-http
+                                - sse
+                                type: string
+                              url:
+                                description: url is the server endpoint.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            - url
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - name
+                          x-kubernetes-list-type: map
                         memory:
                           description: |-
                             memory gives the knight a persistent memory volume, separate from the
@@ -4496,6 +4643,55 @@ spec:
                         maximum: 50
                         minimum: 1
                         type: integer
+                      mcpServers:
+                        description: |-
+                          mcpServers declares remote MCP servers the knight uses. Rendered only
+                          for claude-knight images (into MCP_SERVERS_JSON and
+                          CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+                          the Degraded condition is set with reason MCPServersUnsupported.
+                          Prefer a CLI in the tools image; use MCP for services with no CLI.
+                        items:
+                          description: KnightMCPServer is a remote MCP server wired
+                            into a claude-knight pod.
+                          properties:
+                            name:
+                              description: name is the server name; tools are exposed
+                                as mcp__<name>__<tool>.
+                              maxLength: 63
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            toolFilter:
+                              description: toolFilter restricts the tools the knight
+                                may call.
+                              properties:
+                                exclude:
+                                  description: |-
+                                    exclude lists tool names denied for this server (a deny list, because
+                                    the Claude Code harness exposes a bound server whole).
+                                  items:
+                                    type: string
+                                  type: array
+                              type: object
+                            transport:
+                              default: streamable-http
+                              description: transport is the MCP transport.
+                              enum:
+                              - streamable-http
+                              - sse
+                              type: string
+                            url:
+                              description: url is the server endpoint.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          - url
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
                       memory:
                         description: |-
                           memory gives the knight a persistent memory volume, separate from the
