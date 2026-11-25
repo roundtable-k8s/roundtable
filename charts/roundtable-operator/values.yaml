@@ -143,8 +143,9 @@ networkPolicy:
   # NetworkPolicyPeers allowed to reach the dashboard's http port, in addition
   # to metricsFrom. Empty means only metricsFrom can reach it.
   dashboardFrom: []
-  # Port of the operator's metrics endpoint; must match --metrics-bind-address
-  # in extraArgs (metrics are off by default).
+  # Port of the operator's metrics endpoint when it is enabled through
+  # extraArgs. Ignored when metrics.enabled is true: the policy then allows
+  # the chart-managed port 8080.
   operatorMetricsPort: 8443
 
 # Dashboard (Round Table UI) — observability platform
@@ -377,3 +378,20 @@ prPipeline:
     enabled: false
     name: pr-pipeline-feedback
     timeoutSeconds: 7200
+
+# Prometheus metrics. Everything is opt-in. The operator serves plain HTTP
+# metrics (--metrics-secure=false) so a ServiceMonitor can scrape it without
+# TLS or authn/authz configuration; restrict access with networkPolicy if needed.
+# Monitors are only rendered when the monitoring.coreos.com/v1 API is served.
+metrics:
+  enabled: false
+  # Scrape interval for all monitors.
+  interval: 1m
+  # Extra labels added to every monitor (e.g. the Prometheus selector label).
+  labels: {}
+  serviceMonitor:
+    # ServiceMonitors for the operator and (when dashboard.enabled) the dashboard.
+    enabled: false
+  podMonitor:
+    # PodMonitor for knight pods (port 3000, container "app").
+    enabled: false

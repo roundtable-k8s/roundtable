@@ -1,0 +1,95 @@
+{{- if and .Values.metrics.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "roundtable-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: metrics
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      scheme: http
+      interval: {{ .Values.metrics.interval }}
+{{- if .Values.dashboard.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: dashboard
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.interval }}
+{{- end }}
+{{- end }}
+{{- if .Values.metrics.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "roundtable-operator.fullname" . }}-knights
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: knight
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    # Knight pods declare no container ports, so the target address is built
+    # from the pod IP.
+    - path: /metrics
+      interval: {{ .Values.metrics.interval }}
+      # A table label emitted by the knight wins over the relabeling below.
+      honorLabels: true
+      relabelings:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_container_name]
+          regex: app
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_ip]
+          targetLabel: __address__
+          regex: (.+)
+          replacement: $1:3000
+        # Fallback attribution: fills in `table` from the pod label (only when set).
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_label_ai_roundtable_io_round_table]
+          targetLabel: table
+          regex: (.+)
+          replacement: $1
+{{- end }}
+{{- end }}
