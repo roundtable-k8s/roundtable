@@ -30,8 +30,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/test/utils"
 )
 
-// The core tier (#351): NATS with JetStream from the official Helm chart, the
-// operator from charts/roundtable-operator with the locally built image, and
+// The core tier (#351): the operator from charts/roundtable-operator with the locally built image, and
 // one minimal Knight that must reach an available Deployment.
 const (
 	coreNamespace  = "roundtable-core"
@@ -40,12 +39,6 @@ const (
 	coreValues     = "test/e2e/testdata/core-values.yaml"
 	coreKnight     = "core-knight"
 	coreKnightYAML = "test/e2e/testdata/knight-core.yaml"
-	natsNamespace  = "database"
-	natsRelease    = "nats"
-	natsValues     = "test/e2e/testdata/nats-values.yaml"
-	// natsChartVersion pins the official nats chart (https://nats-io.github.io/k8s/helm/charts/).
-	natsChartVersion = "1.3.6"
-	natsChartRepo    = "https://nats-io.github.io/k8s/helm/charts/"
 )
 
 var _ = Describe("Core install", Ordered, Label(tierCore), func() {
@@ -53,14 +46,8 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		SetDefaultEventuallyTimeout(3 * time.Minute)
 		SetDefaultEventuallyPollingInterval(2 * time.Second)
 
-		By("installing NATS with JetStream")
-		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", natsRelease, "nats",
-			"--repo", natsChartRepo, "--version", natsChartVersion,
-			"-n", natsNamespace, "--create-namespace", "-f", natsValues, "--wait", "--timeout", "5m"))
-		Expect(err).NotTo(HaveOccurred(), "Failed to install NATS")
-
 		By("installing the operator chart with the local image")
-		_, err = utils.Run(exec.Command("helm", "upgrade", "--install", coreRelease, "charts/roundtable-operator",
+		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", coreRelease, "charts/roundtable-operator",
 			"-n", coreNamespace, "--create-namespace", "-f", coreValues, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the operator chart")
 	})
@@ -70,8 +57,7 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", coreKnightYAML,
 			"--ignore-not-found", "--timeout=2m"))
 		_, _ = utils.Run(exec.Command("helm", "uninstall", coreRelease, "-n", coreNamespace, "--wait"))
-		_, _ = utils.Run(exec.Command("helm", "uninstall", natsRelease, "-n", natsNamespace, "--wait"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", coreNamespace, natsNamespace,
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", coreNamespace,
 			"--ignore-not-found", "--wait=false"))
 	})
 
@@ -109,7 +95,7 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		// lines from zap; error-level lines carry "level":"error").
 		time.Sleep(time.Minute)
 		out, err := utils.Run(exec.Command("kubectl", "logs", "deployment/"+coreOperator,
-			"-n", coreNamespace, "--since=2m"))
+			"-n", coreNamespace, "--since=5m"))
 		Expect(err).NotTo(HaveOccurred())
 		var errs []string
 		for _, line := range utils.GetNonEmptyLines(out) {

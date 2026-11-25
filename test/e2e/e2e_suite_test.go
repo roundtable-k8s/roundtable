@@ -37,6 +37,15 @@ const (
 	// stubKnightImage is the no-LLM knight runtime (test/e2e/stubknight) the
 	// Chain trace case runs its steps on.
 	stubKnightImage = "example.com/roundtable-e2e-stub-knight:v0.0.1"
+
+	// NATS is installed once for the whole suite, by every tier, at the
+	// operator's default URL (nats://nats.database.svc:4222).
+	natsNamespace = "database"
+	natsRelease   = "nats"
+	natsValues    = "test/e2e/testdata/nats-values.yaml"
+	// natsChartVersion pins the official nats chart (https://nats-io.github.io/k8s/helm/charts/).
+	natsChartVersion = "1.3.6"
+	natsChartRepo    = "https://nats-io.github.io/k8s/helm/charts/"
 )
 
 // Tier labels. Every scenario carries exactly one; `make e2e TIER=<tier>`
@@ -85,6 +94,17 @@ var _ = BeforeSuite(func() {
 	if tierSelected(tierTrace) {
 		buildStubKnightImage()
 	}
+
+	By("installing NATS with JetStream")
+	_, err = utils.Run(exec.Command("helm", "upgrade", "--install", natsRelease, "nats",
+		"--repo", natsChartRepo, "--version", natsChartVersion,
+		"-n", natsNamespace, "--create-namespace", "-f", natsValues, "--wait", "--timeout", "5m"))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install NATS")
+})
+
+var _ = AfterSuite(func() {
+	_, _ = utils.Run(exec.Command("helm", "uninstall", natsRelease, "-n", natsNamespace, "--wait"))
+	_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", natsNamespace, "--ignore-not-found", "--wait=false"))
 })
 
 // buildStubKnightImage builds the stub knight binary on the host, packs it into
