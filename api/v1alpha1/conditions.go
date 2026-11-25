@@ -478,8 +478,13 @@ const (
 	// is invalid.
 	ReasonTriggerInvalidSpec = "InvalidSpec"
 
-	// ReasonTriggerTargetNotFound indicates the target Chain does not exist.
+	// ReasonTriggerTargetNotFound indicates the target Chain or Knight does
+	// not exist.
 	ReasonTriggerTargetNotFound = "TargetNotFound"
+
+	// ReasonTriggerTargetWrongTable indicates the target Knight sits at
+	// another RoundTable than roundTableRef.
+	ReasonTriggerTargetWrongTable = "TargetWrongTable"
 
 	// ReasonTriggerRoundTableNotFound indicates roundTableRef does not
 	// resolve.

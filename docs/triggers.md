@@ -16,6 +16,10 @@ Four sources exist today:
 
 Exactly one source is set.
 
+A firing either starts a run of a Chain (`target.chainRef`) or sends one task
+to a knight (`target.knight`, see [Knight target](#knight-target)). Exactly
+one target is set.
+
 ## Example: NATS
 
 [`examples/trigger-nats.yaml`](../examples/trigger-nats.yaml):
@@ -536,6 +540,59 @@ A poll that leaves the rate limit at 0 also waits for its reset.
 Chain every weekday at 07:00 New York time with input computed from the
 schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 
+## Knight target
+
+`target.knight` sends one task straight to a knight per firing, so "ask kay
+this every night" or "send tristan this when an alert fires" needs no
+one-step Chain.
+[`examples/trigger-knight-task.yaml`](../examples/trigger-knight-task.yaml)
+has both.
+
+```yaml
+spec:
+  source:
+    schedule: {cron: "0 2 * * *"}
+  target:
+    knight:
+      name: kay                 # Knight in the Trigger's namespace
+      task: |                   # Go template, same data as spec.input
+        Write the nightly briefing for {{ .Event.Time.Format "2006-01-02" }}.
+      model: ""                 # optional per-task model (ID or RoundTable alias)
+      timeoutSeconds: 3600      # default; no result after this long: lost
+```
+
+The task goes through the gateway's single-task path (the one behind
+`POST /v1/knights/<name>/invoke`): the table's subject prefix and the knight's
+domain are resolved as the gateway resolves them, the task is published to
+`<subjectPrefix>.tasks.<domain>.<knight>`, and its record is kept in the
+gateway's task KV bucket (`gateway.taskBucket`, kept `gateway.taskTTL`), so
+`GET /v1/tasks/<task ID>`, the dashboard and the dead-letter view show it like
+any gateway task. The operator writes to that bucket itself, so a knight target
+works with the gateway disabled too.
+
+- `status.recentFirings[].run` is the task ID; `outcome` is filled in once it
+  is known: `succeeded`, `failed` (the knight reported an error or returned
+  nothing) or `lost` (no result within `timeoutSeconds`, or the record is
+  gone). The operator looks for results every 30 seconds while tasks are in
+  flight.
+- `status.activeRuns` lists the task IDs without a result: they are the active
+  runs `concurrency` counts. `Forbid` skips while one is in flight, `Allow`
+  caps them at `maxActive`. `Replace` is rejected: a sent task cannot be
+  withdrawn.
+- Dedupe: the dedupe key becomes the task's gateway `Idempotency-Key`, so a
+  key that already sent a task sends nothing (also on redelivery) while the
+  gateway keeps its task records (`gateway.taskTTL`, 7 days by default), not
+  `ttlSecondsAfterFinished`.
+- The knight must exist, and with `roundTableRef` set it must sit at that
+  RoundTable (its `ai.roundtable.io/round-table` label, as the gateway
+  resolves it). Otherwise the Trigger is not Ready (`TargetNotFound` or
+  `TargetWrongTable`) and fires nothing; NATS events wait in the consumer.
+- A task that renders empty, or an invalid `model`, is recorded in
+  `status.recentFirings` and the event is not retried. A suspended knight
+  makes the event wait.
+- `spec.input` is not used (put the text in `target.knight.task`), and a
+  github source needs a Chain target.
+
 ## Spec
 
 | Field | Meaning |
@@ -554,6 +611,7 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 | `source.github.holdWhilePullRequestLabeled` | Hold a repository while it has an open pull request with this label. |
 | `source.github.skipIfBodyMatches` | `patterns` on title and body, and `handBack` (`addLabels`, `removeLabels`, `comment` with `.Reason`) for items handed back instead of run. |
 | `target.chainRef` | The Chain (same namespace) each firing copies. |
+| `target.knight` | Instead of `chainRef`: `name`, `task` (template), `model` and `timeoutSeconds` of one task sent to a knight per firing (see [Knight target](#knight-target)). |
 | `input` | Go template rendered into the run's `spec.input`. Empty keeps the target's own input. |
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
 | `concurrency.policy` | `Allow` (default), `Forbid` or `Replace`. |
@@ -564,7 +622,7 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 
 ### Templates
 
-`input` and `dedupeKey` see:
+`input`, `target.knight.task` and `dedupeKey` see:
 
 - `.Event.Subject`: the NATS subject (empty for schedule)
 - `.Event.Data`: the payload parsed as JSON, or the raw string when it is not JSON (github: see [The event](#the-event))
@@ -650,7 +708,8 @@ status:
 ```
 
 `Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject or
-cron), `TargetNotFound`, `RoundTableNotFound`, `ConsumerError` (for example no
+cron), `TargetNotFound`, `TargetWrongTable` (knight target),
+`RoundTableNotFound`, `ConsumerError` (for example no
 events stream: set `createStreams` or create the stream yourself). A github
 source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
 and `lastPolledAt`.

@@ -322,7 +322,8 @@ gateway:
   # callers get 429. 0 = unlimited.
   maxStreams: 64
   # NATS KV bucket holding task records (taskId -> status/result) and how
-  # long they are kept.
+  # long they are kept. The operator records the tasks of Triggers with a
+  # knight target there too (also when the gateway is disabled).
   taskBucket: roundtable_gateway_tasks
   taskTTL: 168h
   # Bearer-token auth (always on). Leave existingSecret empty and the chart

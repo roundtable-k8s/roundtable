@@ -405,7 +405,7 @@ var _ = Describe("IssuePickup trigger engine", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: ns},
 			Spec: aiv1alpha1.TriggerSpec{
 				Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "0 * * * *"}},
-				Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+				Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 			},
 		})).To(Succeed())
 		reconcilePickup()

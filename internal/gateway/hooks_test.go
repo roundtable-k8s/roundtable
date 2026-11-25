@@ -73,7 +73,7 @@ func hookTrigger(ns, name string, auth aiv1alpha1.TriggerWebhookAuth) *aiv1alpha
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: aiv1alpha1.TriggerSpec{
 			Source:        aiv1alpha1.TriggerSource{Webhook: &aiv1alpha1.TriggerWebhookSource{Auth: auth}},
-			Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: "target"}},
+			Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "target"}},
 			RoundTableRef: &corev1.LocalObjectReference{Name: "dev"},
 		},
 	}
@@ -116,7 +116,7 @@ func newHookEnv(t *testing.T, hooks HookOptions, enabled bool, allowed ...string
 		ObjectMeta: metav1.ObjectMeta{Name: "nats-only", Namespace: testNS},
 		Spec: aiv1alpha1.TriggerSpec{
 			Source: aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: prefix + ".events.x"}},
-			Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: "target"}},
+			Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "target"}},
 		},
 	}
 	objs := []runtime.Object{

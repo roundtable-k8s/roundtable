@@ -216,7 +216,7 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.defaultTimeout` | duration | `60s` | Wait when the caller passes no `timeoutSeconds` |
 | `gateway.maxTimeout` | duration | `10m` | Upper bound on a caller's wait |
 | `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
-| `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records |
+| `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records (also of Triggers with a knight target) |
 | `gateway.taskTTL` | duration | `168h` | How long task records are kept |
 | `gateway.auth.existingSecret` | string | `""` | Secret holding the bearer token(s); empty = chart generates one |
 | `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation) |

@@ -125,6 +125,17 @@ func (r *Resolver) resolve(ctx context.Context, namespace, name string) (*target
 	return t, nil
 }
 
+// KnightTable returns the RoundTable a knight's tasks are published to,
+// resolved as Invoke resolves it ("" when the knight has none and uses its
+// own spec.nats). The error wraps ErrNotFound when the knight does not exist.
+func (r *Resolver) KnightTable(ctx context.Context, namespace, name string) (string, error) {
+	t, err := r.resolve(ctx, namespace, name)
+	if err != nil {
+		return "", err
+	}
+	return t.RoundTable, nil
+}
+
 // knightInfo summarises a Knight for list_knights.
 func knightInfo(k *aiv1alpha1.Knight, defaultImage string) KnightInfo {
 	table := k.Labels[aiv1alpha1.LabelRoundTable]

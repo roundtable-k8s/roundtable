@@ -264,7 +264,7 @@ var _ = Describe("Trigger GitHub source", func() {
 					Repositories: []string{repo},
 					Query:        aiv1alpha1.TriggerGitHubQuery{Labels: []string{"rt:ready"}},
 				}},
-				Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+				Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 				Input:         `{{ toJson .Event.Data }}`,
 				RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
 			},
@@ -598,7 +598,7 @@ var _ = Describe("Trigger GitHub source", func() {
 						Repositories: []string{repo},
 						Query:        aiv1alpha1.TriggerGitHubQuery{Labels: []string{"rt:ready"}},
 					}},
-					Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+					Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
 				},
 			}

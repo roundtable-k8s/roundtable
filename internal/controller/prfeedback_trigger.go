@@ -170,7 +170,7 @@ func prFeedbackTriggerSpec(rt *aiv1alpha1.RoundTable, cfg *aiv1alpha1.PRFeedback
 				Comment:   prFeedbackEscalationComment,
 			},
 		}},
-		Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: feedbackChainName(cfg)}},
+		Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: feedbackChainName(cfg)}},
 		Input:  prFeedbackTriggerInput(maxAttempts),
 		// One fix round at a time, like the builtin engine's single
 		// feedback Chain.
@@ -345,7 +345,7 @@ func (r *TriggerReconciler) prFeedbackAuthor(ctx context.Context, trg *aiv1alpha
 	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: table}, rt); err != nil {
 		return nil, "", fmt.Errorf("get RoundTable %q: %w", table, err)
 	}
-	author, running, err := traceAuthor(ctx, r.reader(), trg.Namespace, trg.Spec.Target.ChainRef.Name, item.Repo, item.Number)
+	author, running, err := traceAuthor(ctx, r.reader(), trg.Namespace, aiv1alpha1.RefName(trg.Spec.Target.ChainRef), item.Repo, item.Number)
 	if err != nil {
 		return nil, "", err
 	}

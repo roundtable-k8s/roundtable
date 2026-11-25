@@ -46,6 +46,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	"github.com/roundtable-k8s/roundtable/internal/gateway"
 	"github.com/roundtable-k8s/roundtable/internal/github"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
@@ -84,6 +85,15 @@ type TriggerReconciler struct {
 	// api.github.com.
 	GitHub *github.ClientFactory
 
+	// TaskBucket and TaskTTL are the gateway's task KV bucket and record
+	// TTL: knight-target firings record their tasks there. Empty/0 use the
+	// gateway's defaults.
+	TaskBucket string
+	TaskTTL    time.Duration
+	// DefaultKnightImage infers a knight's runtime to validate a knight
+	// target's model (the operator's DEFAULT_KNIGHT_IMAGE).
+	DefaultKnightImage string
+
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
 
@@ -94,6 +104,10 @@ type TriggerReconciler struct {
 	// call pollGitHub themselves).
 	manualGitHubPolls bool
 	fireLocks         sync.Map // namespace/name -> *sync.Mutex
+
+	tasksMu   sync.Mutex
+	tasks     *gateway.Service
+	tasksConn *nats.Conn
 }
 
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers,verbs=get;list;watch;update;patch
@@ -101,6 +115,7 @@ type TriggerReconciler struct {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers/finalizers,verbs=update
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=chains,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
+// +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 
@@ -150,7 +165,18 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	latest.Status.ActiveRuns = active
+	if latest.Spec.Target.Knight != nil {
+		// A knight target's active runs are its tasks without a result.
+		pollAfter, err := r.collectTasks(ctx, latest, now)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if pollAfter > 0 && (gcAfter == 0 || pollAfter < gcAfter) {
+			gcAfter = pollAfter
+		}
+	} else {
+		latest.Status.ActiveRuns = active
+	}
 	latest.Status.Stream = trg.Status.Stream
 	latest.Status.Consumer = trg.Status.Consumer
 	latest.Status.NextScheduledAt = trg.Status.NextScheduledAt
@@ -162,9 +188,10 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		latest.Status.LastPolledAt = nil
 	}
 	patch := client.MergeFrom(orig)
-	if latest.Spec.Source.GitHub != nil {
-		// The poll loop writes GitHubReady concurrently: don't overwrite it
-		// with a stale conditions list (a conflict requeues).
+	if latest.Spec.Source.GitHub != nil || latest.Spec.Target.Knight != nil {
+		// The poll loop writes GitHubReady concurrently, and a firing adds
+		// a knight target's task to activeRuns: don't overwrite them with a
+		// stale list (a conflict requeues).
 		patch = client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 	}
 	if err := r.Status().Patch(ctx, latest, patch); err != nil {
@@ -293,12 +320,33 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	if err := validateGitHubSource(trg.Spec.Source.GitHub); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "source.github: %v", err)
 	}
-	chain := &aiv1alpha1.Chain{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Spec.Target.ChainRef.Name}, chain); err != nil {
-		if apierrors.IsNotFound(err) {
-			return notReady(aiv1alpha1.ReasonTriggerTargetNotFound, "Chain %q not found", trg.Spec.Target.ChainRef.Name)
+	switch target := trg.Spec.Target; {
+	case target.Knight != nil:
+		if _, err := parseTriggerTemplate("task", target.Knight.Task); err != nil {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "target.knight.task: %v", err)
 		}
-		return ctrl.Result{}, metav1.Condition{}, err
+		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" ||
+			trg.Spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec,
+				"target.knight does not support source.github, spec.input or concurrency.policy Replace")
+		}
+		reason, msg, err := r.checkKnightTarget(ctx, trg)
+		if err != nil {
+			return ctrl.Result{}, metav1.Condition{}, err
+		}
+		if reason != "" {
+			return notReady(reason, "%s", msg)
+		}
+	case target.ChainRef != nil:
+		chain := &aiv1alpha1.Chain{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err != nil {
+			if apierrors.IsNotFound(err) {
+				return notReady(aiv1alpha1.ReasonTriggerTargetNotFound, "Chain %q not found", target.ChainRef.Name)
+			}
+			return ctrl.Result{}, metav1.Condition{}, err
+		}
+	default:
+		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "set target.chainRef or target.knight")
 	}
 
 	switch src := trg.Spec.Source; {
@@ -604,9 +652,21 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	firing.Key = truncate(key, 253)
 
+	if trg.Spec.Target.Knight != nil {
+		return r.fireKnight(ctx, knightFiring{
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
+			skip: skip,
+			deduped: func(format string, args ...any) (triggerOutcome, error) {
+				metricOutcome = triggerOutcomeDeduped
+				defer func() { metricOutcome = "" }()
+				return skip(triggerHandled, format, args...)
+			},
+		})
+	}
+	chainName := aiv1alpha1.RefName(trg.Spec.Target.ChainRef)
 	tmpl := &aiv1alpha1.Chain{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: trg.Spec.Target.ChainRef.Name}, tmpl); err != nil {
-		return triggerRetry, fmt.Errorf("get target chain %q: %w", trg.Spec.Target.ChainRef.Name, err)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, tmpl); err != nil {
+		return triggerRetry, fmt.Errorf("get target chain %q: %w", chainName, err)
 	}
 	name := triggerRunName(trg, tmpl.Name, key, item)
 
@@ -777,12 +837,20 @@ const (
 )
 
 // triggerTable is the table label of a Trigger's metrics: its target chain's
-// roundTableRef, else the Trigger's own, else none.
+// roundTableRef or target knight's RoundTable, else the Trigger's own, else
+// none.
 func (r *TriggerReconciler) triggerTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
-	chain := &aiv1alpha1.Chain{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Spec.Target.ChainRef.Name}, chain); err == nil {
-		if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+	switch target := trg.Spec.Target; {
+	case target.Knight != nil:
+		if name, err := r.knightResolver().KnightTable(ctx, trg.Namespace, target.Knight.Name); err == nil && name != "" {
 			return name
+		}
+	case target.ChainRef != nil:
+		chain := &aiv1alpha1.Chain{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err == nil {
+			if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+				return name
+			}
 		}
 	}
 	if name := aiv1alpha1.RefName(trg.Spec.RoundTableRef); name != "" {
