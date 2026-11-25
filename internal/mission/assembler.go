@@ -579,8 +579,6 @@ func (a *KnightAssembler) EnsureMissionServiceAccount(ctx context.Context, missi
 	return nil
 }
 
-const defaultMissionNATSURL = "nats://nats.database.svc.cluster.local:4222"
-
 // EnsureMissionNetworkPolicy creates a NetworkPolicy to isolate ephemeral
 // knights if it doesn't exist. Under default-deny egress (EgressDeny) it does
 // nothing: each ephemeral knight gets its own default-deny policy from the
@@ -666,7 +664,7 @@ func (a *KnightAssembler) buildMissionNetworkPolicy(
 // the default, overridden by the parent RoundTable, then by the mission's
 // roundTableTemplate.
 func (a *KnightAssembler) resolveMissionNATSURL(ctx context.Context, mission *aiv1alpha1.Mission) string {
-	natsURL := defaultMissionNATSURL
+	natsURL := DefaultMissionNATSURL()
 	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 		parentRT := &aiv1alpha1.RoundTable{}
 		key := types.NamespacedName{Name: aiv1alpha1.RefName(mission.Spec.RoundTableRef), Namespace: mission.Namespace}
@@ -690,7 +688,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	var parentDefaults *aiv1alpha1.RoundTableDefaults
 	var parentPolicies *aiv1alpha1.RoundTablePolicies
 	var parentGitHub *aiv1alpha1.GitHubConfig
-	natsURL := defaultMissionNATSURL
+	natsURL := DefaultMissionNATSURL()
 
 	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {
 		parentRT := &aiv1alpha1.RoundTable{}

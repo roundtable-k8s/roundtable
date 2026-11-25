@@ -86,6 +86,12 @@ isolation:
     mode: "off"
 ```
 
+### Mission default NATS URL
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `missionDefaultNatsURL` | string | `nats://nats.database.svc.cluster.local:4222` | Fallback NATS URL for mission knights when neither the parent RoundTable nor `roundTableTemplate.natsURL` sets one (`MISSION_DEFAULT_NATS_URL`) |
+
 ### Mission NetworkPolicy
 
 The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. It is not created when `isolation.egress.mode` is `deny`: each mission knight then gets its own default-deny policy, which this one would widen. Rendered into the operator's `MISSION_NETPOL_*` env vars.

@@ -120,6 +120,11 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.missionDefaultNatsURL }}
+            # Fallback NATS URL for missions with no parent RoundTable or template URL.
+            - name: MISSION_DEFAULT_NATS_URL
+              value: {{ .Values.missionDefaultNatsURL | quote }}
+            {{- end }}
             {{- with .Values.missionNetworkPolicy }}
             # Mission knight egress NetworkPolicy settings.
             - name: MISSION_NETPOL_ENABLED
