@@ -115,6 +115,11 @@ spec:
             {{- end }}
             - name: VAULT_PATH
               value: "/vault"
+            {{- include "roundtable-operator.telemetryEnv" (dict "root" . "service" "roundtable-ui") | nindent 12 }}
+            {{- if and .Values.telemetry.enabled .Values.telemetry.traceUrlTemplate }}
+            - name: TRACE_URL_TEMPLATE
+              value: {{ .Values.telemetry.traceUrlTemplate | quote }}
+            {{- end }}
           {{- if or .Values.dashboard.vault.enabled .Values.gateway.enabled }}
           volumeMounts:
             {{- if .Values.dashboard.vault.enabled }}

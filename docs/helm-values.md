@@ -324,6 +324,23 @@ Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overvie
 
 `make helm-check` runs `scripts/check-grafana-dashboards.sh`, which verifies the rendering, that the JSON parses, and that every query uses only known metric names and filters on `$table`.
 
+### Telemetry
+
+Sets the standard OpenTelemetry `OTEL_*` environment variables on the
+operator (`roundtable-operator`), gateway (`roundtable-gateway`) and dashboard
+(`roundtable-ui`) Deployments. With `telemetry.enabled=false` only
+`OTEL_SDK_DISABLED=true` is set. Knight pods are not affected.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `telemetry.enabled` | bool | `false` | Turn OTel export on |
+| `telemetry.otlp.endpoint` | string | `""` | `OTEL_EXPORTER_OTLP_ENDPOINT`, e.g. `http://otel-collector.observability:4317`; omitted when empty |
+| `telemetry.otlp.protocol` | string | `grpc` | `OTEL_EXPORTER_OTLP_PROTOCOL`: `grpc` or `http/protobuf` |
+| `telemetry.sampling.ratio` | number | `1.0` | `OTEL_TRACES_SAMPLER_ARG` (sampler `parentbased_traceidratio`) |
+| `telemetry.captureContent` | bool | `true` | `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT`: prompt/response text on gen_ai spans, redacted before export |
+| `telemetry.resourceAttributes` | object | `{}` | Extra attributes, rendered sorted as `OTEL_RESOURCE_ATTRIBUTES=k=v,...` |
+| `telemetry.traceUrlTemplate` | string | `""` | Dashboard `TRACE_URL_TEMPLATE` deep link containing `{traceId}` |
+
 ### Scheduling
 
 | Key | Type | Default | Description |
