@@ -34,6 +34,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -70,22 +71,26 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 	if err != nil {
 		t.Fatal(err)
 	}
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	k := &fakeKnight{t: t, nc: nc, release: make(chan struct{}), done: make(chan struct{}), seen: map[string]natspkg.TaskPayload{}}
 	// Real knights consume the tasks stream through a durable consumer.
-	sub, err := js.Subscribe(prefix+".tasks.>", func(m *nats.Msg) {
+	cons, err := js.CreateOrUpdateConsumer(context.Background(), "rt_dev_tasks", jetstream.ConsumerConfig{Durable: "Fake-consumer", AckPolicy: jetstream.AckExplicitPolicy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := cons.Consume(func(m jetstream.Msg) {
 		_ = m.Ack()
 		var p natspkg.TaskPayload
-		if err := json.Unmarshal(m.Data, &p); err != nil {
+		if err := json.Unmarshal(m.Data(), &p); err != nil {
 			t.Errorf("fake knight: bad payload: %v", err)
 			return
 		}
 		k.mu.Lock()
 		k.last = p
-		k.seen[m.Subject] = p
+		k.seen[m.Subject()] = p
 		if k.stopped {
 			k.mu.Unlock()
 			return
@@ -96,7 +101,7 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 			defer k.wg.Done()
 			k.answer(js, p)
 		}()
-	}, nats.Durable("Fake-consumer"), nats.ManualAck(), nats.BindStream("rt_dev_tasks"))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +109,7 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 	// tasks, release held answers and wait for every goroutine so none can
 	// touch t after the test returns.
 	t.Cleanup(func() {
-		_ = sub.Unsubscribe()
+		cc.Stop()
 		k.mu.Lock()
 		k.stopped = true
 		k.mu.Unlock()
@@ -115,7 +120,7 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 	return k
 }
 
-func (k *fakeKnight) answer(js nats.JetStreamContext, p natspkg.TaskPayload) {
+func (k *fakeKnight) answer(js jetstream.JetStream, p natspkg.TaskPayload) {
 	if strings.Contains(p.Task, "hold") {
 		select {
 		case <-k.release:
@@ -143,7 +148,7 @@ func (k *fakeKnight) answer(js nats.JetStreamContext, p natspkg.TaskPayload) {
 		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "echo[" + p.RunID + "]: " + p.Task, Model: model}
 	}
 	data, _ := json.Marshal(res)
-	if _, err := js.Publish(natspkg.ResultSubject(prefix, p.TaskID), data); err != nil {
+	if _, err := js.Publish(context.Background(), natspkg.ResultSubject(prefix, p.TaskID), data); err != nil {
 		k.t.Errorf("fake knight: publish result: %v", err)
 	}
 }
@@ -180,10 +185,10 @@ func newEnv(t *testing.T, opts Options) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(nc.Close)
-	js, _ := nc.JetStream()
+	js, _ := jetstream.New(nc)
 	// Same streams the RoundTable controller creates (WorkQueue default).
 	for name, subj := range map[string]string{"rt_dev_tasks": prefix + ".tasks.>", "rt_dev_results": prefix + ".results.>"} {
-		if _, err := js.AddStream(&nats.StreamConfig{Name: name, Subjects: []string{subj}, Retention: nats.WorkQueuePolicy}); err != nil {
+		if _, err := js.CreateStream(context.Background(), jetstream.StreamConfig{Name: name, Subjects: []string{subj}, Retention: jetstream.WorkQueuePolicy}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -204,7 +209,7 @@ func newEnv(t *testing.T, opts Options) *env {
 	}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 
-	bus, err := NewNATSBus(nc, "gateway_tasks_test", time.Hour)
+	bus, err := NewNATSBus(context.Background(), nc, "gateway_tasks_test", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,10 +294,14 @@ func TestInvokeReturnsResult(t *testing.T) {
 
 	// The recorded result was removed from the WorkQueue results stream
 	// (nobody else acks it) ...
-	js, _ := e.nc.JetStream()
+	js, _ := jetstream.New(e.nc)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		info, err := js.StreamInfo("rt_dev_results")
+		st, err := js.Stream(context.Background(), "rt_dev_results")
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := st.Info(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -40,27 +40,27 @@ type Bus interface {
 	Publish(ctx context.Context, subject string, payload natspkg.TaskPayload, table string) error
 	// LastResult returns the newest message on subject in stream, or nil
 	// when there is none. It never consumes or acknowledges the message.
-	LastResult(stream, subject string) ([]byte, error)
+	LastResult(ctx context.Context, stream, subject string) ([]byte, error)
 	// Discard removes a result that has been recorded from a WorkQueue
 	// stream, standing in for the ack nobody else will send. Results in
 	// Limits/Interest streams are left to the stream's own retention.
-	Discard(stream, subject string) error
+	Discard(ctx context.Context, stream, subject string) error
 
 	// PutRecord stores a task record.
-	PutRecord(rec *TaskRecord) error
+	PutRecord(ctx context.Context, rec *TaskRecord) error
 	// GetRecord loads a task record; ErrNotFound when it doesn't exist.
-	GetRecord(taskID string) (*TaskRecord, error)
+	GetRecord(ctx context.Context, taskID string) (*TaskRecord, error)
 	// ListRecords returns every stored task record.
-	ListRecords() ([]*TaskRecord, error)
+	ListRecords(ctx context.Context) ([]*TaskRecord, error)
 
 	// DeadLetterRecords returns the state of every dead-letter entry.
-	DeadLetterRecords() ([]DeadLetterRecord, error)
+	DeadLetterRecords(ctx context.Context) ([]DeadLetterRecord, error)
 	// DeadLetterEntry returns the entry body stored at a record's subject,
 	// or nil when it has aged out of the dead-letter stream.
-	DeadLetterEntry(subject string) (*deadletter.Entry, error)
+	DeadLetterEntry(ctx context.Context, subject string) (*deadletter.Entry, error)
 	// UpdateDeadLetterRecord stores rec if the key is still at revision;
 	// errStaleRevision when somebody else changed it first.
-	UpdateDeadLetterRecord(key string, rec deadletter.Record, revision uint64) error
+	UpdateDeadLetterRecord(ctx context.Context, key string, rec deadletter.Record, revision uint64) error
 }
 
 // DeadLetterRecord is a dead-letter entry's KV state with its key and revision.
@@ -86,23 +86,20 @@ type ResultWatch interface {
 // survive restarts.
 type NATSBus struct {
 	nc *nats.Conn
-	js nats.JetStreamContext
-	kv nats.KeyValue
-	// pub publishes tasks through pkg/nats.PublishTraced, which is on the
-	// jetstream API; the rest of the bus moves to it in #434.
-	pub jetstream.JetStream
+	js jetstream.JetStream
+	kv jetstream.KeyValue
 }
 
 // NewNATSBus binds to (or creates) the task-record KV bucket. ttl bounds how
 // long records are kept.
-func NewNATSBus(nc *nats.Conn, bucket string, ttl time.Duration) (*NATSBus, error) {
-	js, err := nc.JetStream()
+func NewNATSBus(ctx context.Context, nc *nats.Conn, bucket string, ttl time.Duration) (*NATSBus, error) {
+	js, err := jetstream.New(nc)
 	if err != nil {
 		return nil, fmt.Errorf("JetStream context: %w", err)
 	}
-	kv, err := js.KeyValue(bucket)
-	if errors.Is(err, nats.ErrBucketNotFound) {
-		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
+	kv, err := js.KeyValue(ctx, bucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 			Bucket:      bucket,
 			Description: "Round Table gateway task records",
 			History:     1,
@@ -112,11 +109,7 @@ func NewNATSBus(nc *nats.Conn, bucket string, ttl time.Duration) (*NATSBus, erro
 	if err != nil {
 		return nil, fmt.Errorf("KV bucket %s: %w", bucket, err)
 	}
-	pub, err := jetstream.New(nc)
-	if err != nil {
-		return nil, fmt.Errorf("JetStream context: %w", err)
-	}
-	return &NATSBus{nc: nc, js: js, kv: kv, pub: pub}, nil
+	return &NATSBus{nc: nc, js: js, kv: kv}, nil
 }
 
 // Watch implements Bus.
@@ -157,20 +150,24 @@ func (b *NATSBus) Publish(ctx context.Context, subject string, payload natspkg.T
 	if err != nil {
 		return err
 	}
-	if _, err := natspkg.PublishTraced(ctx, b.pub, subject, data, payload.TaskID, natspkg.WithTable(table)); err != nil {
+	if _, err := natspkg.PublishTraced(ctx, b.js, subject, data, payload.TaskID, natspkg.WithTable(table)); err != nil {
 		return fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return nil
 }
 
 // LastResult implements Bus.
-func (b *NATSBus) LastResult(stream, subject string) ([]byte, error) {
+func (b *NATSBus) LastResult(ctx context.Context, stream, subject string) ([]byte, error) {
 	if stream == "" {
 		return nil, nil
 	}
-	msg, err := b.js.GetLastMsg(stream, subject)
+	st, err := b.js.Stream(ctx, stream)
 	if err != nil {
-		if errors.Is(err, nats.ErrMsgNotFound) {
+		return nil, fmt.Errorf("read %s from stream %s: %w", subject, stream, err)
+	}
+	msg, err := st.GetLastMsgForSubject(ctx, subject)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read %s from stream %s: %w", subject, stream, err)
@@ -179,45 +176,45 @@ func (b *NATSBus) LastResult(stream, subject string) ([]byte, error) {
 }
 
 // Discard implements Bus.
-func (b *NATSBus) Discard(stream, subject string) error {
+func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	if stream == "" {
 		return nil
 	}
-	info, err := b.js.StreamInfo(stream)
+	st, err := b.js.Stream(ctx, stream)
 	if err != nil {
 		return fmt.Errorf("stream info %s: %w", stream, err)
 	}
-	if info.Config.Retention != nats.WorkQueuePolicy {
+	if st.CachedInfo().Config.Retention != jetstream.WorkQueuePolicy {
 		return nil
 	}
-	msg, err := b.js.GetLastMsg(stream, subject)
+	msg, err := st.GetLastMsgForSubject(ctx, subject)
 	if err != nil {
-		if errors.Is(err, nats.ErrMsgNotFound) {
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
 			return nil
 		}
 		return err
 	}
-	if err := b.js.DeleteMsg(stream, msg.Sequence); err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
+	if err := st.DeleteMsg(ctx, msg.Sequence); err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
 		return fmt.Errorf("delete %s seq %d: %w", stream, msg.Sequence, err)
 	}
 	return nil
 }
 
 // PutRecord implements Bus.
-func (b *NATSBus) PutRecord(rec *TaskRecord) error {
+func (b *NATSBus) PutRecord(ctx context.Context, rec *TaskRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	_, err = b.kv.Put(rec.TaskID, data)
+	_, err = b.kv.Put(ctx, rec.TaskID, data)
 	return err
 }
 
 // GetRecord implements Bus.
-func (b *NATSBus) GetRecord(taskID string) (*TaskRecord, error) {
-	entry, err := b.kv.Get(taskID)
+func (b *NATSBus) GetRecord(ctx context.Context, taskID string) (*TaskRecord, error) {
+	entry, err := b.kv.Get(ctx, taskID)
 	if err != nil {
-		if errors.Is(err, nats.ErrKeyNotFound) {
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, err
@@ -230,17 +227,20 @@ func (b *NATSBus) GetRecord(taskID string) (*TaskRecord, error) {
 }
 
 // ListRecords implements Bus.
-func (b *NATSBus) ListRecords() ([]*TaskRecord, error) {
-	keys, err := b.kv.Keys()
+func (b *NATSBus) ListRecords(ctx context.Context) ([]*TaskRecord, error) {
+	lister, err := b.kv.ListKeys(ctx)
 	if err != nil {
-		if errors.Is(err, nats.ErrNoKeysFound) {
-			return nil, nil
-		}
 		return nil, err
+	}
+	// The lister closes its channel once every key is read, so there is
+	// nothing to Stop after a full drain.
+	var keys []string
+	for k := range lister.Keys() {
+		keys = append(keys, k)
 	}
 	out := make([]*TaskRecord, 0, len(keys))
 	for _, k := range keys {
-		rec, err := b.GetRecord(k)
+		rec, err := b.GetRecord(ctx, k)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				continue // expired or deleted between Keys and Get
@@ -254,37 +254,41 @@ func (b *NATSBus) ListRecords() ([]*TaskRecord, error) {
 
 // deadLetterKV binds the operator's dead-letter state bucket; nil when the
 // operator hasn't created it yet (no table has dead-lettering).
-func (b *NATSBus) deadLetterKV() (nats.KeyValue, error) {
-	kv, err := b.js.KeyValue(deadletter.KVBucket)
-	if errors.Is(err, nats.ErrBucketNotFound) {
+func (b *NATSBus) deadLetterKV(ctx context.Context) (jetstream.KeyValue, error) {
+	kv, err := b.js.KeyValue(ctx, deadletter.KVBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
 		return nil, nil
 	}
 	return kv, err
 }
 
 // DeadLetterRecords implements Bus.
-func (b *NATSBus) DeadLetterRecords() ([]DeadLetterRecord, error) {
-	kv, err := b.deadLetterKV()
+func (b *NATSBus) DeadLetterRecords(ctx context.Context) ([]DeadLetterRecord, error) {
+	kv, err := b.deadLetterKV(ctx)
 	if err != nil || kv == nil {
 		return nil, err
 	}
-	keys, err := kv.Keys()
+	lister, err := kv.ListKeys(ctx)
 	if err != nil {
-		if errors.Is(err, nats.ErrNoKeysFound) {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	var keys []string
+	for k := range lister.Keys() {
+		keys = append(keys, k)
+	}
 	out := make([]DeadLetterRecord, 0, len(keys))
 	for _, k := range keys {
-		ent, err := kv.Get(k)
+		ent, err := kv.Get(ctx, k)
 		if err != nil {
-			if errors.Is(err, nats.ErrKeyNotFound) {
+			if errors.Is(err, jetstream.ErrKeyNotFound) {
 				continue
 			}
 			return nil, err
 		}
-		if op := ent.Operation(); op == nats.KeyValueDelete || op == nats.KeyValuePurge {
+		if op := ent.Operation(); op == jetstream.KeyValueDelete || op == jetstream.KeyValuePurge {
 			continue
 		}
 		rec := DeadLetterRecord{Key: k, Revision: ent.Revision()}
@@ -297,17 +301,24 @@ func (b *NATSBus) DeadLetterRecords() ([]DeadLetterRecord, error) {
 }
 
 // DeadLetterEntry implements Bus.
-func (b *NATSBus) DeadLetterEntry(subject string) (*deadletter.Entry, error) {
-	stream, err := b.js.StreamNameBySubject(subject)
+func (b *NATSBus) DeadLetterEntry(ctx context.Context, subject string) (*deadletter.Entry, error) {
+	stream, err := b.js.StreamNameBySubject(ctx, subject)
 	if err != nil {
-		if errors.Is(err, nats.ErrStreamNotFound) {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	msg, err := b.js.GetLastMsg(stream, subject)
+	st, err := b.js.Stream(ctx, stream)
 	if err != nil {
-		if errors.Is(err, nats.ErrMsgNotFound) {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	msg, err := st.GetLastMsgForSubject(ctx, subject)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -320,8 +331,8 @@ func (b *NATSBus) DeadLetterEntry(subject string) (*deadletter.Entry, error) {
 }
 
 // UpdateDeadLetterRecord implements Bus.
-func (b *NATSBus) UpdateDeadLetterRecord(key string, rec deadletter.Record, revision uint64) error {
-	kv, err := b.deadLetterKV()
+func (b *NATSBus) UpdateDeadLetterRecord(ctx context.Context, key string, rec deadletter.Record, revision uint64) error {
+	kv, err := b.deadLetterKV(ctx)
 	if err != nil {
 		return err
 	}
@@ -332,9 +343,9 @@ func (b *NATSBus) UpdateDeadLetterRecord(key string, rec deadletter.Record, revi
 	if err != nil {
 		return err
 	}
-	if _, err := kv.Update(key, data, revision); err != nil {
-		var api *nats.APIError
-		if errors.Is(err, nats.ErrKeyExists) || (errors.As(err, &api) && api.ErrorCode == nats.JSErrCodeStreamWrongLastSequence) {
+	if _, err := kv.Update(ctx, key, data, revision); err != nil {
+		var api *jetstream.APIError
+		if errors.Is(err, jetstream.ErrKeyExists) || (errors.As(err, &api) && api.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence) {
 			return errStaleRevision
 		}
 		return err
