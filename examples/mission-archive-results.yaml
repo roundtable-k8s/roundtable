@@ -1,0 +1,72 @@
+# Mission that archives its own output: a research chain runs under the mission,
+# and its final step has kay write a dated summary to the vault through
+# outputPath. Needs fleet-a (roundtable-fleet.yaml), galahad.yaml and kay.yaml
+# applied in the same namespace. kay's vault claim must allow Briefings/.
+# Other ways to keep output: docs/keeping-mission-output.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: research-archive
+  namespace: roundtable
+spec:
+  description: "Research a topic, then archive a dated summary in the vault"
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 1800
+  input: "Topic: Kubernetes AI agent orchestration tools"
+
+  # Knight that writes steps with outputPath (defaults to "gawain").
+  outputKnightRef: {name: kay}
+
+  steps:
+    - name: research
+      knightRef: {name: galahad}
+      timeoutSeconds: 900
+      task: |
+        Research the topic: {{ .Input }}
+        Report the main findings as bullet points, each with a source link.
+
+    # Final step: kay writes this step's output to Briefings/ after it succeeds.
+    - name: archive
+      knightRef: {name: kay}
+      dependsOn: [research]
+      timeoutSeconds: 600
+      outputPath: "Briefings/{{ .Date }}-{{ .Chain }}.md"
+      task: |
+        Write a short summary of the research as markdown. Start with a
+        one-paragraph conclusion, then the findings.
+
+        ## Findings
+        {{ .Steps.research.Output }}
+
+    # Variant: open a pull request instead of writing a vault file. Replace the
+    # archive step above with a step on a knight that has a repository token,
+    # whose task commits the summary to a docs repo and runs `gh pr create`
+    # ("Closes #<n>" only when an issue is involved). See docs/pr-pipeline.md.
+
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Mission
+metadata:
+  name: research-and-archive
+  namespace: roundtable
+spec:
+  objective: "Research Kubernetes AI agent orchestration tools and keep a dated summary"
+  successCriteria: "A dated summary exists under Briefings/ with sourced findings"
+  roundTableRef: {name: fleet-a}
+  ttlSeconds: 7200
+  timeoutSeconds: 3600
+  costBudgetUSD: "10"
+
+  # Use existing fleet knights; the chain below runs on them.
+  recruitExisting: true
+  knights:
+    - name: galahad
+      role: researcher
+    - name: kay
+      role: writer
+
+  chains:
+    - name: research-archive
+      phase: Active
+
+  retainResults: true
