@@ -85,6 +85,12 @@ type TaskResult struct {
 	// Claude plan ... (resets ...)") is at the knight reserve. Not a failure:
 	// the caller should re-run or defer, not escalate (#321).
 	UsageLimited bool `json:"usage_limited,omitempty"`
+
+	// Refused names why the knight refused the task before running it
+	// (optional). Today only pi-knight's "credits": the provider account is
+	// out of credits, which does not reset on its own. The operator parses it
+	// but treats the result as a plain failure.
+	Refused string `json:"refused,omitempty"`
 }
 
 // GetTaskID returns the task ID from whichever field was populated.

@@ -390,6 +390,23 @@ func TestTaskPayloadSerialization(t *testing.T) {
 }
 
 // TestTaskResultSerialization tests TaskResult JSON unmarshaling (both formats)
+func TestTaskResultRefusalDecode(t *testing.T) {
+	var credits TaskResult
+	if err := json.Unmarshal([]byte(`{"task_id":"t1","success":false,"refused":"credits"}`), &credits); err != nil {
+		t.Fatal(err)
+	}
+	if credits.Refused != "credits" || credits.UsageLimited {
+		t.Errorf("got Refused=%q UsageLimited=%v", credits.Refused, credits.UsageLimited)
+	}
+	var quota TaskResult
+	if err := json.Unmarshal([]byte(`{"taskId":"t2","usage_limited":true}`), &quota); err != nil {
+		t.Fatal(err)
+	}
+	if !quota.UsageLimited || quota.Refused != "" {
+		t.Errorf("got Refused=%q UsageLimited=%v", quota.Refused, quota.UsageLimited)
+	}
+}
+
 func TestTaskResultSerialization(t *testing.T) {
 	tests := []struct {
 		name       string

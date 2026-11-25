@@ -92,6 +92,21 @@ says `#245` instead of a URL used to stall the review loop):
 | `prs` | Pull requests the task opened or updated: `{repo, number, url, action}` with `action` one of `opened` or `updated`. |
 | `verdict` | A review outcome: `ship_it`, `needs_changes`, or `null`/absent when the task is not a review. |
 
+### Refusals: `usage_limited` and `refused`
+
+Optional fields a knight sets when it declines a task before running it:
+
+| Field | Meaning |
+|-------|---------|
+| `usage_limited` | Boolean, `true` on a plan-quota refusal (claude-knight: a plan window is at the knight reserve). Not a failure: the caller should defer the task or use the fallback coder. The operator does not escalate it (#321). |
+| `refused` | Optional string naming the refusal reason. Today only `"credits"` (pi-knight): the provider answered 402 or the account is out of credits, which does not reset on its own. |
+
+The operator parses `refused` (`TaskResult.Refused`) but does not act on it
+yet: a result carrying it is handled as a plain failure and escalated as
+usual. Dead-letter entries use reason `refused` when it is set. Pipeline
+behaviour for `refused: "credits"` (for example routing to another knight) is
+not defined.
+
 Readers use the fields when present and otherwise fall back to the prose
 `output` (`pkg/nats.ParseStructured`): a `Verdict: SHIP IT` / `Verdict: needs
 changes` line (the last one wins), and PR references as GitHub PR URLs,
