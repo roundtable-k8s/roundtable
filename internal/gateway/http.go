@@ -473,7 +473,7 @@ func writeError(w http.ResponseWriter, err error) {
 	)
 	switch {
 	case errors.As(err, &gitManaged):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "managedBy": ManagedByGit})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "managedBy": string(ManagedByGit)})
 		return
 	case errors.As(err, &field):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field.Field})

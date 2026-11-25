@@ -36,23 +36,11 @@ import (
 )
 
 const (
-	// LabelManagedBy is the well-known app.kubernetes.io/managed-by label.
-	LabelManagedBy = "app.kubernetes.io/managed-by"
-	// ManagedByGatewayValue is LabelManagedBy on Triggers the gateway creates.
-	ManagedByGatewayValue = "roundtable-gateway"
-
-	// ManagedBy values reported for a schedule.
-	ManagedByGit   = "git"
-	ManagedByAPI   = "api"
-	ManagedByOther = "other"
-
 	// Flux and Helm ownership markers.
-	fluxKustomizationName = "kustomize.toolkit.fluxcd.io/name"
-	fluxKustomizationNS   = "kustomize.toolkit.fluxcd.io/namespace"
-	fluxHelmReleaseName   = "helm.toolkit.fluxcd.io/name"
-	fluxHelmReleaseNS     = "helm.toolkit.fluxcd.io/namespace"
-	helmReleaseName       = "meta.helm.sh/release-name"
-	helmReleaseNS         = "meta.helm.sh/release-namespace"
+	fluxKustomizationNS = "kustomize.toolkit.fluxcd.io/namespace"
+	fluxHelmReleaseNS   = "helm.toolkit.fluxcd.io/namespace"
+	helmReleaseName     = "meta.helm.sh/release-name"
+	helmReleaseNS       = "meta.helm.sh/release-namespace"
 
 	// maxTriggerNameLength is the CRD's limit: the name labels the runs.
 	maxTriggerNameLength = 63
@@ -62,21 +50,6 @@ const (
 
 // timeZonePattern mirrors source.schedule.timeZone's CRD pattern.
 var timeZonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$`)
-
-// ManagedBy says who owns a Trigger: "git" when Flux or Helm applied it
-// (change it in Git), "api" when the gateway created it, "other" otherwise.
-func ManagedBy(obj metav1.Object) string {
-	labels, annotations := obj.GetLabels(), obj.GetAnnotations()
-	switch {
-	case labels[fluxKustomizationName] != "", annotations[fluxKustomizationName] != "",
-		labels[fluxHelmReleaseName] != "", annotations[fluxHelmReleaseName] != "",
-		strings.EqualFold(labels[LabelManagedBy], "Helm"):
-		return ManagedByGit
-	case labels[LabelManagedBy] == ManagedByGatewayValue:
-		return ManagedByAPI
-	}
-	return ManagedByOther
-}
 
 // gitOwner names the Flux Kustomization or HelmRelease (or Helm release)
 // that applied obj, or "" when the labels do not say.
@@ -158,24 +131,17 @@ type ScheduleRequest struct {
 type ScheduleRecord struct {
 	Name      string                 `json:"name"`
 	Namespace string                 `json:"namespace"`
-	ManagedBy string                 `json:"managedBy"`
+	ManagedBy ManagedBy              `json:"managedBy"`
 	Caller    string                 `json:"caller,omitempty"`
 	CreatedAt time.Time              `json:"createdAt"`
 	Spec      aiv1alpha1.TriggerSpec `json:"spec"`
-}
-
-// SchedulesEnabled reports whether the schedule write endpoints are served.
-func (s *Service) SchedulesEnabled() bool { return s.Schedules != nil }
-
-func errSchedulesDisabled() error {
-	return fmt.Errorf("%w: schedules are disabled on this gateway", ErrNotFound)
 }
 
 // CreateSchedule validates req and creates a schedule Trigger labelled as
 // the gateway's own and annotated with the caller.
 func (s *Service) CreateSchedule(ctx context.Context, req ScheduleRequest) (*ScheduleRecord, error) {
 	if !s.SchedulesEnabled() {
-		return nil, errSchedulesDisabled()
+		return nil, errSchedulesDisabled
 	}
 	ns, err := s.namespace(req.Namespace)
 	if err != nil {
@@ -191,7 +157,7 @@ func (s *Service) CreateSchedule(ctx context.Context, req ScheduleRequest) (*Sch
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
 			Namespace: ns,
-			Labels:    map[string]string{LabelManagedBy: ManagedByGatewayValue},
+			Labels:    map[string]string{labelManagedBy: managedByGateway},
 		},
 		Spec: req.Spec,
 	}
@@ -210,7 +176,7 @@ func (s *Service) CreateSchedule(ctx context.Context, req ScheduleRequest) (*Sch
 // Git-managed one is refused with 409.
 func (s *Service) ReplaceSchedule(ctx context.Context, namespace, name string, req ScheduleRequest) (*ScheduleRecord, error) {
 	if !s.SchedulesEnabled() {
-		return nil, errSchedulesDisabled()
+		return nil, errSchedulesDisabled
 	}
 	ns, err := s.namespace(namespace)
 	if err != nil {
@@ -253,7 +219,7 @@ func (s *Service) ReplaceSchedule(ctx context.Context, namespace, name string, r
 // with 409.
 func (s *Service) DeleteSchedule(ctx context.Context, namespace, name string) error {
 	if !s.SchedulesEnabled() {
-		return errSchedulesDisabled()
+		return errSchedulesDisabled
 	}
 	ns, err := s.namespace(namespace)
 	if err != nil {
@@ -278,27 +244,8 @@ func (s *Service) DeleteSchedule(ctx context.Context, namespace, name string) er
 	return nil
 }
 
-// fetchSchedule reads a Trigger with a schedule source; anything else is a
-// 404 on the schedule routes.
-func (s *Service) fetchSchedule(ctx context.Context, ns, name string) (*aiv1alpha1.Trigger, error) {
-	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
-		return nil, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, ns, name)
-	}
-	trg := &aiv1alpha1.Trigger{}
-	if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, trg); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, ns, name)
-		}
-		return nil, k8sError("get trigger", err)
-	}
-	if trg.Spec.Source.Schedule == nil {
-		return nil, fmt.Errorf("%w: schedule %s/%s (the Trigger has no schedule source)", ErrNotFound, ns, name)
-	}
-	return trg, nil
-}
-
 func refuseGitManaged(trg *aiv1alpha1.Trigger) error {
-	if ManagedBy(trg) == ManagedByGit {
+	if ScheduleManagedBy(trg) == ManagedByGit {
 		return &GitManagedError{Namespace: trg.Namespace, Name: trg.Name, Owner: gitOwner(trg)}
 	}
 	return nil
@@ -319,7 +266,7 @@ func scheduleRecord(trg *aiv1alpha1.Trigger) *ScheduleRecord {
 	return &ScheduleRecord{
 		Name:      trg.Name,
 		Namespace: trg.Namespace,
-		ManagedBy: ManagedBy(trg),
+		ManagedBy: ScheduleManagedBy(trg),
 		Caller:    trg.Annotations[aiv1alpha1.AnnotationCaller],
 		CreatedAt: trg.CreationTimestamp.UTC(),
 		Spec:      trg.Spec,

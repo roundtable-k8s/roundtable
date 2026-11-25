@@ -46,9 +46,9 @@ type scheduleEnv struct {
 	k8s client.Client
 }
 
-// newScheduleEnv serves the gateway with schedule writes enabled over a fake
+// newScheduleWriteEnv serves the gateway with schedule writes enabled over a fake
 // Kubernetes API holding a RoundTable and a Chain.
-func newScheduleEnv(t *testing.T, enabled bool, funcs *interceptor.Funcs, extra ...client.Object) *scheduleEnv {
+func newScheduleWriteEnv(t *testing.T, enabled bool, funcs *interceptor.Funcs, extra ...client.Object) *scheduleEnv {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	_ = aiv1alpha1.AddToScheme(scheme)
@@ -100,7 +100,7 @@ func scheduleSpec(cron, tz, chain string) map[string]any {
 	}
 }
 
-func scheduleTrigger(name string, labels, annotations map[string]string) *aiv1alpha1.Trigger {
+func writeTestTrigger(name string, labels, annotations map[string]string) *aiv1alpha1.Trigger {
 	return &aiv1alpha1.Trigger{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS, Labels: labels, Annotations: annotations},
 		Spec: aiv1alpha1.TriggerSpec{
@@ -111,7 +111,7 @@ func scheduleTrigger(name string, labels, annotations map[string]string) *aiv1al
 }
 
 func TestCreateSchedule(t *testing.T) {
-	e := newScheduleEnv(t, true, nil)
+	e := newScheduleWriteEnv(t, true, nil)
 	body := map[string]any{"name": "morning-digest", "spec": scheduleSpec("0 7 * * 1-5", "Europe/Berlin", "digest")}
 	body["spec"].(map[string]any)["roundTableRef"] = map[string]any{"name": "dev"}
 
@@ -122,12 +122,12 @@ func TestCreateSchedule(t *testing.T) {
 	if loc := resp.Header.Get("Location"); loc != "/v1/schedules/"+testNS+"/morning-digest" {
 		t.Errorf("Location = %q", loc)
 	}
-	if out["managedBy"] != ManagedByAPI || out["caller"] != defaultTokenName || out["namespace"] != testNS {
+	if out["managedBy"] != string(ManagedByAPI) || out["caller"] != defaultTokenName || out["namespace"] != testNS {
 		t.Errorf("response = %v", out)
 	}
 
 	trg := e.trigger(t, "morning-digest")
-	if trg.Labels[LabelManagedBy] != ManagedByGatewayValue {
+	if trg.Labels[labelManagedBy] != managedByGateway {
 		t.Errorf("labels = %v", trg.Labels)
 	}
 	if trg.Annotations[aiv1alpha1.AnnotationCaller] != defaultTokenName {
@@ -148,7 +148,7 @@ func TestCreateSchedule(t *testing.T) {
 }
 
 func TestCreateScheduleValidation(t *testing.T) {
-	e := newScheduleEnv(t, true, nil)
+	e := newScheduleWriteEnv(t, true, nil)
 	spec := func(mut func(map[string]any)) map[string]any {
 		s := scheduleSpec("0 7 * * *", "", "digest")
 		mut(s)
@@ -234,7 +234,7 @@ func testKnight(name, table string) *aiv1alpha1.Knight {
 }
 
 func TestCreateScheduleKnightTarget(t *testing.T) {
-	e := newScheduleEnv(t, true, nil, testKnight("galahad", "dev"), testKnight("loner", ""))
+	e := newScheduleWriteEnv(t, true, nil, testKnight("galahad", "dev"), testKnight("loner", ""))
 	resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, map[string]any{
 		"name": "nightly", "spec": knightSpec("galahad", "Run {{ .Trigger.Name }}"),
 	})
@@ -295,7 +295,7 @@ func TestCreateScheduleAPIServerValidation(t *testing.T) {
 				field.ErrorList{field.Invalid(field.NewPath("spec", "source", "schedule", "timeZone"), "x", "should match pattern")})
 		},
 	}
-	e := newScheduleEnv(t, true, funcs)
+	e := newScheduleWriteEnv(t, true, funcs)
 	resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken,
 		map[string]any{"name": "x", "spec": scheduleSpec("0 7 * * *", "", "digest")})
 	if resp.StatusCode != http.StatusBadRequest {
@@ -307,8 +307,8 @@ func TestCreateScheduleAPIServerValidation(t *testing.T) {
 }
 
 func TestReplaceSchedule(t *testing.T) {
-	existing := scheduleTrigger("nightly", map[string]string{LabelManagedBy: ManagedByGatewayValue, "team": "a"}, nil)
-	e := newScheduleEnv(t, true, nil, existing)
+	existing := writeTestTrigger("nightly", map[string]string{labelManagedBy: managedByGateway, "team": "a"}, nil)
+	e := newScheduleWriteEnv(t, true, nil, existing)
 
 	resp, out := e.do(t, http.MethodPut, "/v1/schedules/"+testNS+"/nightly", testToken,
 		map[string]any{"spec": scheduleSpec("30 2 * * *", "America/New_York", "report")})
@@ -322,7 +322,7 @@ func TestReplaceSchedule(t *testing.T) {
 	if trg.Spec.Target.ChainRef.Name != "report" {
 		t.Errorf("target = %+v", trg.Spec.Target)
 	}
-	if trg.Labels["team"] != "a" || trg.Labels[LabelManagedBy] != ManagedByGatewayValue {
+	if trg.Labels["team"] != "a" || trg.Labels[labelManagedBy] != managedByGateway {
 		t.Errorf("labels not kept: %v", trg.Labels)
 	}
 	if trg.Annotations[aiv1alpha1.AnnotationCaller] != defaultTokenName {
@@ -357,7 +357,7 @@ func TestReplaceScheduleNonSchedule(t *testing.T) {
 			RoundTableRef: &corev1.LocalObjectReference{Name: "dev"},
 		},
 	}
-	e := newScheduleEnv(t, true, nil, nats)
+	e := newScheduleWriteEnv(t, true, nil, nats)
 	resp, _ := e.do(t, http.MethodPut, "/v1/schedules/"+testNS+"/on-deploy", testToken,
 		map[string]any{"spec": scheduleSpec("0 7 * * *", "", "digest")})
 	if resp.StatusCode != http.StatusNotFound {
@@ -373,9 +373,9 @@ func TestReplaceScheduleNonSchedule(t *testing.T) {
 }
 
 func TestDeleteSchedule(t *testing.T) {
-	e := newScheduleEnv(t, true, nil,
-		scheduleTrigger("nightly", map[string]string{LabelManagedBy: ManagedByGatewayValue}, nil),
-		scheduleTrigger("by-hand", nil, nil))
+	e := newScheduleWriteEnv(t, true, nil,
+		writeTestTrigger("nightly", map[string]string{labelManagedBy: managedByGateway}, nil),
+		writeTestTrigger("by-hand", nil, nil))
 	for _, name := range []string{"nightly", "by-hand"} {
 		resp, out := e.do(t, http.MethodDelete, "/v1/schedules/"+testNS+"/"+name, testToken, nil)
 		if resp.StatusCode != http.StatusOK || out["deleted"] != testNS+"/"+name {
@@ -403,27 +403,27 @@ func TestGitManagedScheduleIsReadOnly(t *testing.T) {
 			fluxKustomizationName: "apps", fluxKustomizationNS: "flux-system",
 		}, nil, "Flux Kustomization flux-system/apps"},
 		{"helmrelease", map[string]string{
-			fluxHelmReleaseName: "roundtable", fluxHelmReleaseNS: "flux-system", LabelManagedBy: "Helm",
+			fluxHelmReleaseName: "roundtable", fluxHelmReleaseNS: "flux-system", labelManagedBy: "Helm",
 		}, nil, "Flux HelmRelease flux-system/roundtable"},
-		{"helm", map[string]string{LabelManagedBy: "Helm"}, map[string]string{
+		{"helm", map[string]string{labelManagedBy: "Helm"}, map[string]string{
 			helmReleaseName: "rt", helmReleaseNS: "roundtable",
 		}, "Helm release roundtable/rt"},
-		{"helm-unnamed", map[string]string{LabelManagedBy: "Helm"}, nil, "in Git"},
+		{"helm-unnamed", map[string]string{labelManagedBy: "Helm"}, nil, "in Git"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newScheduleEnv(t, true, nil, scheduleTrigger("from-git", tc.labels, tc.annotations))
+			e := newScheduleWriteEnv(t, true, nil, writeTestTrigger("from-git", tc.labels, tc.annotations))
 			path := "/v1/schedules/" + testNS + "/from-git"
 			resp, out := e.do(t, http.MethodPut, path, testToken,
 				map[string]any{"spec": scheduleSpec("0 9 * * *", "", "report")})
-			if resp.StatusCode != http.StatusConflict || out["managedBy"] != ManagedByGit {
+			if resp.StatusCode != http.StatusConflict || out["managedBy"] != string(ManagedByGit) {
 				t.Fatalf("PUT: status %d: %v", resp.StatusCode, out)
 			}
 			if msg, _ := out["error"].(string); !strings.Contains(msg, tc.where) || !strings.Contains(msg, "Git") {
 				t.Errorf("PUT message %q does not say %q", msg, tc.where)
 			}
 			resp, out = e.do(t, http.MethodDelete, path, testToken, nil)
-			if resp.StatusCode != http.StatusConflict || out["managedBy"] != ManagedByGit {
+			if resp.StatusCode != http.StatusConflict || out["managedBy"] != string(ManagedByGit) {
 				t.Fatalf("DELETE: status %d: %v", resp.StatusCode, out)
 			}
 			trg := e.trigger(t, "from-git")
@@ -437,26 +437,26 @@ func TestGitManagedScheduleIsReadOnly(t *testing.T) {
 func TestManagedBy(t *testing.T) {
 	cases := []struct {
 		labels, annotations map[string]string
-		want                string
+		want                ManagedBy
 	}{
 		{map[string]string{fluxKustomizationName: "apps"}, nil, ManagedByGit},
 		{nil, map[string]string{fluxKustomizationName: "apps"}, ManagedByGit},
 		{map[string]string{fluxHelmReleaseName: "rt"}, nil, ManagedByGit},
-		{map[string]string{LabelManagedBy: "Helm"}, nil, ManagedByGit},
-		{map[string]string{LabelManagedBy: ManagedByGatewayValue}, nil, ManagedByAPI},
-		{map[string]string{LabelManagedBy: "kubectl"}, nil, ManagedByOther},
+		{map[string]string{labelManagedBy: "Helm"}, nil, ManagedByGit},
+		{map[string]string{labelManagedBy: managedByGateway}, nil, ManagedByAPI},
+		{map[string]string{labelManagedBy: "kubectl"}, nil, ManagedByOther},
 		{nil, nil, ManagedByOther},
 	}
 	for _, tc := range cases {
-		obj := &metav1.ObjectMeta{Labels: tc.labels, Annotations: tc.annotations}
-		if got := ManagedBy(obj); got != tc.want {
+		obj := &aiv1alpha1.Trigger{ObjectMeta: metav1.ObjectMeta{Labels: tc.labels, Annotations: tc.annotations}}
+		if got := ScheduleManagedBy(obj); got != tc.want {
 			t.Errorf("ManagedBy(%v, %v) = %s, want %s", tc.labels, tc.annotations, got, tc.want)
 		}
 	}
 }
 
-func TestSchedulesDisabled(t *testing.T) {
-	e := newScheduleEnv(t, false, nil, scheduleTrigger("nightly", nil, nil))
+func TestScheduleWritesDisabled(t *testing.T) {
+	e := newScheduleWriteEnv(t, false, nil, writeTestTrigger("nightly", nil, nil))
 	resp, _ := e.do(t, http.MethodPost, "/v1/schedules", testToken,
 		map[string]any{"name": "x", "spec": scheduleSpec("0 7 * * *", "", "digest")})
 	if resp.StatusCode != http.StatusNotFound {
