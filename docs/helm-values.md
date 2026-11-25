@@ -57,9 +57,38 @@ The operator sets up an OTel tracer provider from the standard `OTEL_*` environm
 | `OTEL_RESOURCE_ATTRIBUTES` | unset | Extra resource attributes (`k=v,k2=v2`) |
 | `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` | Sampler |
 
+### Isolation defaults
+
+Every knight runs under a sandboxing RuntimeClass and behind default-deny
+egress unless its spec opts out (`spec.isolation`, with a reason). Rendered
+into the operator's `KNIGHT_DEFAULT_RUNTIME_CLASS`, `KNIGHT_DEFAULT_EGRESS` and
+`KNIGHT_EGRESS_BASE_HOSTS` env vars. See
+[runtime-isolation.md](runtime-isolation.md) and [egress.md](egress.md).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `isolation.runtimeClassName` | string | `gvisor` | RuntimeClass for every knight that neither sets `runtimeClassName` nor inherits one from its table. `""` turns the default off for the whole install. A knight whose RuntimeClass does not exist is parked (`Isolated=False`, `RuntimeClassNotFound`) |
+| `isolation.egress.mode` | string | `deny` | `deny`: a knight without an allowlist (own or table) gets an empty one, i.e. the baseline only. `"off"`: no policy unless the knight or table sets `egress`. Quote `"off"` (a bare YAML `off` is read as `false`, also treated as off) |
+| `isolation.egress.baseHosts` | list | `[openrouter.ai, api.anthropic.com]` | Hosts every knight's policy allows on 443, on top of DNS, NATS, the Kubernetes API and the knight's arsenal git hosts |
+
+`NOTES.txt` warns after install or upgrade when the default RuntimeClass is not
+in the cluster (a `lookup`; skipped by `helm template`), with the two ways out:
+install gVisor, or set `isolation.runtimeClassName: ""`.
+
+To upgrade a cluster without gVisor without changing any knight, set both
+off switches first; knights that set `runtimeClassName` or `spec.egress`
+themselves are still honoured:
+
+```yaml
+isolation:
+  runtimeClassName: ""
+  egress:
+    mode: "off"
+```
+
 ### Mission NetworkPolicy
 
-The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. Rendered into the operator's `MISSION_NETPOL_*` env vars.
+The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. It is not created when `isolation.egress.mode` is `deny`: each mission knight then gets its own default-deny policy, which this one would widen. Rendered into the operator's `MISSION_NETPOL_*` env vars.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -205,10 +234,13 @@ block: if a knight sets its own `resources` (or `workspace`), that block is used
 as written and no fields are merged in from the default.
 
 Set `knights.<name>.runtimeClassName` (and `planner.runtimeClassName`; both
-default to empty, meaning the cluster's default runtime) to run a knight under a
-RuntimeClass such as `gvisor`. Knights in a RoundTable also inherit
-`RoundTable.spec.defaults.runtimeClassName` when unset. See
-[runtime-isolation.md](runtime-isolation.md).
+default to empty, meaning not set on the Knight) to run a knight under a
+specific RuntimeClass. Knights in a RoundTable inherit
+`RoundTable.spec.defaults.runtimeClassName` when unset, and otherwise get the
+operator default `isolation.runtimeClassName` (`gvisor`). Set
+`knights.<name>.isolation` (rendered verbatim into `Knight.spec.isolation`) to
+opt a chart knight out, for example `{runtime: none, reason: "needs ptrace for
+the debugger skill"}`. See [runtime-isolation.md](runtime-isolation.md).
 
 Set `knights.<name>.memory` to give a knight a persistent memory volume,
 separate from its `/data` workspace, that every replica mounts read-write at

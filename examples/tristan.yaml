@@ -12,6 +12,8 @@ spec:
     - kubernetes
     - shared
 
+  # Runs isolated under the defaults (#387): kubectl, helm and flux talk to
+  # the Kubernetes API, which the egress baseline allows.
   tools:
     mise:
       - kubectl

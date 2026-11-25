@@ -38,6 +38,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
@@ -67,19 +68,72 @@ func knightPodSelectorLabels(k *aiv1alpha1.Knight) map[string]string {
 	}
 }
 
-// EgressAllowlist is the input to the egress policy renderers. An empty
-// AllowedHosts renders the baseline (DNS and NATS only).
+// kubeAPIFallbackPorts are the ports the fallback NetworkPolicy allows to any
+// destination for the Kubernetes API: a NetworkPolicy can't select the API
+// server, and the kubernetes Service (443) is usually DNATed to 6443.
+var kubeAPIFallbackPorts = []int32{443, 6443}
+
+// EgressAllowlist is the input to the egress policy renderers. Every policy
+// allows the baseline: DNS, NATS, the Kubernetes API, BaseHosts (on 443) and
+// GitHosts (on their ports). AllowedHosts are allowed on AllowedPorts on top.
 type EgressAllowlist struct {
 	AllowedHosts []string
 	AllowedPorts []int32
+	// BaseHosts are the operator's base hosts (KNIGHT_EGRESS_BASE_HOSTS).
+	BaseHosts []string
+	// GitHosts are the hosts of the knight's arsenal repos.
+	GitHosts []knightpkg.GitHost
 }
 
-// egressAllowlistOf returns the knight's allowlist, or nil without spec.egress.
-func egressAllowlistOf(k *aiv1alpha1.Knight) *EgressAllowlist {
+// egressAllowlistOf returns the knight's allowlist with the baseline, or nil
+// without spec.egress. Call it after ApplyIsolationDefaults, which fills
+// spec.egress under default-deny and clears it for isolation.egress:
+// unrestricted.
+func (r *KnightReconciler) egressAllowlistOf(k *aiv1alpha1.Knight) *EgressAllowlist {
 	if k.Spec.Egress == nil {
 		return nil
 	}
-	return &EgressAllowlist{AllowedHosts: k.Spec.Egress.AllowedHosts, AllowedPorts: k.Spec.Egress.AllowedPorts}
+	return &EgressAllowlist{
+		AllowedHosts: k.Spec.Egress.AllowedHosts,
+		AllowedPorts: k.Spec.Egress.AllowedPorts,
+		BaseHosts:    r.Isolation.BaseHosts,
+		GitHosts:     knightpkg.ArsenalGitHosts(k),
+	}
+}
+
+// baselineHostsByPort returns the base hosts (on 443) and git hosts (on their
+// ports) grouped by port, each list lower-cased, sorted and deduplicated.
+func (a EgressAllowlist) baselineHostsByPort() map[int32][]string {
+	out := map[int32][]string{}
+	for _, h := range a.BaseHosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			out[defaultEgressPort] = append(out[defaultEgressPort], h)
+		}
+	}
+	for _, g := range a.GitHosts {
+		if g.Host != "" && g.Port > 0 {
+			out[g.Port] = append(out[g.Port], strings.ToLower(g.Host))
+		}
+	}
+	for p, hosts := range out {
+		slices.Sort(hosts)
+		out[p] = slices.Compact(hosts)
+	}
+	return out
+}
+
+// hostCount is the number of distinct hosts the policy allows by name.
+func (a EgressAllowlist) hostCount() int {
+	seen := map[string]bool{}
+	for _, h := range a.hosts() {
+		seen[h] = true
+	}
+	for _, hosts := range a.baselineHostsByPort() {
+		for _, h := range hosts {
+			seen[h] = true
+		}
+	}
+	return len(seen)
 }
 
 // ports returns the allowed ports, sorted and deduplicated, defaulting to 443.
@@ -130,8 +184,9 @@ func (r *KnightReconciler) egressNetPolSettings() missionpkg.NetPolSettings {
 
 // RenderCiliumEgressPolicy renders the knight's CiliumNetworkPolicy: egress
 // is allowed to (a) the cluster DNS with a DNS proxy rule (needed for FQDN
-// tracking), (b) the knight's NATS server and (c) each allowed host on the
-// allowed ports. Everything else is denied. The endpoint selector uses the
+// tracking), (b) the knight's NATS server, (c) the Kubernetes API server,
+// (d) the base and arsenal git hosts and (e) each allowed host on the allowed
+// ports. Everything else is denied. The endpoint selector uses the
 // knight's pod labels, so it covers both runtime backends.
 func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s missionpkg.NetPolSettings) *unstructured.Unstructured {
 	egress := []any{
@@ -144,23 +199,13 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 		},
 	}
 	egress = append(egress, ciliumNATSRules(k.Spec.NATS.URL, s)...)
+	egress = append(egress, map[string]any{"toEntities": []any{"kube-apiserver"}})
+	baseline := allow.baselineHostsByPort()
+	for _, p := range slices.Sorted(maps.Keys(baseline)) {
+		egress = append(egress, ciliumFQDNRule(baseline[p], []int32{p}))
+	}
 	if hosts := allow.hosts(); len(hosts) > 0 {
-		fqdns := make([]any, 0, len(hosts))
-		for _, h := range hosts {
-			if strings.HasPrefix(h, "*.") {
-				fqdns = append(fqdns, map[string]any{"matchPattern": h})
-			} else {
-				fqdns = append(fqdns, map[string]any{"matchName": h})
-			}
-		}
-		ports := make([]any, 0, len(allow.ports()))
-		for _, p := range allow.ports() {
-			ports = append(ports, map[string]any{"port": strconv.Itoa(int(p)), "protocol": "TCP"})
-		}
-		egress = append(egress, map[string]any{
-			"toFQDNs": fqdns,
-			"toPorts": []any{map[string]any{"ports": ports}},
-		})
+		egress = append(egress, ciliumFQDNRule(hosts, allow.ports()))
 	}
 
 	cnp := newCiliumEgressPolicy(k)
@@ -170,6 +215,26 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 		"egress":           egress,
 	}
 	return cnp
+}
+
+// ciliumFQDNRule allows TCP on ports to hosts (exact names, or "*." patterns).
+func ciliumFQDNRule(hosts []string, ports []int32) map[string]any {
+	fqdns := make([]any, 0, len(hosts))
+	for _, h := range hosts {
+		if strings.HasPrefix(h, "*.") {
+			fqdns = append(fqdns, map[string]any{"matchPattern": h})
+		} else {
+			fqdns = append(fqdns, map[string]any{"matchName": h})
+		}
+	}
+	toPorts := make([]any, 0, len(ports))
+	for _, p := range ports {
+		toPorts = append(toPorts, map[string]any{"port": strconv.Itoa(int(p)), "protocol": "TCP"})
+	}
+	return map[string]any{
+		"toFQDNs": fqdns,
+		"toPorts": []any{map[string]any{"ports": toPorts}},
+	}
 }
 
 // ciliumNATSRules allows TCP to each NATS server: to the NATS pods when the
@@ -201,9 +266,10 @@ func ciliumNATSRules(rawURL string, s missionpkg.NetPolSettings) []any {
 }
 
 // RenderEgressNetworkPolicy renders the fallback NetworkPolicy used when the
-// CiliumNetworkPolicy API isn't served. It can't express hostnames, so it
-// allows DNS, NATS and, when hosts are allowed, the allowed ports to any
-// destination.
+// CiliumNetworkPolicy API isn't served. It can't express hostnames or the
+// API server, so it allows DNS, NATS and, to any destination, the Kubernetes
+// API ports (443, 6443), the baseline hosts' ports and, when hosts are
+// allowed, the allowed ports.
 func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s missionpkg.NetPolSettings) *networkingv1.NetworkPolicy {
 	rules := []networkingv1.NetworkPolicyEgressRule{missionpkg.DNSEgressRule(s)}
 	seen := map[string]bool{}
@@ -217,17 +283,21 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 		seen[key] = true
 		rules = append(rules, rule)
 	}
+	allowed := slices.Clone(kubeAPIFallbackPorts)
+	allowed = slices.AppendSeq(allowed, maps.Keys(allow.baselineHostsByPort()))
 	if len(allow.hosts()) > 0 {
-		allowed := allow.ports()
-		ports := make([]networkingv1.NetworkPolicyPort, 0, len(allowed))
-		for _, p := range allowed {
-			ports = append(ports, networkingv1.NetworkPolicyPort{
-				Protocol: ptr.To(corev1.ProtocolTCP),
-				Port:     new(intstr.FromInt32(p)),
-			})
-		}
-		rules = append(rules, networkingv1.NetworkPolicyEgressRule{Ports: ports})
+		allowed = append(allowed, allow.ports()...)
 	}
+	slices.Sort(allowed)
+	allowed = slices.Compact(allowed)
+	ports := make([]networkingv1.NetworkPolicyPort, 0, len(allowed))
+	for _, p := range allowed {
+		ports = append(ports, networkingv1.NetworkPolicyPort{
+			Protocol: ptr.To(corev1.ProtocolTCP),
+			Port:     new(intstr.FromInt32(p)),
+		})
+	}
+	rules = append(rules, networkingv1.NetworkPolicyEgressRule{Ports: ports})
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      egressPolicyName(k),
@@ -276,10 +346,11 @@ func newCiliumEgressPolicy(k *aiv1alpha1.Knight) *unstructured.Unstructured {
 	return cnp
 }
 
-// reconcileEgress renders the knight's egress policy from spec.egress, or
-// removes it when spec.egress is unset, and sets EgressRestricted.
+// reconcileEgress renders the knight's egress policy from spec.egress (after
+// ApplyIsolationDefaults), or removes it when spec.egress is unset, and sets
+// EgressRestricted.
 func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Knight) error {
-	allow := egressAllowlistOf(k)
+	allow := r.egressAllowlistOf(k)
 	if allow == nil {
 		meta.RemoveStatusCondition(&k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		return r.deleteEgressPolicies(ctx, k)
@@ -297,12 +368,12 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	case r.CiliumEnabled:
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = aiv1alpha1.ReasonFQDNPolicyApplied
-		cond.Message = fmt.Sprintf("CiliumNetworkPolicy %s limits egress to DNS, NATS and %d allowed host(s)",
-			egressPolicyName(k), len(allow.hosts()))
+		cond.Message = fmt.Sprintf("CiliumNetworkPolicy %s limits egress to DNS, NATS, the Kubernetes API and %d host(s)",
+			egressPolicyName(k), allow.hostCount())
 	default:
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = aiv1alpha1.ReasonFQDNPolicyUnavailable
-		cond.Message = fmt.Sprintf("%s CiliumNetworkPolicy is not served, so allowedHosts can't be enforced; "+
+		cond.Message = fmt.Sprintf("%s CiliumNetworkPolicy is not served, so hostnames can't be enforced; "+
 			"NetworkPolicy %s allows DNS, NATS and the allowed ports to any destination",
 			rtruntime.CiliumNetworkPolicyGVK.GroupVersion(), egressPolicyName(k))
 	}

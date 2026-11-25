@@ -718,8 +718,11 @@ spec:
                         CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
                         cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
                         allows the allowed ports to any destination and reports
-                        EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
-                        policy is rendered.
+                        EgressRestricted=False (FQDNPolicyUnavailable). When unset the table
+                        default applies, and when that is unset too an empty allowlist (unless
+                        the operator's default egress mode is off). The baseline (Kubernetes
+                        API, the operator's base hosts and the arsenal git hosts) is always
+                        allowed. isolation.egress: unrestricted renders no policy.
                       properties:
                         allowedHosts:
                           description: |-
@@ -1020,6 +1023,44 @@ spec:
                         If empty, the knight's RoundTable spec.defaults.image applies, and when
                         that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                       type: string
+                    isolation:
+                      description: |-
+                        isolation opts the knight out of the operator's isolation defaults. By
+                        default every knight runs under the operator's default RuntimeClass
+                        (gvisor) and behind a default-deny egress policy (DNS, NATS, the
+                        Kubernetes API, the operator's base hosts, its arsenal git hosts and its
+                        own allowedHosts). Opting out needs a reason, and the knight reports
+                        Isolated=False with reason OptedOut. There is deliberately no table-level
+                        opt-out.
+                      properties:
+                        egress:
+                          description: |-
+                            egress is "default" (spec.egress, the table default or an empty
+                            allowlist, on top of the baseline) or "unrestricted" (no egress policy).
+                          enum:
+                          - default
+                          - unrestricted
+                          maxLength: 16
+                          type: string
+                        reason:
+                          description: |-
+                            reason says why the knight opts out (for example "needs ptrace for the
+                            debugger skill"). Required, at least 10 characters, when runtime or
+                            egress is not "default". It is shown in the Isolated condition.
+                          maxLength: 512
+                          minLength: 10
+                          type: string
+                        runtime:
+                          description: |-
+                            runtime is "default" (run under the RuntimeClass from spec.runtimeClassName,
+                            the table default or the operator default) or "none" (run without a
+                            sandboxing RuntimeClass, even if one is set elsewhere).
+                          enum:
+                          - default
+                          - none
+                          maxLength: 16
+                          type: string
+                      type: object
                     lifecycle:
                       description: lifecycle controls suspend/resume behavior.
                       properties:
@@ -1326,9 +1367,11 @@ spec:
                         runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
                         pod runs under (for example "gvisor"). It applies to both runtime:
                         deployment and runtime: sandbox. When unset the table default applies,
-                        and when that is unset too the cluster's default runtime is used. If the
-                        RuntimeClass does not exist the knight reports RuntimeAvailable=False
-                        with reason RuntimeClassNotFound.
+                        and when that is unset too the operator default (KNIGHT_DEFAULT_RUNTIME_CLASS,
+                        "gvisor" unless the install turns it off). An empty string means the
+                        cluster's default runtime. isolation.runtime: none clears it. If the
+                        RuntimeClass does not exist the knight is parked with
+                        RuntimeAvailable=False and Isolated=False, reason RuntimeClassNotFound.
                       type: string
                     serviceAccountName:
                       description: |-
@@ -2067,8 +2110,11 @@ spec:
                           CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
                           cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
                           allows the allowed ports to any destination and reports
-                          EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
-                          policy is rendered.
+                          EgressRestricted=False (FQDNPolicyUnavailable). When unset the table
+                          default applies, and when that is unset too an empty allowlist (unless
+                          the operator's default egress mode is off). The baseline (Kubernetes
+                          API, the operator's base hosts and the arsenal git hosts) is always
+                          allowed. isolation.egress: unrestricted renders no policy.
                         properties:
                           allowedHosts:
                             description: |-
@@ -2371,6 +2417,44 @@ spec:
                           If empty, the knight's RoundTable spec.defaults.image applies, and when
                           that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.
                         type: string
+                      isolation:
+                        description: |-
+                          isolation opts the knight out of the operator's isolation defaults. By
+                          default every knight runs under the operator's default RuntimeClass
+                          (gvisor) and behind a default-deny egress policy (DNS, NATS, the
+                          Kubernetes API, the operator's base hosts, its arsenal git hosts and its
+                          own allowedHosts). Opting out needs a reason, and the knight reports
+                          Isolated=False with reason OptedOut. There is deliberately no table-level
+                          opt-out.
+                        properties:
+                          egress:
+                            description: |-
+                              egress is "default" (spec.egress, the table default or an empty
+                              allowlist, on top of the baseline) or "unrestricted" (no egress policy).
+                            enum:
+                            - default
+                            - unrestricted
+                            maxLength: 16
+                            type: string
+                          reason:
+                            description: |-
+                              reason says why the knight opts out (for example "needs ptrace for the
+                              debugger skill"). Required, at least 10 characters, when runtime or
+                              egress is not "default". It is shown in the Isolated condition.
+                            maxLength: 512
+                            minLength: 10
+                            type: string
+                          runtime:
+                            description: |-
+                              runtime is "default" (run under the RuntimeClass from spec.runtimeClassName,
+                              the table default or the operator default) or "none" (run without a
+                              sandboxing RuntimeClass, even if one is set elsewhere).
+                            enum:
+                            - default
+                            - none
+                            maxLength: 16
+                            type: string
+                        type: object
                       lifecycle:
                         description: lifecycle controls suspend/resume behavior.
                         properties:
@@ -2677,9 +2761,11 @@ spec:
                           runtimeClassName is the name of the Kubernetes RuntimeClass the knight's
                           pod runs under (for example "gvisor"). It applies to both runtime:
                           deployment and runtime: sandbox. When unset the table default applies,
-                          and when that is unset too the cluster's default runtime is used. If the
-                          RuntimeClass does not exist the knight reports RuntimeAvailable=False
-                          with reason RuntimeClassNotFound.
+                          and when that is unset too the operator default (KNIGHT_DEFAULT_RUNTIME_CLASS,
+                          "gvisor" unless the install turns it off). An empty string means the
+                          cluster's default runtime. isolation.runtime: none clears it. If the
+                          RuntimeClass does not exist the knight is parked with
+                          RuntimeAvailable=False and Isolated=False, reason RuntimeClassNotFound.
                         type: string
                       serviceAccountName:
                         description: |-

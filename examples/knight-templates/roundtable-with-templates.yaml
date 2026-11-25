@@ -36,6 +36,12 @@ spec:
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 2
       taskTimeoutSeconds: 300
+      # Scan targets are chosen per mission, so no fixed allowlist fits:
+      # opt out of default-deny egress (#387) with a reason. Only a template
+      # (or inline spec) can opt a mission knight out.
+      isolation:
+        egress: unrestricted
+        reason: "scans targets chosen per mission"
       nats:
         subjects: ["security-ops.tasks.security.>"]
     
@@ -50,6 +56,9 @@ spec:
       image: ghcr.io/roundtable-k8s/pi-knight:latest
       concurrency: 1
       taskTimeoutSeconds: 600
+      isolation:
+        egress: unrestricted
+        reason: "tests targets chosen per mission"
       nats:
         subjects: ["security-ops.tasks.security.>"]
     

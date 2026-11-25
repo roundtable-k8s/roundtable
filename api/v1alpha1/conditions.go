@@ -74,6 +74,15 @@ const (
 	// ports to any destination) or the policy failed to apply.
 	ConditionKnightEgressRestricted = "EgressRestricted"
 
+	// ConditionKnightIsolated reports how isolated the knight actually is.
+	// Status=True (reason Isolated) means a RuntimeClass is applied and a
+	// CiliumNetworkPolicy with hostname rules limits its egress. Status=False
+	// reasons: RuntimeClassNotFound (the knight stays parked), OptedOut
+	// (spec.isolation, the message carries its reason), FQDNPolicyUnavailable,
+	// EgressPolicyFailed, or IsolationDisabled (no RuntimeClass or no egress
+	// policy applies, e.g. the install turned the defaults off).
+	ConditionKnightIsolated = "Isolated"
+
 	// ConditionKnightMemoryShared reports whether the memory PVC the operator
 	// created (spec.memory without existingClaim) can be shared by all of the
 	// knight's pods. Only set when the knight can run more than one pod
@@ -232,6 +241,19 @@ const (
 
 	// ReasonEgressPolicyFailed indicates the egress policy could not be applied.
 	ReasonEgressPolicyFailed = "EgressPolicyFailed"
+
+	// ReasonIsolated indicates the knight runs under a RuntimeClass and
+	// behind an egress policy with hostname rules.
+	ReasonIsolated = "Isolated"
+
+	// ReasonIsolationOptedOut indicates the knight opts out of isolation in
+	// spec.isolation.
+	ReasonIsolationOptedOut = "OptedOut"
+
+	// ReasonIsolationDisabled indicates no RuntimeClass or no egress policy
+	// applies to the knight without an opt-out (the operator defaults are off,
+	// or the table sets runtimeClassName: "").
+	ReasonIsolationDisabled = "IsolationDisabled"
 
 	// ===== RoundTable Condition Reasons =====
 

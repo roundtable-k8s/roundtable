@@ -122,6 +122,12 @@ type KnightReconciler struct {
 	// NetworkPolicies). Nil uses the defaults.
 	EgressNetPol *missionpkg.NetPolSettings
 
+	// Isolation are the operator's isolation defaults (default RuntimeClass,
+	// default-deny egress, base hosts), read from KNIGHT_DEFAULT_RUNTIME_CLASS,
+	// KNIGHT_DEFAULT_EGRESS and KNIGHT_EGRESS_BASE_HOSTS. The zero value turns
+	// them off.
+	Isolation knightpkg.IsolationSettings
+
 	// NATSMonitoringEndpoint overrides the NATS HTTP monitoring endpoint
 	// (host:port) written into ScaledObject triggers. Empty derives it from
 	// each knight's spec.nats.url host on port 8222.
@@ -180,6 +186,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			if err := deleteKnightCards(ctx, r.Client, r.NATS, r.CardsBucket, knight); err != nil {
 				log.Error(err, "Failed to delete agent cards")
 			}
+			deleteIsolatedMetric(knight)
 			controllerutil.RemoveFinalizer(knight, knightFinalizer)
 			if err := r.Update(ctx, knight); err != nil {
 				return ctrl.Result{}, err
@@ -208,8 +215,16 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Inherit the table's defaults and vault, then the operator defaults (in
 	// memory only). Every status update below reports the effective model.
-	ownRuntimeClass := knight.Spec.RuntimeClassName != nil
+	rcSource := runtimeClassFromKnight
+	if knight.Spec.RuntimeClassName == nil {
+		rcSource = runtimeClassFromTable
+	}
 	knightpkg.ApplyTableDefaults(ctx, r.Client, knight)
+	if rcSource == runtimeClassFromTable && knight.Spec.RuntimeClassName == nil {
+		rcSource = runtimeClassFromOperator
+	}
+	// Then the operator's isolation defaults and the knight's opt-out.
+	knightpkg.ApplyIsolationDefaults(knight, r.Isolation)
 	knight.Status.Model = knight.Spec.Model
 
 	// A sandbox knight without the sandbox backend can't be reconciled. Park it
@@ -243,19 +258,17 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// (After the suspend step, so a parked knight can still be suspended.)
-	// A knight naming a RuntimeClass that doesn't exist would only produce pods
-	// the API server rejects; park it with a clear condition instead.
+	// A knight whose RuntimeClass doesn't exist would only produce pods the
+	// API server rejects; park it with a clear condition instead (fail closed:
+	// a missing gvisor never silently runs the knight unsandboxed).
 	if name := runtimeClassOf(knight); name != "" {
 		if err := r.Get(ctx, types.NamespacedName{Name: name}, &nodev1.RuntimeClass{}); err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
-			field := "spec.runtimeClassName"
-			if !ownRuntimeClass {
-				field = "the RoundTable's spec.defaults.runtimeClassName (or set spec.runtimeClassName on the knight)"
-			}
-			return r.parkKnight(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound,
-				fmt.Sprintf("RuntimeClass %q does not exist; create it or change %s", name, field))
+			msg := runtimeClassNotFoundMessage(name, rcSource)
+			changed := r.setIsolated(knight, metav1.ConditionFalse, aiv1alpha1.ReasonRuntimeClassNotFound, msg)
+			return r.parkKnightWith(ctx, knight, aiv1alpha1.ReasonRuntimeClassNotFound, msg, changed)
 		}
 	}
 
@@ -306,6 +319,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		reconcileErr = err
 		log.Error(err, "Failed to reconcile egress policy")
 	}
+
+	// 2d. Isolated condition and metric from the RuntimeClass and egress.
+	r.reconcileIsolated(knight)
 
 	// 3. Runtime (Deployment or Sandbox, depending on knight.Spec.Runtime).
 	//    Held while the tools image for the current spec is unpublished, so the
@@ -459,14 +475,20 @@ func runtimeClassOf(knight *aiv1alpha1.Knight) string {
 // given reason, leaves its runtime resources alone and requeues slowly. The
 // status is only written when it changes.
 func (r *KnightReconciler) parkKnight(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string) (ctrl.Result, error) {
+	return r.parkKnightWith(ctx, knight, reason, msg, false)
+}
+
+// parkKnightWith is parkKnight that also writes the status when the caller
+// already changed it (changed).
+func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string, changed bool) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	changed := meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+	changed = meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: knight.Generation,
-	})
+	}) || changed
 	if meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,

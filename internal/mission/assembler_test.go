@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 // ─── buildEphemeralKnight ───────────────────────────────────────────────────
@@ -305,5 +306,67 @@ func TestEnsureMissionNetworkPolicyUsesMissionNATSURL(t *testing.T) {
 	}
 	if p.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "messaging" {
 		t.Fatalf("unexpected: %+v", p.Spec.Egress[0])
+	}
+}
+
+// ─── isolation defaults (#387) ──────────────────────────────────────────────
+
+// An ephemeral mission knight is a Knight like any other: under the operator
+// defaults it gets gvisor and a default-deny egress allowlist, which the
+// Knight controller renders with the same baseline (DNS, NATS, Kubernetes
+// API, base hosts, arsenal hosts).
+func TestEphemeralKnightGetsIsolationDefaults(t *testing.T) {
+	mission, mk, rt := ephemeralFixtures()
+	a := &KnightAssembler{EgressDeny: true}
+	k, err := a.buildEphemeralKnight(mission, mk, rt)
+	if err != nil {
+		t.Fatalf("buildEphemeralKnight: %v", err)
+	}
+	knightpkg.ApplyIsolationDefaults(k, knightpkg.DefaultIsolationSettings())
+	if k.Spec.RuntimeClassName == nil || *k.Spec.RuntimeClassName != "gvisor" {
+		t.Fatalf("runtimeClassName = %v, want gvisor", k.Spec.RuntimeClassName)
+	}
+	if k.Spec.Egress == nil || len(k.Spec.Egress.AllowedHosts) != 0 {
+		t.Fatalf("egress = %+v, want an empty default-deny allowlist", k.Spec.Egress)
+	}
+	if k.Spec.NATS.URL != rt.Spec.NATS.URL {
+		t.Fatalf("NATS URL = %q, want the table's (the policy's NATS peer)", k.Spec.NATS.URL)
+	}
+}
+
+// Only the template (or inline spec) can opt a mission knight out; spec
+// overrides cannot.
+func TestEphemeralKnightOptOutOnlyFromTemplate(t *testing.T) {
+	mission, mk, rt := ephemeralFixtures()
+	tpl := rt.Spec.KnightTemplates["base"]
+	tpl.Isolation = &aiv1alpha1.KnightIsolation{Egress: aiv1alpha1.IsolationUnrestricted, Reason: "crawls arbitrary sites"}
+	rt.Spec.KnightTemplates["base"] = tpl
+	k, err := (&KnightAssembler{}).buildEphemeralKnight(mission, mk, rt)
+	if err != nil {
+		t.Fatalf("buildEphemeralKnight: %v", err)
+	}
+	knightpkg.ApplyIsolationDefaults(k, knightpkg.DefaultIsolationSettings())
+	if k.Spec.Egress != nil {
+		t.Fatalf("egress = %+v, want nil for a template that opts out", k.Spec.Egress)
+	}
+}
+
+func TestMissionNetworkPolicySkippedUnderDefaultDeny(t *testing.T) {
+	s := k8sruntime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(s)
+	_ = networkingv1.AddToScheme(s)
+	for _, deny := range []bool{true, false} {
+		c := fake.NewClientBuilder().WithScheme(s).Build()
+		a := &KnightAssembler{Client: c, Scheme: s, EgressDeny: deny}
+		if err := a.EnsureMissionNetworkPolicy(context.Background(), netpolMission()); err != nil {
+			t.Fatalf("EnsureMissionNetworkPolicy(deny=%v): %v", deny, err)
+		}
+		list := &networkingv1.NetworkPolicyList{}
+		if err := c.List(context.Background(), list); err != nil {
+			t.Fatal(err)
+		}
+		if want := map[bool]int{true: 0, false: 1}[deny]; len(list.Items) != want {
+			t.Fatalf("deny=%v: %d mission NetworkPolicies, want %d", deny, len(list.Items), want)
+		}
 	}
 }

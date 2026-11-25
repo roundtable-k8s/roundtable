@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
@@ -135,13 +136,14 @@ var _ = Describe("Knight egress allowlist (#348)", func() {
 		}))
 		Expect(np.Spec.PolicyTypes).To(Equal([]networkingv1.PolicyType{networkingv1.PolicyTypeEgress}))
 		Expect(np.Spec.Egress).To(HaveLen(3))
-		// DNS, NATS in its namespace, then 443 to any destination.
+		// DNS, NATS in its namespace, then 443 (and the API server's 6443) to any destination.
 		Expect(np.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels).To(HaveKeyWithValue("kubernetes.io/metadata.name", "kube-system"))
 		Expect(np.Spec.Egress[1].To[0].NamespaceSelector.MatchLabels).To(HaveKeyWithValue("kubernetes.io/metadata.name", "database"))
 		Expect(np.Spec.Egress[1].Ports[0].Port.IntValue()).To(Equal(4222))
 		Expect(np.Spec.Egress[2].To).To(BeEmpty())
-		Expect(np.Spec.Egress[2].Ports).To(HaveLen(1))
+		Expect(np.Spec.Egress[2].Ports).To(HaveLen(2))
 		Expect(*np.Spec.Egress[2].Ports[0].Port).To(Equal(intstr.FromInt32(443)))
+		Expect(*np.Spec.Egress[2].Ports[1].Port).To(Equal(intstr.FromInt32(6443)))
 
 		cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		Expect(cond).NotTo(BeNil())
@@ -195,7 +197,7 @@ var _ = Describe("Knight egress allowlist (#348)", func() {
 			Expect(sel).To(Equal(map[string]string{"app.kubernetes.io/name": "knight", "app.kubernetes.io/instance": k.Name}))
 
 			egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
-			Expect(egress).To(HaveLen(3))
+			Expect(egress).To(HaveLen(4))
 			Expect(egress[0]).To(Equal(map[string]any{
 				"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{
 					"k8s:io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns",
@@ -211,7 +213,8 @@ var _ = Describe("Knight egress allowlist (#348)", func() {
 				}}},
 				"toPorts": []any{map[string]any{"ports": []any{map[string]any{"port": "4222", "protocol": "TCP"}}}},
 			}))
-			Expect(egress[2]).To(Equal(map[string]any{
+			Expect(egress[2]).To(Equal(map[string]any{"toEntities": []any{"kube-apiserver"}}))
+			Expect(egress[3]).To(Equal(map[string]any{
 				"toFQDNs": []any{
 					map[string]any{"matchPattern": "*.github.com"},
 					map[string]any{"matchName": "api.anthropic.com"},
@@ -266,15 +269,15 @@ func TestEgressPolicySameForBothRuntimes(t *testing.T) {
 	s := missionpkg.DefaultNetPolSettings()
 	dep, sbx := testEgressKnight("deployment"), testEgressKnight("sandbox")
 
-	depCNP := RenderCiliumEgressPolicy(dep, *egressAllowlistOf(dep), s)
-	sbxCNP := RenderCiliumEgressPolicy(sbx, *egressAllowlistOf(sbx), s)
+	depCNP := RenderCiliumEgressPolicy(dep, *(&KnightReconciler{}).egressAllowlistOf(dep), s)
+	sbxCNP := RenderCiliumEgressPolicy(sbx, *(&KnightReconciler{}).egressAllowlistOf(sbx), s)
 	assert.Equal(t, depCNP.Object, sbxCNP.Object)
 	sel, _, _ := unstructured.NestedStringMap(sbxCNP.Object, "spec", "endpointSelector", "matchLabels")
 	assert.Equal(t, map[string]string{"app.kubernetes.io/name": "knight", "app.kubernetes.io/instance": "scout"}, sel)
 	assert.Equal(t, "knight-scout-egress", sbxCNP.GetName())
 
-	depNP := RenderEgressNetworkPolicy(dep, *egressAllowlistOf(dep), s)
-	sbxNP := RenderEgressNetworkPolicy(sbx, *egressAllowlistOf(sbx), s)
+	depNP := RenderEgressNetworkPolicy(dep, *(&KnightReconciler{}).egressAllowlistOf(dep), s)
+	sbxNP := RenderEgressNetworkPolicy(sbx, *(&KnightReconciler{}).egressAllowlistOf(sbx), s)
 	assert.Equal(t, depNP, sbxNP)
 	assert.Equal(t, sel, sbxNP.Spec.PodSelector.MatchLabels)
 }
@@ -287,43 +290,79 @@ func TestRenderEgressBaselineAndPorts(t *testing.T) {
 		NATSPodLabels: map[string]string{"app.kubernetes.io/name": "nats"},
 	}
 
-	// Empty allowlist (the #387 baseline): DNS and NATS only.
+	// Empty allowlist (the #387 baseline): DNS, NATS and the Kubernetes API.
 	cnp := RenderCiliumEgressPolicy(k, EgressAllowlist{}, s)
 	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
-	require.Len(t, egress, 2)
+	require.Len(t, egress, 3)
 	dnsSel, _, _ := unstructured.NestedStringMap(egress[0].(map[string]any)["toEndpoints"].([]any)[0].(map[string]any), "matchLabels")
 	assert.Equal(t, map[string]string{"k8s:io.kubernetes.pod.namespace": "dns", "app": "coredns"}, dnsSel)
 	natsSel, _, _ := unstructured.NestedStringMap(egress[1].(map[string]any)["toEndpoints"].([]any)[0].(map[string]any), "matchLabels")
 	assert.Equal(t, map[string]string{"k8s:io.kubernetes.pod.namespace": "database", "app.kubernetes.io/name": "nats"}, natsSel)
+	assert.Equal(t, map[string]any{"toEntities": []any{"kube-apiserver"}}, egress[2])
 	np := RenderEgressNetworkPolicy(k, EgressAllowlist{}, s)
-	assert.Len(t, np.Spec.Egress, 2)
+	require.Len(t, np.Spec.Egress, 3)
+	assert.Equal(t, []int32{443, 6443}, npPorts(np.Spec.Egress[2]))
 
 	// Explicit ports, deduplicated and sorted; hosts lower-cased.
 	allow := EgressAllowlist{AllowedHosts: []string{"Example.com", "example.com"}, AllowedPorts: []int32{8443, 443, 8443}}
 	cnp = RenderCiliumEgressPolicy(k, allow, s)
 	egress, _, _ = unstructured.NestedSlice(cnp.Object, "spec", "egress")
-	require.Len(t, egress, 3)
+	require.Len(t, egress, 4)
 	assert.Equal(t, map[string]any{
 		"toFQDNs": []any{map[string]any{"matchName": "example.com"}},
 		"toPorts": []any{map[string]any{"ports": []any{
 			map[string]any{"port": "443", "protocol": "TCP"},
 			map[string]any{"port": "8443", "protocol": "TCP"},
 		}}},
-	}, egress[2])
+	}, egress[3])
 	np = RenderEgressNetworkPolicy(k, allow, s)
 	require.Len(t, np.Spec.Egress, 3)
-	require.Len(t, np.Spec.Egress[2].Ports, 2)
-	assert.Equal(t, corev1.ProtocolTCP, *np.Spec.Egress[2].Ports[1].Protocol)
-	assert.Equal(t, int32(8443), np.Spec.Egress[2].Ports[1].Port.IntVal)
+	assert.Equal(t, corev1.ProtocolTCP, *np.Spec.Egress[2].Ports[2].Protocol)
+	assert.Equal(t, []int32{443, 6443, 8443}, npPorts(np.Spec.Egress[2]))
 
 	// NATS outside the cluster: the port to any destination; multiple URLs
 	// to the same server collapse into one rule.
 	k.Spec.NATS.URL = "nats://nats.example.com:4222,nats://nats2.example.com:4222"
 	cnp = RenderCiliumEgressPolicy(k, EgressAllowlist{}, s)
 	egress, _, _ = unstructured.NestedSlice(cnp.Object, "spec", "egress")
-	require.Len(t, egress, 2)
+	require.Len(t, egress, 3)
 	assert.Equal(t, []any{"all"}, egress[1].(map[string]any)["toEntities"])
 	np = RenderEgressNetworkPolicy(k, EgressAllowlist{}, s)
-	require.Len(t, np.Spec.Egress, 2)
+	require.Len(t, np.Spec.Egress, 3)
 	assert.Empty(t, np.Spec.Egress[1].To)
+}
+
+// npPorts lists a NetworkPolicy egress rule's ports.
+func npPorts(r networkingv1.NetworkPolicyEgressRule) []int32 {
+	out := make([]int32, 0, len(r.Ports))
+	for _, p := range r.Ports {
+		out = append(out, p.Port.IntVal)
+	}
+	return out
+}
+
+func TestRenderEgressIsolationBaseline(t *testing.T) {
+	k := testEgressKnight("")
+	s := missionpkg.DefaultNetPolSettings()
+	allow := EgressAllowlist{
+		AllowedHosts: []string{"example.com"},
+		BaseHosts:    []string{"OpenRouter.ai", "api.anthropic.com", "openrouter.ai"},
+		GitHosts: []knightpkg.GitHost{
+			{Host: "github.com", Port: 443},
+			{Host: "git.example.org", Port: 22},
+		},
+	}
+	cnp := RenderCiliumEgressPolicy(k, allow, s)
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	// DNS, NATS, kube-apiserver, port 22 hosts, port 443 hosts, allowlist.
+	require.Len(t, egress, 6)
+	assert.Equal(t, map[string]any{"toEntities": []any{"kube-apiserver"}}, egress[2])
+	assert.Equal(t, ciliumFQDNRule([]string{"git.example.org"}, []int32{22}), egress[3])
+	assert.Equal(t, ciliumFQDNRule([]string{"api.anthropic.com", "github.com", "openrouter.ai"}, []int32{443}), egress[4])
+	assert.Equal(t, ciliumFQDNRule([]string{"example.com"}, []int32{443}), egress[5])
+	assert.Equal(t, 5, allow.hostCount())
+
+	np := RenderEgressNetworkPolicy(k, allow, s)
+	require.Len(t, np.Spec.Egress, 3)
+	assert.Equal(t, []int32{22, 443, 6443}, npPorts(np.Spec.Egress[2]))
 }

@@ -83,6 +83,10 @@ spec:
   {{- if $spec.runtimeClassName }}
   runtimeClassName: {{ $spec.runtimeClassName | quote }}
   {{- end }}
+  {{- with $spec.isolation }}
+  isolation:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- if $spec.suspend }}
   suspend: {{ $spec.suspend }}
   {{- end }}

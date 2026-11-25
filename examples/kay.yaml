@@ -22,6 +22,9 @@ spec:
     writablePaths:
       - "Briefings/"
 
+  # Runs isolated under the defaults (#387): it only needs NATS, its model
+  # provider and the vault volume, all covered by the egress baseline.
+
   concurrency: 1
   taskTimeoutSeconds: 900
 

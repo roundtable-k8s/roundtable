@@ -1,0 +1,24 @@
+The Round Table operator is installed in {{ .Release.Namespace }}.
+{{- $rc := .Values.isolation.runtimeClassName }}
+{{- if not (kindIs "string" $rc) }}{{ $rc = "gvisor" }}{{ end }}
+{{- if $rc }}
+
+Isolation: every knight runs under the RuntimeClass "{{ $rc }}" unless its
+spec opts out (spec.isolation.runtime: none with a reason).
+{{- if not (lookup "node.k8s.io/v1" "RuntimeClass" "" $rc) }}
+
+WARNING: RuntimeClass "{{ $rc }}" was not found in the cluster. Every knight
+without an opt-out will be parked with Isolated=False (RuntimeClassNotFound)
+until it exists. Either:
+  1. install gVisor (or the runtime behind "{{ $rc }}") and create the
+     RuntimeClass, or
+  2. turn the default off for the whole install:
+       helm upgrade {{ .Release.Name }} ... --set isolation.runtimeClassName=""
+(If this is `helm template` or a dry run, the cluster was not queried and
+this warning may be wrong.)
+{{- end }}
+{{- else }}
+
+Isolation: no default RuntimeClass (isolation.runtimeClassName is empty);
+knights run on the cluster's default runtime unless they set runtimeClassName.
+{{- end }}

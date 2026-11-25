@@ -28,6 +28,14 @@ import (
 type KnightAssembler struct {
 	Client client.Client
 	Scheme *runtime.Scheme
+	// EgressDeny is the operator's default-deny egress mode
+	// (KNIGHT_DEFAULT_EGRESS=deny). Ephemeral knights are Knight resources, so
+	// the Knight controller gives each one the same default-deny egress policy
+	// as any other knight (baseline plus allowlist, honouring an explicit
+	// spec.isolation opt-out from the template or inline spec). The legacy
+	// mission NetworkPolicy, which allows TCP 443 to any destination, would
+	// widen that policy (NetworkPolicies are additive), so it is not created.
+	EgressDeny bool
 }
 
 // minAssemblyTimeout floors the assembly window. Ephemeral knights always
@@ -573,10 +581,13 @@ func (a *KnightAssembler) EnsureMissionServiceAccount(ctx context.Context, missi
 
 const defaultMissionNATSURL = "nats://nats.database.svc.cluster.local:4222"
 
-// EnsureMissionNetworkPolicy creates a NetworkPolicy to isolate ephemeral knights if it doesn't exist.
+// EnsureMissionNetworkPolicy creates a NetworkPolicy to isolate ephemeral
+// knights if it doesn't exist. Under default-deny egress (EgressDeny) it does
+// nothing: each ephemeral knight gets its own default-deny policy from the
+// Knight controller.
 func (a *KnightAssembler) EnsureMissionNetworkPolicy(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	settings := NetPolSettingsFromEnv()
-	if !settings.Enabled {
+	if !settings.Enabled || a.EgressDeny {
 		return nil
 	}
 	policyName := fmt.Sprintf("mission-%s-isolation", mission.Name)
