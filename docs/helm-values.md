@@ -308,6 +308,22 @@ older `ai.roundtable.io/table` label). Mission and warm-pool knights get the
 table's value copied into their spec, and a mission's ephemeral RoundTable
 inherits it from `spec.roundTableRef`.
 
+### Grafana dashboards
+
+Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overview** (knights by phase, warm pool, tasks/min, error rate, active tasks, NATS connectivity, KEDA desired vs actual replicas) and **Cost and tokens** (spend and tokens per model and knight, 24h spend, spend per table). They query the `roundtable_*` metric names and need Prometheus scraping the operator and the knights, plus kube-state-metrics for the replicas panel. Every dashboard has a `datasource`, a `namespace` and a multi-select `table` variable; the `table` filter is applied to every `roundtable_*` query. The KEDA panel is filtered by namespace only, since HPAs carry no table label. Per-chain cost is not shown: knight metrics carry no chain label.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `dashboards.enabled` | bool | `false` | Render the dashboards (one object per file). Off renders nothing. |
+| `dashboards.label` | string | `grafana_dashboard` | Label the Grafana sidecar selects ConfigMaps by |
+| `dashboards.labelValue` | string | `"1"` | Value of that label |
+| `dashboards.folder` | string | `""` | Grafana folder; set as the `dashboards.folderAnnotation` annotation (or `spec.folder` of the CRs) when non-empty |
+| `dashboards.folderAnnotation` | string | `grafana_folder` | Annotation key the sidecar reads the folder from |
+| `dashboards.grafanaOperator.enabled` | bool | `false` | Render `GrafanaDashboard` CRs (`grafana.integreatly.org/v1beta1`) instead of ConfigMaps. Only when that API is in the cluster; otherwise ConfigMaps are rendered. |
+| `dashboards.grafanaOperator.instanceSelector` | object | `{dashboards: grafana}` | `matchLabels` selecting the Grafana instance(s) |
+
+`make helm-check` runs `scripts/check-grafana-dashboards.sh`, which verifies the rendering, that the JSON parses, and that every query uses only known metric names and filters on `$table`.
+
 ### Scheduling
 
 | Key | Type | Default | Description |

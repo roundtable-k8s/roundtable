@@ -421,3 +421,24 @@ alerts:
     # roundtable.scaling group (KEDA scaler errors, HPA ScalingActive=false).
     # Needs KEDA's and kube-state-metrics' metrics; disable if you have neither.
     enabled: true
+
+# Grafana dashboards (fleet overview, cost and tokens), built on the
+# roundtable_* metrics. Off by default: nothing is rendered. They need
+# Prometheus scraping the operator and knights; see docs/helm-values.md.
+dashboards:
+  enabled: false
+  # Label the Grafana sidecar selects ConfigMaps by.
+  label: grafana_dashboard
+  labelValue: "1"
+  # Optional Grafana folder. Set on the sidecar ConfigMaps as the annotation
+  # below, or as spec.folder of the GrafanaDashboard CRs.
+  folder: ""
+  folderAnnotation: grafana_folder
+  # Render GrafanaDashboard CRs (grafana.integreatly.org/v1beta1) instead of
+  # ConfigMaps. Only takes effect when that API is available in the cluster;
+  # otherwise the ConfigMaps are rendered.
+  grafanaOperator:
+    enabled: false
+    # matchLabels selecting the Grafana instance(s) to load the dashboards into.
+    instanceSelector:
+      dashboards: grafana
