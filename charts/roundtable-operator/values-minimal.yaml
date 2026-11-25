@@ -1,0 +1,39 @@
+# Minimal install: Kubernetes + NATS JetStream and nothing else.
+#
+#   helm install roundtable-operator charts/roundtable-operator \
+#     -n roundtable --create-namespace -f charts/roundtable-operator/values-minimal.yaml
+#
+# Every optional add-on is switched off, so none of KEDA, agent-sandbox,
+# gVisor, Prometheus Operator or a container registry has to exist. See
+# docs/dependencies.md for what each switch turns off and what you see instead.
+
+# No KEDA: knights with maxReplicas > 1 run spec.replicas pods and report
+# Autoscaled=False (KEDAUnavailable).
+keda: "false"
+
+# No agent-sandbox: knights with runtime: sandbox report RuntimeAvailable=False
+# (SandboxUnavailable). Knights default to runtime: deployment.
+sandboxBackend: "false"
+
+# No tools-image registry: knights run without spec.tools.nix packages and get
+# a ToolsImageNotConfigured warning event.
+toolsImage:
+  repository: ""
+
+# No gVisor: the chart default RuntimeClass "gvisor" would park every knight
+# (RuntimeClassNotFound) on a cluster without it. Empty turns it off.
+isolation:
+  runtimeClassName: ""
+
+# Dashboard without the vault volume (no PVC to provide) and without the gateway.
+dashboard:
+  enabled: true
+  vault:
+    enabled: false
+  env:
+    NATS_URL: "nats://nats.nats.svc:4222"
+gateway:
+  enabled: false
+
+# Point the NATS URLs at your server (JetStream enabled).
+missionDefaultNatsURL: nats://nats.nats.svc:4222
