@@ -274,10 +274,12 @@ var _ = Describe("Mission Controller", func() {
 
 	newReconciler := func() *MissionReconciler {
 		return &MissionReconciler{
-			Client:    k8sClient,
-			Scheme:    k8sClient.Scheme(),
-			Recorder:  record.NewFakeRecorder(100),
-			Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			Recorder:    record.NewFakeRecorder(100),
+			Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+			Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+			CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 		}
 	}
 
@@ -1526,10 +1528,12 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 
 			By("Reconciling the mission to assembling phase")
 			reconciler := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Drive through Assembling — the warm pool claim recreates the knight
@@ -1615,10 +1619,12 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 
 			By("Reconciling the mission")
 			reconciler := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Drive to assembling phase
@@ -1735,10 +1741,12 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 
 			By("Reconciling the mission")
 			reconciler := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Drive to assembling phase
@@ -1849,10 +1857,12 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 
 			By("Reconciling the mission")
 			reconciler := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Drive to assembling phase
@@ -2009,10 +2019,12 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 
 			By("Reconciling the mission")
 			reconciler := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Reconcile a few times to create the mission-scoped chain

@@ -407,6 +407,8 @@ func main() {
 			Client: mgr.GetClient(),
 			Scheme: mgr.GetScheme(),
 		},
+		Cleaner:     &mission.Cleaner{Client: mgr.GetClient(), NATS: natsProvider},
+		CostTracker: &mission.CostTracker{Client: mgr.GetClient()},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Mission")
 		os.Exit(1)

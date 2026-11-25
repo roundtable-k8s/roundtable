@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 )
 
@@ -312,6 +313,7 @@ var _ = Describe("Completion notifications", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(100),
 				Notify:   notify.NewNotifier(allowed),
+				Cleaner:  &missionpkg.Cleaner{Client: k8sClient},
 			}
 		}
 
