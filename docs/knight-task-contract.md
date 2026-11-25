@@ -26,6 +26,7 @@ Published by the chain controller and the [invoke gateway](gateway.md) to
 | `chainName`, `stepName` | no | Set for chain steps and mission briefings. |
 | `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. A chain step with `resumeRunId` sends an earlier run's ID instead (see below). |
 | `model` | no | Per-task model override (see below). Absent means "use your configured model" (`KNIGHT_MODEL`, from `Knight.spec.model`). |
+| `attempt`, `retryOf` | no | Set by a manual retry (#397): the 1-based attempt number and the task ID being retried. Absent means attempt 1. Used to de-duplicate dead-letter entries (see [Delivery and failure](#delivery-and-failure)). |
 
 ### `model`
 
@@ -156,6 +157,74 @@ spec:
   the model the knight reports having used.
 - A model mismatch is a spec error: the step fails immediately and is **not**
   retried, regardless of `retry` / `retryPolicy`.
+
+## Delivery and failure
+
+**At most once.** A task is delivered to one knight once and never re-run
+automatically (whiteboard decision 12, #377). The runtimes create their tasks
+consumer with `max_deliver: 1` and ack only after the result is published, so a
+knight that dies mid-task does not get the task again. Retry is a manual action
+(#397). Chains keep their own step retries (`retry` / `retryPolicy`): those
+publish a new task and are unaffected by what follows.
+
+**Dead-letter stream.** So nothing vanishes, the operator records every lost or
+failed task in a per-table dead-letter stream. It is set up with the other
+streams when `RoundTable.spec.nats.createStreams` is true:
+
+| Stream | Subjects | Retention |
+|--------|----------|-----------|
+| `<tasksStream>_ADVISORIES` | `$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.<tasksStream>.*` | Limits, 7 days |
+| `<tasksStream>_DLQ` | `<prefix>.dlq.>` | Limits, `spec.nats.deadLetterMaxAge` (default `720h`, 30 days); 10 min duplicate window |
+
+What lands there, on `<prefix>.dlq.<knight>.<taskId>`:
+
+- **Lost tasks** (`reason: lost`): a task that was delivered and never acked
+  (crash, OOM, hang) hits max deliveries and JetStream emits an advisory. The
+  advisories stream stores it even when no pod of that knight is running
+  (scale to zero, crash loop, deleted knight). The operator's durable consumer
+  `roundtable-dead-letter` on that stream loads the original task by
+  `stream_seq`, writes the entry with the original payload and then deletes the
+  never-acked message from the tasks stream, but only once the knight's own
+  `lost: true` result has arrived or about 45 s have passed since the advisory
+  (the knights load the same message to publish that result, which the chain
+  controller, planner and gateway wait for). If the original is already gone,
+  the entry carries what the advisory has (knight from the consumer name, the
+  sequence) and `taskId: seq-<n>`.
+- **Failed tasks**: every result with `success: false` (or an `error` and no
+  `success`) on `<prefix>.results.>`. `reason` is `lost` for a result with
+  `lost: true`, `usage_limited` for `usage_limited: true`, `refused` when
+  `refused` is set, `timeout` when the error mentions a timeout, else `failed`.
+  Include the original task payload as `task` in failure results so the entry
+  can be retried. The operator reads results with a core subscription, so
+  failures published while the operator is down are not captured (the knight's
+  task metric and the dispatcher still see them).
+
+Entry body:
+
+```json
+{
+  "taskId": "…", "table": "fleet-a", "knight": "galahad",
+  "reason": "lost", "error": "…", "attempt": 1, "retryOf": "",
+  "chainName": "…", "stepName": "…", "runId": "…",
+  "task": { "taskId": "…", "task": "…" },
+  "streamSeq": 42, "deadLetteredAt": "2026-11-24T12:00:00Z"
+}
+```
+
+`task` is the original task payload or `null`; `streamSeq` is the tasks-stream
+sequence for lost tasks (0 for failed results). Each entry is published with
+`Nats-Msg-Id: dlq-<taskId>-<attempt>` (`attempt` from the task payload, default
+1), and the operator skips a task attempt it has already recorded, so the
+advisory and the knight's own `lost: true` result give one entry.
+
+**State** lives in the KV bucket `roundtable-dead-letters`, key
+`<table>.<taskId>`, as `{state, reason, knight, attempt, subject, updatedAt}`:
+`open` on capture; `resolved` when a `success: true` result for the same task
+id arrives later (a spurious "lost" after an event-loop stall, pi-knight#84);
+`retried` is set by the retry API. Keys expire after 30 days.
+
+**Metrics**: `roundtable_tasks_dead_lettered_total{table,knight,reason}` and
+`roundtable_dead_letters_open{table,knight}`.
 
 ## Draining on rollout
 

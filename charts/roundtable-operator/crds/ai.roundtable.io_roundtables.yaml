@@ -1304,6 +1304,12 @@ spec:
                     description: createStreams, if true, tells the controller to create/update
                       the JetStream streams.
                     type: boolean
+                  deadLetterMaxAge:
+                    description: |-
+                      deadLetterMaxAge is how long entries are kept in the table's dead-letter
+                      stream (<tasksStream>_DLQ), which records lost and failed tasks. Only
+                      used when createStreams is true. Defaults to 720h (30 days).
+                    type: string
                   resultsStream:
                     description: resultsStream is the JetStream stream name for results.
                     type: string

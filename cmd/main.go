@@ -44,6 +44,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/controller"
+	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/mission"
 	notifypkg "github.com/roundtable-k8s/roundtable/internal/notify"
@@ -294,6 +295,10 @@ func main() {
 			setupLog.Error(err, "Failed to close NATS provider")
 		}
 	}()
+	// Dead-letter watchers (#396), started per RoundTable by its controller.
+	// Deferred after the provider so they stop before the connection closes.
+	deadLetters := deadletter.NewManager(ctrl.Log.WithName("dead-letter"))
+	defer deadLetters.StopAll()
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
 	knightSecurity := knightpkg.PodSecurityFromEnv()
@@ -349,10 +354,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.RoundTableReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
-		NATS:     natsProvider,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorderFor("roundtable-controller"), //nolint:staticcheck // SA1019: see note above
+		NATS:        natsProvider,
+		DeadLetters: deadLetters,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
