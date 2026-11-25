@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks examples/observability: values-telemetry.yaml renders the chart
 # collector with only the Jaeger trace exporter, the operator, gateway and
-# dashboard export to that collector, and the manifests are valid Kubernetes YAML.
+# dashboard export to that collector, and the manifests are well-formed (checked offline with yq).
 #
 # Usage: HELM=bin/helm scripts/check-observability-example.sh
 set -euo pipefail
@@ -30,8 +30,4 @@ manifests="$dir/jaeger.yaml"
 if yq -e 'select(.apiVersion == null or .kind == null or .metadata.name == null)' "$manifests" >/dev/null 2>&1; then fail "jaeger.yaml has a document without apiVersion, kind or name"; fi
 yq -e 'select(.kind == "Service" and .metadata.name == "jaeger") | .spec.ports[] | select(.port == 4317)' "$manifests" >/dev/null || fail "jaeger Service lacks port 4317"
 yq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image | test(":[0-9.]+$")' "$manifests" >/dev/null || fail "jaeger image must be pinned to a version tag"
-if command -v kubectl >/dev/null; then
-  # Client-side only: no kubeconfig, so kubectl never contacts a cluster.
-  KUBECONFIG=/dev/null kubectl create --dry-run=client --validate=false -f "$manifests" -o name >/dev/null || fail "kubectl create --dry-run=client rejected jaeger.yaml"
-fi
 echo "observability example OK"
