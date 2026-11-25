@@ -190,6 +190,9 @@ succeeded). The RoundTable also gets `IssuePickedUp`, `IssueNeedsHuman` and
   `humanPatterns` match words in the issue. It errs on the safe side (an
   issue that merely mentions "auth" is handed back); the PR pipeline's
   `escalate` step still catches the rest. Tune `humanPatterns` per table.
+- **Label cache.** The pickup labels are ensured once and remembered in
+  memory. A label deleted afterwards is not re-created until the operator
+  restarts or the table's label set changes.
 - **First page only.** Each poll reads up to 100 ready issues per repo.
 - **Polling.** Event-driven pickup via a GitHub webhook into JetStream is
   #176.

@@ -47,7 +47,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `runId` | string | Optional; chain/mission run id from the task. |
 | `chainName`, `stepName` | string | Optional; from the task when it comes from a Chain. |
 | `model` | string | Optional; resolved model. |
-| `seq` | int | Per-task, starts at 1, +1 per event published (including heartbeats). A gap means loss. |
+| `seq` | int | Per-task, starts at 1, +1 per event published (including heartbeats). A gap means loss. Matches `ActivityEvent.Seq` (int64) and the schema's `seq` (integer): change both together. |
 | `truncated` | bool | `true` if any text field was cut to its limit (omitted otherwise). |
 
 Names follow the attribute names in [telemetry conventions](telemetry-conventions.md) (#154). When trace context lands

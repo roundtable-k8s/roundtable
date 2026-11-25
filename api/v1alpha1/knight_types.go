@@ -347,6 +347,8 @@ type KnightWorkspace struct {
 
 	// existingClaim references an existing PVC to use instead of creating a new one.
 	// Useful for migrating existing knights to operator management.
+	// With more than one replica the claim must be ReadWriteMany; the operator
+	// cannot check access modes, so a ReadWriteOnce claim leaves a stuck pod.
 	// +optional
 	ExistingClaim string `json:"existingClaim,omitempty"`
 
@@ -475,6 +477,7 @@ type KnightTools struct {
 	// flakes adds packages from Nix flakes outside nixpkgs to the same tools
 	// image as nix. Each ref must be pinned to a commit, because the image is
 	// rebuilt only when the spec changes; a branch name would never refresh.
+	// git+ssh refs need matching SSH credentials on the tools builder Job.
 	// +kubebuilder:validation:MaxItems=16
 	// +listType=atomic
 	// +optional
