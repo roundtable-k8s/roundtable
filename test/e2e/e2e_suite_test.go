@@ -34,6 +34,9 @@ import (
 var (
 	// managerImage is the manager image to be built and loaded for testing.
 	managerImage = "example.com/roundtable-operator:v0.0.1"
+	// stubKnightImage is the no-LLM knight runtime (test/e2e/stubknight) the
+	// Chain trace case runs its steps on.
+	stubKnightImage = "example.com/roundtable-e2e-stub-knight:v0.0.1"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -60,8 +63,30 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
 
+	buildStubKnightImage()
+
 	setupCertManager()
 })
+
+// buildStubKnightImage builds the stub knight binary on the host, packs it into
+// an image and loads it into Kind.
+func buildStubKnightImage() {
+	By("building the stub knight image")
+	dir, err := os.MkdirTemp("", "stubknight")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	defer func() { _ = os.RemoveAll(dir) }()
+	// Run replaces cmd.Env, so the env for a static Linux binary is set in sh.
+	cmd := exec.Command("sh", "-c", `CGO_ENABLED=0 GOOS=linux go build -o "$0/stubknight" ./test/e2e/stubknight`, dir)
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the stub knight")
+	cmd = exec.Command("docker", "build", "-t", stubKnightImage, "-f", "test/e2e/stubknight/Dockerfile", dir)
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the stub knight image")
+
+	By("loading the stub knight image on Kind")
+	err = utils.LoadImageToKindClusterWithName(stubKnightImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the stub knight image into Kind")
+}
 
 var _ = AfterSuite(func() {
 	teardownCertManager()

@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func clearEnv(t *testing.T) {
@@ -108,5 +109,25 @@ func TestServiceNameOverride(t *testing.T) {
 	}()
 	if got := serviceAttrs(t)["service.name"]; got != "custom" {
 		t.Fatalf("service.name = %q", got)
+	}
+}
+
+// Chain run spans are emitted after the fact with IDs stored on the resource;
+// the provider Setup builds must honour them or the operator drops the spans.
+func TestSetupHonoursPresetIDs(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+	shutdown := setup(t)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		_ = shutdown(ctx)
+	}()
+	tid := trace.TraceID{1, 2, 3}
+	sid := DeriveSpanID(tid, "step/a/task-1")
+	_, span := otel.Tracer("t").Start(WithPresetIDs(context.Background(), tid, sid), "s", trace.WithNewRoot())
+	defer span.End()
+	if got := span.SpanContext(); got.TraceID() != tid || got.SpanID() != sid {
+		t.Fatalf("span IDs = %s/%s, want %s/%s", got.TraceID(), got.SpanID(), tid, sid)
 	}
 }
