@@ -17,12 +17,14 @@ limitations under the License.
 package knight
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -89,6 +91,16 @@ func (t Telemetry) WithTable(o *aiv1alpha1.RoundTableTelemetry) Telemetry {
 func processTelemetry() Telemetry {
 	telemetryOnce.Do(func() { telemetryLoaded = LoadTelemetry() })
 	return telemetryLoaded
+}
+
+// ResolveTelemetry returns the telemetry settings a knight's pod gets: the
+// operator environment with the knight's table overrides applied.
+func ResolveTelemetry(ctx context.Context, r client.Reader, k *aiv1alpha1.Knight) Telemetry {
+	tel := processTelemetry()
+	if rt := findTable(ctx, r, k, func(rt *aiv1alpha1.RoundTable) bool { return rt.Spec.Telemetry != nil }); rt != nil {
+		tel = tel.WithTable(rt.Spec.Telemetry)
+	}
+	return tel
 }
 
 // Env returns the OTEL_* env for a knight's app container. Without an

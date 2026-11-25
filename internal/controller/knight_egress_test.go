@@ -922,3 +922,62 @@ func plainHosts(names ...string) []aiv1alpha1.EgressHost {
 	}
 	return out
 }
+
+func TestRenderEgressOTLPCollector(t *testing.T) {
+	k := testEgressKnight("")
+	s := missionpkg.DefaultNetPolSettings()
+	base := RenderCiliumEgressPolicy(k, EgressAllowlist{}, s)
+	baseNP := RenderEgressNetworkPolicy(k, EgressAllowlist{}, s)
+
+	// No endpoint: both policies are unchanged.
+	assert.Equal(t, base, RenderCiliumEgressPolicy(k, EgressAllowlist{OTLPEndpoint: ""}, s))
+	assert.Equal(t, baseNP, RenderEgressNetworkPolicy(k, EgressAllowlist{OTLPEndpoint: ""}, s))
+
+	cases := []struct {
+		name, endpoint, key string
+		ports               []int32
+	}{
+		{"in-cluster", "http://otel-collector.observability.svc:4318", "toEndpoints", []int32{4318}},
+		{"external", "https://otlp.example.com:4317", "toFQDNs", []int32{4317}},
+		{"default ports", "http://collector.example.com", "toFQDNs", []int32{4317, 4318}},
+		{"ip", "http://10.1.2.3:4317", "toCIDR", []int32{4317}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			allow := EgressAllowlist{OTLPEndpoint: c.endpoint}
+			egress, _, _ := unstructured.NestedSlice(RenderCiliumEgressPolicy(k, allow, s).Object, "spec", "egress")
+			baseEgress, _, _ := unstructured.NestedSlice(base.Object, "spec", "egress")
+			require.Len(t, egress, len(baseEgress)+1)
+			// The collector rule sits after DNS and NATS, before the API server.
+			found, _ := egress[2].(map[string]any)
+			require.NotNil(t, found, "collector rule with %s", c.key)
+			rawPorts := found["toPorts"].([]any)[0].(map[string]any)["ports"].([]any)
+			got := make([]int32, 0, len(rawPorts))
+			for _, p := range rawPorts {
+				n, _ := strconv.Atoi(p.(map[string]any)["port"].(string))
+				got = append(got, int32(n))
+			}
+			assert.Equal(t, c.ports, got)
+			if c.name == "in-cluster" {
+				sel := found["toEndpoints"].([]any)[0].(map[string]any)["matchLabels"].(map[string]any)
+				assert.Equal(t, "observability", sel["k8s:io.kubernetes.pod.namespace"])
+			}
+
+			np := RenderEgressNetworkPolicy(k, allow, s)
+			if c.name == "in-cluster" {
+				require.Len(t, np.Spec.Egress, len(baseNP.Spec.Egress)+1)
+				var ns string
+				for _, r := range np.Spec.Egress {
+					if len(r.To) == 1 && r.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == "observability" {
+						ns = "observability"
+						assert.Equal(t, []int32{4318}, npPorts(r))
+					}
+				}
+				assert.Equal(t, "observability", ns)
+			} else {
+				require.Len(t, np.Spec.Egress, len(baseNP.Spec.Egress))
+				assert.Subset(t, npPorts(np.Spec.Egress[len(np.Spec.Egress)-1]), c.ports)
+			}
+		})
+	}
+}
