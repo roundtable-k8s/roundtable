@@ -105,7 +105,7 @@ func (r *ChainReconciler) owningMissionInactive(ctx context.Context, chain *aiv1
 // Also warns about common mistakes like using lowercase field names.
 func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 	// Dry-run execute with mock data to catch field access errors
-	mockSteps := make(map[string]map[string]string)
+	mockSteps := make(map[string]map[string]any)
 	for _, s := range chain.Spec.Steps {
 		mockSteps[s.Name] = stepTemplateData(aiv1alpha1.ChainStepStatus{})
 	}
@@ -113,7 +113,7 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 		if !strings.Contains(task, "{{") {
 			return nil
 		}
-		tmpl, err := template.New("validate").Parse(task)
+		tmpl, err := template.New("validate").Funcs(templateFuncs).Parse(task)
 		if err != nil {
 			return fmt.Errorf("step %q has invalid template: %w", name, err)
 		}
@@ -140,9 +140,9 @@ func (r *ChainReconciler) validateTemplates(chain *aiv1alpha1.Chain) error {
 		if step.Loop == nil {
 			continue
 		}
-		body := make(map[string]map[string]string, len(step.Loop.Steps))
+		body := make(map[string]map[string]any, len(step.Loop.Steps))
 		for _, b := range step.Loop.Steps {
-			body[b.Name] = map[string]string{"Output": "", "Error": "", "Phase": ""}
+			body[b.Name] = map[string]any{"Output": "", "Error": "", "Phase": "", "PRs": []templatePR{}, "Verdict": ""}
 		}
 		loopData := map[string]any{"Loop": map[string]any{
 			"Iteration": 1, "MaxIterations": 1, "Steps": body,

@@ -213,7 +213,7 @@ func TestPRPipelineExampleVerdict(t *testing.T) {
 // the controller does, checking that only the loop that ran contributes.
 func TestPRPipelineExampleTemplates(t *testing.T) {
 	chain := loadPRPipelineExample(t)
-	steps := map[string]map[string]string{}
+	steps := map[string]map[string]any{}
 	for _, s := range chain.Spec.Steps {
 		steps[s.Name] = stepTemplateData(aiv1alpha1.ChainStepStatus{Phase: aiv1alpha1.ChainStepPhaseSkipped})
 	}
@@ -227,7 +227,7 @@ func TestPRPipelineExampleTemplates(t *testing.T) {
 			if s.Name != name {
 				continue
 			}
-			tmpl := template.Must(template.New(name).Parse(s.Task))
+			tmpl := template.Must(template.New(name).Funcs(templateFuncs).Parse(s.Task))
 			var buf bytes.Buffer
 			if err := tmpl.Execute(&buf, map[string]any{"Steps": steps, "Input": chain.Spec.Input}); err != nil {
 				t.Fatal(err)

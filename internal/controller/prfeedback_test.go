@@ -435,7 +435,7 @@ func TestPRFeedbackLeadStepsNeverSeeTheLog(t *testing.T) {
 	r := &ChainReconciler{}
 	seen := map[string]bool{}
 	for _, s := range chain.Spec.Steps {
-		out, err := r.renderTemplateWith(chain, s.Task, nil)
+		out, err := r.renderTemplateWith(context.Background(), chain, s.Task, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", s.Name, err)
 		}

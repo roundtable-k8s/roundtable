@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -130,20 +131,71 @@ func validateConditionsAndLoops(chain *aiv1alpha1.Chain) (string, error) {
 }
 
 // stepTemplateData is the per-step entry of .Steps in task templates.
-func stepTemplateData(ss aiv1alpha1.ChainStepStatus) map[string]string {
-	d := map[string]string{
+func stepTemplateData(ss aiv1alpha1.ChainStepStatus) map[string]any {
+	d := map[string]any{
 		"Output":     ss.Output,
 		"Error":      ss.Error,
 		"Phase":      string(ss.Phase),
 		"Reason":     ss.Reason,
 		"Outcome":    "",
 		"Iterations": "0",
+		"PRs":        []templatePR{},
+		"Verdict":    "",
 	}
 	if ss.Loop != nil {
 		d["Outcome"] = string(ss.Loop.Outcome)
 		d["Iterations"] = strconv.Itoa(int(ss.Loop.Iteration))
 	}
 	return d
+}
+
+// templatePR is a pull request of a step's structured result, as templates
+// see it in .Steps.<name>.PRs. State is what the knight reported the task did
+// with the PR (opened, updated, ...); it is empty when unknown.
+type templatePR struct {
+	URL    string
+	Repo   string
+	Number int
+	State  string
+}
+
+// templateFuncs are the helpers available in task templates.
+var templateFuncs = template.FuncMap{"prURLs": prURLs}
+
+// prURLs joins the URLs of a step's PRs with spaces ("" when there are none),
+// e.g. {{ prURLs .Steps.implement.PRs }} or {{ prURLs .Steps.implement }}.
+func prURLs(v any) string {
+	if m, ok := v.(map[string]any); ok {
+		v = m["PRs"]
+	}
+	prs, _ := v.([]templatePR)
+	urls := make([]string, 0, len(prs))
+	for _, p := range prs {
+		if p.URL != "" {
+			urls = append(urls, p.URL)
+		}
+	}
+	return strings.Join(urls, " ")
+}
+
+// fillStructured sets PRs and Verdict on a template entry from the step's
+// structured result (KV entry, else the prose fallback over out).
+func (r *ChainReconciler) fillStructured(ctx context.Context, chain *aiv1alpha1.Chain, d map[string]any, key, out string) {
+	prs, verdict := r.structuredVars(ctx, chain, key, out, true)
+	list := make([]templatePR, 0, len(prs))
+	for _, p := range prs {
+		m, _ := p.(map[string]any)
+		n, _ := m["number"].(int64)
+		list = append(list, templatePR{URL: m["url"].(string), Repo: m["repo"].(string), Number: int(n), State: m["action"].(string)})
+	}
+	d["PRs"] = list
+	d["Verdict"] = verdict
+}
+
+// templateWantsStructured reports whether a task template may use the
+// structured fields, so the KV is only read for templates that need it.
+func templateWantsStructured(task string) bool {
+	return strings.Contains(task, "PRs") || strings.Contains(task, "Verdict") || strings.Contains(task, "prURLs")
 }
 
 // mentions reports whether name appears in any of the expressions. It is a
@@ -728,11 +780,14 @@ func (r *ChainReconciler) dispatchBodyTask(ctx context.Context, nc natsConfig, c
 	}
 
 	last := r.loopLast(ctx, chain, spec, ls, idx)
-	bodySteps := make(map[string]map[string]string, len(ls.Steps))
+	bodySteps := make(map[string]map[string]any, len(ls.Steps))
 	for _, s := range ls.Steps {
-		bodySteps[s.Name] = map[string]string{"Output": s.Output, "Error": s.Error, "Phase": string(s.Phase)}
+		bodySteps[s.Name] = map[string]any{"Output": s.Output, "Error": s.Error, "Phase": string(s.Phase), "PRs": []templatePR{}, "Verdict": ""}
+		if s.Phase == aiv1alpha1.ChainStepPhaseSucceeded && templateWantsStructured(body.Task) {
+			r.fillStructured(ctx, chain, bodySteps[s.Name], loopBodyKey(chain, spec.Name, s.Name), s.Output)
+		}
 	}
-	taskStr, err := r.renderTemplateWith(chain, body.Task, map[string]any{"Loop": map[string]any{
+	taskStr, err := r.renderTemplateWith(ctx, chain, body.Task, map[string]any{"Loop": map[string]any{
 		"Iteration":     int(ls.Iteration),
 		"MaxIterations": int(ls.MaxIterations),
 		"Last": map[string]string{

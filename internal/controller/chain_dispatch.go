@@ -37,21 +37,25 @@ import (
 )
 
 // renderTemplate renders Go templates in the task string with step outputs and input.
-func (r *ChainReconciler) renderTemplate(chain *aiv1alpha1.Chain, taskStr string) (string, error) {
-	return r.renderTemplateWith(chain, taskStr, nil)
+func (r *ChainReconciler) renderTemplate(ctx context.Context, chain *aiv1alpha1.Chain, taskStr string) (string, error) {
+	return r.renderTemplateWith(ctx, chain, taskStr, nil)
 }
 
 // renderTemplateWith renders a task template with extra top-level data
 // (forEach items add Item, item, ItemIndex and ItemJSON).
-func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr string, extra map[string]any) (string, error) {
+func (r *ChainReconciler) renderTemplateWith(ctx context.Context, chain *aiv1alpha1.Chain, taskStr string, extra map[string]any) (string, error) {
 	if !strings.Contains(taskStr, "{{") {
 		return taskStr, nil
 	}
 
 	// Build template data
-	steps := make(map[string]map[string]string)
+	wantStructured := templateWantsStructured(taskStr)
+	steps := make(map[string]map[string]any)
 	for _, ss := range chain.Status.StepStatuses {
 		steps[ss.Name] = stepTemplateData(ss)
+		if wantStructured && ss.Phase == aiv1alpha1.ChainStepPhaseSucceeded {
+			r.fillStructured(ctx, chain, steps[ss.Name], chain.Name+"."+ss.Name, ss.Output)
+		}
 	}
 
 	data := map[string]any{
@@ -61,7 +65,7 @@ func (r *ChainReconciler) renderTemplateWith(chain *aiv1alpha1.Chain, taskStr st
 	}
 	maps.Copy(data, extra)
 
-	tmpl, err := template.New("task").Parse(taskStr)
+	tmpl, err := template.New("task").Funcs(templateFuncs).Parse(taskStr)
 	if err != nil {
 		return "", fmt.Errorf("template parse error: %w", err)
 	}
@@ -255,7 +259,7 @@ func (r *ChainReconciler) dispatchStep(ctx context.Context, chain *aiv1alpha1.Ch
 	log := logf.FromContext(ctx)
 
 	// Render task template
-	taskStr, err := r.renderTemplate(chain, step.Task)
+	taskStr, err := r.renderTemplate(ctx, chain, step.Task)
 	if err != nil {
 		log.Error(err, "Failed to render template", "step", step.Name)
 		ss.Phase = aiv1alpha1.ChainStepPhaseFailed

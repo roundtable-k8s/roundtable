@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestDependentStepTaskContainsUpstreamOutput(t *testing.T) {
 		}},
 	}
 
-	got, err := r.renderTemplate(chain, task)
+	got, err := r.renderTemplate(context.Background(), chain, task)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
