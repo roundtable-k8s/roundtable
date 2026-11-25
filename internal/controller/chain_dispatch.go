@@ -330,6 +330,7 @@ func (r *ChainReconciler) dispatchStep(ctx context.Context, chain *aiv1alpha1.Ch
 		RunID:     runID,
 		Task:      taskStr,
 		Model:     model,
+		Effort:    step.Effort,
 	}
 
 	seq, err := r.publishTask(withRunSpan(ctx, chain, plainStepSpanKey(step.Name, taskID)), nc, knight.Spec.Domain, knightName, payload)

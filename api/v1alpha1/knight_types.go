@@ -78,6 +78,14 @@ type KnightSpec struct {
 	// +optional
 	Model string `json:"model,omitempty"`
 
+	// effort is the knight's default reasoning effort. It is passed to the
+	// pod as KNIGHT_EFFORT; the runtime maps it onto its own setting. A chain
+	// step's effort overrides it for that task. Unset leaves the runtime's
+	// own configuration alone.
+	// +kubebuilder:validation:Enum=low;medium;high;xhigh;max
+	// +optional
+	Effort string `json:"effort,omitempty"`
+
 	// image is the container image for the knight runtime.
 	// If empty, the knight's RoundTable spec.defaults.image applies, and when
 	// that is unset too the operator's DEFAULT_KNIGHT_IMAGE env var.

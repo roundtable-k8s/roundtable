@@ -619,6 +619,7 @@ func (r *ChainReconciler) dispatchItems(ctx context.Context, nc natsConfig, chai
 			RunID:     runID,
 			Task:      taskStr,
 			Model:     model,
+			Effort:    spec.Effort,
 		}
 		seq, err := r.publishTask(withRunSpan(ctx, chain, itemSpanKey(taskID)), nc, knight.Spec.Domain, spec.KnightRef.Name, payload)
 		if err != nil {

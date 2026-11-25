@@ -26,6 +26,7 @@ Published by the chain controller and the [invoke gateway](gateway.md) to
 | `chainName`, `stepName` | no | Set for chain steps and mission briefings. |
 | `runId` | no | Chain run ID, or for gateway tasks the conversation ID. Key agent sessions on it so context never bleeds between runs; a gateway caller sends the same `runId` again to continue a conversation. A chain step with `resumeRunId` sends an earlier run's ID instead (see below). |
 | `model` | no | Per-task model override (see below). Absent means "use your configured model" (`KNIGHT_MODEL`, from `Knight.spec.model`). |
+| `effort` | no | Per-task reasoning-effort override: `low`, `medium`, `high`, `xhigh` or `max` (see below). Absent means "use your configured effort" (`KNIGHT_EFFORT`, from `Knight.spec.effort`, when set). |
 | `attempt`, `retryOf`, `previousFailure` | no | Set by a manual retry (#397): the 1-based attempt number, the task ID being retried and why that attempt was dead-lettered (at most 2 KB). Absent means attempt 1. A retried task may have partly run, so check for partial work before starting over. Used to de-duplicate dead-letter entries (see [Delivery and failure](#delivery-and-failure)). |
 
 ### `model`
@@ -55,6 +56,15 @@ A knight that does not understand `model` ignores it and uses its configured
 model — the field is additive and old knights keep working. A knight that does
 understand it but cannot honour it (unknown model, provider not configured) must
 fail the task with an `error` rather than silently fall back.
+
+### `effort`
+
+When present (from `ChainStep.effort`, also on loop body steps), run **this task
+only** at that reasoning effort, then go back to the configured effort. The
+operator passes the value through unchanged; each runtime maps it onto its own
+setting. `Knight.spec.effort` is the knight-level default, exported to the pod
+as the `KNIGHT_EFFORT` env var (absent when unset). A knight that does not
+understand `effort` ignores it — the field is additive.
 
 ## Result payload
 

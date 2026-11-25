@@ -608,6 +608,23 @@ var _ = Describe("PodBuilder", func() {
 			Expect(path).To(ContainSubstring("/usr/local/bin")) // base PATH preserved
 		})
 
+		It("exports KNIGHT_EFFORT only when spec.effort is set (#375)", func() {
+			find := func() (string, bool) {
+				for _, e := range builder.Build(context.Background()).Containers[0].Env {
+					if e.Name == "KNIGHT_EFFORT" {
+						return e.Value, true
+					}
+				}
+				return "", false
+			}
+			_, found := find()
+			Expect(found).To(BeFalse())
+			knight.Spec.Effort = "xhigh"
+			v, found := find()
+			Expect(found).To(BeTrue())
+			Expect(v).To(Equal("xhigh"))
+		})
+
 		It("creates main container with proper configuration", func() {
 			builder.WithWorkspace()
 			spec := builder.Build(context.Background())

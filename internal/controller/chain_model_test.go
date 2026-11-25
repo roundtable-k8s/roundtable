@@ -100,6 +100,7 @@ var _ = Describe("Chain per-step model override", func() {
 		r        *ChainReconciler
 	)
 
+	var stepEffort string
 	reconcileN := func(n int) {
 		for range n {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
@@ -117,7 +118,7 @@ var _ = Describe("Chain per-step model override", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 			Spec: aiv1alpha1.ChainSpec{
 				RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 86400,
-				Steps: []aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: knightRef}, Task: "do it", TimeoutSeconds: 120, Model: model}},
+				Steps: []aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: knightRef}, Task: "do it", TimeoutSeconds: 120, Model: model, Effort: stepEffort}},
 			},
 		})).To(Succeed())
 		reconcileN(3)
@@ -139,6 +140,7 @@ var _ = Describe("Chain per-step model override", func() {
 	}
 
 	BeforeEach(func() {
+		stepEffort = ""
 		fake = &modelFakeNATS{fakeNATSClient: newFakeNATSClient()}
 		recorder = record.NewFakeRecorder(100)
 		r = &ChainReconciler{
@@ -191,6 +193,22 @@ var _ = Describe("Chain per-step model override", func() {
 		p := fake.payloads()
 		Expect(p).To(HaveLen(1))
 		Expect(p[0]).To(HaveKeyWithValue("model", "opus"))
+	})
+
+	It("sends the step effort in the task payload, and omits it when unset (#375)", func() {
+		stepEffort = "high"
+		c := run(claudeKnight, "")
+		Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
+		p := fake.payloads()
+		Expect(p).To(HaveLen(1))
+		Expect(p[0]).To(HaveKeyWithValue("effort", "high"))
+	})
+
+	It("omits effort from the payload when the step sets none (#375)", func() {
+		run(claudeKnight, "")
+		p := fake.payloads()
+		Expect(p).To(HaveLen(1))
+		Expect(p[0]).NotTo(HaveKey("effort"))
 	})
 
 	It("passes a literal provider/model through to a pi-knight (image from the operator default)", func() {
