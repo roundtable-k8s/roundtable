@@ -280,6 +280,8 @@ var _ = Describe("Mission Controller", func() {
 			Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 			CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+			Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+			Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 		}
 	}
 
@@ -1534,6 +1536,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Drive through Assembling — the warm pool claim recreates the knight
@@ -1625,6 +1629,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Drive to assembling phase
@@ -1747,6 +1753,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Drive to assembling phase
@@ -1863,6 +1871,8 @@ var _ = Describe("Mission Controller - Warm Pool", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Drive to assembling phase
@@ -2025,6 +2035,8 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
 				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
 				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
+				Briefer:     &missionpkg.Briefer{Client: k8sClient, Recorder: record.NewFakeRecorder(100)},
+				Chains:      &missionpkg.ChainManager{Client: k8sClient, Scheme: k8sClient.Scheme()},
 			}
 
 			// Reconcile a few times to create the mission-scoped chain
@@ -2120,46 +2132,6 @@ var _ = Describe("Mission Controller - Generated Chains", func() {
 				"Planner-generated chain should inherit roundTableRef from parent mission (issue #84)")
 			Expect(aiv1alpha1.RefName(chain.Spec.MissionRef)).To(Equal(missionName),
 				"Planner-generated chain should have missionRef set")
-		})
-
-		It("ensureMissionChain is a no-op when the planner already created the chain (no source template)", func() {
-			// Regression: meta-mission chains are created directly by the planner
-			// as mission-<mission>-<chain>; there is no standalone source-chain
-			// template. ensureMissionChain must short-circuit on the existing
-			// chain instead of failing with "source chain not found" (which
-			// marked the mission Failed even though its chain succeeded).
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{Name: missionName, Namespace: namespace},
-				Spec: aiv1alpha1.MissionSpec{
-					Objective:     "Test meta-mission chain wiring",
-					RoundTableRef: aiv1alpha1.LocalRef(rtName),
-				},
-			}
-
-			By("Pre-creating the mission-scoped chain as the planner would")
-			missionChainName := fmt.Sprintf("mission-%s-haiku-generation", missionName)
-			plannerChain := &aiv1alpha1.Chain{
-				ObjectMeta: metav1.ObjectMeta{Name: missionChainName, Namespace: namespace},
-				Spec: aiv1alpha1.ChainSpec{
-					Description:   "Planner-created chain",
-					Steps:         []aiv1alpha1.ChainStep{{Name: "write_haiku", KnightRef: corev1.LocalObjectReference{Name: "haiku-writer"}, Task: "Write a haiku"}},
-					MissionRef:    aiv1alpha1.LocalRef(missionName),
-					RoundTableRef: aiv1alpha1.LocalRef(rtName),
-				},
-			}
-			Expect(k8sClient.Create(ctx, plannerChain)).To(Succeed())
-			defer func() { _ = k8sClient.Delete(ctx, plannerChain) }()
-
-			By("Calling ensureMissionChain with only the bare chain name and no source template")
-			reconciler := &MissionReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: record.NewFakeRecorder(100),
-			}
-			err := reconciler.ensureMissionChain(ctx, mission,
-				aiv1alpha1.MissionChainRef{Name: "haiku-generation", Phase: "Active"})
-			Expect(err).NotTo(HaveOccurred(),
-				"should short-circuit on the existing planner chain, not require a source template")
 		})
 	})
 })
