@@ -653,8 +653,8 @@ too.
 | Annotation | Effect |
 |---|---|
 | `ai.roundtable.io/suspended` | Suspends the Trigger like `spec.suspend`. It is suspended while **either** is set; removing the annotation does not clear `spec.suspend`. Any value but `"false"` counts. The value records who suspended it (the gateway writes its caller). |
-| `ai.roundtable.io/run-now` | Fires the Trigger once now, through the normal firing path: the same input rendering (`.Event.Time` is now, `.Event.Data` empty), concurrency policy, labels and `ttlSecondsAfterFinished`. It fires even while the Trigger is suspended. The value is a request ID: the firing's dedupe key is `manual:<value>` (`spec.dedupeKey` is not used), so the run is `<chain>-<trigger>-<hash of manual:<value>>`. The operator removes the annotation once the firing is handled; the firing shows in `status.recentFirings` (with a `skipReason` if, for example, `Forbid` held it back). |
-| `ai.roundtable.io/run-now-caller` | Who asked for the run-now firing; copied to the run as `ai.roundtable.io/caller`. |
+| `ai.roundtable.io/run-now` | Fires the Trigger once now, through the normal firing path: the same input rendering (`.Event.Time` is now, `.Event.Data` empty), concurrency policy, labels and `ttlSecondsAfterFinished`. It fires even while the Trigger is suspended. The value is a request ID: the firing's dedupe key is `manual:<value>` (`spec.dedupeKey` is not used), so the run is `<chain>-<trigger>-<hash of manual:<value>>` (a knight target sends one task, a mission target creates the Mission `<trigger>-<8 hex of the key hash>`). The operator removes the annotation once the firing is handled; the firing shows in `status.recentFirings` (with a `skipReason` if, for example, `Forbid` held it back). |
+| `ai.roundtable.io/run-now-caller` | Who asked for the run-now firing; copied to the run (the Chain run, the knight task or the Mission) as `ai.roundtable.io/caller`. |
 
 ```bash
 kubectl annotate trigger morning-digest ai.roundtable.io/suspended=me   # suspend

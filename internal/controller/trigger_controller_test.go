@@ -1022,6 +1022,27 @@ var _ = Describe("Trigger controller", func() {
 			})
 		})
 
+		It("fires once now for the run-now annotation on a suspended schedule and records the caller on the Mission", func() {
+			t := scheduleMissionTrigger("mt-runnow", func(s *aiv1alpha1.TriggerSpec) { s.Suspend = true })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{
+				aiv1alpha1.AnnotationTriggerRunNow:       "req-m",
+				aiv1alpha1.AnnotationTriggerRunNowCaller: "roundtable/ui",
+			}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("mt-runnow")
+
+			ms := missionsOf("mt-runnow")
+			Expect(ms).To(HaveLen(1))
+			Expect(ms[0].Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationCaller, "roundtable/ui"))
+			t = getTrigger("mt-runnow")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].Key).To(Equal(aiv1alpha1.TriggerRunNowKey("req-m")))
+			Expect(t.Status.RecentFirings[0].Run).To(Equal(ms[0].Name))
+		})
+
 		It("creates one Mission per firing with the rendered objective and budget, skips under Forbid, and records its phase", func() {
 			t := scheduleMissionTrigger("mt-cron", func(s *aiv1alpha1.TriggerSpec) {
 				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid

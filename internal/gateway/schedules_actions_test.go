@@ -67,6 +67,9 @@ func newActionEnv(t *testing.T, enabled bool) *actionEnv {
 	orphan.Spec.Target.ChainRef.Name = "gone"
 	knight := actionTrigger("knight-digest", nil)
 	knight.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "brief me"}}
+	mission := actionTrigger("mission-digest", nil)
+	mission.Spec.Target = aiv1alpha1.TriggerTarget{Mission: &aiv1alpha1.TriggerMissionTarget{Objective: "review"}}
+	invoke := actionTrigger("invoke-digest", nil)
 	events := actionTrigger("events", nil)
 	events.Spec.Source = aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: "x.events.y"}}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
@@ -75,7 +78,7 @@ func newActionEnv(t *testing.T, enabled bool) *actionEnv {
 			"kustomize.toolkit.fluxcd.io/name":      "apps",
 			"kustomize.toolkit.fluxcd.io/namespace": "flux-system",
 		}),
-		suspended, orphan, events, knight,
+		suspended, orphan, events, knight, mission, invoke,
 	).WithStatusSubresource(&aiv1alpha1.Trigger{}, &aiv1alpha1.Chain{}).Build()
 
 	svc := NewService(&Resolver{Client: k8s}, nil, Options{Namespace: testNS, MaxTimeout: time.Minute,
@@ -127,6 +130,8 @@ func (e *actionEnv) playTrigger(t *testing.T, name, skipReason string) {
 		if skipReason == "" {
 			if trg.Spec.Target.ChainRef != nil {
 				firing.Run = chainrun.TriggerRunName(trg.Spec.Target.ChainRef.Name, trg.Name, key)
+			} else if trg.Spec.Target.Mission != nil {
+				firing.Run = "invoke-mission-1a2b3c4d"
 			} else {
 				firing.Run = TaskIDPrefix + "galahad-abc123"
 			}
@@ -277,6 +282,33 @@ func TestRunKnightSchedule(t *testing.T) {
 	trg := e.trigger(t, "knight-digest")
 	if trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller] != "token" {
 		t.Errorf("annotations: %v", trg.Annotations)
+	}
+}
+
+func TestRunMissionSchedule(t *testing.T) {
+	e := newActionEnv(t, true)
+	go e.playTrigger(t, "mission-digest", "")
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/mission-digest/run", testToken, nil)
+	if resp.StatusCode != http.StatusCreated || out["state"] != ScheduleRunStarted || out["target"] != "mission" || out["run"] != "invoke-mission-1a2b3c4d" {
+		t.Fatalf("run: %d %v", resp.StatusCode, out)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/v1/missions/"+testNS+"/invoke-mission-1a2b3c4d" {
+		t.Errorf("Location: %q", loc)
+	}
+}
+
+// A Chain run of a schedule named "invoke-..." has a name starting with the
+// task ID prefix; its Location must still be the run route.
+func TestRunChainScheduleLocationIgnoresNamePrefix(t *testing.T) {
+	e := newActionEnv(t, true)
+	go e.playTrigger(t, "invoke-digest", "")
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/invoke-digest/run", testToken, nil)
+	if resp.StatusCode != http.StatusCreated || out["target"] != "chain" {
+		t.Fatalf("run: %d %v", resp.StatusCode, out)
+	}
+	run, _ := out["run"].(string)
+	if loc := resp.Header.Get("Location"); loc != "/v1/schedules/"+testNS+"/invoke-digest/runs/"+run {
+		t.Errorf("Location: %q", loc)
 	}
 }
 

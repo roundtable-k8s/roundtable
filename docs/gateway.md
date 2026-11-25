@@ -822,6 +822,68 @@ Git: no `status`, `managedFields`, `resourceVersion`, `uid`, `generation`,
 curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/manifest" > morning-digest.yaml
 ```
 
+### `POST /v1/schedules/{namespace}/{name}/suspend`
+
+Sets `ai.roundtable.io/suspended` to the caller (`token` for the static bearer
+tokens). The answer is the effective state:
+
+```json
+{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "annotation"}
+```
+
+### `POST /v1/schedules/{namespace}/{name}/resume`
+
+Removes the annotation. It does **not** clear `spec.suspend`: a schedule
+suspended in its spec stays suspended, and the answer says so:
+
+```json
+{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "spec",
+ "message": "spec.suspend is still true: the schedule stays suspended until spec.suspend is cleared where the Trigger is defined"}
+```
+
+### `POST /v1/schedules/{namespace}/{name}/run`
+
+Fires the schedule once now through the trigger controller's normal firing
+path (input rendering, concurrency policy, run labels), even while it is
+suspended. The gateway sets `ai.roundtable.io/run-now` (a request ID) and
+`ai.roundtable.io/run-now-caller` on the Trigger; the controller starts the
+run, annotates it `ai.roundtable.io/caller` with the caller, records the
+firing and removes the request. The gateway waits up to 10 seconds for that:
+
+- **201** with `state: started` once the run exists;
+- **202** with `state: pending` if the operator has not handled it yet. For a
+  Chain target the run name is already known (it is derived from the firing's
+  key). For a knight or mission target it is not: `run` is empty and there is
+  no `Location`; the task ID or Mission name appears in the schedule's
+  `status.recentFirings[].run` once the firing is recorded;
+- **409** with `state: skipped` and the reason when the firing started
+  nothing (for example `concurrency Forbid: run ... is active`), when an
+  earlier run-now request is still waiting (`state: pending`), or when the
+  target Chain does not exist.
+
+The answer's `target` is `chain`, `knight` or `mission`, and `Location`
+follows it:
+
+- **Chain**: `run` is the Chain run; 201 and 202 carry
+  `Location: /v1/schedules/{namespace}/{name}/runs/{run}`.
+- **Knight**: `run` is the task ID and the task records the caller; a 201
+  carries `Location: /v1/tasks/{taskId}`.
+- **Mission**: `run` is the Mission's name; the Mission carries the caller as
+  `ai.roundtable.io/caller`, and a 201 carries
+  `Location: /v1/missions/{namespace}/{name}`. Like a knight target, `run` is
+  empty and there is no `Location` while the request is pending.
+
+```json
+{"schedule": "morning-digest", "namespace": "roundtable", "run": "daily-digest-morning-digest-3f9a0c1b2d4e",
+ "key": "manual:1795627159000-1a2b3c4d", "target": "chain", "state": "started", "caller": "token"}
+```
+
+```bash
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/suspend"
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/run"
+curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/resume"
+```
+
 ## Schedule run history
 
 A schedule is a Trigger with a `source.schedule` ([triggers.md](triggers.md)).
@@ -899,62 +961,6 @@ two places a schedule's results are stored today:
 
 Raising the retention raises the task bucket TTL for all tasks, not only
 schedule runs.
-### `POST /v1/schedules/{namespace}/{name}/suspend`
-
-Sets `ai.roundtable.io/suspended` to the caller (`token` for the static bearer
-tokens). The answer is the effective state:
-
-```json
-{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "annotation"}
-```
-
-### `POST /v1/schedules/{namespace}/{name}/resume`
-
-Removes the annotation. It does **not** clear `spec.suspend`: a schedule
-suspended in its spec stays suspended, and the answer says so:
-
-```json
-{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "spec",
- "message": "spec.suspend is still true: the schedule stays suspended until spec.suspend is cleared where the Trigger is defined"}
-```
-
-### `POST /v1/schedules/{namespace}/{name}/run`
-
-Fires the schedule once now through the trigger controller's normal firing
-path (input rendering, concurrency policy, run labels), even while it is
-suspended. The gateway sets `ai.roundtable.io/run-now` (a request ID) and
-`ai.roundtable.io/run-now-caller` on the Trigger; the controller starts the
-run, annotates it `ai.roundtable.io/caller` with the caller, records the
-firing and removes the request. The gateway waits up to 10 seconds for that:
-
-- **201** with `state: started` once the run exists;
-- **202** with `state: pending` if the operator has not handled it yet. For a
-  Chain target the run name is already known (it is derived from the firing's
-  key). For a knight target the task ID is not: `run` is empty and there is
-  no `Location`; the task ID appears in the schedule's
-  `status.recentFirings[].run` once the firing is recorded;
-- **409** with `state: skipped` and the reason when the firing started
-  nothing (for example `concurrency Forbid: run ... is active`), when an
-  earlier run-now request is still waiting (`state: pending`), or when the
-  target Chain does not exist.
-
-A knight target works the same way: `run` is the task ID, the task records
-the caller, and a 201 carries `Location: /v1/tasks/{taskId}`.
-
-For a Chain target, 201 and 202 carry
-`Location: /v1/schedules/{namespace}/{name}/runs/{run}`. That route comes with
-the schedule run routes (#586) and is not served yet.
-
-```json
-{"schedule": "morning-digest", "namespace": "roundtable", "run": "daily-digest-morning-digest-3f9a0c1b2d4e",
- "key": "manual:1795627159000-1a2b3c4d", "state": "started", "caller": "token"}
-```
-
-```bash
-curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/suspend"
-curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/run"
-curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/resume"
-```
 
 ## Webhooks
 

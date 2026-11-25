@@ -753,7 +753,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 
 	if trg.Spec.Target.Mission != nil {
 		return r.fireMission(ctx, missionFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
