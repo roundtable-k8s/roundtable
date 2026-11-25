@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -529,4 +530,37 @@ func main() {
 	if err := shutdownTelemetry(shutdownCtx); err != nil {
 		setupLog.Error(err, "Failed to flush OpenTelemetry spans")
 	}
+}
+
+// leaderElectionTimings are the lease timings handed to controller-runtime.
+type leaderElectionTimings struct {
+	LeaseDuration time.Duration
+	RenewDeadline time.Duration
+	RetryPeriod   time.Duration
+}
+
+// Validate mirrors client-go's leader election constraints so a bad
+// combination fails at start-up with a clear message rather than a late,
+// cryptic error from the election loop. client-go requires
+// leaseDuration > renewDeadline > retryPeriod * 1.2 (JitterFactor).
+func (t leaderElectionTimings) Validate() error {
+	if t.LeaseDuration <= 0 || t.RenewDeadline <= 0 || t.RetryPeriod <= 0 {
+		return fmt.Errorf("leader election timings must be positive: lease-duration=%s renew-deadline=%s retry-period=%s",
+			t.LeaseDuration, t.RenewDeadline, t.RetryPeriod)
+	}
+	if t.RenewDeadline >= t.LeaseDuration {
+		return fmt.Errorf("leader-election-renew-deadline (%s) must be less than leader-election-lease-duration (%s)",
+			t.RenewDeadline, t.LeaseDuration)
+	}
+	if float64(t.RenewDeadline) <= 1.2*float64(t.RetryPeriod) {
+		return fmt.Errorf("leader-election-renew-deadline (%s) must be greater than 1.2 x leader-election-retry-period (%s)",
+			t.RenewDeadline, t.RetryPeriod)
+	}
+	return nil
+}
+
+// isLeaderElectionLost reports whether a manager.Start error means the lease
+// could not be renewed in time (controller-runtime returns "leader election lost").
+func isLeaderElectionLost(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "leader election lost")
 }
