@@ -1,101 +1,85 @@
 # Architecture
 
+> How the system runs today. Three parts: [NATS/JetStream topology](#natsjetstream-topology), [the knight environment](#the-knight-environment) and [request flow](#request-flow). Design records for individual features are linked where they apply.
+
 ## Overview
 
 **Knights of the Round Table** is a Kubernetes operator that orchestrates fleets of AI agents as first-class cluster resources. It provides declarative management, workflow orchestration, and cost control through four Custom Resource Definitions.
 
-### Core Metaphor
-
 | Concept | Kubernetes Resource | Purpose |
 |---------|-------------------|---------|
-| **Knight** | Pod (Deployment/Sandbox) | A single AI agent with a domain, model, and skills |
+| **Knight** | Deployment (or agent-sandbox Sandbox) + pod | A single AI agent with a domain, model, skills and tools |
 | **RoundTable** | Fleet config | A group of knights sharing NATS infrastructure and policies |
 | **Chain** | DAG workflow | Multi-step task pipeline with output chaining between knights |
 | **Mission** | Ephemeral team | Auto-assembles knights for a time-bounded objective |
 
-## System Architecture
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                       │
-│                                                            │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │              Operator Pod                            │  │
-│  │  ┌───────────────┐  ┌───────────────────────────┐  │  │
-│  │  │  Controllers   │  │  Runtime Backends          │  │  │
-│  │  │  • Knight      │  │  • DeploymentBackend      │  │  │
-│  │  │  • RoundTable  │  │  • SandboxBackend         │  │  │
-│  │  │  • Chain       │  │    (scale-to-zero)        │  │  │
-│  │  │  • Mission     │  └───────────────────────────┘  │  │
-│  │  └───────────────┘                                   │  │
-│  └─────────────────────────────────────────────────────┘  │
-│           │ watches/reconciles                             │
-│           ▼                                                │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │              CRDs (etcd)                             │  │
-│  │  RoundTable ──owns──► Knight[]                      │  │
-│  │  Mission ──creates──► ephemeral RoundTable + Chain[]│  │
-│  │  Chain ──references──► Knight (by name/domain)      │  │
-│  └─────────────────────────────────────────────────────┘  │
-│           │ creates pods                                   │
-│           ▼                                                │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │         Knight Pods (pi-knight runtime)              │  │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐      │  │
-│  │  │Galahad │ │Tristan │ │ Warm-1 │ │ Warm-2 │      │  │
-│  │  │security│ │ infra  │ │(idle)  │ │(idle)  │      │  │
-│  │  └───┬────┘ └───┬────┘ └────────┘ └────────┘      │  │
-│  │      │          │                                    │  │
-│  │      ▼          ▼                                    │  │
-│  │  ┌─────────────────────────────────────────────┐    │  │
-│  │  │           NATS JetStream                     │    │  │
-│  │  │  Tasks:   {prefix}.tasks.{domain}.>          │    │  │
-│  │  │  Results: {prefix}.results.{task_id}         │    │  │
-│  │  │  KV:     chain-outputs (step result cache)   │    │  │
-│  │  └─────────────────────────────────────────────┘    │  │
-│  └─────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph cluster[Kubernetes cluster]
+    op[Operator<br/>Knight, RoundTable, Chain, Mission controllers]
+    gw[Invoke gateway<br/>cmd/gateway]
+    subgraph pods[Knight pods]
+      k1[Knight A]
+      k2[Knight B]
+    end
+    nats[(NATS JetStream)]
+    keda[KEDA]
+  end
+  op -- reconciles --> pods
+  op -- streams, consumers, KV --> nats
+  op -- publishes tasks, polls results --> nats
+  gw -- publishes tasks, reads results --> nats
+  nats -- pull consumer per knight --> pods
+  keda -- consumer lag --> nats
+  keda -- scales --> pods
 ```
 
-## Controller Reconciliation
+## NATS/JetStream topology
 
-Each CRD has a dedicated reconciler following the standard Kubernetes controller pattern:
+All names come from `pkg/nats`, `internal/deadletter` and the RoundTable reconciler (`internal/controller/roundtable_controller.go`, `ensureStreams`). `<prefix>` is `spec.nats.subjectPrefix` of the RoundTable.
 
-**KnightReconciler**: Task consumer → ConfigMap → PVC → Runtime (Deployment or Sandbox) → Status
-**RoundTableReconciler**: Knight discovery → Health aggregation → NATS streams → Warm pool → Cost check
-**ChainReconciler**: Step ordering → Task dispatch → Output collection → Template rendering → Next step
-**MissionReconciler**: State machine (Pending → Provisioning → Planning → Assembling → Briefing → Active → Cleanup)
+### Streams
 
-## Runtime Backends
+| Stream | Subjects | Retention | Created by |
+|---|---|---|---|
+| Tasks stream, `spec.nats.tasksStream` | `<prefix>.tasks.>` | `spec.nats.streamRetention` (default WorkQueue), file storage | RoundTable controller (`ensureStreams`), when `spec.nats.createStreams` is true |
+| Results stream, `spec.nats.resultsStream` | `<prefix>.results.>` | same as tasks | same |
+| Events stream, `spec.nats.eventsStream` (default `<tasksStream>_EVENTS`) | `<prefix>.events.>` | Limits with a max age (`EventsRetention()`); read by NATS-source Triggers | same, skipped for ephemeral (Mission) tables |
+| Advisories stream `<tasksStream>_ADVISORIES` | JetStream max-deliveries advisories for the tasks stream | Limits | RoundTable controller (dead-letter manager, `deadletter.AdvisoriesStreamName`) |
+| Dead-letter stream `<tasksStream>_DLQ` | `<prefix>.dlq.>` | Limits, max age `spec.nats.deadLetterMaxAge` | same (`deadletter.StreamName`) |
 
-The operator uses a pluggable `RuntimeBackend` interface:
+Task activity events are published on plain NATS (no stream captures them); see below.
 
-```go
-type RuntimeBackend interface {
-    Reconcile(ctx context.Context, knight *Knight) error
-    Cleanup(ctx context.Context, knight *Knight) error
-    IsReady(ctx context.Context, knight *Knight) (bool, error)
-    Suspend(ctx context.Context, knight *Knight) error
-    Resume(ctx context.Context, knight *Knight) error
-}
-```
+### Subjects
 
-- **DeploymentBackend** — Standard Kubernetes Deployment. Always running. Good for persistent knights.
-- **SandboxBackend** — Uses the `agents.x-k8s.io/v1beta1` Sandbox CRD (agent-sandbox v1.0.0 or later). Suspends and resumes through `spec.operatingMode`. Good for cost optimization.
+| Subject | Publisher | Reader | Source |
+|---|---|---|---|
+| `<prefix>.tasks.<domain>.<knight>` | Chain/Mission controllers, invoke gateway | the knight's consumer | `natspkg.TaskSubject` |
+| `<prefix>.results.<taskId>` | the knight runtime | Chain/Mission controllers (JetStream consumer), invoke gateway (core subscription plus `GetLastMsg`) | `natspkg.ResultSubject` |
+| `<prefix>.activity.<Knight>.<taskId>` | the knight runtime | gateway (`/events` streams, MCP progress), UI | `natspkg.ActivitySubject`; [design](design/task-activity-events.md) |
+| `<prefix>.events.<name>` | anything | NATS-source Triggers | `natspkg.EventSubject` |
+| `<prefix>.dlq.<knight>.<taskId>` | operator dead-letter watcher | `GET /v1/dead-letters` | `deadletter.Subject` |
 
-Selected per-knight via `spec.runtime: deployment|sandbox`. Why two backends, how gVisor, KEDA and egress fit each, and what was rejected: [design/runtime-backends-adr.md](design/runtime-backends-adr.md).
+### Consumers
 
-## NATS Communication
+| Consumer | On | Owner |
+|---|---|---|
+| `<Knight>-consumer` (`natspkg.KnightTaskConsumerName`) | tasks stream | Knight controller; durable, pull |
+| `chain-poll-<chain>-<step>` (`natspkg.ChainConsumerName`) | results stream | Chain controller; ephemeral, deleted after the read |
+| `roundtable-dead-letter` (`deadletter.ConsumerName`) | advisories stream | RoundTable controller (dead-letter manager) |
+| `trigger-<namespace>_<name>` (`natspkg.TriggerConsumerName`) | events stream | Trigger controller |
 
-### Subject Routing
+### KV buckets
 
-```
-{prefix}.tasks.{domain}.>        — All tasks for a domain
-{prefix}.tasks.{domain}.{knight} — Tasks for a specific knight
-{prefix}.results.{task_id}       — Result for a specific task
-```
+| Bucket | Holds | Source |
+|---|---|---|
+| `chain-outputs` | Chain step outputs, read back for fan-out, loops and large outputs | `internal/controller/chain_outputs.go` |
+| `mission-results` | Retained Mission results (TTL `ResultsTTL`, default 30 days) | `natspkg.ResultsBucket` |
+| `roundtable-cards` (override: env `CARDS_KV_BUCKET`) | Knight agent cards, one entry per knight | `natspkg.DefaultCardsBucket`, [agent-cards.md](agent-cards.md) |
+| `roundtable-dead-letters` | Dead-letter entry state, key `<table>.<taskId>` | `deadletter.KVBucket` |
+| `roundtable_gateway_tasks` (chart value `gateway.taskBucket`) | Invoke gateway task records | `charts/roundtable-operator/values.yaml` |
 
-### Consumer Model
+### Consumer model
 
 Each knight reads its tasks from a **durable JetStream pull consumer**
 `<Knight>-consumer` (the Knight name capitalised) on `spec.nats.stream`:
@@ -146,13 +130,99 @@ The runtimes still create the consumer at start-up with the same config until
 they only bind to it (roundtable-k8s/knights follow-up). Because both sides
 produce the same config, neither rewrites the other's consumer.
 
-### Message Flow
 
-1. Tim/Chain/Mission publishes task → `fleet-a.tasks.security.galahad`
-2. Galahad's consumer pulls the message
-3. pi-knight runtime processes it (LLM call + tool use)
-4. Result published → `fleet-a.results.{task_id}`
-5. Chain controller or caller picks up the result
+## The knight environment
+
+One Knight resource becomes one Deployment (default) or Sandbox plus its supporting objects. The pod is assembled in `internal/knight/pod_builder.go`; the backend is picked with `spec.runtime`.
+
+```go
+type RuntimeBackend interface { // pkg/runtime/backend.go
+    Reconcile / Cleanup / IsReady / Suspend / Resume
+}
+```
+
+- **DeploymentBackend** (`deployment_backend.go`): a Kubernetes Deployment.
+- **SandboxBackend** (`sandbox_backend.go`): the `agents.x-k8s.io` Sandbox CRD; suspends and resumes through `spec.operatingMode`.
+
+Why two backends and what was rejected: [design/runtime-backends-adr.md](design/runtime-backends-adr.md).
+
+```mermaid
+flowchart TB
+  subgraph pod[Knight pod]
+    rt[Runtime container<br/>pi-knight or claude-knight]
+    gs[git-sync sidecar<br/>one per arsenal]
+    sf[skill-filter sidecar]
+    br[browser sidecar<br/>optional]
+  end
+  tools[(Nix tools image<br/>read-only at /nix)] --> rt
+  gs -- emptyDir --> sf -- filtered skills --> rt
+  ws[(/data workspace<br/>pvc or ephemeral)] --- rt
+  rt <-- tasks, results, activity --> nats[(NATS)]
+```
+
+| Part | How it is built |
+|---|---|
+| **Runtime image** | `spec.image` selects the runtime: pi-knight or claude-knight (roundtable-k8s/knights). The operator sets `KNIGHT_NAME` (capitalised Knight name), `KNIGHT_MODEL`, `KNIGHT_EFFORT`, `NATS_URL`, `NATS_TASKS_STREAM`, `NATS_RESULTS_STREAM`, `NATS_RESULTS_PREFIX`, `SUBSCRIBE_TOPICS` (from `spec.nats.subjects`), `MAX_CONCURRENT_TASKS`, `TASK_TIMEOUT_MS`, `ROUNDTABLE_TABLE`, `KNIGHT_CARDS_BUCKET`, `KNIGHT_WORKSPACE_MODE`, `KNIGHT_MEMORY_DIR`/`KNIGHT_MEMORY_ROOT` ([memory.md](memory.md)), `ACTIVITY_CONTENT`, `METRICS_PORT`, `LOG_LEVEL`, `TZ` and the OpenTelemetry variables (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_SDK_DISABLED`, `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT`). |
+| **Skills** | `spec.arsenal` / `spec.arsenals`: one git-sync sidecar per arsenal (`GITSYNC_REPO`, `GITSYNC_REF`, `GITSYNC_ROOT`, `GITSYNC_LINK`, `GITSYNC_PERIOD`) syncs into an emptyDir. The `skill-filter` sidecar copies only the categories in `SKILL_CATEGORIES` into the skills directory the runtime reads. |
+| **Tools** | `spec.tools.nix` and `spec.tools.flakes` are built into a tools image (nix2container, tag = hash of the tool set; `internal/knight/tools_image.go`, `internal/controller/knight_toolsimage.go`), recorded in `status.toolsImage` and mounted read-only at `/nix`. The pod's PATH uses `/nix/profile/bin` (`KNIGHT_NIX_PROFILE`). Needs the chart value `toolsImage.repository`. |
+| **Workspace** | `spec.workspace.mode`: `pvc` (default; one ReadWriteOnce PVC at `/data`, or `existingClaim`) or `ephemeral` (per-pod emptyDir at `/data`, size limit `size`). More than one replica needs `ephemeral` or a shared claim. |
+| **Scaling** | `spec.replicas` / `spec.maxReplicas` and `lifecycle.suspendPolicy: auto` make the operator render a KEDA ScaledObject (`internal/controller/knight_scaling.go`) with a `nats-jetstream` trigger on the knight's `<Knight>-consumer`, `lagThreshold: 1`. Without KEDA the knight runs at a fixed replica count. |
+| **Pod security** | Pod: `runAsUser/Group` and `fsGroup` 1000 by default (env `KNIGHT_RUN_AS_USER`, `KNIGHT_RUN_AS_GROUP`, `KNIGHT_FS_GROUP`, `KNIGHT_FS_GROUP_CHANGE_POLICY` on the operator). Containers: `RestrictedContainerSecurityContext` (no privilege escalation, non-root, drop `ALL`, `RuntimeDefault` seccomp). `spec.runtimeClassName` / `spec.isolation` pick gVisor and egress rules ([runtime-isolation.md](runtime-isolation.md), [egress.md](egress.md)). |
+
+## Request flow
+
+### Chain step
+
+The Chain controller renders the step prompt, publishes a task, then polls for the result on every reconcile. It never holds a connection open for the duration of the task.
+
+```mermaid
+sequenceDiagram
+  participant C as Chain controller
+  participant T as Tasks stream
+  participant K as Knight pod
+  participant R as Results stream
+  participant KV as KV chain-outputs
+  C->>T: publish TaskPayload on prefix.tasks.domain.knight
+  T-->>K: pull via Knight-consumer (explicit ack, max_deliver 1)
+  K->>K: LLM call and tool use
+  K-->>C: activity events on prefix.activity.Knight.taskId (core NATS, optional)
+  K->>R: publish result on prefix.results.taskId
+  K->>T: ack task
+  C->>R: ephemeral consumer chain-poll-chain-step, FetchOne
+  R-->>C: result
+  C->>KV: store step output
+  C->>C: render next step with Steps.step.Output
+```
+
+Sources: `internal/controller/chain_dispatch.go` (publish), `chain_results.go` (`ChainConsumerName`, `FetchOne`), `chain_outputs.go` (`KVPut` to `chain-outputs`).
+
+### Invoke gateway call
+
+The gateway ([gateway.md](gateway.md)) is a separate Deployment built from the operator image. It publishes the same `TaskPayload` and returns the answer in the HTTP response, or a task ID to poll if the wait runs out.
+
+```mermaid
+sequenceDiagram
+  participant Cl as Caller (HTTP or MCP)
+  participant G as Invoke gateway
+  participant KV as KV roundtable_gateway_tasks
+  participant T as Tasks stream
+  participant K as Knight pod
+  participant R as Results stream
+  Cl->>G: POST /v1/knights/name/invoke
+  G->>G: resolve Knight, RoundTable prefix and streams
+  G->>R: core subscription on prefix.results.taskId
+  G->>KV: put task record (pending)
+  G->>T: JetStream publish on prefix.tasks.domain.knight
+  T-->>K: pull via Knight-consumer
+  K-->>G: activity events (for /events and MCP progress)
+  K->>R: publish result on prefix.results.taskId
+  R-->>G: result message
+  G->>KV: update record (done)
+  G-->>Cl: 200 with output
+  Note over G,Cl: On timeout the caller gets the taskId and polls GET /v1/tasks/taskId, which reads the last message from the results stream
+```
+
+Sources: `internal/gateway/service.go` (`Invoke`: `Watch`, `PutRecord`, `Publish`), `internal/gateway/bus.go` (`LastResult`).
 
 ## Mission Lifecycle
 
