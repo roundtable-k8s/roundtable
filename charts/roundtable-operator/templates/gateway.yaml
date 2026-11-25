@@ -43,7 +43,7 @@ metadata:
 ---
 # Read-only: the gateway looks up Knights, their RoundTables and Chains.
 # Tasks go over NATS. The only objects it writes are Missions, run copies
-# of opted-in Chains and schedule Triggers' annotations (below).
+# of opted-in Chains and schedule Triggers (below).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -110,10 +110,10 @@ subjects:
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
-{{- /* Objects the gateway writes (Missions, run copies of opted-in Chains, schedule Trigger annotations) or reads per namespace (schedule Triggers). */}}
+{{- /* Objects the gateway writes: Missions, run copies of opted-in Chains and schedule Triggers. */}}
 {{- $writes := list }}
 {{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions" "verbs" (list "get" "list" "watch" "create" "delete")) }}{{ end }}
-{{- if $schedules.enabled }}{{ $writes = append $writes (dict "suffix" "schedules" "resource" "triggers" "what" "Schedule Triggers (patch sets the suspend and run-now annotations)" "verbs" (list "get" "list" "watch" "patch")) }}{{ end }}
+{{- if $schedules.enabled }}{{ $writes = append $writes (dict "suffix" "schedules" "resource" "triggers" "what" "Schedule Triggers (POST/PUT/DELETE /v1/schedules)" "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete")) }}{{ end }}
 {{- if $runs.enabled }}{{ $writes = append $writes (dict "suffix" "runs" "resource" "chains" "what" "Run copies of Chains labelled ai.roundtable.io/invokable=true (delete cleans up expired copies, patch cancels a run)" "verbs" (list "get" "list" "watch" "create" "patch" "delete")) }}{{ end }}
 {{- range $w := $writes }}
 {{- if has "*" ($gw.allowedNamespaces | default list) }}
