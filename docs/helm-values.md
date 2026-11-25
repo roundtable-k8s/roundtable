@@ -195,6 +195,25 @@ RuntimeClass such as `gvisor`. Knights in a RoundTable also inherit
 `RoundTable.spec.defaults.runtimeClassName` when unset. See
 [runtime-isolation.md](runtime-isolation.md).
 
+Set `knights.<name>.memory` to give a knight a persistent memory volume,
+separate from its `/data` workspace, that every replica mounts read-write at
+`/memory/<name>` (`KNIGHT_MEMORY_DIR`; `KNIGHT_MEMORY_ROOT=/memory`). Without
+`existingClaim` the operator creates the ReadWriteMany PVC `<name>-memory`
+(`size`, default `1Gi`, and `storageClassName`), owned by the Knight and
+deleted with it. With `existingClaim` the shared claim is mounted read-only at
+`/memory` and its `<name>` sub-directory read-write at `/memory/<name>`; the
+operator never creates or deletes that claim. Knights in a RoundTable inherit
+`spec.defaults.memory` (including `existingClaim`) when unset.
+
+```yaml
+knights:
+  galahad:
+    memory:
+      size: 1Gi
+      storageClassName: cephfs     # must support ReadWriteMany for replicas > 1
+      # existingClaim: table-memory  # shared RWX claim instead of <name>-memory
+```
+
 Define knights inline in values to deploy them with the operator:
 
 ```yaml

@@ -138,6 +138,37 @@ var _ = Describe("Sandbox knights against the agent-sandbox v1beta1 CRDs", func(
 		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, key, &appsv1.Deployment{}))).To(BeTrue())
 	})
 
+	It("carries the memory mounts in the Sandbox pod template (#388)", func() {
+		knight := newSandboxKnight("sbx-memory")
+		knight.Spec.Memory = &aiv1alpha1.KnightMemory{ExistingClaim: "table-memory"}
+		key := createKnight(knight)
+
+		var mounts []any
+		Eventually(func() ([]any, error) {
+			sb, err := getSandbox(key)
+			if err != nil {
+				return nil, err
+			}
+			containers, _, err := unstructured.NestedSlice(sb.Object, "spec", "podTemplate", "spec", "containers")
+			if err != nil || len(containers) == 0 {
+				return nil, err
+			}
+			mounts, _, err = unstructured.NestedSlice(containers[0].(map[string]any), "volumeMounts")
+			return mounts, err
+		}, timeout, interval).ShouldNot(BeEmpty())
+
+		var memory []map[string]any
+		for _, m := range mounts {
+			if mm := m.(map[string]any); mm["name"] == "memory" {
+				memory = append(memory, mm)
+			}
+		}
+		Expect(memory).To(ConsistOf(
+			map[string]any{"name": "memory", "mountPath": "/memory", "readOnly": true},
+			map[string]any{"name": "memory", "mountPath": "/memory/sbx-memory", "subPath": "sbx-memory"},
+		))
+	})
+
 	It("maps spec.suspend to operatingMode Suspended/Running and the Suspended phase", func() {
 		knight := newSandboxKnight("sbx-suspend")
 		key := createKnight(knight)

@@ -74,6 +74,15 @@ const (
 	// ports to any destination) or the policy failed to apply.
 	ConditionKnightEgressRestricted = "EgressRestricted"
 
+	// ConditionKnightMemoryShared reports whether the memory PVC the operator
+	// created (spec.memory without existingClaim) can be shared by all of the
+	// knight's pods. Only set when the knight can run more than one pod
+	// (replicas or maxReplicas above 1) and the claim is bound.
+	// Status=False (MemoryNotRWX) means the claim was bound without
+	// ReadWriteMany: pods on other nodes can't mount it. Use a storageClassName
+	// that supports ReadWriteMany.
+	ConditionKnightMemoryShared = "MemoryShared"
+
 	// ===== RoundTable Condition Types =====
 
 	// ConditionRoundTableAvailable indicates whether the RoundTable is operational.
@@ -182,6 +191,13 @@ const (
 	// ReasonAutoscalingUnsupported indicates autoscaling was requested on a
 	// runtime the operator can't autoscale (runtime: sandbox).
 	ReasonAutoscalingUnsupported = "UnsupportedRuntime"
+
+	// ReasonMemoryNotRWX indicates the knight's memory PVC was bound without
+	// ReadWriteMany although the knight can run more than one pod.
+	ReasonMemoryNotRWX = "MemoryNotRWX"
+
+	// ReasonMemoryRWX indicates the knight's memory PVC is bound ReadWriteMany.
+	ReasonMemoryRWX = "MemoryRWX"
 
 	// ReasonPlanCapApplied indicates the plan-task cap lowered the knight's scale.
 	ReasonPlanCapApplied = "PlanCapApplied"

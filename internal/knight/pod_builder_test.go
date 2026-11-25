@@ -26,6 +26,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -576,5 +578,126 @@ var _ = Describe("PodBuilder restricted security", func() {
 			Expect(sc.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault), c.Name)
 			Expect(sc.Privileged).To(BeNil(), c.Name)
 		}
+	})
+})
+
+var _ = Describe("Knight memory volume (#388)", func() {
+	ctx := context.Background()
+
+	newKnight := func(memory *aiv1alpha1.KnightMemory) *aiv1alpha1.Knight {
+		return &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "merlin", Namespace: "default",
+				Labels: map[string]string{aiv1alpha1.LabelRoundTable: "mem-table"},
+			},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain: "d", Skills: []string{"s"},
+				NATS:   aiv1alpha1.KnightNATS{URL: "nats://x:4222", Stream: "s", ResultsStream: "r", Subjects: []string{"a.>"}},
+				Memory: memory,
+			},
+		}
+	}
+	build := func(k *aiv1alpha1.Knight) corev1.PodSpec {
+		return NewPodBuilder(k, "img").WithWorkspace().WithMemory().Build(ctx)
+	}
+	memoryVolumes := func(spec corev1.PodSpec) []corev1.Volume {
+		var out []corev1.Volume
+		for _, v := range spec.Volumes {
+			if v.Name == "memory" {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	memoryMounts := func(spec corev1.PodSpec) []corev1.VolumeMount {
+		var out []corev1.VolumeMount
+		for _, m := range spec.Containers[0].VolumeMounts {
+			if m.Name == "memory" {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	env := func(spec corev1.PodSpec) map[string]string {
+		out := map[string]string{}
+		for _, e := range spec.Containers[0].Env {
+			out[e.Name] = e.Value
+		}
+		return out
+	}
+
+	It("adds no volume, mount or env without spec.memory", func() {
+		spec := build(newKnight(nil))
+		Expect(memoryVolumes(spec)).To(BeEmpty())
+		Expect(memoryMounts(spec)).To(BeEmpty())
+		Expect(env(spec)).NotTo(HaveKey("KNIGHT_MEMORY_DIR"))
+		Expect(env(spec)).NotTo(HaveKey("KNIGHT_MEMORY_ROOT"))
+	})
+
+	It("mounts the per-knight claim read-write at /memory/<knight>", func() {
+		spec := build(newKnight(&aiv1alpha1.KnightMemory{}))
+
+		vols := memoryVolumes(spec)
+		Expect(vols).To(HaveLen(1))
+		Expect(vols[0].PersistentVolumeClaim).NotTo(BeNil())
+		Expect(vols[0].PersistentVolumeClaim.ClaimName).To(Equal("merlin-memory"))
+		Expect(vols[0].PersistentVolumeClaim.ReadOnly).To(BeFalse())
+
+		Expect(memoryMounts(spec)).To(ConsistOf(corev1.VolumeMount{Name: "memory", MountPath: "/memory/merlin"}))
+		Expect(env(spec)).To(HaveKeyWithValue("KNIGHT_MEMORY_DIR", "/memory/merlin"))
+		Expect(env(spec)).To(HaveKeyWithValue("KNIGHT_MEMORY_ROOT", "/memory"))
+	})
+
+	It("mounts an existingClaim read-only at /memory and its <knight> subPath read-write", func() {
+		spec := build(newKnight(&aiv1alpha1.KnightMemory{ExistingClaim: "table-memory"}))
+
+		vols := memoryVolumes(spec)
+		Expect(vols).To(HaveLen(1))
+		Expect(vols[0].PersistentVolumeClaim.ClaimName).To(Equal("table-memory"))
+		// The volume itself is writable so the subPath mount can be.
+		Expect(vols[0].PersistentVolumeClaim.ReadOnly).To(BeFalse())
+
+		Expect(memoryMounts(spec)).To(ConsistOf(
+			corev1.VolumeMount{Name: "memory", MountPath: "/memory", ReadOnly: true},
+			corev1.VolumeMount{Name: "memory", MountPath: "/memory/merlin", SubPath: "merlin"},
+		))
+		Expect(env(spec)).To(HaveKeyWithValue("KNIGHT_MEMORY_DIR", "/memory/merlin"))
+		Expect(env(spec)).To(HaveKeyWithValue("KNIGHT_MEMORY_ROOT", "/memory"))
+	})
+
+	Describe("table defaults", func() {
+		reader := func(memory *aiv1alpha1.KnightMemory) *fake.ClientBuilder {
+			s := runtime.NewScheme()
+			Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+			rt := &aiv1alpha1.RoundTable{
+				ObjectMeta: metav1.ObjectMeta{Name: "mem-table", Namespace: "default"},
+				Spec:       aiv1alpha1.RoundTableSpec{Defaults: &aiv1alpha1.RoundTableDefaults{Memory: memory}},
+			}
+			return fake.NewClientBuilder().WithScheme(s).WithObjects(rt)
+		}
+
+		It("inherits the table's memory, existingClaim included, when the knight leaves it unset", func() {
+			k := newKnight(nil)
+			ApplyTableDefaults(ctx, reader(&aiv1alpha1.KnightMemory{ExistingClaim: "table-memory"}).Build(), k)
+
+			Expect(k.Spec.Memory).To(Equal(&aiv1alpha1.KnightMemory{ExistingClaim: "table-memory"}))
+			Expect(memoryMounts(build(k))).To(HaveLen(2))
+		})
+
+		It("keeps the knight's own memory", func() {
+			size := resource.MustParse("5Gi")
+			own := &aiv1alpha1.KnightMemory{Size: &size, StorageClassName: "cephfs"}
+			k := newKnight(own.DeepCopy())
+			ApplyTableDefaults(ctx, reader(&aiv1alpha1.KnightMemory{ExistingClaim: "table-memory"}).Build(), k)
+
+			Expect(k.Spec.Memory).To(Equal(own))
+			Expect(memoryVolumes(build(k))[0].PersistentVolumeClaim.ClaimName).To(Equal("merlin-memory"))
+		})
+
+		It("adds no memory when neither the knight nor the table sets it", func() {
+			k := newKnight(nil)
+			ApplyTableDefaults(ctx, reader(nil).Build(), k)
+			Expect(k.Spec.Memory).To(BeNil())
+		})
 	})
 })

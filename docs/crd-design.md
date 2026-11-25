@@ -141,6 +141,7 @@ A step's `when` is a CEL expression over prior steps (`steps.<name>.{phase,outpu
    | `spec.concurrency` | `spec.defaults.concurrency` | `2` |
    | `spec.resources` | `spec.defaults.resources` | none |
    | `spec.workspace` | `spec.defaults.workspace` (never `existingClaim`) | PVC |
+   | `spec.memory` | `spec.defaults.memory` (including `existingClaim`) | no memory volume |
    | `spec.runtimeClassName` | `spec.defaults.runtimeClassName` | cluster default |
    | `spec.vault` | `spec.vault` | no vault |
 
@@ -186,6 +187,20 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   `existingClaim` is allowed) and on `runtime: sandbox`. See
   [memory.md](memory.md) for how workspace, vault and shared mounts
   relate to knight memory.
+- **Memory.** `spec.memory` adds a persistent memory volume separate from the
+  workspace, so memory survives pod replacement, scaling and restarts. The
+  knight's own memory is read-write at `/memory/<knight>`
+  (`KNIGHT_MEMORY_DIR`), and `/memory` (`KNIGHT_MEMORY_ROOT`) is its parent.
+  Without `existingClaim` the operator creates the ReadWriteMany PVC
+  `<knight>-memory` (`size`, default 1Gi; `storageClassName`), owned by the
+  Knight and deleted with it, and mounts it at `/memory/<knight>`. With
+  `existingClaim` (for example one RWX claim for a whole table) the claim is
+  mounted read-only at `/memory` and its `<knight>` sub-directory read-write
+  at `/memory/<knight>`: each knight writes only its own directory and reads
+  everyone else's. The operator never creates, changes or deletes an
+  `existingClaim`. A knight that can run more than one pod whose
+  operator-created memory PVC is bound without ReadWriteMany reports
+  `MemoryShared=False` reason `MemoryNotRWX`.
 - **Autoscaling.** With `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`
   the operator renders a KEDA `ScaledObject` (same name as the Knight):
   `nats-jetstream` trigger on `spec.nats.stream` / `<Knight>-consumer`,

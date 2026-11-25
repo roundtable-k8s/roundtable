@@ -525,6 +525,34 @@ spec:
                 maximum: 50
                 minimum: 1
                 type: integer
+              memory:
+                description: |-
+                  memory gives the knight a persistent memory volume, separate from the
+                  /data workspace, that every replica mounts read-write at
+                  /memory/<knight> (KNIGHT_MEMORY_DIR). Unset means no memory volume.
+                properties:
+                  existingClaim:
+                    description: |-
+                      existingClaim is a ReadWriteMany PVC shared by several knights (for
+                      example a whole table) instead of a per-knight claim. Each knight writes
+                      only its own <knight> sub-directory and reads everyone else's.
+                    type: string
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      size is the storage request of the PVC the operator creates.
+                      Defaults to 1Gi. Ignored with existingClaim.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  storageClassName:
+                    description: |-
+                      storageClassName is the StorageClass of the PVC the operator creates;
+                      empty uses the cluster default. It must support ReadWriteMany when the
+                      knight runs more than one pod. Ignored with existingClaim.
+                    type: string
+                type: object
               model:
                 description: |-
                   model is the AI model to use (e.g., "openrouter/deepseek/deepseek-v3.2", "claude-sonnet-4-20250514").
