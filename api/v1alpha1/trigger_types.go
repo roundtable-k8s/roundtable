@@ -94,10 +94,6 @@ const (
 	// firing; the controller copies it to the run's ai.roundtable.io/caller.
 	AnnotationTriggerRunNowCaller = "ai.roundtable.io/run-now-caller"
 
-	// AnnotationCaller records who asked for an object (for example the
-	// gateway caller that started a run).
-	AnnotationCaller = "ai.roundtable.io/caller"
-
 	// TriggerSuspendedBySpec and TriggerSuspendedByAnnotation are the values
 	// of status.suspendedBy (joined with "," when both apply).
 	TriggerSuspendedBySpec       = "spec"

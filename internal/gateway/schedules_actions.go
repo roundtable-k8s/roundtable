@@ -146,7 +146,7 @@ func scheduleState(trg *aiv1alpha1.Trigger) *ScheduleState {
 
 // callerOr is the request's caller, or "gateway" when auth recorded none.
 func callerOr(ctx context.Context) string {
-	if c := CallerFrom(ctx); c != "" {
+	if c := callerName(ctx); c != "" {
 		return c
 	}
 	return "gateway"
@@ -207,6 +207,10 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 		}
 		if !t.DeletionTimestamp.IsZero() {
 			return false, &ConflictError{State: "deleting", Reason: fmt.Sprintf("schedule %s/%s is being deleted", t.Namespace, t.Name)}
+		}
+		if t.Spec.Target.ChainRef == nil {
+			return false, &ConflictError{State: "unsupportedTarget",
+				Reason: fmt.Sprintf("schedule %s/%s does not target a Chain; run now supports Chain targets only", t.Namespace, t.Name)}
 		}
 		chain = t.Spec.Target.ChainRef.Name
 		if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: chain}, &aiv1alpha1.Chain{}); err != nil {

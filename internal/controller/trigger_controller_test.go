@@ -833,7 +833,7 @@ var _ = Describe("Trigger controller", func() {
 
 			// Firing the same schedule time again sends nothing.
 			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "kt-cron"},
-				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil)
+				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
 			Expect(getTrigger("kt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))

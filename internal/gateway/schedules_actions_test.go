@@ -43,7 +43,7 @@ func scheduleTrigger(name string, labels map[string]string) *aiv1alpha1.Trigger 
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS, Labels: labels},
 		Spec: aiv1alpha1.TriggerSpec{
 			Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "0 7 * * *"}},
-			Target: aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: "digest"}},
+			Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "digest"}},
 		},
 	}
 }
@@ -151,7 +151,7 @@ func TestSuspendResumeGitManagedSchedule(t *testing.T) {
 		t.Fatalf("suspend: %d %v", resp.StatusCode, out)
 	}
 	trg := e.trigger(t, "git-digest")
-	if trg.Annotations[aiv1alpha1.AnnotationTriggerSuspended] != CallerStaticToken {
+	if trg.Annotations[aiv1alpha1.AnnotationTriggerSuspended] != "token" {
 		t.Errorf("annotation: %v", trg.Annotations)
 	}
 	if trg.Spec.Suspend || trg.Labels["kustomize.toolkit.fluxcd.io/name"] != "apps" {
@@ -201,7 +201,7 @@ func TestRunGitManagedSchedule(t *testing.T) {
 	}
 	key, _ := out["key"].(string)
 	want := chainrun.TriggerRunName("digest", "git-digest", key)
-	if out["run"] != want || out["namespace"] != testNS || out["schedule"] != "git-digest" || out["caller"] != CallerStaticToken {
+	if out["run"] != want || out["namespace"] != testNS || out["schedule"] != "git-digest" || out["caller"] != "token" {
 		t.Errorf("run reference: %v, want run %s", out, want)
 	}
 	if loc := resp.Header.Get("Location"); loc != "/v1/schedules/"+testNS+"/git-digest/runs/"+want {
@@ -229,7 +229,7 @@ func TestRunScheduleRecordsCallerAndPending(t *testing.T) {
 	}
 	trg := e.trigger(t, "suspended")
 	if aiv1alpha1.TriggerRunNowKey(trg.Annotations[aiv1alpha1.AnnotationTriggerRunNow]) != out["key"] ||
-		trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller] != CallerStaticToken {
+		trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller] != "token" {
 		t.Errorf("annotations: %v", trg.Annotations)
 	}
 
