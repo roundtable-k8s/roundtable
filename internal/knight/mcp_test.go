@@ -3,6 +3,7 @@ package knight
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -135,5 +136,138 @@ func TestMCPServersValueFromNotDuplicated(t *testing.T) {
 	}
 	if len(dt) != 2 || dt[0].ValueFrom == nil || dt[1].Value != "$(CLAUDE_DISALLOWED_TOOLS),mcp__vault__delete,mcp__vault__write" {
 		t.Errorf("deny list must keep the user's ref and append via expansion: %+v", dt)
+	}
+}
+
+func headerKnight(env ...corev1.EnvVar) *aiv1alpha1.Knight {
+	k := mcpKnight(env...)
+	k.Spec.MCPServers[0].HeadersFrom = []aiv1alpha1.KnightMCPHeader{{
+		Name:      "Authorization",
+		ValueFrom: aiv1alpha1.KnightMCPHeaderSource{SecretKeyRef: aiv1alpha1.KnightSecretKeyRef{Name: "vault-mcp", Key: "token"}},
+	}}
+	k.Spec.MCPServers[1].HeadersFrom = []aiv1alpha1.KnightMCPHeader{{
+		Name:      "X-Api-Key",
+		ValueFrom: aiv1alpha1.KnightMCPHeaderSource{SecretKeyRef: aiv1alpha1.KnightSecretKeyRef{Name: "feeds-mcp", Key: "api-key"}},
+	}}
+	return k
+}
+
+func appEnv(t *testing.T, k *aiv1alpha1.Knight, image string) []corev1.EnvVar {
+	t.Helper()
+	for _, c := range NewPodBuilder(k, image).Build(context.Background()).Containers {
+		if c.Name == "app" {
+			return c.Env
+		}
+	}
+	t.Fatal("no app container")
+	return nil
+}
+
+func findEnv(env []corev1.EnvVar, name string) []corev1.EnvVar {
+	var out []corev1.EnvVar
+	for _, e := range env {
+		if e.Name == name {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestMCPHeadersRenderedAsSecretEnvAndPlaceholders(t *testing.T) {
+	env := appEnv(t, headerKnight(), claudeImg)
+	for name, want := range map[string][2]string{
+		"MCP_VAULT_AUTHORIZATION": {"vault-mcp", "token"},
+		"MCP_FEEDS_X_API_KEY":     {"feeds-mcp", "api-key"},
+	} {
+		got := findEnv(env, name)
+		if len(got) != 1 {
+			t.Fatalf("%s: got %d entries: %+v", name, len(got), got)
+		}
+		e := got[0]
+		if e.Value != "" || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil ||
+			e.ValueFrom.SecretKeyRef.Name != want[0] || e.ValueFrom.SecretKeyRef.Key != want[1] {
+			t.Errorf("%s = %+v, want secretKeyRef %s/%s", name, e, want[0], want[1])
+		}
+	}
+	js := findEnv(env, EnvMCPServersJSON)
+	if len(js) != 1 {
+		t.Fatalf("MCP_SERVERS_JSON entries: %+v", js)
+	}
+	var got map[string]map[string]struct {
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal([]byte(js[0].Value), &got); err != nil {
+		t.Fatal(err)
+	}
+	if h := got["mcpServers"]["vault"].Headers; len(h) != 1 || h["Authorization"] != "${MCP_VAULT_AUTHORIZATION}" {
+		t.Errorf("vault headers = %v", h)
+	}
+	if h := got["mcpServers"]["feeds"].Headers; len(h) != 1 || h["X-Api-Key"] != "${MCP_FEEDS_X_API_KEY}" {
+		t.Errorf("feeds headers = %v", h)
+	}
+}
+
+func TestMCPHeaderEnvNameCollisions(t *testing.T) {
+	ref := aiv1alpha1.KnightMCPHeaderSource{SecretKeyRef: aiv1alpha1.KnightSecretKeyRef{Name: "s", Key: "k"}}
+	k := mcpKnight(corev1.EnvVar{Name: "MCP_A_B_C", Value: "user"})
+	k.Spec.MCPServers = []aiv1alpha1.KnightMCPServer{
+		{Name: "a-b", URL: "http://ab", HeadersFrom: []aiv1alpha1.KnightMCPHeader{{Name: "c", ValueFrom: ref}}},
+		{Name: "a", URL: "http://a", HeadersFrom: []aiv1alpha1.KnightMCPHeader{{Name: "b-c", ValueFrom: ref}, {Name: "b.c", ValueFrom: ref}}},
+	}
+	env := appEnv(t, k, claudeImg)
+	if u := findEnv(env, "MCP_A_B_C"); len(u) != 1 || u[0].Value != "user" {
+		t.Errorf("user's MCP_A_B_C must be untouched: %+v", u)
+	}
+	for _, n := range []string{"MCP_A_B_C_2", "MCP_A_B_C_3", "MCP_A_B_C_4"} {
+		if e := findEnv(env, n); len(e) != 1 || e[0].ValueFrom == nil {
+			t.Errorf("%s: %+v", n, e)
+		}
+	}
+	var got map[string]map[string]struct {
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal([]byte(findEnv(env, EnvMCPServersJSON)[0].Value), &got); err != nil {
+		t.Fatal(err)
+	}
+	s := got["mcpServers"]
+	if s["a-b"].Headers["c"] != "${MCP_A_B_C_2}" || s["a"].Headers["b-c"] != "${MCP_A_B_C_3}" || s["a"].Headers["b.c"] != "${MCP_A_B_C_4}" {
+		t.Errorf("headers = %+v", s)
+	}
+}
+
+func TestMCPHeadersNotRenderedForPi(t *testing.T) {
+	for _, e := range appEnv(t, headerKnight(), piImg) {
+		if strings.HasPrefix(e.Name, "MCP_") {
+			t.Errorf("%s rendered for pi-knight", e.Name)
+		}
+	}
+}
+
+func TestMCPHeaderEnvName(t *testing.T) {
+	for in, want := range map[[2]string]string{
+		{"vault", "Authorization"}: "MCP_VAULT_AUTHORIZATION",
+		{"web-fetch", "X-Api-Key"}: "MCP_WEB_FETCH_X_API_KEY",
+		{"m1", "x.trace~id"}:       "MCP_M1_X_TRACE_ID",
+	} {
+		if got := MCPHeaderEnvName(in[0], in[1]); got != want {
+			t.Errorf("MCPHeaderEnvName(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
+	}
+}
+
+func TestMCPHeadersCaseDuplicateDropped(t *testing.T) {
+	k := headerKnight()
+	k.Spec.MCPServers[0].HeadersFrom = append(k.Spec.MCPServers[0].HeadersFrom, aiv1alpha1.KnightMCPHeader{
+		Name:      "authorization",
+		ValueFrom: aiv1alpha1.KnightMCPHeaderSource{SecretKeyRef: aiv1alpha1.KnightSecretKeyRef{Name: "other", Key: "k"}},
+	})
+	env := appEnv(t, k, claudeImg)
+	for _, e := range env {
+		if strings.HasPrefix(e.Name, "MCP_VAULT_AUTHORIZATION_") {
+			t.Errorf("case duplicate rendered: %+v", e)
+		}
+	}
+	if e := findEnv(env, "MCP_VAULT_AUTHORIZATION"); len(e) != 1 || e[0].ValueFrom.SecretKeyRef.Name != "vault-mcp" {
+		t.Errorf("first header must win: %+v", e)
 	}
 }

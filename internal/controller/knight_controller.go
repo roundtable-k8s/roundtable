@@ -338,6 +338,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	r.setScalingConditions(knight, plan)
 
+	// 5. Secret keys behind spec.mcpServers[].headersFrom. Secrets are read
+	//    uncached and not watched, so poll while one is missing.
+	mcpHeadersPending := r.setMCPHeadersCondition(ctx, knight)
+
 	// Update status based on reconciliation results
 	if err := r.updateStatus(ctx, knight, plan.Scaling, reconcileErr); err != nil {
 		log.Error(err, "Failed to update status")
@@ -354,6 +358,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if nixRequeue == 0 || wakingRequeue < nixRequeue {
 			nixRequeue = wakingRequeue
 		}
+	}
+
+	if mcpHeadersPending && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
+		nixRequeue = RequeueSlow
 	}
 
 	if nixRequeue > 0 {
@@ -959,6 +967,95 @@ func (r *KnightReconciler) setMCPServersCondition(knight *aiv1alpha1.Knight) {
 		Message:            "spec.mcpServers is only supported for claude-knight images; no MCP servers are rendered",
 		ObservedGeneration: knight.Generation,
 	})
+}
+
+// setMCPHeadersCondition checks that every Secret key named by
+// spec.mcpServers[].headersFrom exists and sets MCPHeadersReady. It reports
+// whether a reference is unresolved (the caller requeues: Secrets are not
+// watched). A header repeated in a different case on one server is reported
+// too (MCPHeaderDuplicate). Only key presence is checked; values never reach a
+// condition, event or log line. The condition is removed when no headers are
+// rendered (none declared, or not a claude-knight image).
+func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *aiv1alpha1.Knight) bool {
+	type ref struct{ secret, key string }
+	var refs []ref
+	var dups []string
+	seen := map[ref]bool{}
+	if knightpkg.AgentRuntimeForImage(knightpkg.EffectiveImage(knight, r.DefaultImage)) == knightpkg.AgentRuntimeClaude {
+		for _, s := range knight.Spec.MCPServers {
+			unique := knightpkg.UniqueMCPHeaders(s.HeadersFrom)
+			if len(unique) < len(s.HeadersFrom) {
+				dups = append(dups, fmt.Sprintf("server %q", s.Name))
+			}
+			for _, h := range unique {
+				rf := ref{h.ValueFrom.SecretKeyRef.Name, h.ValueFrom.SecretKeyRef.Key}
+				if !seen[rf] {
+					seen[rf] = true
+					refs = append(refs, rf)
+				}
+			}
+		}
+	}
+	if len(refs) == 0 {
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		return false
+	}
+
+	type lookup struct {
+		data map[string][]byte
+		err  error
+	}
+	secrets := map[string]lookup{}
+	var missing, unreadable []string
+	for _, rf := range refs {
+		l, ok := secrets[rf.secret]
+		if !ok {
+			sec := &corev1.Secret{}
+			l.err = r.Get(ctx, types.NamespacedName{Name: rf.secret, Namespace: knight.Namespace}, sec)
+			l.data = sec.Data
+			secrets[rf.secret] = l
+			if l.err != nil && !apierrors.IsNotFound(l.err) {
+				logf.FromContext(ctx).Error(l.err, "Failed to read MCP header Secret", "secret", rf.secret)
+				unreadable = append(unreadable, fmt.Sprintf("Secret %q (%s)", rf.secret, apierrors.ReasonForError(l.err)))
+			}
+		}
+		switch {
+		case apierrors.IsNotFound(l.err):
+			missing = append(missing, fmt.Sprintf("Secret %q (key %q)", rf.secret, rf.key))
+		case l.err != nil:
+			// reported once in unreadable
+		default:
+			if _, ok := l.data[rf.key]; !ok {
+				missing = append(missing, fmt.Sprintf("key %q in Secret %q", rf.key, rf.secret))
+			}
+		}
+	}
+
+	cond := metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightMCPHeadersReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonMCPHeaderSecretsFound,
+		Message:            "All Secret keys referenced by spec.mcpServers[].headersFrom exist",
+		ObservedGeneration: knight.Generation,
+	}
+	switch {
+	case len(missing) > 0:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = aiv1alpha1.ReasonMCPHeaderSecretMissing
+		cond.Message = fmt.Sprintf("spec.mcpServers[].headersFrom references missing %s in namespace %q; the pod cannot start until it exists",
+			strings.Join(missing, ", "), knight.Namespace)
+	case len(dups) > 0:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = aiv1alpha1.ReasonMCPHeaderDuplicate
+		cond.Message = fmt.Sprintf("spec.mcpServers[].headersFrom repeats a header name in a different case on %s; only the first is sent",
+			strings.Join(dups, ", "))
+	case len(unreadable) > 0:
+		cond.Status = metav1.ConditionUnknown
+		cond.Reason = aiv1alpha1.ReasonMCPHeaderSecretUnreadable
+		cond.Message = "cannot read " + strings.Join(unreadable, ", ")
+	}
+	meta.SetStatusCondition(&knight.Status.Conditions, cond)
+	return len(missing) > 0 || len(unreadable) > 0
 }
 
 // setDeprecatedFieldsCondition reports deprecated, ignored spec fields. A

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -542,5 +543,136 @@ var _ = Describe("Knight mcpServers on an unsupported runtime", func() {
 	It("does not set it for a claude-knight image", func() {
 		got := run("mcp-claude", "ghcr.io/roundtable-k8s/claude-knight:latest")
 		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)).To(BeNil())
+	})
+})
+
+var _ = Describe("Knight mcpServers headersFrom", func() {
+	ctx := context.Background()
+	const secretValue = "Bearer s3cr3t-header-value"
+
+	newKnight := func(name string, headers ...aiv1alpha1.KnightMCPHeader) *aiv1alpha1.Knight {
+		k := &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: aiv1alpha1.KnightSpec{
+				Domain: "security", Skills: []string{"shared"}, Image: "ghcr.io/roundtable-k8s/claude-knight:latest",
+				MCPServers: []aiv1alpha1.KnightMCPServer{{Name: "vault", URL: "http://vault/mcp", HeadersFrom: headers}},
+			},
+		}
+		k.Spec.NATS.Subjects = []string{"roundtable.tasks.security.>"}
+		return k
+	}
+	header := func(name, secret, key string) aiv1alpha1.KnightMCPHeader {
+		return aiv1alpha1.KnightMCPHeader{Name: name, ValueFrom: aiv1alpha1.KnightMCPHeaderSource{
+			SecretKeyRef: aiv1alpha1.KnightSecretKeyRef{Name: secret, Key: key},
+		}}
+	}
+	create := func(k *aiv1alpha1.Knight) {
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		DeferCleanup(func() {
+			cur := &aiv1alpha1.Knight{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(k), cur); err == nil {
+				cur.Finalizers = nil
+				_ = k8sClient.Update(ctx, cur)
+				_ = k8sClient.Delete(ctx, cur)
+			}
+		})
+	}
+	reconcileKnight := func(k *aiv1alpha1.Knight) (*aiv1alpha1.Knight, reconcile.Result) {
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		var res reconcile.Result
+		for range 3 {
+			var err error
+			res, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(k)})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		got := &aiv1alpha1.Knight{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), got)).To(Succeed())
+		return got, res
+	}
+
+	It("sets MCPHeadersReady=False naming a missing key, and clears it once the key exists", func() {
+		sec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "mcp-hdr-secret", Namespace: "default"},
+			Data:       map[string][]byte{"other": []byte("x")},
+		}
+		Expect(k8sClient.Create(ctx, sec)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, sec) })
+		k := newKnight("mcp-hdr-missing", header("Authorization", "mcp-hdr-secret", "token"))
+		create(k)
+
+		got, res := reconcileKnight(k)
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonMCPHeaderSecretMissing))
+		Expect(c.Message).To(ContainSubstring(`key "token" in Secret "mcp-hdr-secret"`))
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0), "secrets are not watched, so poll")
+
+		sec.Data["token"] = []byte(secretValue)
+		Expect(k8sClient.Update(ctx, sec)).To(Succeed())
+		got, _ = reconcileKnight(k)
+		c = meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+
+		// The value never reaches status, the ConfigMap or the Deployment.
+		for _, o := range []struct {
+			name string
+			obj  client.Object
+		}{{k.Name, got}, {"knight-" + k.Name + "-config", &corev1.ConfigMap{}}, {k.Name, &appsv1.Deployment{}}} {
+			obj := o.obj
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: o.name, Namespace: k.Namespace}, obj)).To(Succeed())
+			b, err := json.Marshal(obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).NotTo(ContainSubstring("s3cr3t-header-value"), "%T", obj)
+		}
+		deploy := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(k), deploy)).To(Succeed())
+		var ref *corev1.SecretKeySelector
+		for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+			if e.Name == "MCP_VAULT_AUTHORIZATION" && e.ValueFrom != nil {
+				ref = e.ValueFrom.SecretKeyRef
+			}
+		}
+		Expect(ref).NotTo(BeNil())
+		Expect(ref.Name).To(Equal("mcp-hdr-secret"))
+		Expect(ref.Key).To(Equal("token"))
+	})
+
+	It("names a missing Secret", func() {
+		k := newKnight("mcp-hdr-nosecret", header("Authorization", "mcp-hdr-absent", "token"))
+		create(k)
+		got, _ := reconcileKnight(k)
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Message).To(ContainSubstring(`Secret "mcp-hdr-absent"`))
+	})
+
+	It("rejects a duplicate header name on one server", func() {
+		err := k8sClient.Create(ctx, newKnight("mcp-hdr-dup", header("Authorization", "s", "a"), header("Authorization", "s", "b")))
+		Expect(errors.IsInvalid(err)).To(BeTrue(), "%v", err)
+	})
+
+	It("reports a header repeated in a different case", func() {
+		sec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "mcp-hdr-case", Namespace: "default"},
+			Data:       map[string][]byte{"a": []byte("x"), "b": []byte("y")},
+		}
+		Expect(k8sClient.Create(ctx, sec)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, sec) })
+		k := newKnight("mcp-hdr-case", header("Authorization", "mcp-hdr-case", "a"), header("authorization", "mcp-hdr-case", "b"))
+		create(k)
+		got, _ := reconcileKnight(k)
+		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonMCPHeaderDuplicate))
+		Expect(c.Message).To(ContainSubstring(`server "vault"`))
+	})
+
+	It("rejects an invalid header name", func() {
+		err := k8sClient.Create(ctx, newKnight("mcp-hdr-badname", header("Bad Header:", "s", "a")))
+		Expect(errors.IsInvalid(err)).To(BeTrue(), "%v", err)
 	})
 })

@@ -91,6 +91,28 @@ const (
 	// ConditionKnightDegraded is True when part of the spec cannot be honoured.
 	ConditionKnightDegraded = "Degraded"
 
+	// ConditionKnightMCPHeadersReady reports whether every Secret key named by
+	// spec.mcpServers[].headersFrom exists. False (MCPHeaderSecretMissing)
+	// names the missing Secret/key (MCPHeaderDuplicate: a header repeated in
+	// a different case); the pod would otherwise fail to start
+	// with CreateContainerConfigError. Absent when no headersFrom are
+	// rendered (no headers, or a runtime other than claude-knight).
+	ConditionKnightMCPHeadersReady = "MCPHeadersReady"
+
+	// ReasonMCPHeaderSecretsFound means every referenced Secret key exists.
+	ReasonMCPHeaderSecretsFound = "SecretsFound"
+
+	// ReasonMCPHeaderSecretMissing means a referenced Secret or key is missing.
+	ReasonMCPHeaderSecretMissing = "MCPHeaderSecretMissing"
+
+	// ReasonMCPHeaderDuplicate means two headersFrom entries of one server
+	// differ only in case; only the first is rendered.
+	ReasonMCPHeaderDuplicate = "MCPHeaderDuplicate"
+
+	// ReasonMCPHeaderSecretUnreadable means a referenced Secret could not be
+	// read (other than not found), e.g. RBAC or an API error.
+	ReasonMCPHeaderSecretUnreadable = "MCPHeaderSecretUnreadable"
+
 	// ReasonMCPServersUnsupported means spec.mcpServers is set on a runtime
 	// that has no MCP client (anything but claude-knight); nothing is rendered.
 	ReasonMCPServersUnsupported = "MCPServersUnsupported"

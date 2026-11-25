@@ -1,0 +1,46 @@
+# A claude-knight calling a remote MCP server that needs an Authorization header.
+# The header value lives in a Secret in the knight's namespace; the operator adds
+# it to the pod as env var MCP_VAULT_AUTHORIZATION (valueFrom: secretKeyRef) and
+# writes only the placeholder "${MCP_VAULT_AUTHORIZATION}" into MCP_SERVERS_JSON.
+# Use one token per MCP server, and put the server's host on spec.egress.
+# Rotate: update the Secret, then restart the knight
+# (kubectl rollout restart deployment/vault-reader -n roundtable).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-reader-mcp
+  namespace: roundtable
+type: Opaque
+stringData:
+  authorization: "Bearer <placeholder-token>"  # the whole header value
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: vault-reader
+  namespace: roundtable
+spec:
+  domain: vault-reader
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
+  skills:
+    - vault-reader
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.vault-reader.>"
+  mcpServers:
+    - name: vault
+      url: https://vault-mcp.example.com/mcp
+      toolFilter:
+        exclude: ["delete_note"]
+      headersFrom:
+        - name: Authorization
+          valueFrom:
+            secretKeyRef:
+              name: vault-reader-mcp
+              key: authorization
+  egress:
+    allowedHosts:
+      - "vault-mcp.example.com"
