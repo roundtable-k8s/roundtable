@@ -1,0 +1,71 @@
+# Two jobs on the persona knights: a scheduled briefing and an on-demand
+# chain run through the gateway. See README.md.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: morning-briefing
+  namespace: roundtable
+spec:
+  description: "Morning briefing: research and infrastructure gather in parallel, the editor writes Briefings/<date>.md"
+  roundTableRef: {name: fleet-a}
+  schedule: "30 6 * * *"        # 06:30 every day
+  timeZone: Europe/London
+  timeoutSeconds: 1800
+  input: "Morning briefing for the household"
+  # The editor writes the steps that have outputPath.
+  outputKnightRef: {name: editor}
+  steps:
+    - name: research
+      knightRef: {name: scout}
+      timeoutSeconds: 600
+      task: |
+        {{ .Input }}
+        Report what is new in the last 24 hours on the topics in Topics.md
+        in the notes volume. At most eight bullet points, each with a source
+        link and a one-line "why it matters".
+    - name: infrastructure
+      knightRef: {name: steward}
+      timeoutSeconds: 600
+      task: |
+        {{ .Input }}
+        Report the cluster's health: pod restarts, failed workloads and
+        pending volumes in the last 24 hours. Bullet points, one-line
+        "so what" each. Say so if all is well.
+    - name: briefing
+      knightRef: {name: editor}
+      dependsOn: [research, infrastructure]
+      timeoutSeconds: 600
+      outputPath: "Briefings/{{ .Date }}.md"
+      task: |
+        Write the morning briefing as markdown. Action items first.
+
+        ## Research
+        {{ .Steps.research.Output }}
+
+        ## Infrastructure
+        {{ .Steps.infrastructure.Output }}
+---
+# No schedule. Opted in to gateway runs by the invokable label:
+# POST /v1/chains/summarize-note/runs (see README.md).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: summarize-note
+  namespace: roundtable
+  labels:
+    ai.roundtable.io/invokable: "true"
+spec:
+  description: "Summarize one piece of text in five bullet points and keep it in Briefings/"
+  roundTableRef: {name: fleet-a}
+  timeoutSeconds: 900
+  outputKnightRef: {name: editor}
+  steps:
+    - name: summarize
+      knightRef: {name: editor}
+      outputPath: "Briefings/{{ .Date }}-summary.md"
+      task: |
+        Summarize the text below in at most five bullet points. Say so if it
+        is empty or unreadable.
+
+        Text:
+        {{ .Input }}

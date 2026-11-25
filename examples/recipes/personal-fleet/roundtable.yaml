@@ -1,0 +1,35 @@
+# The table for the personal-fleet recipe, plus the shared notes volume.
+# If you already run a RoundTable named fleet-a (roundtable-fleet.yaml), skip
+# the RoundTable and keep the PVC. See README.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: personal-notes
+  namespace: roundtable
+spec:
+  # Shared by three knights at once, so it must be ReadWriteMany. To use an
+  # existing notes vault instead, delete this document and set claimName in
+  # knights.yaml to your PVC.
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: fleet-a
+  namespace: roundtable
+spec:
+  description: "Personal fleet: research, infrastructure and an editor"
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: fleet-a
+    tasksStream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    createStreams: true
+    streamRetention: WorkQueue
+  defaults:
+    model: sonnet
+    concurrency: 1
+    taskTimeoutSeconds: 600
