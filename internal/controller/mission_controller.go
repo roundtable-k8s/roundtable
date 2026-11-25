@@ -852,7 +852,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 
 		// Step 2: Delete NATS consumers (best effort)
 		log.Info("Deleting NATS consumers")
-		if err := r.Cleaner.DeleteNATSConsumers(mission); err != nil {
+		if err := r.Cleaner.DeleteNATSConsumers(ctx, mission); err != nil {
 			log.Error(err, "Failed to delete NATS consumers (best effort, continuing)")
 			// Continue even if this fails - consumers will be deleted when stream is deleted
 		}
@@ -862,7 +862,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			log.Info("Deleting NATS streams",
 				"tasksStream", mission.Status.NATSTasksStream,
 				"resultsStream", mission.Status.NATSResultsStream)
-			if err := r.Cleaner.DeleteNATSStreams(mission); err != nil {
+			if err := r.Cleaner.DeleteNATSStreams(ctx, mission); err != nil {
 				log.Error(err, "Failed to delete NATS streams, retrying with backoff")
 				return ctrl.Result{RequeueAfter: RequeueModerate}, nil
 			}

@@ -628,13 +628,9 @@ func (p *Planner) pollPlanningResult(ctx context.Context, mission *aiv1alpha1.Mi
 		"subject", subject,
 		"consumer", consumerName)
 
-	msg, err := natsClient.PollMessage(subject, 2*time.Second,
-		natspkg.WithDurable(consumerName),
-		natspkg.WithAckExplicit(),
-		natspkg.WithBindStream(resultsStream),
-		natspkg.WithDeliverAll(),
-		natspkg.WithFallbackAutoDetect(),
-	)
+	// FetchOne acks the result (required for WorkQueue retention).
+	msg, err := natsClient.FetchOne(ctx, resultsStream,
+		natspkg.ResultConsumerConfig(consumerName, subject), 2*time.Second)
 
 	if err != nil {
 		log.V(1).Info("Planning result not yet available", "taskID", taskID, "error", err.Error())
@@ -649,13 +645,10 @@ func (p *Planner) pollPlanningResult(ctx context.Context, mission *aiv1alpha1.Mi
 		natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef)), natspkg.WithTaskID(taskID))
 	consumeSpan.End()
 
-	if err := msg.Ack(); err != nil {
-		log.Error(err, "Failed to ack planning result message")
-	}
-	_ = natsClient.DeleteConsumer(resultsStream, consumerName)
+	_ = natsClient.DeleteConsumer(ctx, resultsStream, consumerName)
 
 	var taskResult natspkg.TaskResult
-	if err := json.Unmarshal(msg.Data, &taskResult); err != nil {
+	if err := json.Unmarshal(msg.Data(), &taskResult); err != nil {
 		return nil, fmt.Errorf("failed to parse planning result: %w", err)
 	}
 

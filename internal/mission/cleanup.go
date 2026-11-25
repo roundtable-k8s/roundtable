@@ -81,7 +81,7 @@ func (c *Cleaner) DeleteEphemeralKnights(ctx context.Context, mission *aiv1alpha
 // DeleteNATSConsumers deletes all NATS consumers for this mission's streams (best effort).
 //
 //nolint:unparam // error return kept so failures can propagate without a caller change
-func (c *Cleaner) DeleteNATSConsumers(mission *aiv1alpha1.Mission) error {
+func (c *Cleaner) DeleteNATSConsumers(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	natsCli, err := c.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
@@ -99,12 +99,12 @@ func (c *Cleaner) DeleteNATSConsumers(mission *aiv1alpha1.Mission) error {
 
 		// Delete from tasks stream (best effort)
 		if tasksStream != "" {
-			_ = natsCli.DeleteConsumer(tasksStream, consumerName)
+			_ = natsCli.DeleteConsumer(ctx, tasksStream, consumerName)
 		}
 
 		// Delete from results stream (best effort)
 		if resultsStream != "" {
-			_ = natsCli.DeleteConsumer(resultsStream, consumerName)
+			_ = natsCli.DeleteConsumer(ctx, resultsStream, consumerName)
 		}
 	}
 
@@ -112,7 +112,7 @@ func (c *Cleaner) DeleteNATSConsumers(mission *aiv1alpha1.Mission) error {
 }
 
 // DeleteNATSStreams deletes the mission's task and result streams.
-func (c *Cleaner) DeleteNATSStreams(mission *aiv1alpha1.Mission) error {
+func (c *Cleaner) DeleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	natsCli, err := c.natsClient()
 	if err != nil {
 		return nil // Gracefully skip if no NATS client
@@ -120,14 +120,14 @@ func (c *Cleaner) DeleteNATSStreams(mission *aiv1alpha1.Mission) error {
 
 	// Delete tasks stream
 	if mission.Status.NATSTasksStream != "" {
-		if err := natsCli.DeleteStream(mission.Status.NATSTasksStream); err != nil {
+		if err := natsCli.DeleteStream(ctx, mission.Status.NATSTasksStream); err != nil {
 			return fmt.Errorf("failed to delete tasks stream: %w", err)
 		}
 	}
 
 	// Delete results stream
 	if mission.Status.NATSResultsStream != "" {
-		if err := natsCli.DeleteStream(mission.Status.NATSResultsStream); err != nil {
+		if err := natsCli.DeleteStream(ctx, mission.Status.NATSResultsStream); err != nil {
 			return fmt.Errorf("failed to delete results stream: %w", err)
 		}
 	}
@@ -267,7 +267,7 @@ func (c *Cleaner) StoreResultsToKV(ctx context.Context, mission *aiv1alpha1.Miss
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
 
-	if err := natsCli.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
+	if err := natsCli.KVPut(ctx, kvBucket, kvKey, resultsJSON); err != nil {
 		return fmt.Errorf("failed to store results in NATS KV: %w", err)
 	}
 

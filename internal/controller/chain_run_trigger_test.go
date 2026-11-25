@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -51,11 +51,13 @@ func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *pickupFakeNATS) ConsumerAckFloor(string, string) (uint64, error) { return f.floor, nil }
-func (f *pickupFakeNATS) ConsumerDeliveredSeq(string, string) (uint64, error) {
+func (f *pickupFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
+	return f.floor, nil
+}
+func (f *pickupFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return f.delivered, nil
 }
-func (f *pickupFakeNATS) PollMessage(string, time.Duration, ...natspkg.SubscribeOption) (*nats.Msg, error) {
+func (f *pickupFakeNATS) FetchOne(context.Context, string, jetstream.ConsumerConfig, time.Duration) (jetstream.Msg, error) {
 	return nil, nil
 }
 

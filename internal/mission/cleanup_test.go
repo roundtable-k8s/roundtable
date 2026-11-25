@@ -1,6 +1,7 @@
 package mission
 
 import (
+	"context"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,10 +72,10 @@ func TestDeleteEphemeralKnightsSkipsNonEphemeral(t *testing.T) {
 func TestNATSCleanupWithoutProviderIsNoop(t *testing.T) {
 	c := &Cleaner{}
 	m := &aiv1alpha1.Mission{Status: aiv1alpha1.MissionStatus{NATSTasksStream: "t", NATSResultsStream: "r"}}
-	if err := c.DeleteNATSConsumers(m); err != nil {
+	if err := c.DeleteNATSConsumers(context.Background(), m); err != nil {
 		t.Errorf("DeleteNATSConsumers: %v", err)
 	}
-	if err := c.DeleteNATSStreams(m); err != nil {
+	if err := c.DeleteNATSStreams(context.Background(), m); err != nil {
 		t.Errorf("DeleteNATSStreams: %v", err)
 	}
 	if err := c.StoreResultsToKV(t.Context(), m); err == nil {

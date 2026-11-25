@@ -146,7 +146,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// 3. NATS Stream Management
 	if rt.Spec.NATS.CreateStreams {
-		if err := r.ensureStreams(rt); err != nil {
+		if err := r.ensureStreams(ctx, rt); err != nil {
 			log.Error(err, "Failed to ensure NATS streams")
 			meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionNATSReady,
@@ -319,7 +319,7 @@ func (r *RoundTableReconciler) countActiveMissions(ctx context.Context, rt *aiv1
 }
 
 // ensureStreams creates or verifies JetStream streams for this RoundTable.
-func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
+func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1.RoundTable) error {
 	// Get shared NATS client
 	natsCli, err := r.natsClient()
 	if err != nil {
@@ -343,7 +343,7 @@ func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := natsCli.CreateStream(tasksStreamConfig); err != nil {
+	if err := natsCli.CreateStream(ctx, tasksStreamConfig); err != nil {
 		return fmt.Errorf("tasks stream: %w", err)
 	}
 
@@ -355,17 +355,17 @@ func (r *RoundTableReconciler) ensureStreams(rt *aiv1alpha1.RoundTable) error {
 		Retention: retention,
 		Storage:   natspkg.StorageFile,
 	}
-	if err := natsCli.CreateStream(resultsStreamConfig); err != nil {
+	if err := natsCli.CreateStream(ctx, resultsStreamConfig); err != nil {
 		return fmt.Errorf("results stream: %w", err)
 	}
 
-	return r.ensureDeadLetters(rt, natsCli)
+	return r.ensureDeadLetters(ctx, rt, natsCli)
 }
 
 // ensureDeadLetters creates the table's advisories and dead-letter streams and
 // keeps its dead-letter watcher running. Skipped when no Manager is wired or
 // the client exposes no raw connection (test fakes).
-func (r *RoundTableReconciler) ensureDeadLetters(rt *aiv1alpha1.RoundTable, natsCli natspkg.Client) error {
+func (r *RoundTableReconciler) ensureDeadLetters(ctx context.Context, rt *aiv1alpha1.RoundTable, natsCli natspkg.Client) error {
 	if r.DeadLetters == nil {
 		return nil
 	}
@@ -382,7 +382,7 @@ func (r *RoundTableReconciler) ensureDeadLetters(rt *aiv1alpha1.RoundTable, nats
 		cfg.MaxAge = d.Duration
 	}
 	key := client.ObjectKeyFromObject(rt).String()
-	if err := r.DeadLetters.Ensure(nc, key, cfg); err != nil {
+	if err := r.DeadLetters.Ensure(ctx, nc, key, cfg); err != nil {
 		return fmt.Errorf("dead-letter: %w", err)
 	}
 	return nil

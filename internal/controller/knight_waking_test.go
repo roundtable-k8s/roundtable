@@ -29,7 +29,7 @@ type fakePending struct {
 	consumer string
 }
 
-func (f *fakePending) ConsumerPending(stream, consumer string) (uint64, error) {
+func (f *fakePending) ConsumerPending(_ context.Context, stream, consumer string) (uint64, error) {
 	f.stream, f.consumer = stream, consumer
 	return f.n, f.err
 }

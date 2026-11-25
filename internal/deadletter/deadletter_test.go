@@ -17,6 +17,7 @@ limitations under the License.
 package deadletter
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	rtmetrics "github.com/roundtable-k8s/roundtable/pkg/metrics"
@@ -42,7 +44,7 @@ const (
 type env struct {
 	t   *testing.T
 	nc  *nats.Conn
-	js  nats.JetStreamContext
+	js  jetstream.JetStream
 	m   *Manager
 	cfg TableConfig
 }
@@ -75,35 +77,55 @@ func newEnvGrace(t *testing.T, grace time.Duration) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(nc.Close)
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, subj := range map[string]string{testTasks: testPrefix + ".tasks.>", testResults: testPrefix + ".results.>"} {
-		if _, err := js.AddStream(&nats.StreamConfig{Name: name, Subjects: []string{subj}, Retention: nats.WorkQueuePolicy}); err != nil {
+		if _, err := js.CreateStream(context.Background(), jetstream.StreamConfig{Name: name, Subjects: []string{subj}, Retention: jetstream.WorkQueuePolicy}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	e := &env{t: t, nc: nc, js: js, m: NewManager(logr.Discard()),
 		cfg: TableConfig{Table: testTable, Prefix: testPrefix, TasksStream: testTasks, LostGrace: grace}}
-	if err := e.m.Ensure(nc, "roundtable/"+testTable, e.cfg); err != nil {
+	if err := e.m.Ensure(context.Background(), nc, "roundtable/"+testTable, e.cfg); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(e.m.StopAll)
 	return e
 }
 
+func (e *env) streamInfo(name string) (*jetstream.StreamInfo, error) {
+	st, err := e.js.Stream(context.Background(), name)
+	if err != nil {
+		return nil, err
+	}
+	return st.Info(context.Background())
+}
+
+func (e *env) consumerInfo(stream, name string) (*jetstream.ConsumerInfo, error) {
+	c, err := e.js.Consumer(context.Background(), stream, name)
+	if err != nil {
+		return nil, err
+	}
+	return c.Info(context.Background())
+}
+
 // entries returns every message in the dead-letter stream.
 func (e *env) entries() []Entry {
 	e.t.Helper()
-	info, err := e.js.StreamInfo(StreamName(testTasks))
+	info, err := e.streamInfo(StreamName(testTasks))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	dlq, err := e.js.Stream(context.Background(), StreamName(testTasks))
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	var out []Entry
 	for seq := info.State.FirstSeq; seq <= info.State.LastSeq && info.State.Msgs > 0; seq++ {
-		m, err := e.js.GetMsg(StreamName(testTasks), seq)
-		if errors.Is(err, nats.ErrMsgNotFound) {
+		m, err := dlq.GetMsg(context.Background(), seq)
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
 			continue
 		}
 		if err != nil {
@@ -120,12 +142,12 @@ func (e *env) entries() []Entry {
 
 func (e *env) record(taskID string) (Record, bool) {
 	e.t.Helper()
-	kv, err := e.js.KeyValue(KVBucket)
+	kv, err := e.js.KeyValue(context.Background(), KVBucket)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	ent, err := kv.Get(Key(testTable, taskID))
-	if errors.Is(err, nats.ErrKeyNotFound) {
+	ent, err := kv.Get(context.Background(), Key(testTable, taskID))
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
 		return Record{}, false
 	}
 	if err != nil {
@@ -147,7 +169,7 @@ func (e *env) publishResult(v any) {
 	if id == "" {
 		id, _ = m["taskId"].(string)
 	}
-	if _, err := e.js.Publish(natspkg.ResultSubject(testPrefix, id), data); err != nil {
+	if _, err := e.js.Publish(context.Background(), natspkg.ResultSubject(testPrefix, id), data); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -171,29 +193,24 @@ func eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 func (e *env) loseTask(knight string, task natspkg.TaskPayload) {
 	e.t.Helper()
 	durable := natspkg.KnightTaskConsumerName(knight)
-	if _, err := e.js.AddConsumer(testTasks, &nats.ConsumerConfig{
+	cons, err := e.js.CreateOrUpdateConsumer(context.Background(), testTasks, jetstream.ConsumerConfig{
 		Durable:       durable,
 		FilterSubject: natspkg.TaskSubject(testPrefix, "dev", knight),
-		AckPolicy:     nats.AckExplicitPolicy,
+		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       500 * time.Millisecond,
 		MaxDeliver:    1,
-	}); err != nil {
-		e.t.Fatal(err)
-	}
-	data, _ := json.Marshal(task)
-	if _, err := e.js.Publish(natspkg.TaskSubject(testPrefix, "dev", knight), data); err != nil {
-		e.t.Fatal(err)
-	}
-	sub, err := e.js.PullSubscribe(natspkg.TaskSubject(testPrefix, "dev", knight), durable, nats.Bind(testTasks, durable))
+	})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	msgs, err := sub.Fetch(1, nats.MaxWait(2*time.Second))
-	if err != nil || len(msgs) != 1 {
-		e.t.Fatalf("fetch task: %v (%d msgs)", err, len(msgs))
+	data, _ := json.Marshal(task)
+	if _, err := e.js.Publish(context.Background(), natspkg.TaskSubject(testPrefix, "dev", knight), data); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := cons.Next(jetstream.FetchMaxWait(2 * time.Second)); err != nil {
+		e.t.Fatalf("fetch task: %v", err)
 	}
 	// Do not ack: the knight dies.
-	_ = sub.Unsubscribe()
 }
 
 func TestLostTaskDeadLetteredWithoutKnightListening(t *testing.T) {
@@ -215,7 +232,7 @@ func TestLostTaskDeadLetteredWithoutKnightListening(t *testing.T) {
 		t.Fatalf("entry attempt/seq/time = %d/%d/%v", got.Attempt, got.StreamSeq, got.DeadLetteredAt)
 	}
 	eventually(t, 15*time.Second, "original removed from tasks stream", func() bool {
-		info, err := e.js.StreamInfo(testTasks)
+		info, err := e.streamInfo(testTasks)
 		return err == nil && info.State.Msgs == 0
 	})
 	if rec, ok := e.record(task.TaskID); !ok || rec.State != StateOpen || rec.Reason != ReasonLost {
@@ -229,7 +246,7 @@ func TestLostTaskDeadLetteredWithoutKnightListening(t *testing.T) {
 	})
 	// The advisory was acked: nothing pending on the operator's consumer.
 	eventually(t, 5*time.Second, "advisory acked", func() bool {
-		ci, err := e.js.ConsumerInfo(AdvisoriesStreamName(testTasks), ConsumerName)
+		ci, err := e.consumerInfo(AdvisoriesStreamName(testTasks), ConsumerName)
 		return err == nil && ci.NumAckPending == 0 && ci.NumPending == 0
 	})
 	// Still exactly one entry.
@@ -273,7 +290,7 @@ func TestLostAdvisoryAndKnightLostResultProduceOneEntry(t *testing.T) {
 	// ...then the stored advisory is processed.
 	e.loseTask("galahad", task)
 	eventually(t, 10*time.Second, "original removed", func() bool {
-		info, err := e.js.StreamInfo(testTasks)
+		info, err := e.streamInfo(testTasks)
 		return err == nil && info.State.Msgs == 0
 	})
 	time.Sleep(300 * time.Millisecond)
@@ -334,7 +351,7 @@ func TestLostAdvisoryForVanishedTask(t *testing.T) {
 	e := newEnv(t)
 	w := e.m.watchers["roundtable/"+testTable]
 	adv, _ := json.Marshal(advisory{Stream: testTasks, Consumer: "Tristan-consumer", StreamSeq: 42, Deliveries: 1})
-	if err := w.handleAdvisory(adv); err != nil {
+	if err := w.handleAdvisory(context.Background(), adv); err != nil {
 		t.Fatal(err)
 	}
 	entries := e.entries()
@@ -350,7 +367,7 @@ func TestLostAdvisoryForVanishedTask(t *testing.T) {
 func TestEnsureIsIdempotentAndUpdatesMaxAge(t *testing.T) {
 	e := newEnv(t)
 	w := e.m.watchers["roundtable/"+testTable]
-	if err := e.m.Ensure(e.nc, "roundtable/"+testTable, e.cfg); err != nil {
+	if err := e.m.Ensure(context.Background(), e.nc, "roundtable/"+testTable, e.cfg); err != nil {
 		t.Fatal(err)
 	}
 	if e.m.watchers["roundtable/"+testTable] != w {
@@ -358,17 +375,17 @@ func TestEnsureIsIdempotentAndUpdatesMaxAge(t *testing.T) {
 	}
 	cfg := e.cfg
 	cfg.MaxAge = 5 * time.Minute
-	if err := e.m.Ensure(e.nc, "roundtable/"+testTable, cfg); err != nil {
+	if err := e.m.Ensure(context.Background(), e.nc, "roundtable/"+testTable, cfg); err != nil {
 		t.Fatal(err)
 	}
-	info, err := e.js.StreamInfo(StreamName(testTasks))
+	info, err := e.streamInfo(StreamName(testTasks))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Config.MaxAge != 5*time.Minute || info.Config.Duplicates != 5*time.Minute || info.Config.Retention != nats.LimitsPolicy {
+	if info.Config.MaxAge != 5*time.Minute || info.Config.Duplicates != 5*time.Minute || info.Config.Retention != jetstream.LimitsPolicy {
 		t.Fatalf("DLQ config = %+v", info.Config)
 	}
-	adv, err := e.js.StreamInfo(AdvisoriesStreamName(testTasks))
+	adv, err := e.streamInfo(AdvisoriesStreamName(testTasks))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +431,7 @@ func TestNamesAndTokens(t *testing.T) {
 
 func (e *env) tasksMsgs() uint64 {
 	e.t.Helper()
-	info, err := e.js.StreamInfo(testTasks)
+	info, err := e.streamInfo(testTasks)
 	if err != nil {
 		e.t.Fatal(err)
 	}

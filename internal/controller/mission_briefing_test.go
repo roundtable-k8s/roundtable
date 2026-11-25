@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,25 +80,37 @@ func (f *fakeNATSClient) PublishJSON(subject string, v any) error {
 	return f.Publish(subject, data)
 }
 
-func (f *fakeNATSClient) Subscribe(string, ...natspkg.SubscribeOption) (*nats.Subscription, error) {
+func (f *fakeNATSClient) CreateStream(context.Context, natspkg.StreamConfig) error { return nil }
+func (f *fakeNATSClient) DeleteStream(context.Context, string) error               { return nil }
+func (f *fakeNATSClient) StreamInfo(context.Context, string) (*jetstream.StreamInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (f *fakeNATSClient) CreateStream(natspkg.StreamConfig) error { return nil }
-func (f *fakeNATSClient) DeleteStream(string) error               { return nil }
-func (f *fakeNATSClient) StreamInfo(string) (*nats.StreamInfo, error) {
+func (f *fakeNATSClient) EnsureConsumer(context.Context, string, string, natspkg.ConsumerConfig) error {
+	return nil
+}
+func (f *fakeNATSClient) DeleteConsumer(context.Context, string, string) error { return nil }
+func (f *fakeNATSClient) FetchOne(context.Context, string, jetstream.ConsumerConfig, time.Duration) (jetstream.Msg, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (f *fakeNATSClient) EnsureConsumer(string, string, natspkg.ConsumerConfig) error { return nil }
-func (f *fakeNATSClient) DeleteConsumer(string, string) error                         { return nil }
-func (f *fakeNATSClient) PollMessage(string, time.Duration, ...natspkg.SubscribeOption) (*nats.Msg, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (f *fakeNATSClient) KVPut(string, string, []byte) error { return nil }
-func (f *fakeNATSClient) KVGet(string, string) ([]byte, error) {
+func (f *fakeNATSClient) KVPut(context.Context, string, string, []byte) error { return nil }
+func (f *fakeNATSClient) KVGet(context.Context, string, string) ([]byte, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (f *fakeNATSClient) KVDelete(string, string) error   { return nil }
-func (f *fakeNATSClient) KVKeys(string) ([]string, error) { return nil, nil }
+func (f *fakeNATSClient) KVDelete(context.Context, string, string) error   { return nil }
+func (f *fakeNATSClient) KVKeys(context.Context, string) ([]string, error) { return nil, nil }
+
+// fakeMsg is a jetstream.Msg carrying only a subject and data, as returned
+// by the fakes' FetchOne (already acked). Other methods are not used.
+type fakeMsg struct {
+	jetstream.Msg
+	subject string
+	data    []byte
+}
+
+func (m *fakeMsg) Subject() string                           { return m.subject }
+func (m *fakeMsg) Data() []byte                              { return m.data }
+func (m *fakeMsg) Headers() nats.Header                      { return nil }
+func (m *fakeMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, jetstream.ErrNotJSMessage }
 
 var _ = Describe("MissionReconciler.publishBriefing", func() {
 	const namespace = "default"
@@ -258,8 +271,12 @@ func (f *fakeNATSClient) PublishJSONSeq(subject string, v any) (uint64, error) {
 	}
 	return uint64(len(f.subjects())), nil
 }
-func (f *fakeNATSClient) ConsumerAckFloor(string, string) (uint64, error)     { return 0, nil }
-func (f *fakeNATSClient) ConsumerDeliveredSeq(string, string) (uint64, error) { return 0, nil }
+func (f *fakeNATSClient) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
+	return 0, nil
+}
+func (f *fakeNATSClient) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
+	return 0, nil
+}
 
 func (f *fakeNATSClient) PublishJSONCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) error {
 	return f.PublishJSON(subject, v)
