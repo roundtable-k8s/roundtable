@@ -190,6 +190,7 @@ spec:
             - --default-timeout={{ $gw.defaultTimeout }}
             - --max-timeout={{ $gw.maxTimeout }}
             - --max-in-flight={{ $gw.maxInFlight }}
+            - --max-streams={{ $gw.maxStreams | default 0 }}
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
             - --token-file=/var/run/secrets/roundtable/gateway/token

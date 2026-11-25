@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -64,6 +65,11 @@ type Options struct {
 	MaxTimeout time.Duration
 	// MaxInFlight caps concurrently waiting invocations (0 = unlimited).
 	MaxInFlight int
+	// MaxStreams caps concurrently open event streams (0 = unlimited).
+	MaxStreams int
+	// StreamHeartbeat is how often an idle event stream gets a comment line
+	// (default 15s).
+	StreamHeartbeat time.Duration
 	// DefaultKnightImage is the operator's DEFAULT_KNIGHT_IMAGE, used to
 	// infer a knight's runtime for model validation.
 	DefaultKnightImage string
@@ -90,6 +96,10 @@ type Service struct {
 
 	now      func() time.Time
 	inflight chan struct{}
+	// streams holds a slot per open event stream; closing ends them all.
+	streams   chan struct{}
+	closing   chan struct{}
+	closeOnce sync.Once
 }
 
 // NewService builds a Service.
@@ -102,7 +112,10 @@ func NewService(resolver *Resolver, bus Bus, opts Options, log logr.Logger) *Ser
 	}
 	opts.Missions.defaults()
 	opts.Runs.defaults()
-	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now}
+	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now, closing: make(chan struct{})}
+	if opts.MaxStreams > 0 {
+		s.streams = make(chan struct{}, opts.MaxStreams)
+	}
 	if opts.MaxInFlight > 0 {
 		s.inflight = make(chan struct{}, opts.MaxInFlight)
 	}
@@ -227,6 +240,27 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	s.Log.Info("Invoked knight", "knight", knightName, "namespace", ns, "taskId", taskID, "runId", runID, "model", model)
+	if progress := progressFrom(ctx); progress != nil && wait > 0 {
+		// Report the task's tool calls to an MCP client that asked for progress.
+		stop := s.startProgress(ctx, progress, func(ctx context.Context, emit func(StreamEvent) error) error {
+			pump := s.newActivityPump(ctx)
+			defer pump.close()
+			if err := pump.add(taskID, natspkg.ActivitySubject(t.SubjectPrefix, knightName, taskID)); err != nil {
+				return err
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case data := <-pump.out:
+					if err := emit(StreamEvent{Name: "activity", Data: json.RawMessage(data)}); err != nil {
+						return err
+					}
+				}
+			}
+		})
+		defer stop()
+	}
 
 	if wait > 0 {
 		wctx, cancel := context.WithTimeout(ctx, wait)

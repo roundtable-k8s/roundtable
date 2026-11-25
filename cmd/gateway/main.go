@@ -52,7 +52,7 @@ func main() {
 	var (
 		listen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
 		defaultTimeout, maxTimeout, taskTTL, runTTL                          time.Duration
-		maxInFlight                                                          int
+		maxInFlight, maxStreams                                              int
 		missionsEnabled, allowSkillGeneration, runsEnabled                   bool
 		maxBudgetUSD                                                         float64
 		maxMissionTTL, maxMissionTimeout                                     int
@@ -70,6 +70,7 @@ func main() {
 		"How long invoke waits when the caller doesn't say.")
 	flag.DurationVar(&maxTimeout, "max-timeout", 30*time.Minute, "Upper bound on the wait a caller may request.")
 	flag.IntVar(&maxInFlight, "max-in-flight", 64, "Maximum concurrently waiting invocations (0 = unlimited).")
+	flag.IntVar(&maxStreams, "max-streams", 64, "Maximum concurrently open event streams (0 = unlimited).")
 	flag.StringVar(&defaultImage, "default-knight-image", os.Getenv("DEFAULT_KNIGHT_IMAGE"),
 		"The operator's DEFAULT_KNIGHT_IMAGE, used to infer knight runtimes for model validation.")
 	flag.BoolVar(&missionsEnabled, "missions", true,
@@ -140,6 +141,7 @@ func main() {
 		DefaultTimeout:     defaultTimeout,
 		MaxTimeout:         maxTimeout,
 		MaxInFlight:        maxInFlight,
+		MaxStreams:         maxStreams,
 		DefaultKnightImage: defaultImage,
 		Missions: gateway.MissionOptions{
 			MaxBudgetUSD:         maxBudgetUSD,
@@ -176,6 +178,9 @@ func main() {
 		// long response.
 		IdleTimeout: 2 * time.Minute,
 	}
+	// Open event streams never end by themselves: close them first or
+	// Shutdown waits for them until its deadline.
+	srv.RegisterOnShutdown(svc.CloseStreams)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if runsEnabled {

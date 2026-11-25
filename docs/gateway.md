@@ -169,6 +169,49 @@ Empty output counts as a failure, as it does in the task contract.
 Returns the task record. If the task is still `pending`, the gateway first
 checks the results stream for the result and records it if found.
 
+### `GET /v1/tasks/{taskId}/events`
+
+Follows a task live as Server-Sent Events (`text/event-stream`). Connect to a
+running task and the stream carries what the knight is doing, then the result,
+then closes:
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" \
+  "$GATEWAY/v1/tasks/$TASK_ID/events"
+```
+
+```
+event: activity
+data: {"v":1,"type":"tool.started","knight":"operator","taskId":"invoke-operator-1760000000000-ab12cd34","seq":2,"tool":"Bash","argsSummary":"go test ./..."}
+
+: heartbeat
+
+event: result
+id: result
+data: {"taskId":"invoke-operator-1760000000000-ab12cd34","status":"succeeded","output":"..."}
+```
+
+| Event | Data |
+|-------|------|
+| `activity` | A knight's [task activity event](design/task-activity-events.md) as published: `task.started`, `task.heartbeat`, `tool.started`, `tool.finished`, `assistant.message`, `task.finished` |
+| `result` | The task record, once the result arrived (same as `GET /v1/tasks/{taskId}`). The stream closes after it. |
+| `error` | `{"error": "..."}`: the stream failed after it started |
+
+A comment line (`: heartbeat`) is sent every 15 s when the stream is idle, so
+proxies don't cut it.
+
+- A task that already finished returns its `result` at once. An unknown task is a **404**.
+- **Activity is not replayed.** Knights publish it on core NATS and it isn't
+  stored, so a stream only shows events from the moment it connected. The
+  `result` is always delivered, and activity is sampled above 20 events/s per
+  task (see the design doc).
+- The `result` event has `id: result`. A client that reconnects with
+  `Last-Event-ID: result` gets **204** (no content, and `EventSource` stops
+  reconnecting) instead of the result again.
+- Streams count against `gateway.maxStreams` (default 64 per replica); beyond
+  it callers get **429**. Streams are closed when the gateway shuts down.
+- Only tasks started through the gateway (`invoke`) can be followed.
+
 ### `GET /v1/tasks?knight=&runId=&status=&limit=`
 
 Lists recent gateway tasks, newest first. The default limit is 20 and the
@@ -421,6 +464,28 @@ same 200/202 convention. `waitSeconds` long-polls (capped at
 `gateway.maxTimeout`), so a caller whose connection dropped resumes waiting
 where it left off.
 
+### `GET /v1/runs/{namespace}/{run}/events`
+
+Follows a gateway run as Server-Sent Events, with the same framing, heartbeat,
+`Last-Event-ID` and `maxStreams` rules as the task stream:
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" \
+  "$GATEWAY/v1/runs/roundtable/digest-gw-1a2b3c4d/events"
+```
+
+| Event | Data |
+|-------|------|
+| `step` | `{"name","phase","error?","output?","outputTruncated?"}`: sent when a step's phase changes. A client that connects mid-run first gets each step's current phase. `output` is cut at 4 KiB; the result has the full (64 KiB) output. |
+| `activity` | The activity events of the steps that are running (found by the step's `taskId`) |
+| `result` | The run record (same as `GET /v1/runs/{namespace}/{run}`) once the run is terminal. The stream closes after it. |
+| `error` | `{"error": "..."}` |
+
+A finished run yields its steps and the `result` at once. Step changes are
+read from the Chain every second or two, so a step that starts and finishes
+between two reads is reported only as its latest phase. Activity is not
+replayed, as for tasks.
+
 ### `GET /v1/runs?namespace=&chain=&phase=&limit=`
 
 `{"runs": [...]}`: gateway-started runs, newest first, without `steps` and
@@ -516,6 +581,12 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 
 The mission tools are only listed when `gateway.missions.enabled` is true, the
 chain-run tools when `gateway.runs.enabled` is true.
+
+`invoke_knight` and `run_chain` send MCP progress notifications while they
+wait, when the client passes a progress token: one per tool call the knight
+makes (`invoke_knight`) or per step change and tool call (`run_chain`), at most
+one every 500 ms (step changes and task starts are always sent). The message
+is text such as `tool Bash go test ./...` or `step fetch: Running`.
 
 To register the endpoint with Claude Code:
 
