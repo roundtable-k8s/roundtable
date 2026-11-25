@@ -382,7 +382,7 @@ spec:
     costBudgetUSD: "50.00"
     costResetSchedule: "0 0 1 * *"
     maxKnights: 15
-    maxMissions: 5
+    maxMissions: 5   # concurrent active missions; 0 = unlimited. Extra missions wait in Pending (Admitted=False, TableAtMissionLimit), oldest first
   knightSelector:
     matchLabels:
       roundtable.ai.roundtable.io/fleet: fleet-a

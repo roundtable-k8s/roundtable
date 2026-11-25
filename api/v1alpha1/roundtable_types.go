@@ -375,7 +375,10 @@ type RoundTablePolicies struct {
 	// +optional
 	MaxKnights int32 `json:"maxKnights,omitempty"`
 
-	// maxMissions is the maximum number of concurrent active missions.
+	// maxMissions is the maximum number of concurrent active missions
+	// (Provisioning, Planning, Assembling, Briefing or Active). Missions over
+	// the limit wait in Pending, oldest first, with Admitted=False.
+	// 0 means unlimited.
 	// +kubebuilder:default=5
 	// +kubebuilder:validation:Minimum=0
 	// +optional
