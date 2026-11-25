@@ -45,6 +45,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
+	"github.com/roundtable-k8s/roundtable/internal/github"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -63,7 +64,9 @@ const (
 // TriggerReconciler runs Triggers: for a NATS source it keeps one durable
 // consumer on the RoundTable's events stream and a fetch loop that starts a
 // run per message; for a schedule source it fires at each cron time. Runs are
-// copies of the target Chain started through chainrun.Start.
+// copies of the target Chain started through chainrun.Start. A github source
+// is a NATS source fed by a poll loop that publishes matching items to the
+// Trigger's own subject.
 //
 // It only runs in the elected leader (controllers need leader election by
 // default), so fetch loops, which are started from Reconcile, do too.
@@ -75,13 +78,20 @@ type TriggerReconciler struct {
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder
 	NATS      *natspkg.Provider
+	// GitHub builds GitHub clients for github sources; nil means
+	// api.github.com.
+	GitHub *github.ClientFactory
 
 	// Now returns the current time; nil means time.Now (tests override it).
 	Now func() time.Time
 
 	initOnce  sync.Once
 	consumers *triggerConsumers
-	fireLocks sync.Map // namespace/name -> *sync.Mutex
+	pollers   *triggerPollers
+	// manualGitHubPolls keeps Reconcile from starting poll loops (tests
+	// call pollGitHub themselves).
+	manualGitHubPolls bool
+	fireLocks         sync.Map // namespace/name -> *sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers,verbs=get;list;watch;update;patch
@@ -90,6 +100,7 @@ type TriggerReconciler struct {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=chains,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 
 // Reconcile keeps a Trigger's consumer or schedule in line with its spec.
 func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -98,6 +109,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Get(ctx, req.NamespacedName, trg); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.consumers.stop(req.String())
+			r.pollers.stop(req.String())
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -142,7 +154,17 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	latest.Status.ObservedGeneration = latest.Generation
 	cond.ObservedGeneration = latest.Generation
 	meta.SetStatusCondition(&latest.Status.Conditions, cond)
-	if err := r.Status().Patch(ctx, latest, client.MergeFrom(orig)); err != nil {
+	if latest.Spec.Source.GitHub == nil || latest.Spec.Suspend {
+		meta.RemoveStatusCondition(&latest.Status.Conditions, aiv1alpha1.ConditionTriggerGitHubReady)
+		latest.Status.LastPolledAt = nil
+	}
+	patch := client.MergeFrom(orig)
+	if latest.Spec.Source.GitHub != nil {
+		// The poll loop writes GitHubReady concurrently: don't overwrite it
+		// with a stale conditions list (a conflict requeues).
+		patch = client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+	}
+	if err := r.Status().Patch(ctx, latest, patch); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -156,6 +178,9 @@ func (r *TriggerReconciler) init() {
 	r.initOnce.Do(func() {
 		if r.consumers == nil {
 			r.consumers = newTriggerConsumers(logf.Log.WithName("trigger-consumers"))
+		}
+		if r.pollers == nil {
+			r.pollers = newTriggerPollers(logf.Log.WithName("trigger-github"))
 		}
 	})
 }
@@ -200,9 +225,10 @@ func (r *TriggerReconciler) natsConn() (*nats.Conn, error) {
 	return nc, nil
 }
 
-// releaseConsumer stops the fetch loop and deletes the durable consumer
-// recorded in status, if any.
+// releaseConsumer stops the fetch and poll loops and deletes the durable
+// consumer recorded in status, if any.
 func (r *TriggerReconciler) releaseConsumer(ctx context.Context, trg *aiv1alpha1.Trigger) error {
+	r.pollers.stop(client.ObjectKeyFromObject(trg).String())
 	r.consumers.stop(client.ObjectKeyFromObject(trg).String())
 	if trg.Status.Consumer == "" || trg.Status.Stream == "" {
 		trg.Status.Stream, trg.Status.Consumer = "", ""
@@ -223,6 +249,7 @@ func (r *TriggerReconciler) releaseConsumer(ctx context.Context, trg *aiv1alpha1
 // finalize deletes the Trigger's consumer and releases the finalizer.
 func (r *TriggerReconciler) finalize(ctx context.Context, trg *aiv1alpha1.Trigger) error {
 	if !controllerutil.ContainsFinalizer(trg, aiv1alpha1.FinalizerTrigger) {
+		r.pollers.stop(client.ObjectKeyFromObject(trg).String())
 		r.consumers.stop(client.ObjectKeyFromObject(trg).String())
 		return nil
 	}
@@ -248,6 +275,7 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	notReady := func(reason, format string, args ...any) (ctrl.Result, metav1.Condition, error) {
 		// Events wait in the durable consumer until the Trigger is fixed.
 		r.consumers.stop(key)
+		r.pollers.stop(key)
 		trg.Status.NextScheduledAt = nil
 		return ctrl.Result{RequeueAfter: triggerRequeueError},
 			triggerCondition(metav1.ConditionFalse, reason, fmt.Sprintf(format, args...)), nil
@@ -268,7 +296,7 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	}
 
 	switch src := trg.Spec.Source; {
-	case src.NATS != nil, src.Webhook != nil:
+	case src.NATS != nil, src.Webhook != nil, src.GitHub != nil:
 		return r.reconcileNATS(ctx, trg, notReady)
 	case src.Schedule != nil:
 		if err := r.releaseConsumer(ctx, trg); err != nil {
@@ -283,14 +311,16 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 type notReadyFunc func(reason, format string, args ...any) (ctrl.Result, metav1.Condition, error)
 
 // usesConsumer reports whether the Trigger reads the events stream through a
-// durable consumer (NATS and webhook sources).
+// durable consumer (NATS, webhook and github sources).
 func usesConsumer(trg *aiv1alpha1.Trigger) bool {
-	return trg.Spec.Source.NATS != nil || trg.Spec.Source.Webhook != nil
+	src := trg.Spec.Source
+	return src.NATS != nil || src.Webhook != nil || src.GitHub != nil
 }
 
 // reconcileNATS ensures the durable consumer and its fetch loop. A webhook
 // source is a NATS source on the fixed subject the gateway publishes its
-// deliveries to.
+// deliveries to; a github source one on the subject its poll loop publishes
+// matching items to.
 func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.Trigger, notReady notReadyFunc) (ctrl.Result, metav1.Condition, error) {
 	rtName := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
 	rt := &aiv1alpha1.RoundTable{}
@@ -301,12 +331,17 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 		return ctrl.Result{}, metav1.Condition{}, err
 	}
 	var subject string
-	if trg.Spec.Source.Webhook != nil {
+	switch src := trg.Spec.Source; {
+	case src.Webhook != nil, src.GitHub != nil:
 		if rt.Spec.NATS.SubjectPrefix == "" {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "RoundTable %q has no spec.nats.subjectPrefix", rtName)
 		}
-		subject = natspkg.WebhookEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
-	} else {
+		if src.GitHub != nil {
+			subject = natspkg.GitHubEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
+		} else {
+			subject = natspkg.WebhookEventSubject(rt.Spec.NATS.SubjectPrefix, trg.Namespace, trg.Name)
+		}
+	default:
 		subject = trg.Spec.Source.NATS.Subject
 		prefix := natspkg.EventsSubjectPrefix(rt.Spec.NATS.SubjectPrefix)
 		if !strings.HasPrefix(subject, prefix) || len(subject) == len(prefix) {
@@ -337,11 +372,21 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	if err := r.consumers.ensure(nc, nn.String(), cfg, r.messageHandler(nn)); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerConsumerError, "%v", err)
 	}
+	msg := fmt.Sprintf("Consumer %s on stream %s reads %s", durable, stream, subject)
+	if gh := trg.Spec.Source.GitHub; gh != nil {
+		if !r.manualGitHubPolls {
+			r.pollers.ensure(nn.String(), trg.Generation, func(ctx context.Context) time.Duration {
+				return r.pollGitHub(ctx, nn)
+			})
+		}
+		msg += fmt.Sprintf("; polling %d repositories every %s", len(gh.Repositories), githubPollInterval(gh))
+	} else {
+		r.pollers.stop(nn.String())
+	}
 	// Re-check periodically: the fetch loop exits if its consumer is deleted
 	// (events stream recreated, JetStream storage lost); the next reconcile
 	// recreates the consumer and restarts the loop.
-	return ctrl.Result{RequeueAfter: RequeueVerySlow}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening,
-		fmt.Sprintf("Consumer %s on stream %s reads %s", durable, stream, subject)), nil
+	return ctrl.Result{RequeueAfter: RequeueVerySlow}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening, msg), nil
 }
 
 // reconcileSchedule fires when a schedule time has passed since the last one
@@ -410,7 +455,10 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 			Data:    eventData(msg.Data()),
 			Headers: eventHeaders(msg.Headers()),
 		}
-		key := msg.Headers().Get(nats.MsgIdHdr)
+		key := msg.Headers().Get(natspkg.EventKeyHeader)
+		if key == "" {
+			key = msg.Headers().Get(nats.MsgIdHdr)
+		}
 		if md, err := msg.Metadata(); err == nil {
 			ev.Time = md.Timestamp
 			if key == "" {
@@ -514,11 +562,25 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	name := chainrun.Name(tmpl.Name, trg.Name, dedupeHash(key))
 
+	// duplicate handles an event whose run already exists. A github item
+	// whose claim failed when its run started is published again by the
+	// next poll: apply the claim now.
+	duplicate := func() (triggerOutcome, error) {
+		if pendingGitHubClaim(trg, ev) == nil {
+			return skip(triggerHandled, "duplicate dedupe key: run %s exists", name)
+		}
+		if reason := r.githubAfterRun(ctx, trg, ev, name); reason != "" {
+			firing.Run = name
+			return skip(triggerHandled, "%s", reason)
+		}
+		return triggerHandled, nil
+	}
+
 	existing := &aiv1alpha1.Chain{}
 	err = r.reader().Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: name}, existing)
 	switch {
 	case err == nil:
-		return skip(triggerHandled, "duplicate dedupe key: run %s exists", name)
+		return duplicate()
 	case !apierrors.IsNotFound(err):
 		return triggerRetry, err
 	}
@@ -563,13 +625,17 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		Owner:       trg,
 	})
 	if apierrors.IsAlreadyExists(err) {
-		return skip(triggerHandled, "duplicate dedupe key: run %s exists", name)
+		return duplicate()
 	}
 	if err != nil {
 		return triggerRetry, fmt.Errorf("start run %s: %w", name, err)
 	}
 
 	firing.Run = name
+	// Claim only once the run exists: a failed claim leaves the item
+	// selected, and the next poll retries the claim (the run is found by
+	// name, so nothing starts twice).
+	firing.SkipReason = r.githubAfterRun(ctx, trg, ev, name)
 	if err := r.recordFiring(ctx, nn, firing, func(st *aiv1alpha1.TriggerStatus) {
 		at := metav1.NewTime(now)
 		st.LastFiredAt = &at
@@ -673,6 +739,7 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 // SetupWithManager sets up the controller with the Manager.
 func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.consumers = newTriggerConsumers(mgr.GetLogger().WithName("trigger-consumers"))
+	r.pollers = newTriggerPollers(mgr.GetLogger().WithName("trigger-github"))
 	r.init()
 	if r.APIReader == nil {
 		r.APIReader = mgr.GetAPIReader()
@@ -680,6 +747,7 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Stop the fetch loops when the manager stops (or loses leadership).
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		<-ctx.Done()
+		r.pollers.stopAll()
 		r.consumers.stopAll()
 		return nil
 	})); err != nil {

@@ -359,4 +359,7 @@ func TestEventHelpers(t *testing.T) {
 	if got := WebhookEventSubject("fleet-a", "roundtable", "alerts"); got != "fleet-a.events.webhook.roundtable.alerts" {
 		t.Errorf("WebhookEventSubject = %q", got)
 	}
+	if got := GitHubEventSubject("fleet-a", "roundtable", "ready"); got != "fleet-a.events.github.roundtable.ready" {
+		t.Errorf("GitHubEventSubject = %q", got)
+	}
 }

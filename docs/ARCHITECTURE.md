@@ -58,6 +58,7 @@ Task activity events are published on plain NATS (no stream captures them); see 
 | `<prefix>.results.<taskId>` | the knight runtime | Chain/Mission controllers (JetStream consumer), invoke gateway (core subscription plus `GetLastMsg`) | `natspkg.ResultSubject` |
 | `<prefix>.activity.<Knight>.<taskId>` | the knight runtime | gateway (`/events` streams, MCP progress), UI | `natspkg.ActivitySubject`; [design](design/task-activity-events.md) |
 | `<prefix>.events.<name>` | anything | NATS-source Triggers | `natspkg.EventSubject` |
+| `<prefix>.events.github.<namespace>.<name>` | the Trigger controller's GitHub poll loop | that github-source Trigger | `natspkg.GitHubEventSubject` |
 | `<prefix>.dlq.<knight>.<taskId>` | operator dead-letter watcher | `GET /v1/dead-letters` | `deadletter.Subject` |
 
 ### Consumers

@@ -40,7 +40,8 @@ spec:
         description: |-
           Trigger starts a run of a Chain with input rendered from an event: a
           message on the RoundTable's events stream, a webhook delivered through the
-          gateway, or a cron schedule.
+          gateway, a cron schedule, or a GitHub issue or pull request matching a
+          query.
         properties:
           apiVersion:
             description: |-
@@ -89,8 +90,8 @@ spec:
                   dedupeKey is a Go template (same data as input) whose result
                   identifies the event: an event whose key matches a run that still
                   exists starts nothing. Defaults to the Nats-Msg-Id header (else the
-                  stream sequence) for NATS and webhook, and the scheduled time for
-                  schedule.
+                  stream sequence) for NATS and webhook, the scheduled time for
+                  schedule, and "<owner/name>#<number>" for github.
                 type: string
               input:
                 description: |-
@@ -104,8 +105,9 @@ spec:
               roundTableRef:
                 description: |-
                   roundTableRef names the RoundTable (same namespace) whose events
-                  stream a NATS or webhook source reads. Required for source.nats and
-                  source.webhook.
+                  stream a NATS, webhook or github source reads, and whose
+                  spec.github.tokenSecretRef a github source polls with. Required for
+                  source.nats, source.webhook and source.github.
                 properties:
                   name:
                     default: ""
@@ -122,7 +124,99 @@ spec:
                 description: source is where events come from.
                 properties:
                   github:
-                    description: github is reserved for the GitHub source.
+                    description: |-
+                      github polls GitHub for issues or pull requests matching a query and
+                      fires once per item. The operator publishes each item to
+                      <subjectPrefix>.events.github.<namespace>.<name> on the RoundTable's
+                      events stream, which the Trigger reads like a NATS source.
+                    properties:
+                      claim:
+                        description: |-
+                          claim marks an item as taken once its run was created, so it is not
+                          picked again: typically remove the selecting label and add an
+                          in-progress one.
+                        properties:
+                          addLabels:
+                            description: |-
+                              addLabels are added to the item (created in the repository if
+                              missing).
+                            items:
+                              maxLength: 50
+                              minLength: 1
+                              type: string
+                            maxItems: 10
+                            type: array
+                            x-kubernetes-list-type: set
+                          removeLabels:
+                            description: removeLabels are removed from the item.
+                            items:
+                              maxLength: 50
+                              minLength: 1
+                              type: string
+                            maxItems: 10
+                            type: array
+                            x-kubernetes-list-type: set
+                        type: object
+                        x-kubernetes-validations:
+                        - message: set claim.addLabels or claim.removeLabels
+                          rule: (has(self.addLabels) && size(self.addLabels) > 0)
+                            || (has(self.removeLabels) && size(self.removeLabels)
+                            > 0)
+                      kind:
+                        default: issue
+                        description: kind selects issues or pull requests. Defaults
+                          to issue.
+                        enum:
+                        - issue
+                        - pullRequest
+                        type: string
+                      pollInterval:
+                        description: |-
+                          pollInterval is how often each repository is listed. Defaults to 60s;
+                          at least 30s.
+                        type: string
+                        x-kubernetes-validations:
+                        - message: pollInterval must be at least 30s
+                          rule: duration(self) >= duration('30s')
+                      query:
+                        description: query selects the items.
+                        properties:
+                          labels:
+                            description: labels an item must all carry.
+                            items:
+                              maxLength: 50
+                              minLength: 1
+                              type: string
+                            maxItems: 10
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-type: set
+                          state:
+                            default: open
+                            description: state is open, closed or all. Defaults to
+                              open.
+                            enum:
+                            - open
+                            - closed
+                            - all
+                            type: string
+                        required:
+                        - labels
+                        type: object
+                      repositories:
+                        description: repositories are the repositories polled, as
+                          "owner/name".
+                        items:
+                          maxLength: 140
+                          pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                          type: string
+                        maxItems: 20
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                    required:
+                    - query
+                    - repositories
                     type: object
                   nats:
                     description: |-
@@ -255,12 +349,12 @@ spec:
                     or source.github
                   rule: '[has(self.nats), has(self.schedule), has(self.webhook), has(self.github)].filter(x,
                     x).size() == 1'
-                - message: source.github is not implemented yet
-                  rule: '!has(self.github)'
               suspend:
                 description: |-
-                  suspend stops firing. A NATS or webhook source's consumer is deleted,
-                  so events published while suspended do not fire on resume.
+                  suspend stops firing. A NATS, webhook or github source's consumer is
+                  deleted, so events published while suspended do not fire on resume (a
+                  github source stops polling and picks up matching items again on
+                  resume).
                 type: boolean
               target:
                 description: target is what each firing starts.
@@ -300,6 +394,8 @@ spec:
               rule: '!has(self.source.nats) || has(self.roundTableRef)'
             - message: roundTableRef is required for source.webhook
               rule: '!has(self.source.webhook) || has(self.roundTableRef)'
+            - message: roundTableRef is required for source.github
+              rule: '!has(self.source.github) || has(self.roundTableRef)'
           status:
             description: status defines the observed state of Trigger
             properties:
@@ -311,7 +407,9 @@ spec:
                   type: string
                 type: array
               conditions:
-                description: 'conditions: Ready is True while the Trigger is listening.'
+                description: |-
+                  conditions: Ready is True while the Trigger is listening; GitHubReady
+                  (github source) is True while polling works.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -371,10 +469,17 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               consumer:
-                description: consumer is the NATS or webhook source's durable consumer.
+                description: consumer is the NATS, webhook or github source's durable
+                  consumer.
                 type: string
               lastFiredAt:
                 description: lastFiredAt is when a firing last started a run.
+                format: date-time
+                type: string
+              lastPolledAt:
+                description: |-
+                  lastPolledAt is when a github source last listed its repositories
+                  successfully.
                 format: date-time
                 type: string
               lastScheduledAt:
@@ -414,7 +519,8 @@ spec:
                   type: object
                 type: array
               stream:
-                description: stream is the JetStream stream the NATS or webhook source's
+                description: |-
+                  stream is the JetStream stream the NATS, webhook or github source's
                   consumer is on.
                 type: string
             type: object

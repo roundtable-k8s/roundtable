@@ -1,0 +1,37 @@
+# A Trigger that starts the security-report Chain once per open issue labelled
+# "security-review" in two repositories, then marks the issue as taken. Needs
+# chain-sequential.yaml and a RoundTable "fleet-a" with createStreams: true
+# and spec.github.tokenSecretRef (a token that can read issues and write
+# labels in both repositories).
+#
+#   kubectl -n roundtable get trigger security-issues        # Ready, Last Fired
+#   kubectl -n roundtable get trigger security-issues \
+#     -o jsonpath='{.status.conditions[?(@.type=="GitHubReady")].message}'
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: security-issues
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    github:
+      repositories: [acme/api, acme/web]
+      kind: issue                       # or pullRequest
+      query:
+        labels: [security-review]       # an item must carry all of them
+        state: open                     # open (default), closed or all
+      pollInterval: 2m                  # default 60s, at least 30s
+      # Applied only after the run was created. Removing the selecting label
+      # keeps the issue from being picked again once its run is deleted.
+      claim:
+        removeLabels: [security-review]
+        addLabels: [security-review:in-progress]
+  target:
+    chainRef: {name: security-report}
+  input: |
+    Review {{ .Event.Data.repo }}#{{ .Event.Data.number }} ({{ .Event.Data.url }}),
+    "{{ .Event.Data.title }}" opened by {{ .Event.Data.author }}, labels
+    {{ toJson .Event.Data.labels }}. Report the security impact.
+  concurrency:
+    maxActive: 2                        # further items wait for a free slot

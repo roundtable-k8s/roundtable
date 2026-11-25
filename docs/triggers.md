@@ -5,15 +5,15 @@ the target Chain whose `spec.input` is rendered from the event (the same kind
 of copy issue pickup and the gateway make, through `internal/chainrun`). The
 design decisions are in #400.
 
-Three sources exist today:
+Four sources exist today:
 
 | Source | Fires on | Default dedupe key |
 |---|---|---|
 | `nats` | each message on a subject under the table's `<subjectPrefix>.events.` | `Nats-Msg-Id` header, else the stream sequence |
 | `webhook` | each authenticated `POST` to the gateway's `/v1/hooks/<namespace>/<name>` | the sender's delivery id (see [Webhook source](#webhook-source)), else the stream sequence |
 | `schedule` | each cron time | the schedule time (RFC 3339, UTC) |
+| `github` | each issue or pull request matching a label query, polled | `<owner/name>#<number>` |
 
-`github` is reserved: the API server rejects it until it is implemented.
 Exactly one source is set.
 
 ## Example: NATS
@@ -55,7 +55,7 @@ the [invoke gateway](gateway.md#webhooks); the gateway checks the sender's
 credential **for that Trigger** and publishes the request body to
 `<subjectPrefix>.events.webhook.<namespace>.<name>` on the table's events
 stream. The Trigger reads that subject like a NATS source, so the bus stays the
-system of record and everything under [Delivery](#delivery-nats-and-webhook-sources)
+system of record and everything under [Delivery](#delivery-nats-webhook-and-github-sources)
 applies.
 
 [`examples/trigger-webhook.yaml`](../examples/trigger-webhook.yaml):
@@ -240,6 +240,111 @@ rest_command:
 | 429 | The Trigger's rate limit (`gateway.hooks.rate` per second, burst `gateway.hooks.burst`) is used up; see `Retry-After` |
 | 503 | The Trigger's RoundTable is missing or the publish failed (no events stream: set `createStreams`) |
 
+## GitHub source
+
+"When an issue or pull request in these repositories carries these labels,
+start the chain with it as input." The operator polls GitHub's REST API with
+the table's token (`RoundTable.spec.github.tokenSecretRef` of `roundTableRef`)
+and publishes each item that needs handling to
+`<subjectPrefix>.events.github.<namespace>.<name>` on the table's events
+stream. The Trigger reads that subject like a NATS source, so everything under
+[Delivery](#delivery-nats-webhook-and-github-sources) applies and the bus stays
+the system of record. Nothing about `RoundTable.spec.issuePickup` changes.
+
+[`examples/trigger-github.yaml`](../examples/trigger-github.yaml):
+
+```yaml
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: security-issues
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    github:
+      repositories: [acme/api, acme/web]
+      kind: issue                       # or pullRequest
+      query:
+        labels: [security-review]       # an item must carry all of them
+        state: open                     # open (default), closed or all
+      pollInterval: 2m                  # default 60s, at least 30s
+      claim:
+        removeLabels: [security-review]
+        addLabels: [security-review:in-progress]
+  target:
+    chainRef: {name: security-report}
+  input: |
+    Review {{ .Event.Data.repo }}#{{ .Event.Data.number }} ({{ .Event.Data.url }}),
+    "{{ .Event.Data.title }}" opened by {{ .Event.Data.author }}, labels
+    {{ toJson .Event.Data.labels }}. Report the security impact.
+  concurrency:
+    maxActive: 2
+```
+
+### The event
+
+`.Event.Data` of each item:
+
+| Key | Value |
+|---|---|
+| `repo` | `owner/name` |
+| `number` | the issue or pull request number |
+| `title` | its title |
+| `labels` | its label names (a list) |
+| `url` | its web URL |
+| `author` | the login that opened it |
+| `kind` | `issue` or `pullRequest` |
+| `state` | `open` or `closed` |
+
+The message also carries a `Roundtable-Event-Key: <owner/name>#<number>`
+header, the default dedupe key. `.Event.Subject` is the Trigger's subject and
+`.Event.Time` when the item was published.
+
+### Polling
+
+- One poll loop per Trigger, started by the Trigger controller in the elected
+  leader and stopped when the Trigger is suspended, deleted or switched to
+  another source. A spec change restarts it, so it polls at once.
+- Each poll lists every repository through the issues endpoint (`labels`,
+  `state`; pull requests are told apart by GitHub's `pull_request` link) and
+  publishes:
+  - an item **without a run** (by its dedupe key), unless the concurrency policy
+    would hold it back anyway (`maxActive` reached, `Forbid` with a run active;
+    `Replace` publishes at most one new item per poll). Held items are counted
+    in `GitHubReady` instead of filling `status.recentFirings` every poll, and
+    start on a later poll once a slot is free.
+  - an item **whose run exists but whose claim is still pending** (see below).
+- Everything else is left alone: an item whose run still exists does not fire
+  again. Without `claim`, an item that keeps its labels fires again only after
+  its run was deleted (`ttlSecondsAfterFinished`).
+- An item whose `input` or `dedupeKey` template fails to render is not
+  published; it is named in `GitHubReady` until it is fixed.
+
+### Claim
+
+`claim.addLabels` / `claim.removeLabels` are applied to an item **after** its
+run was created, never before. If labelling fails, the firing is recorded with
+the run and a `skipReason` (`claim of acme/api#12 failed, retried on the next
+poll: …`), and the next poll publishes the item again: its run is found by name,
+so nothing starts twice, and only the claim is retried. Remove the selecting
+label in the claim (as above) so an item is not picked again once its run is
+deleted.
+
+### Rate limits and GitHubReady
+
+`GitHubReady` reports the last poll:
+
+| Status | Reason | When |
+|---|---|---|
+| True | `Polling` | The last poll succeeded. The message counts matching, published and held items and the rate limit remaining. |
+| False | `TokenError` | The RoundTable has no `spec.github.tokenSecretRef`, or the Secret or key is missing. |
+| False | `RateLimited` | GitHub's primary or secondary rate limit was hit. The loop waits until the limit resets (at least `pollInterval`, at most an hour; 5 minutes for a secondary limit without `Retry-After`) and lists no further repositories meanwhile. |
+| False | `PollError` | Listing a repository or publishing failed, or an item's template failed to render. |
+
+A poll that leaves the rate limit at 0 also waits for its reset.
+`status.lastPolledAt` is the last successful poll.
+
 ## Example: schedule
 
 [`examples/trigger-schedule.yaml`](../examples/trigger-schedule.yaml) runs a
@@ -254,13 +359,18 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 | `source.webhook.auth` | `bearerTokenSecretRef` or `hmacSecretRef`: a key of a labelled Secret in the Trigger's namespace. |
 | `source.webhook.eventType` | Fire only on deliveries with this `Ce-Type` (else `X-GitHub-Event`). |
 | `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire. |
+| `source.github.repositories` | `owner/name` of each repository polled (1 to 20). |
+| `source.github.kind` | `issue` (default) or `pullRequest`. |
+| `source.github.query.labels` / `state` | Labels an item must all carry (1 to 10), and `open` (default), `closed` or `all`. |
+| `source.github.pollInterval` | How often the repositories are listed (default `60s`, at least `30s`). |
+| `source.github.claim.addLabels` / `removeLabels` | Labels added to and removed from an item once its run was created. |
 | `target.chainRef` | The Chain (same namespace) each firing copies. |
 | `input` | Go template rendered into the run's `spec.input`. Empty keeps the target's own input. |
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
 | `concurrency.policy` | `Allow` (default), `Forbid` or `Replace`. |
 | `concurrency.maxActive` | Under `Allow`, the most active runs; a firing at the cap is skipped. 0 means no cap. |
-| `suspend` | Stop firing. A NATS or webhook source's consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them). |
-| `roundTableRef` | The RoundTable whose events stream a NATS or webhook source reads. Required for `nats` and `webhook`. |
+| `suspend` | Stop firing. A NATS, webhook or github source's consumer is deleted, so events published while suspended don't fire on resume (the gateway still accepts and stores them; a github source stops polling and picks up matching items again on resume). |
+| `roundTableRef` | The RoundTable whose events stream a NATS, webhook or github source reads (and whose GitHub token a github source uses). Required for `nats`, `webhook` and `github`. |
 | `ttlSecondsAfterFinished` | Delete a finished run this long after it completed (default 86400; 0 keeps runs). |
 
 ### Templates
@@ -268,7 +378,7 @@ schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
 `input` and `dedupeKey` see:
 
 - `.Event.Subject`: the NATS subject (empty for schedule)
-- `.Event.Data`: the payload parsed as JSON, or the raw string when it is not JSON
+- `.Event.Data`: the payload parsed as JSON, or the raw string when it is not JSON (github: see [The event](#the-event))
 - `.Event.Headers`: header name to value (multiple values joined with `, `)
 - `.Event.Time`: when the message was stored in the stream, or the schedule time (in the schedule's zone)
 - `.Trigger.Name`, `.Trigger.Namespace`
@@ -293,7 +403,7 @@ message, the redelivered message finds the run and is skipped.
 JetStream also drops a repeated `Nats-Msg-Id` within the stream's duplicate
 window (2 minutes) before the Trigger sees it.
 
-## Delivery (NATS and webhook sources)
+## Delivery (NATS, webhook and github sources)
 
 `RoundTable.spec.nats.createStreams: true` creates an events stream next to the
 tasks and results streams:
@@ -302,9 +412,12 @@ tasks and results streams:
 - subjects: `<subjectPrefix>.events.>`
 - Limits retention, max age `spec.nats.eventsMaxAge` (default 168h)
 
-Each NATS- or webhook-source Trigger gets one durable pull consumer on it,
-`trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:
-`<subjectPrefix>.events.webhook.<namespace>.<name>`). A new consumer
+Each NATS-, webhook- or github-source Trigger gets one durable pull consumer on
+it, `trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:
+`<subjectPrefix>.events.webhook.<namespace>.<name>`, github:
+`<subjectPrefix>.events.github.<namespace>.<name>`). A message's default
+dedupe key is its `Roundtable-Event-Key` header, else `Nats-Msg-Id`, else the
+stream sequence. A new consumer
 starts at new messages (not the stream's backlog). From then on, events
 published while the operator is down fire when it comes back.
 
@@ -340,4 +453,6 @@ status:
 
 `Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject or
 cron), `TargetNotFound`, `RoundTableNotFound`, `ConsumerError` (for example no
-events stream: set `createStreams` or create the stream yourself).
+events stream: set `createStreams` or create the stream yourself). A github
+source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
+and `lastPolledAt`.

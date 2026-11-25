@@ -102,3 +102,14 @@ func TriggerConsumerName(namespace, name string) string {
 func WebhookEventSubject(prefix, namespace, name string) string {
 	return EventSubject(prefix, "webhook."+namespace+"."+name)
 }
+
+// GitHubEventSubject is the subject the operator publishes a github-source
+// Trigger's polled items to and the Trigger reads them from.
+// Format: {prefix}.events.github.{namespace}.{name}.
+func GitHubEventSubject(prefix, namespace, name string) string {
+	return EventSubject(prefix, "github."+namespace+"."+name)
+}
+
+// EventKeyHeader carries an event's default dedupe key when it differs from
+// its Nats-Msg-Id (a github-source item: "<owner/name>#<number>").
+const EventKeyHeader = "Roundtable-Event-Key"

@@ -63,9 +63,8 @@ const (
 )
 
 // TriggerSource is where a Trigger's events come from. Exactly one source is
-// set. github is reserved and rejected until implemented.
+// set.
 // +kubebuilder:validation:XValidation:rule="[has(self.nats), has(self.schedule), has(self.webhook), has(self.github)].filter(x, x).size() == 1",message="set exactly one of source.nats, source.schedule, source.webhook or source.github"
-// +kubebuilder:validation:XValidation:rule="!has(self.github)",message="source.github is not implemented yet"
 type TriggerSource struct {
 	// nats fires on each message published to a subject on the RoundTable's
 	// events stream (<subjectPrefix>.events.>).
@@ -83,9 +82,111 @@ type TriggerSource struct {
 	// +optional
 	Webhook *TriggerWebhookSource `json:"webhook,omitempty"`
 
-	// github is reserved for the GitHub source.
+	// github polls GitHub for issues or pull requests matching a query and
+	// fires once per item. The operator publishes each item to
+	// <subjectPrefix>.events.github.<namespace>.<name> on the RoundTable's
+	// events stream, which the Trigger reads like a NATS source.
 	// +optional
-	GitHub *TriggerReservedSource `json:"github,omitempty"`
+	GitHub *TriggerGitHubSource `json:"github,omitempty"`
+}
+
+// TriggerGitHubKind is what a GitHub source selects.
+// +kubebuilder:validation:Enum=issue;pullRequest
+type TriggerGitHubKind string
+
+const (
+	// TriggerGitHubKindIssue selects issues (not pull requests).
+	TriggerGitHubKindIssue TriggerGitHubKind = "issue"
+	// TriggerGitHubKindPullRequest selects pull requests.
+	TriggerGitHubKindPullRequest TriggerGitHubKind = "pullRequest"
+)
+
+// TriggerGitHubState is the state of the items a GitHub source selects.
+// +kubebuilder:validation:Enum=open;closed;all
+type TriggerGitHubState string
+
+const (
+	// TriggerGitHubStateOpen selects open items.
+	TriggerGitHubStateOpen TriggerGitHubState = "open"
+	// TriggerGitHubStateClosed selects closed items.
+	TriggerGitHubStateClosed TriggerGitHubState = "closed"
+	// TriggerGitHubStateAll selects open and closed items.
+	TriggerGitHubStateAll TriggerGitHubState = "all"
+)
+
+// TriggerGitHubSource polls GitHub's REST API with the RoundTable's token
+// (spec.github.tokenSecretRef of roundTableRef). Each matching item is one
+// event whose default dedupe key is "<owner/name>#<number>".
+type TriggerGitHubSource struct {
+	// repositories are the repositories polled, as "owner/name".
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`
+	// +kubebuilder:validation:items:MaxLength=140
+	// +listType=set
+	// +required
+	Repositories []string `json:"repositories"`
+
+	// kind selects issues or pull requests. Defaults to issue.
+	// +kubebuilder:default=issue
+	// +optional
+	Kind TriggerGitHubKind `json:"kind,omitempty"`
+
+	// query selects the items.
+	// +required
+	Query TriggerGitHubQuery `json:"query"`
+
+	// pollInterval is how often each repository is listed. Defaults to 60s;
+	// at least 30s.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('30s')",message="pollInterval must be at least 30s"
+	// +optional
+	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
+
+	// claim marks an item as taken once its run was created, so it is not
+	// picked again: typically remove the selecting label and add an
+	// in-progress one.
+	// +optional
+	Claim *TriggerGitHubClaim `json:"claim,omitempty"`
+}
+
+// TriggerGitHubQuery is what GitHub's "list repository issues" endpoint can
+// filter on.
+type TriggerGitHubQuery struct {
+	// labels an item must all carry.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=50
+	// +listType=set
+	// +required
+	Labels []string `json:"labels"`
+
+	// state is open, closed or all. Defaults to open.
+	// +kubebuilder:default=open
+	// +optional
+	State TriggerGitHubState `json:"state,omitempty"`
+}
+
+// TriggerGitHubClaim is the labelling applied to an item after its run was
+// created.
+// +kubebuilder:validation:XValidation:rule="(has(self.addLabels) && size(self.addLabels) > 0) || (has(self.removeLabels) && size(self.removeLabels) > 0)",message="set claim.addLabels or claim.removeLabels"
+type TriggerGitHubClaim struct {
+	// addLabels are added to the item (created in the repository if
+	// missing).
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=50
+	// +listType=set
+	// +optional
+	AddLabels []string `json:"addLabels,omitempty"`
+
+	// removeLabels are removed from the item.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=50
+	// +listType=set
+	// +optional
+	RemoveLabels []string `json:"removeLabels,omitempty"`
 }
 
 // TriggerNATSSource reads events from the RoundTable's events stream.
@@ -157,10 +258,6 @@ type TriggerScheduleSource struct {
 	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
 }
 
-// TriggerReservedSource is a placeholder for a source that is not
-// implemented yet.
-type TriggerReservedSource struct{}
-
 // TriggerTarget is what a firing starts.
 type TriggerTarget struct {
 	// chainRef names the Chain (same namespace) a firing starts a copy of.
@@ -187,6 +284,7 @@ type TriggerConcurrency struct {
 // TriggerSpec defines the desired state of Trigger.
 // +kubebuilder:validation:XValidation:rule="!has(self.source.nats) || has(self.roundTableRef)",message="roundTableRef is required for source.nats"
 // +kubebuilder:validation:XValidation:rule="!has(self.source.webhook) || has(self.roundTableRef)",message="roundTableRef is required for source.webhook"
+// +kubebuilder:validation:XValidation:rule="!has(self.source.github) || has(self.roundTableRef)",message="roundTableRef is required for source.github"
 type TriggerSpec struct {
 	// source is where events come from.
 	// +required
@@ -208,8 +306,8 @@ type TriggerSpec struct {
 	// dedupeKey is a Go template (same data as input) whose result
 	// identifies the event: an event whose key matches a run that still
 	// exists starts nothing. Defaults to the Nats-Msg-Id header (else the
-	// stream sequence) for NATS and webhook, and the scheduled time for
-	// schedule.
+	// stream sequence) for NATS and webhook, the scheduled time for
+	// schedule, and "<owner/name>#<number>" for github.
 	// +optional
 	DedupeKey string `json:"dedupeKey,omitempty"`
 
@@ -217,14 +315,17 @@ type TriggerSpec struct {
 	// +optional
 	Concurrency TriggerConcurrency `json:"concurrency,omitempty"`
 
-	// suspend stops firing. A NATS or webhook source's consumer is deleted,
-	// so events published while suspended do not fire on resume.
+	// suspend stops firing. A NATS, webhook or github source's consumer is
+	// deleted, so events published while suspended do not fire on resume (a
+	// github source stops polling and picks up matching items again on
+	// resume).
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
 
 	// roundTableRef names the RoundTable (same namespace) whose events
-	// stream a NATS or webhook source reads. Required for source.nats and
-	// source.webhook.
+	// stream a NATS, webhook or github source reads, and whose
+	// spec.github.tokenSecretRef a github source polls with. Required for
+	// source.nats, source.webhook and source.github.
 	// +optional
 	RoundTableRef *corev1.LocalObjectReference `json:"roundTableRef,omitempty"`
 
@@ -281,15 +382,22 @@ type TriggerStatus struct {
 	// +optional
 	ActiveRuns []string `json:"activeRuns,omitempty"`
 
-	// stream is the JetStream stream the NATS or webhook source's consumer is on.
+	// stream is the JetStream stream the NATS, webhook or github source's
+	// consumer is on.
 	// +optional
 	Stream string `json:"stream,omitempty"`
 
-	// consumer is the NATS or webhook source's durable consumer.
+	// consumer is the NATS, webhook or github source's durable consumer.
 	// +optional
 	Consumer string `json:"consumer,omitempty"`
 
-	// conditions: Ready is True while the Trigger is listening.
+	// lastPolledAt is when a github source last listed its repositories
+	// successfully.
+	// +optional
+	LastPolledAt *metav1.Time `json:"lastPolledAt,omitempty"`
+
+	// conditions: Ready is True while the Trigger is listening; GitHubReady
+	// (github source) is True while polling works.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -308,7 +416,8 @@ type TriggerStatus struct {
 
 // Trigger starts a run of a Chain with input rendered from an event: a
 // message on the RoundTable's events stream, a webhook delivered through the
-// gateway, or a cron schedule.
+// gateway, a cron schedule, or a GitHub issue or pull request matching a
+// query.
 type Trigger struct {
 	metav1.TypeMeta `json:",inline"`
 

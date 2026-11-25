@@ -48,6 +48,8 @@ type Issue struct {
 	// "not_planned" or "reopened" (empty for old or open issues).
 	StateReason string  `json:"state_reason,omitempty"`
 	Labels      []Label `json:"labels"`
+	// User is the issue's author.
+	User User `json:"user"`
 	// PullRequest is set when the item is a pull request (the issues API
 	// lists both).
 	PullRequest *struct{} `json:"pull_request,omitempty"`
@@ -153,6 +155,7 @@ func toIssue(i *gh.Issue) Issue {
 	out := Issue{
 		Number: i.GetNumber(), Title: i.GetTitle(), Body: i.GetBody(), HTMLURL: i.GetHTMLURL(),
 		State: i.GetState(), StateReason: i.GetStateReason(), Labels: toLabels(i.Labels),
+		User: User{Login: i.GetUser().GetLogin()},
 	}
 	if i.PullRequestLinks != nil {
 		out.PullRequest = &struct{}{}
@@ -219,6 +222,81 @@ func (c *Client) listIssues(ctx context.Context, repo string, opts *gh.IssueList
 		out = append(out, toIssue(i))
 	}
 	return out, err
+}
+
+// IssueQuery filters ListIssuesByQuery.
+type IssueQuery struct {
+	// Labels an item must all carry.
+	Labels []string
+	// State is "open", "closed" or "all" ("" means open).
+	State string
+	// PullRequests selects pull requests instead of issues.
+	PullRequests bool
+}
+
+// Rate is GitHub's rate limit as last reported.
+type Rate struct {
+	Limit     int
+	Remaining int
+	Reset     time.Time
+}
+
+// ListIssuesByQuery lists a repository's issues or pull requests matching q
+// through the issues endpoint (which filters pull requests by label too),
+// oldest first, and returns the rate limit reported by the last response
+// (zero when none was received).
+func (c *Client) ListIssuesByQuery(ctx context.Context, repo string, q IssueQuery) ([]Issue, Rate, error) {
+	var rate Rate
+	g, err := c.api()
+	if err != nil {
+		return nil, rate, err
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, rate, err
+	}
+	state := q.State
+	if state == "" {
+		state = "open"
+	}
+	opts := gh.IssueListByRepoOptions{State: state, Labels: q.Labels, Sort: "created", Direction: "asc"}
+	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.Issue, *gh.Response, error) {
+		o := opts
+		o.ListOptions = lo
+		items, resp, err := g.Issues.ListByRepo(ctx, owner, name, &o)
+		if resp != nil && resp.Rate.Limit > 0 {
+			rate = Rate{Limit: resp.Rate.Limit, Remaining: resp.Rate.Remaining, Reset: resp.Rate.Reset.Time}
+		}
+		return items, resp, err
+	})
+	if err != nil {
+		return nil, rate, err
+	}
+	out := make([]Issue, 0, len(raw))
+	for _, i := range raw {
+		item := toIssue(i)
+		if (item.PullRequest != nil) == q.PullRequests {
+			out = append(out, item)
+		}
+	}
+	return out, rate, nil
+}
+
+// RateLimited reports whether err is GitHub's primary or secondary rate
+// limit, and when to try again (zero when GitHub did not say).
+func RateLimited(err error) (time.Time, bool) {
+	var rl *gh.RateLimitError
+	if errors.As(err, &rl) {
+		return rl.Rate.Reset.Time, true
+	}
+	var abuse *gh.AbuseRateLimitError
+	if errors.As(err, &abuse) {
+		if abuse.RetryAfter != nil && *abuse.RetryAfter > 0 {
+			return time.Now().Add(*abuse.RetryAfter), true
+		}
+		return time.Time{}, true
+	}
+	return time.Time{}, false
 }
 
 // GetIssue returns one issue.

@@ -474,4 +474,21 @@ const (
 	// ReasonTriggerConsumerError indicates the JetStream consumer could not
 	// be created or read.
 	ReasonTriggerConsumerError = "ConsumerError"
+
+	// ConditionTriggerGitHubReady is True while a github-source Trigger's
+	// token resolves and its last poll succeeded.
+	ConditionTriggerGitHubReady = "GitHubReady"
+
+	// ReasonTriggerPolling indicates the last GitHub poll succeeded.
+	ReasonTriggerPolling = "Polling"
+
+	// ReasonTriggerTokenError indicates the GitHub token could not be read.
+	ReasonTriggerTokenError = "TokenError"
+
+	// ReasonTriggerPollError indicates the last GitHub poll failed.
+	ReasonTriggerPollError = "PollError"
+
+	// ReasonTriggerRateLimited indicates GitHub's rate limit is used up; the
+	// poller waits for it to reset.
+	ReasonTriggerRateLimited = "RateLimited"
 )
