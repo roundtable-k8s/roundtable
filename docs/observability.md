@@ -331,7 +331,9 @@ thresholds: [helm-values.md](helm-values.md#grafana-dashboards).
 
 ## Cost and token totals per run, step and mission
 
-Each finished task attempt reports `cost` (USD), `tokens` (`input`, `output`)
+Each finished task attempt reports `cost` (USD), `tokens` (`input`, `output`
+and optionally `cacheRead`, `cacheWrite`; `input` excludes cached input, see
+[knight-task-contract.md](knight-task-contract.md#usage-cost-billing-and-tokens))
 and `billing` in its result. The operator sums them:
 
 - **Status.** `Chain.status.costUSD` and `status.tokens` are the totals of the
@@ -346,7 +348,7 @@ and `billing` in its result. The operator sums them:
 | Metric | Labels |
 |---|---|
 | `roundtable_chain_step_cost_usd_total` | `table`, `chain`, `step`, `knight`, `billing` |
-| `roundtable_chain_step_tokens_total` | `table`, `chain`, `step`, `knight`, `type` (`input`, `output`) |
+| `roundtable_chain_step_tokens_total` | `table`, `chain`, `step`, `knight`, `type` (`input`, `output`, `cacheRead`, `cacheWrite`) |
 | `roundtable_mission_cost_usd_total` | `table`, `mission`, `billing` |
 
 The `chain` label of a run copy started by issue pickup, a Trigger or the

@@ -27,3 +27,24 @@ func TestSumChainUsage(t *testing.T) {
 		t.Fatal("empty mission cost")
 	}
 }
+
+func TestSumChainUsageCachedTokens(t *testing.T) {
+	m := &aiv1alpha1.Mission{}
+	m.Status.ChainStatuses = []aiv1alpha1.MissionChainStatus{
+		{Name: "a", Tokens: &aiv1alpha1.TokenTotals{Input: 6, Output: 2, CacheRead: 30000, CacheWrite: 1500}},
+		{Name: "b", Tokens: &aiv1alpha1.TokenTotals{Input: 18, Output: 1, CacheRead: 12000}},
+		// An older knight's chain without cached tokens.
+		{Name: "c", Tokens: &aiv1alpha1.TokenTotals{Input: 5, Output: 3}},
+	}
+	_, tokens := SumChainUsage(m)
+	want := aiv1alpha1.TokenTotals{Input: 29, Output: 6, CacheRead: 42000, CacheWrite: 1500}
+	if tokens == nil || *tokens != want {
+		t.Fatalf("tokens = %+v, want %+v", tokens, want)
+	}
+
+	m.Status.ChainStatuses = m.Status.ChainStatuses[2:]
+	_, tokens = SumChainUsage(m)
+	if want := (aiv1alpha1.TokenTotals{Input: 5, Output: 3}); tokens == nil || *tokens != want {
+		t.Fatalf("without cache fields: tokens = %+v, want %+v", tokens, want)
+	}
+}

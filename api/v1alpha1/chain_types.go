@@ -499,15 +499,41 @@ const (
 	ChainStepPhaseDeferred ChainStepPhase = "Deferred"
 )
 
-// TokenTotals is a sum of input and output tokens.
+// TokenTotals is a sum of input, cached input and output tokens.
 type TokenTotals struct {
-	// input is the number of input tokens.
+	// input is the number of uncached input tokens. Cached input is counted
+	// in cacheRead and cacheWrite, not here.
 	// +optional
 	Input int64 `json:"input,omitempty"`
 
 	// output is the number of output tokens.
 	// +optional
 	Output int64 `json:"output,omitempty"`
+
+	// cacheRead is the number of input tokens read from the prompt cache.
+	// +optional
+	CacheRead int64 `json:"cacheRead,omitempty"`
+
+	// cacheWrite is the number of input tokens written to the prompt cache.
+	// +optional
+	CacheWrite int64 `json:"cacheWrite,omitempty"`
+}
+
+// IsZero reports whether t counts no tokens.
+func (t TokenTotals) IsZero() bool {
+	return t.Input <= 0 && t.Output <= 0 && t.CacheRead <= 0 && t.CacheWrite <= 0
+}
+
+// Add returns t plus o, allocating t when nil.
+func (t *TokenTotals) Add(o TokenTotals) *TokenTotals {
+	if t == nil {
+		t = &TokenTotals{}
+	}
+	t.Input += o.Input
+	t.Output += o.Output
+	t.CacheRead += o.CacheRead
+	t.CacheWrite += o.CacheWrite
+	return t
 }
 
 // AnnotationRunTemplate names the template Chain a run copy was started from

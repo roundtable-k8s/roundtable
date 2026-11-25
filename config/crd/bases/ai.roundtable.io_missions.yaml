@@ -6444,8 +6444,20 @@ spec:
                     tokens:
                       description: tokens is the chain's token use (the chain's status.tokens).
                       properties:
+                        cacheRead:
+                          description: cacheRead is the number of input tokens read
+                            from the prompt cache.
+                          format: int64
+                          type: integer
+                        cacheWrite:
+                          description: cacheWrite is the number of input tokens written
+                            to the prompt cache.
+                          format: int64
+                          type: integer
                         input:
-                          description: input is the number of input tokens.
+                          description: |-
+                            input is the number of uncached input tokens. Cached input is counted
+                            in cacheRead and cacheWrite, not here.
                           format: int64
                           type: integer
                         output:
@@ -6678,8 +6690,20 @@ spec:
               tokens:
                 description: tokens is the token use of the mission's chains.
                 properties:
+                  cacheRead:
+                    description: cacheRead is the number of input tokens read from
+                      the prompt cache.
+                    format: int64
+                    type: integer
+                  cacheWrite:
+                    description: cacheWrite is the number of input tokens written
+                      to the prompt cache.
+                    format: int64
+                    type: integer
                   input:
-                    description: input is the number of input tokens.
+                    description: |-
+                      input is the number of uncached input tokens. Cached input is counted
+                      in cacheRead and cacheWrite, not here.
                     format: int64
                     type: integer
                   output:
