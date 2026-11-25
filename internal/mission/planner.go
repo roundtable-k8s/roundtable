@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/roundtable-k8s/roundtable/internal/knight"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -481,7 +481,7 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 					// filtering in code avoids duplicates for knights with both.
 					matched := knightList.Items[:0]
 					for _, k := range knightList.Items {
-						if k.Labels[aiv1alpha1.LabelRoundTable] == rt.Name || k.Labels[knight.LegacyTableLabel] == rt.Name {
+						if k.Labels[aiv1alpha1.LabelRoundTable] == rt.Name || k.Labels[knightpkg.LegacyTableLabel] == rt.Name {
 							matched = append(matched, k)
 						}
 					}
