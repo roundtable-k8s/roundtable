@@ -53,9 +53,10 @@ func main() {
 		listen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
 		defaultTimeout, maxTimeout, taskTTL, runTTL                          time.Duration
 		maxInFlight, maxStreams                                              int
-		missionsEnabled, allowSkillGeneration, runsEnabled                   bool
-		maxBudgetUSD                                                         float64
-		maxMissionTTL, maxMissionTimeout                                     int
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled     bool
+		maxBudgetUSD, hookRate                                               float64
+		maxMissionTTL, maxMissionTimeout, hookBurst                          int
+		hookMaxBody                                                          int64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
 	flag.StringVar(&natsURL, "nats-url", envOr("NATS_URL", "nats://nats.database.svc:4222"), "NATS server URL.")
@@ -83,6 +84,12 @@ func main() {
 	flag.BoolVar(&runsEnabled, "runs", true,
 		"Serve the chain-run endpoints (needs RBAC to create, read and delete Chains).")
 	flag.DurationVar(&runTTL, "run-ttl", 24*time.Hour, "How long a finished chain run started by the gateway is kept.")
+	flag.BoolVar(&hooksEnabled, "hooks", true,
+		"Serve POST /v1/hooks/{namespace}/{trigger} for webhook Triggers (needs RBAC to get Triggers and "+
+			"Secrets labelled ai.roundtable.io/webhook-secret=true).")
+	flag.Int64Var(&hookMaxBody, "hook-max-body-bytes", 1<<20, "Largest webhook body accepted.")
+	flag.Float64Var(&hookRate, "hook-rate", 2, "Webhook deliveries per second each Trigger accepts on average.")
+	flag.IntVar(&hookBurst, "hook-burst", 20, "Webhook deliveries each Trigger accepts at once.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -149,13 +156,17 @@ func main() {
 			MaxTimeoutSeconds:    int32(max(min(maxMissionTimeout, math.MaxInt32), 0)),
 			AllowSkillGeneration: allowSkillGeneration,
 		},
-		Runs: gateway.RunOptions{TTL: runTTL},
+		Runs:  gateway.RunOptions{TTL: runTTL},
+		Hooks: gateway.HookOptions{MaxBodyBytes: hookMaxBody, Rate: hookRate, Burst: hookBurst},
 	}, log)
 	if missionsEnabled {
 		svc.Missions = k8s
 	}
 	if runsEnabled {
 		svc.Runs = k8s
+	}
+	if hooksEnabled {
+		svc.Hooks = k8s
 	}
 
 	mux := http.NewServeMux()
@@ -194,7 +205,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled,
+	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled, "hooks", hooksEnabled,
 		"namespace", namespace, "nats", natsURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "Gateway server failed")

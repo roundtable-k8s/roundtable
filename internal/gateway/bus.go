@@ -38,6 +38,11 @@ type Bus interface {
 	// Publish publishes a task through JetStream, so it fails when no
 	// stream captures the subject.
 	Publish(ctx context.Context, subject string, payload natspkg.TaskPayload, table string) error
+	// PublishEvent publishes an event to subject through JetStream, expecting
+	// it to land in stream. A non-empty msgID becomes Nats-Msg-Id, so a
+	// repeat within the stream's duplicate window is dropped: duplicate is
+	// then true and seq is the original's sequence.
+	PublishEvent(ctx context.Context, stream, subject string, data []byte, header nats.Header, msgID string) (seq uint64, duplicate bool, err error)
 	// LastResult returns the newest message on subject in stream, or nil
 	// when there is none. It never consumes or acknowledges the message.
 	LastResult(ctx context.Context, stream, subject string) ([]byte, error)
@@ -154,6 +159,20 @@ func (b *NATSBus) Publish(ctx context.Context, subject string, payload natspkg.T
 		return fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return nil
+}
+
+// PublishEvent implements Bus.
+func (b *NATSBus) PublishEvent(ctx context.Context, stream, subject string, data []byte, header nats.Header, msgID string) (uint64, bool, error) {
+	msg := &nats.Msg{Subject: subject, Data: data, Header: header}
+	opts := []jetstream.PublishOpt{jetstream.WithExpectStream(stream)}
+	if msgID != "" {
+		opts = append(opts, jetstream.WithMsgID(msgID))
+	}
+	ack, err := b.js.PublishMsg(ctx, msg, opts...)
+	if err != nil {
+		return 0, false, fmt.Errorf("publish %s: %w", subject, err)
+	}
+	return ack.Sequence, ack.Duplicate, nil
 }
 
 // LastResult implements Bus.

@@ -180,11 +180,7 @@ var _ = Describe("Trigger controller", func() {
 		}
 
 		It("rejects reserved, missing and multiple sources", func() {
-			t := base("v-webhook")
-			t.Spec.Source.Webhook = &aiv1alpha1.TriggerReservedSource{}
-			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("source.webhook is not implemented yet")))
-
-			t = base("v-github")
+			t := base("v-github")
 			t.Spec.Source.GitHub = &aiv1alpha1.TriggerReservedSource{}
 			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("source.github is not implemented yet")))
 
@@ -198,6 +194,29 @@ var _ = Describe("Trigger controller", func() {
 			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("set exactly one of")))
 		})
 
+		It("validates a webhook source", func() {
+			secret := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "hook"}, Key: "token"}
+
+			t := base("v-wh-noref")
+			t.Spec.Source.Webhook = &aiv1alpha1.TriggerWebhookSource{Auth: aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secret}}
+			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("roundTableRef is required for source.webhook")))
+
+			t = base("v-wh-noauth")
+			t.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: rtName}
+			t.Spec.Source.Webhook = &aiv1alpha1.TriggerWebhookSource{}
+			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("set exactly one of auth.bearerTokenSecretRef or auth.hmacSecretRef")))
+
+			t = base("v-wh-both")
+			t.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: rtName}
+			t.Spec.Source.Webhook = &aiv1alpha1.TriggerWebhookSource{Auth: aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secret, HMACSecretRef: secret}}
+			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("set exactly one of auth.bearerTokenSecretRef or auth.hmacSecretRef")))
+
+			t = base("v-wh")
+			t.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: rtName}
+			t.Spec.Source.Webhook = &aiv1alpha1.TriggerWebhookSource{Auth: aiv1alpha1.TriggerWebhookAuth{HMACSecretRef: secret}}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+		})
+
 		It("requires roundTableRef for a NATS source and defaults the rest", func() {
 			t := base("v-nats")
 			t.Spec.Source.NATS = &aiv1alpha1.TriggerNATSSource{Subject: prefix + ".events.x"}
@@ -209,6 +228,74 @@ var _ = Describe("Trigger controller", func() {
 			got := getTrigger("v-sched")
 			Expect(got.Spec.Concurrency.Policy).To(Equal(aiv1alpha1.TriggerConcurrencyAllow))
 			Expect(got.Spec.TTLSecondsAfterFinished).To(Equal(ptr.To[int32](86400)))
+		})
+	})
+
+	Context("webhook source", func() {
+		webhookTrigger := func(name, eventType string) *aiv1alpha1.Trigger {
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source: aiv1alpha1.TriggerSource{Webhook: &aiv1alpha1.TriggerWebhookSource{
+						Auth: aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "hook"}, Key: "token"}},
+						EventType: eventType,
+					}},
+					Target:        aiv1alpha1.TriggerTarget{ChainRef: corev1.LocalObjectReference{Name: tmplName}},
+					Input:         `{"alert": "{{ .Event.Data.alert }}", "subject": "{{ .Event.Subject }}"}`,
+					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+				},
+			}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			reconcileTrigger(name)
+			return getTrigger(name)
+		}
+		publishWithHeaders := func(subject, msgID, data string, headers map[string]string) {
+			msg := nats.NewMsg(subject)
+			msg.Data = []byte(data)
+			for k, v := range headers {
+				msg.Header.Set(k, v)
+			}
+			_, err := js.PublishMsg(ctx, msg, jetstream.WithMsgID(msgID))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("reads the fixed webhook subject and starts a run per delivery", func() {
+			t := webhookTrigger("alerts", "")
+			subject := natspkg.WebhookEventSubject(prefix, ns, "alerts")
+			Expect(t.Finalizers).To(ContainElement(aiv1alpha1.FinalizerTrigger))
+			Expect(t.Status.Consumer).To(Equal(natspkg.TriggerConsumerName(ns, "alerts")))
+			Expect(meta.IsStatusConditionTrue(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+			Expect(meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady).Message).To(ContainSubstring(subject))
+
+			publishWithHeaders(subject, "d1", `{"alert":"disk"}`, map[string]string{"Content-Type": "application/json"})
+			Eventually(func() int { return len(runsOf("alerts")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			run := runsOf("alerts")[0]
+			Expect(run.Spec.Input).To(Equal(`{"alert": "disk", "subject": "` + subject + `"}`))
+			Expect(run.Annotations[aiv1alpha1.AnnotationTriggerKey]).To(Equal("d1"))
+
+			// Another Trigger's webhook subject is not read.
+			publishWithHeaders(natspkg.WebhookEventSubject(prefix, ns, "other"), "d2", `{"alert":"cpu"}`, nil)
+			Consistently(func() int { return len(runsOf("alerts")) }, 2*time.Second, 200*time.Millisecond).Should(Equal(1))
+		})
+
+		It("fires only on the configured eventType", func() {
+			webhookTrigger("typed", "com.example.deploy")
+			subject := natspkg.WebhookEventSubject(prefix, ns, "typed")
+			publishWithHeaders(subject, "e1", `{"alert":"a"}`, map[string]string{"Ce-Type": "com.example.other"})
+			publishWithHeaders(subject, "e2", `{"alert":"b"}`, nil)
+			publishWithHeaders(subject, "e3", `{"alert":"c"}`, map[string]string{"Ce-Type": "com.example.deploy"})
+			Eventually(func() int { return len(runsOf("typed")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			Expect(runsOf("typed")[0].Spec.Input).To(ContainSubstring(`"alert": "c"`))
+			Consistently(func() int { return len(runsOf("typed")) }, time.Second, 200*time.Millisecond).Should(Equal(1))
+			// Filtered events are acked, not left for redelivery, and not
+			// recorded as firings.
+			Expect(getTrigger("typed").Status.RecentFirings).To(HaveLen(1))
+			cons, err := js.Consumer(ctx, stream, natspkg.TriggerConsumerName(ns, "typed"))
+			Expect(err).NotTo(HaveOccurred())
+			info, err := cons.Info(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.NumAckPending).To(BeZero())
 		})
 	})
 

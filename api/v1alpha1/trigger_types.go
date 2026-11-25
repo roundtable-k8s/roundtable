@@ -31,8 +31,13 @@ const (
 	AnnotationTriggerKey = "ai.roundtable.io/trigger-key"
 
 	// AnnotationTriggerSubject is the NATS subject of the event that started
-	// a Trigger's run (NATS source only).
+	// a Trigger's run (NATS and webhook sources).
 	AnnotationTriggerSubject = "ai.roundtable.io/trigger-subject"
+
+	// LabelWebhookSecret marks a Secret the gateway may read as a webhook
+	// Trigger's credential. The gateway refuses a referenced Secret without
+	// it.
+	LabelWebhookSecret = "ai.roundtable.io/webhook-secret"
 
 	// FinalizerTrigger lets the operator delete a Trigger's JetStream
 	// consumer before the Trigger goes away.
@@ -58,9 +63,8 @@ const (
 )
 
 // TriggerSource is where a Trigger's events come from. Exactly one source is
-// set. webhook and github are reserved and rejected until implemented.
+// set. github is reserved and rejected until implemented.
 // +kubebuilder:validation:XValidation:rule="[has(self.nats), has(self.schedule), has(self.webhook), has(self.github)].filter(x, x).size() == 1",message="set exactly one of source.nats, source.schedule, source.webhook or source.github"
-// +kubebuilder:validation:XValidation:rule="!has(self.webhook)",message="source.webhook is not implemented yet (#176)"
 // +kubebuilder:validation:XValidation:rule="!has(self.github)",message="source.github is not implemented yet"
 type TriggerSource struct {
 	// nats fires on each message published to a subject on the RoundTable's
@@ -72,9 +76,12 @@ type TriggerSource struct {
 	// +optional
 	Schedule *TriggerScheduleSource `json:"schedule,omitempty"`
 
-	// webhook is reserved for the gateway webhook source (#176).
+	// webhook fires on each authenticated POST to the gateway's
+	// /v1/hooks/<namespace>/<name>. The gateway publishes the request body
+	// to <subjectPrefix>.events.webhook.<namespace>.<name> on the
+	// RoundTable's events stream, which the Trigger reads like a NATS source.
 	// +optional
-	Webhook *TriggerReservedSource `json:"webhook,omitempty"`
+	Webhook *TriggerWebhookSource `json:"webhook,omitempty"`
 
 	// github is reserved for the GitHub source.
 	// +optional
@@ -91,6 +98,39 @@ type TriggerNATSSource struct {
 	// +kubebuilder:validation:Pattern=`^[^\s]+$`
 	// +required
 	Subject string `json:"subject"`
+}
+
+// TriggerWebhookSource receives events through the gateway's hook endpoint.
+type TriggerWebhookSource struct {
+	// auth is the credential a sender must present. The gateway accepts only
+	// this credential on the Trigger's hook URL, never its own API tokens.
+	// +required
+	Auth TriggerWebhookAuth `json:"auth"`
+
+	// eventType, when set, fires only on events of this type: the Ce-Type
+	// header (CloudEvents), else X-GitHub-Event. Other events are stored on
+	// the stream and acknowledged without firing.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	EventType string `json:"eventType,omitempty"`
+}
+
+// TriggerWebhookAuth selects how the gateway authenticates a sender. Exactly
+// one is set. The referenced Secret is in the Trigger's namespace and must be
+// labelled ai.roundtable.io/webhook-secret: "true".
+// +kubebuilder:validation:XValidation:rule="[has(self.bearerTokenSecretRef), has(self.hmacSecretRef)].filter(x, x).size() == 1",message="set exactly one of auth.bearerTokenSecretRef or auth.hmacSecretRef"
+type TriggerWebhookAuth struct {
+	// bearerTokenSecretRef selects the Secret key holding the token senders
+	// send as "Authorization: Bearer <token>" (at least 16 characters).
+	// +optional
+	BearerTokenSecretRef *corev1.SecretKeySelector `json:"bearerTokenSecretRef,omitempty"`
+
+	// hmacSecretRef selects the Secret key holding the HMAC-SHA256 key
+	// senders sign the raw request body with, sent as
+	// "X-Hub-Signature-256: sha256=<hex>" (GitHub style) or
+	// "X-Signature: sha256=<hex>" (Flux generic-hmac).
+	// +optional
+	HMACSecretRef *corev1.SecretKeySelector `json:"hmacSecretRef,omitempty"`
 }
 
 // TriggerScheduleSource fires on a cron schedule. Catch-up follows
@@ -146,6 +186,7 @@ type TriggerConcurrency struct {
 
 // TriggerSpec defines the desired state of Trigger.
 // +kubebuilder:validation:XValidation:rule="!has(self.source.nats) || has(self.roundTableRef)",message="roundTableRef is required for source.nats"
+// +kubebuilder:validation:XValidation:rule="!has(self.source.webhook) || has(self.roundTableRef)",message="roundTableRef is required for source.webhook"
 type TriggerSpec struct {
 	// source is where events come from.
 	// +required
@@ -167,7 +208,8 @@ type TriggerSpec struct {
 	// dedupeKey is a Go template (same data as input) whose result
 	// identifies the event: an event whose key matches a run that still
 	// exists starts nothing. Defaults to the Nats-Msg-Id header (else the
-	// stream sequence) for NATS, and the scheduled time for schedule.
+	// stream sequence) for NATS and webhook, and the scheduled time for
+	// schedule.
 	// +optional
 	DedupeKey string `json:"dedupeKey,omitempty"`
 
@@ -175,13 +217,14 @@ type TriggerSpec struct {
 	// +optional
 	Concurrency TriggerConcurrency `json:"concurrency,omitempty"`
 
-	// suspend stops firing. A NATS source's consumer is deleted, so events
-	// published while suspended do not fire on resume.
+	// suspend stops firing. A NATS or webhook source's consumer is deleted,
+	// so events published while suspended do not fire on resume.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
 
 	// roundTableRef names the RoundTable (same namespace) whose events
-	// stream a NATS source reads. Required for source.nats.
+	// stream a NATS or webhook source reads. Required for source.nats and
+	// source.webhook.
 	// +optional
 	RoundTableRef *corev1.LocalObjectReference `json:"roundTableRef,omitempty"`
 
@@ -238,11 +281,11 @@ type TriggerStatus struct {
 	// +optional
 	ActiveRuns []string `json:"activeRuns,omitempty"`
 
-	// stream is the JetStream stream the NATS source's consumer is on.
+	// stream is the JetStream stream the NATS or webhook source's consumer is on.
 	// +optional
 	Stream string `json:"stream,omitempty"`
 
-	// consumer is the NATS source's durable consumer.
+	// consumer is the NATS or webhook source's durable consumer.
 	// +optional
 	Consumer string `json:"consumer,omitempty"`
 
@@ -264,7 +307,8 @@ type TriggerStatus struct {
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be at most 63 characters: it labels the Trigger's runs"
 
 // Trigger starts a run of a Chain with input rendered from an event: a
-// message on the RoundTable's events stream or a cron schedule.
+// message on the RoundTable's events stream, a webhook delivered through the
+// gateway, or a cron schedule.
 type Trigger struct {
 	metav1.TypeMeta `json:",inline"`
 

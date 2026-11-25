@@ -54,6 +54,9 @@ const (
 	// runPhasePending is the phase of a run the chain controller hasn't
 	// started yet.
 	runPhasePending = "Pending"
+
+	// labelTrue is the value of an opt-in label.
+	labelTrue = "true"
 )
 
 // RunOptions configures the chain-run endpoints.
@@ -145,7 +148,7 @@ var errRunsDisabled = fmt.Errorf("%w: chain runs are disabled on this gateway", 
 // invokable reports whether a Chain may be run through the gateway: it opts in
 // with the label, and is neither a run copy nor mission-scoped.
 func invokable(c *aiv1alpha1.Chain) bool {
-	return c.Labels[aiv1alpha1.LabelInvokable] == "true" &&
+	return c.Labels[aiv1alpha1.LabelInvokable] == labelTrue &&
 		c.Labels[chainrun.LabelRunSource] == "" &&
 		c.Spec.MissionRef == nil
 }
@@ -178,7 +181,7 @@ func (s *Service) ListChains(ctx context.Context, namespace string) ([]ChainInfo
 	}
 	var list aiv1alpha1.ChainList
 	if err := s.Runs.List(ctx, &list, client.InNamespace(ns),
-		client.MatchingLabels{aiv1alpha1.LabelInvokable: "true"}); err != nil {
+		client.MatchingLabels{aiv1alpha1.LabelInvokable: labelTrue}); err != nil {
 		return nil, k8sError("list chains", err)
 	}
 	out := make([]ChainInfo, 0, len(list.Items))
