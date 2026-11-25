@@ -48,6 +48,7 @@ spec:
             - {{ . }}
             {{- end }}
           env:
+            {{- include "roundtable-operator.telemetryEnv" (dict "root" . "service" "roundtable-operator") | nindent 12 }}
             - name: DEFAULT_KNIGHT_IMAGE
               value: "{{ .Values.images.piKnight.repository }}:{{ .Values.images.piKnight.tag }}"
             # Pod security context applied to knight pods.

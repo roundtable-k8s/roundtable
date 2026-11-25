@@ -148,6 +148,19 @@ networkPolicy:
   operatorMetricsPort: 8443
 
 # Dashboard (Round Table UI) — observability platform
+# OpenTelemetry export for the operator, gateway and dashboard (#343). Sets the
+# standard OTEL_* env vars on their Deployments. Off by default.
+telemetry:
+  enabled: false
+  otlp:
+    endpoint: ""          # e.g. http://otel-collector.observability:4317
+    protocol: grpc        # grpc | http/protobuf
+  sampling:
+    ratio: 1.0            # parentbased_traceidratio
+  captureContent: true    # prompt/response text on gen_ai spans (redacted); only matters when enabled
+  resourceAttributes: {}  # extra key=value pairs (cluster name, env...)
+  traceUrlTemplate: ""    # UI deep link, e.g. https://grafana/explore?...{traceId}
+
 dashboard:
   enabled: true
   replicas: 1
