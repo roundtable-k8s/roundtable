@@ -12,10 +12,12 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -32,6 +34,10 @@ type Planner struct {
 
 	// TracerProvider makes the plan span; nil uses the global one.
 	TracerProvider trace.TracerProvider
+
+	// Recorder records the deprecated role-label planner fallback; nil
+	// records nothing.
+	Recorder record.EventRecorder
 }
 
 // natsClient returns the NATS client from the provider.
@@ -74,17 +80,25 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		plannerChanged = true
 	}
 	// A planner that names no knight, template or inline spec (absent, or
-	// options only) uses the knight labelled ai.roundtable.io/role=planner.
-	// The given options (timeout, limits, context) are kept.
-	if found, err := p.defaultPlannerKnight(ctx, mission); err != nil {
+	// options only) uses the table's planner, else the knight labelled
+	// ai.roundtable.io/role=planner. The given options (timeout, limits,
+	// context) are kept.
+	found, wait, err := p.defaultPlannerKnight(ctx, mission)
+	if err != nil {
 		return ctrl.Result{}, err
-	} else if found {
+	}
+	if found {
 		plannerChanged = true
 	}
 	if plannerChanged {
 		if err := p.Client.Update(ctx, mission); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to initialize planner config: %w", err)
 		}
+	}
+	// Wait for the table's planner knight, but no longer than the planning
+	// timeout; then planning fails with errNoPlanner.
+	if wait && !planningTimedOut(mission) {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Initialize planning result if needed
@@ -132,10 +146,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	}
 
 	// Check timeout
-	timeout := mission.Spec.Planner.TimeoutSeconds
-	if timeout == 0 {
-		timeout = 300 // Default 5 minutes
-	}
+	timeout := planningTimeout(mission)
 	elapsed := time.Since(mission.Status.StartedAt.Time)
 	if elapsed > time.Duration(timeout)*time.Second {
 		log.Error(fmt.Errorf("planning timeout"), "Planning exceeded timeout",
@@ -155,8 +166,10 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, p.Client.Status().Update(ctx, mission)
 	}
 
-	// Wait for planner knight to be ready
-	if plannerKnight.Status.Phase != aiv1alpha1.KnightPhaseReady {
+	// Wait for planner knight to be ready. A knight scaled to zero by its
+	// suspendPolicy auto (a table planner) wakes on the queued task, so the
+	// task is dispatched to it.
+	if plannerKnight.Status.Phase != aiv1alpha1.KnightPhaseReady && !wakesOnTask(plannerKnight) {
 		log.Info("Waiting for planner knight to be ready",
 			"knight", plannerKnight.Name,
 			"phase", plannerKnight.Status.Phase)
@@ -295,41 +308,112 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	return ctrl.Result{}, nil
 }
 
+// planningTimeout is spec.planner.timeoutSeconds, default 300.
+func planningTimeout(mission *aiv1alpha1.Mission) int32 {
+	if mission.Spec.Planner != nil && mission.Spec.Planner.TimeoutSeconds != 0 {
+		return mission.Spec.Planner.TimeoutSeconds
+	}
+	return 300 // Default 5 minutes
+}
+
+// planningTimedOut reports whether planning has run past its timeout.
+func planningTimedOut(mission *aiv1alpha1.Mission) bool {
+	if mission.Status.StartedAt == nil {
+		return false
+	}
+	return time.Since(mission.Status.StartedAt.Time) > time.Duration(planningTimeout(mission))*time.Second
+}
+
+// wakesOnTask reports whether a knight is asleep (scaled to zero by
+// lifecycle.suspendPolicy auto) and will wake when a task is queued for it.
+func wakesOnTask(k *aiv1alpha1.Knight) bool {
+	return k.Status.Phase == aiv1alpha1.KnightPhaseSuspended && !k.Spec.Suspend && knightpkg.ScaleToZero(k)
+}
+
 // plannerHasSource reports whether the planner names a knight, a template or
 // an inline spec.
 func plannerHasSource(planner *aiv1alpha1.MissionPlanner) bool {
 	return aiv1alpha1.RefName(planner.KnightRef) != "" || planner.TemplateName != "" || planner.EphemeralSpec != nil
 }
 
-// defaultPlannerKnight sets spec.planner.knightRef to the knight labelled
-// ai.roundtable.io/role=planner when the planner names no source. It reports
-// whether it changed the spec. With no labelled knight the spec is left as it
-// is and ensurePlannerKnight fails with errNoPlanner.
-func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.Mission) (bool, error) {
+// defaultPlannerKnight sets spec.planner.knightRef when the planner names no
+// source, in this order (#566): the planner of the mission's RoundTable, then
+// (deprecated, with a warning event) a knight labelled
+// ai.roundtable.io/role=planner that belongs to no other table. It reports
+// whether it changed the spec, and wait when the table's own planner knight is
+// not created yet. With no planner at all the spec is left as it is and
+// ensurePlannerKnight fails with errNoPlanner.
+func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.Mission) (changed, wait bool, err error) {
 	if plannerHasSource(mission.Spec.Planner) {
-		return false, nil
+		return false, false, nil
 	}
+	log := logf.FromContext(ctx)
+
+	table := aiv1alpha1.RefName(mission.Spec.RoundTableRef)
+	if table != "" {
+		rt := &aiv1alpha1.RoundTable{}
+		err := p.Client.Get(ctx, types.NamespacedName{Name: table, Namespace: mission.Namespace}, rt)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, false, fmt.Errorf("failed to get RoundTable %s: %w", table, err)
+		}
+		if err == nil {
+			if name := rt.PlannerKnightName(); name != "" {
+				if rt.OwnsPlanner() {
+					// The RoundTable controller creates it; wait for it
+					// rather than fail on a just-created table.
+					k := &aiv1alpha1.Knight{}
+					err := p.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: mission.Namespace}, k)
+					if apierrors.IsNotFound(err) {
+						log.Info("Waiting for the table's planner Knight", "name", name, "table", table)
+						return false, true, nil
+					}
+					if err != nil {
+						return false, false, err
+					}
+				}
+				mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(name)
+				log.Info("Using the table's planner Knight", "name", name, "table", table)
+				return true, false, nil
+			}
+		}
+	}
+
 	plannerKnights := &aiv1alpha1.KnightList{}
 	if err := p.Client.List(ctx, plannerKnights, client.InNamespace(mission.Namespace),
 		client.MatchingLabels{aiv1alpha1.LabelRole: "planner"}); err != nil {
-		return false, fmt.Errorf("failed to list planner knights: %w", err)
+		return false, false, fmt.Errorf("failed to list planner knights: %w", err)
 	}
+	sort.Slice(plannerKnights.Items, func(i, j int) bool {
+		return plannerKnights.Items[i].Name < plannerKnights.Items[j].Name
+	})
 	for i := range plannerKnights.Items {
 		k := &plannerKnights.Items[i]
 		// Skip another mission's ephemeral planner knight.
 		if k.Labels[aiv1alpha1.LabelEphemeral] == "true" {
 			continue
 		}
+		// Skip another table's planner: a mission is never planned by a
+		// knight of a table it does not run on.
+		if kt := k.Labels[aiv1alpha1.LabelRoundTable]; kt != "" && kt != table {
+			continue
+		}
 		mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(k.Name)
-		logf.FromContext(ctx).Info("Using role-labelled planner knight", "name", k.Name)
-		return true, nil
+		log.Info("Using role-labelled planner knight", "name", k.Name)
+		if p.Recorder != nil {
+			p.Recorder.Eventf(mission, corev1.EventTypeWarning, "DeprecatedPlanner",
+				"Planning with knight %s found by its %s=planner label; this is deprecated: "+
+					"give RoundTable %q a planner (spec.planner) or set spec.planner.knightRef",
+				k.Name, aiv1alpha1.LabelRole, table)
+		}
+		return true, false, nil
 	}
-	return false, nil
+	return false, false, nil
 }
 
 // errNoPlanner is the error for a meta-mission with no planner to use.
 func errNoPlanner(namespace string) error {
 	return fmt.Errorf("no planner knight: set spec.planner.knightRef (or templateName or ephemeralSpec), "+
+		"enable the RoundTable's spec.planner, "+
 		"or label a Knight in namespace %q with %s=planner", namespace, aiv1alpha1.LabelRole)
 }
 

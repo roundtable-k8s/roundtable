@@ -125,9 +125,10 @@ type StartMissionRequest struct {
 
 // MissionPlannerRequest is the planner part of StartMissionRequest.
 type MissionPlannerRequest struct {
-	// Knight is an existing Knight to plan with; omitted, the knight labelled
-	// ai.roundtable.io/role=planner in the namespace is used.
-	Knight     string `json:"knight,omitempty" jsonschema:"existing knight to plan with; omit for the namespace's planner knight"`
+	// Knight is an existing Knight to plan with; omitted, the RoundTable's
+	// planner is used, else (deprecated) the knight labelled
+	// ai.roundtable.io/role=planner in the namespace.
+	Knight     string `json:"knight,omitempty" jsonschema:"existing knight to plan with; omit for the table's planner knight"`
 	Context    string `json:"context,omitempty" jsonschema:"extra information for the planner (max 64 KiB)"`
 	MaxChains  int32  `json:"maxChains,omitempty" jsonschema:"most chains the planner may generate (1-20)"`
 	MaxKnights int32  `json:"maxKnights,omitempty" jsonschema:"most ephemeral knights the planner may generate (1-50)"`
@@ -289,7 +290,8 @@ func (s *Service) buildMission(ctx context.Context, ns string, req StartMissionR
 		return nil, err
 	}
 
-	if err := s.getObject(ctx, ns, req.RoundTable, "RoundTable", &aiv1alpha1.RoundTable{}); err != nil {
+	rt := &aiv1alpha1.RoundTable{}
+	if err := s.getObject(ctx, ns, req.RoundTable, "RoundTable", rt); err != nil {
 		return nil, err
 	}
 	m := &aiv1alpha1.Mission{
@@ -343,7 +345,7 @@ func (s *Service) buildMission(ctx context.Context, ns string, req StartMissionR
 		}
 		plannerKnight := p.Knight
 		if plannerKnight == "" {
-			if plannerKnight, err = s.defaultPlanner(ctx, ns); err != nil {
+			if plannerKnight, err = s.defaultPlanner(ctx, ns, rt); err != nil {
 				return nil, err
 			}
 		} else if err := s.getObject(ctx, ns, plannerKnight, "planner knight", &aiv1alpha1.Knight{}); err != nil {
@@ -388,19 +390,28 @@ func (s *Service) getObject(ctx context.Context, ns, name, kind string, obj clie
 	return nil
 }
 
-// defaultPlanner finds the knight labelled ai.roundtable.io/role=planner.
-func (s *Service) defaultPlanner(ctx context.Context, ns string) (string, error) {
+// defaultPlanner is the mission's RoundTable planner (#566), else
+// (deprecated) the knight labelled ai.roundtable.io/role=planner that belongs
+// to no other table.
+func (s *Service) defaultPlanner(ctx context.Context, ns string, rt *aiv1alpha1.RoundTable) (string, error) {
+	if name := rt.PlannerKnightName(); name != "" {
+		return name, nil
+	}
 	var list aiv1alpha1.KnightList
 	if err := s.Resolver.Client.List(ctx, &list, client.InNamespace(ns),
 		client.MatchingLabels{plannerRoleLabel: "planner"}); err != nil {
 		return "", fmt.Errorf("list planner knights in %s: %w", ns, err)
 	}
-	if len(list.Items) == 0 {
-		return "", fmt.Errorf("%w: no knight labelled %s=planner in %s; set planner.knight", ErrInvalid, plannerRoleLabel, ns)
-	}
 	names := make([]string, 0, len(list.Items))
 	for _, k := range list.Items {
+		if kt := k.Labels[aiv1alpha1.LabelRoundTable]; k.Labels[aiv1alpha1.LabelEphemeral] == "true" || (kt != "" && kt != rt.Name) {
+			continue
+		}
 		names = append(names, k.Name)
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("%w: RoundTable %s has no planner and no knight is labelled %s=planner in %s; set planner.knight",
+			ErrInvalid, rt.Name, plannerRoleLabel, ns)
 	}
 	slices.Sort(names)
 	return names[0], nil

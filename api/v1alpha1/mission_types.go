@@ -428,9 +428,11 @@ type MissionPlanner struct {
 	// have planning, reasoning, and orchestration skills. One of knightRef,
 	// templateName or ephemeralSpec is used. When a meta-mission's
 	// spec.planner is omitted, or sets only options (timeoutSeconds, maxChains,
-	// context and so on) and none of the three, the operator fills in a knight
-	// labelled ai.roundtable.io/role=planner and keeps the given options. With
-	// no such knight the mission fails.
+	// context and so on) and none of the three, the operator fills in the
+	// planner of the mission's RoundTable (spec.planner on the table), else
+	// (deprecated) a knight labelled ai.roundtable.io/role=planner that
+	// belongs to no other table, and keeps the given options. With neither the
+	// mission fails.
 	// +optional
 	KnightRef *corev1.LocalObjectReference `json:"knightRef,omitempty"`
 

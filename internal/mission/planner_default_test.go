@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -179,5 +180,177 @@ func TestExplicitPlannerKnightRefIsKept(t *testing.T) {
 
 	if aiv1alpha1.RefName(m.Spec.Planner.KnightRef) != "mine" {
 		t.Errorf("knightRef = %q, want %q", aiv1alpha1.RefName(m.Spec.Planner.KnightRef), "mine")
+	}
+}
+
+func plannerTestTable(name string, planner *aiv1alpha1.RoundTablePlanner) *aiv1alpha1.RoundTable {
+	return &aiv1alpha1.RoundTable{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: aiv1alpha1.RoundTableSpec{
+			NATS:    aiv1alpha1.RoundTableNATS{SubjectPrefix: name, TasksStream: name + "_tasks", ResultsStream: name + "_results"},
+			Planner: planner,
+		},
+	}
+}
+
+// tablePlanner is a table-owned planner knight as the RoundTable controller
+// creates it.
+func tablePlanner(table string) *aiv1alpha1.Knight {
+	return roleKnight(table+"-planner", map[string]string{aiv1alpha1.LabelRoundTable: table})
+}
+
+// onTableA puts the mission on table "a".
+func onTableA(m *aiv1alpha1.Mission) *aiv1alpha1.Mission {
+	m.Spec.RoundTableRef = aiv1alpha1.LocalRef("a")
+	return m
+}
+
+// TestMissionUsesItsTablePlanner: a mission on table A is planned by A's
+// planner, even when table B has one and a role-labelled knight exists
+// (#566).
+func TestMissionUsesItsTablePlanner(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", nil), plannerTestTable("b", nil),
+		tablePlanner("a"), tablePlanner("b"),
+		roleKnight("planner", nil),
+	)
+
+	m := reconcilePlanning(t, c)
+
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "a-planner" {
+		t.Fatalf("knightRef = %q, want table a's planner %q", got, "a-planner")
+	}
+	if m.Status.PlanningResult == nil || m.Status.PlanningResult.Error != "" {
+		t.Errorf("planning should not fail, got %+v", m.Status.PlanningResult)
+	}
+}
+
+// TestMissionUsesTableKnightRef: a table's spec.planner.knightRef plans its
+// missions.
+func TestMissionUsesTableKnightRef(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", &aiv1alpha1.RoundTablePlanner{KnightRef: aiv1alpha1.LocalRef("mine")}),
+		&aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: "default"}},
+		roleKnight("planner", nil),
+	)
+
+	m := reconcilePlanning(t, c)
+
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "mine" {
+		t.Fatalf("knightRef = %q, want %q", got, "mine")
+	}
+}
+
+// TestMissionWaitsForTablePlanner: while the table's own planner knight is
+// not created yet, planning waits instead of failing or using another
+// planner.
+func TestMissionWaitsForTablePlanner(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", nil),
+		roleKnight("planner", nil),
+	)
+	p := &Planner{Client: c}
+	key := types.NamespacedName{Name: "m", Namespace: "default"}
+	m := &aiv1alpha1.Mission{}
+	if err := c.Get(context.Background(), key, m); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := p.ReconcilePlanning(context.Background(), m)
+	if err != nil {
+		t.Fatalf("ReconcilePlanning: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Errorf("expected a requeue while waiting for the table planner")
+	}
+	if err := c.Get(context.Background(), key, m); err != nil {
+		t.Fatal(err)
+	}
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "" {
+		t.Errorf("knightRef = %q, want none yet", got)
+	}
+	if m.Status.PlanningResult != nil && m.Status.PlanningResult.Error != "" {
+		t.Errorf("planning should not fail while waiting: %s", m.Status.PlanningResult.Error)
+	}
+}
+
+// TestDisabledTablePlannerFallsBackToRoleLabel: with the table's planner
+// disabled the role-labelled knight is used, with a deprecation warning, but
+// never another table's planner.
+func TestDisabledTablePlannerFallsBackToRoleLabel(t *testing.T) {
+	disabled := &aiv1alpha1.RoundTablePlanner{Enabled: new(bool)}
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", disabled), plannerTestTable("b", nil),
+		// Sorts first, but belongs to table b.
+		tablePlanner("b"),
+		roleKnight("planner", nil),
+	)
+	rec := record.NewFakeRecorder(10)
+	p := &Planner{Client: c, Recorder: rec}
+	key := types.NamespacedName{Name: "m", Namespace: "default"}
+	m := &aiv1alpha1.Mission{}
+	if err := c.Get(context.Background(), key, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ReconcilePlanning(context.Background(), m); err != nil {
+		t.Fatalf("ReconcilePlanning: %v", err)
+	}
+	if err := c.Get(context.Background(), key, m); err != nil {
+		t.Fatal(err)
+	}
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "planner" {
+		t.Fatalf("knightRef = %q, want the install-wide %q", got, "planner")
+	}
+	select {
+	case e := <-rec.Events:
+		if !strings.Contains(e, "DeprecatedPlanner") {
+			t.Errorf("event = %q, want DeprecatedPlanner", e)
+		}
+	default:
+		t.Error("no deprecation warning event")
+	}
+}
+
+// TestOtherTablesPlannerIsNeverUsed: a mission whose table has no planner
+// fails rather than borrowing another table's.
+func TestOtherTablesPlannerIsNeverUsed(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", &aiv1alpha1.RoundTablePlanner{Enabled: new(bool)}),
+		plannerTestTable("b", nil), tablePlanner("b"),
+	)
+
+	m := reconcilePlanning(t, c)
+
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "" {
+		t.Fatalf("knightRef = %q, want none", got)
+	}
+	if pr := m.Status.PlanningResult; pr == nil || pr.Error == "" {
+		t.Errorf("expected a planning error, got %+v", pr)
+	}
+}
+
+// TestWakesOnTask: a planner scaled to zero by suspendPolicy auto gets its
+// task; a manually suspended one does not.
+func TestWakesOnTask(t *testing.T) {
+	k := &aiv1alpha1.Knight{
+		Spec:   aiv1alpha1.KnightSpec{Lifecycle: &aiv1alpha1.KnightLifecycle{SuspendPolicy: "auto"}},
+		Status: aiv1alpha1.KnightStatus{Phase: aiv1alpha1.KnightPhaseSuspended},
+	}
+	if !wakesOnTask(k) {
+		t.Error("an auto-suspended knight wakes on a task")
+	}
+	k.Spec.Suspend = true
+	if wakesOnTask(k) {
+		t.Error("a manually suspended knight does not wake")
+	}
+	k.Spec.Suspend = false
+	k.Spec.Lifecycle = nil
+	if wakesOnTask(k) {
+		t.Error("a knight without suspendPolicy auto does not wake")
 	}
 }

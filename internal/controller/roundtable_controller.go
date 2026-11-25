@@ -63,6 +63,10 @@ type RoundTableReconciler struct {
 	// running knights; zero means one second.
 	ServiceInfoTimeout time.Duration
 
+	// PlannerDefaults are the install-wide defaults for table-owned planner
+	// knights (Helm planner.*); zero fields use DefaultPlannerDefaults.
+	PlannerDefaults PlannerDefaults
+
 	// Now overrides the clock (tests).
 	Now func() time.Time
 
@@ -101,6 +105,15 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	log = log.WithValues("table", rt.Name)
 	ctx = logf.IntoContext(ctx, log)
+
+	// The table's planner knight (#566). It scales to zero when idle, so it
+	// is kept while the table is suspended.
+	plannerKnight, err := r.reconcilePlanner(ctx, rt)
+	if err != nil {
+		log.Error(err, "Failed to reconcile planner Knight")
+		r.Recorder.Event(rt, corev1.EventTypeWarning, "PlannerFailed", err.Error())
+	}
+	rt.Status.PlannerKnight = plannerKnight
 
 	// Handle suspended state
 	if rt.Spec.Suspend {
@@ -274,6 +287,7 @@ func (r *RoundTableReconciler) discoverKnights(ctx context.Context, rt *aiv1alph
 	if err := r.List(ctx, knightList, listOpts...); err != nil {
 		return nil, fmt.Errorf("failed to list knights: %w", err)
 	}
+	r.appendOwnedPlanner(ctx, rt, knightList)
 
 	// For non-ephemeral RoundTables, filter out any ephemeral knights
 	// (in case knightSelector didn't exclude them)
@@ -288,6 +302,27 @@ func (r *RoundTableReconciler) discoverKnights(ctx context.Context, rt *aiv1alph
 	}
 
 	return knightList.Items, nil
+}
+
+// appendOwnedPlanner adds the table-owned planner knight to the list when the
+// knightSelector left it out, so it gets a card and counts as the table's.
+func (r *RoundTableReconciler) appendOwnedPlanner(ctx context.Context, rt *aiv1alpha1.RoundTable, list *aiv1alpha1.KnightList) {
+	if !rt.OwnsPlanner() {
+		return
+	}
+	name := rt.OwnedPlannerName()
+	for i := range list.Items {
+		if list.Items[i].Name == name {
+			return
+		}
+	}
+	k := &aiv1alpha1.Knight{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: rt.Namespace, Name: name}, k); err != nil {
+		return
+	}
+	if metav1.IsControlledBy(k, rt) {
+		list.Items = append(list.Items, *k)
+	}
 }
 
 // computePhase determines the RoundTable phase based on knight health and cost.

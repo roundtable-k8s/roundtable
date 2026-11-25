@@ -436,16 +436,32 @@ codingKnightDefaults:
   workspace:
     size: 20Gi
 
-# Built-in planner knight — ships with the operator for meta-missions
+# Planner defaults (#566). Every RoundTable gets its own planner knight,
+# <table>-planner, owned by the table, on the table's NATS prefix and streams
+# (<prefix>.tasks.planner.>), with its credentials and spec.defaults, scaled to
+# zero when idle. RoundTable spec.planner configures or disables it. model,
+# skills, arsenals, prompt, concurrency and taskTimeoutSeconds below are the
+# install-wide defaults table planners inherit (a table's spec.planner, then
+# its spec.defaults.model / arsenals, win over model and arsenals).
+#
+# enabled renders the old install-wide planner Knight
+# <release>-roundtable-operator-planner (no table, fleet-a names). Off since
+# #566; a mission on a table whose planner is disabled can still fall back to
+# it (deprecated, with a warning event). Upgrade note: docs/helm-values.md.
 planner:
-  enabled: true
+  enabled: false
   domain: operator
   model: claude-sonnet-4-20250514
   skills:
     - operator
     - shared
+  # Prompt overrides for table planners (identity, instructions,
+  # configMapRef), as in Knight spec.prompt. Empty = the runtime's own.
+  prompt: {}
   concurrency: 1
   taskTimeoutSeconds: 600
+  # runtimeClassName, the scheduling fields and github apply to the
+  # install-wide planner only; table planners take them from their RoundTable.
   # RuntimeClass for the planner pod. Empty = the operator default
   # (isolation.runtimeClassName).
   runtimeClassName: ""
@@ -457,7 +473,8 @@ planner:
   topologySpreadConstraints: []
   priorityClassName: ""
   # Ordered skill sources merged into /skills (first = base, later entries
-  # override per skill). One git-sync-<name> sidecar per git entry.
+  # override per skill). One git-sync-<name> sidecar per git entry. Also the
+  # default arsenals of table planners.
   arsenals:
     - name: platform
       repo: https://github.com/roundtable-k8s/arsenal.git
@@ -469,8 +486,9 @@ planner:
   # /var/run/secrets/roundtable/github/token (GITHUB_TOKEN_FILE). The kubelet
   # refreshes the file when the Secret rotates, so short-lived GitHub App
   # installation tokens keep working; the knight image's git credential
-  # helper and gh shim read it on every call. The planner is not part of a
-  # RoundTable, so it does not inherit spec.github from one; set it here.
+  # helper and gh shim read it on every call. The install-wide planner is not
+  # part of a RoundTable, so it does not inherit spec.github from one; set it
+  # here. Table planners use their table's spec.github instead.
   github: {}
   #   tokenSecretRef:
   #     name: roundtable-github-token
