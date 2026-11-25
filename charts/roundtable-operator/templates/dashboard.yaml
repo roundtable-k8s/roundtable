@@ -42,7 +42,7 @@ rules:
     verbs: ["get", "list"]
   {{- end }}
   - apiGroups: ["ai.roundtable.io"]
-    resources: ["knights", "chains", "roundtables"]
+    resources: ["knights", "chains", "roundtables", "triggers"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["ai.roundtable.io"]
     resources: ["missions"]
