@@ -504,6 +504,29 @@ func TestTransientProviderFailure(t *testing.T) {
 	}
 }
 
+func TestTransientProviderReason(t *testing.T) {
+	cases := []struct {
+		name string
+		res  *natspkg.TaskResult
+		want string
+		ok   bool
+	}{
+		{"flag only", &natspkg.TaskResult{Error: "weird new text", Transient: true, TransientReason: "network"}, "network", true},
+		{"flag, unrecognised error, no reason", &natspkg.TaskResult{Error: "weird", Transient: true}, "unknown", true},
+		{"flag wins over text", &natspkg.TaskResult{Error: "API Error: 529 Overloaded", Transient: true, TransientReason: "provider_5xx"}, "provider_5xx", true},
+		{"text only overloaded", &natspkg.TaskResult{Error: "API Error: 529 Overloaded"}, "overloaded", true},
+		{"text only 5xx", &natspkg.TaskResult{Error: "HTTP 502 bad gateway"}, "provider_5xx", true},
+		{"neither", &natspkg.TaskResult{Error: "tests failed", TransientReason: "network"}, "", false},
+		{"nil", nil, "", false},
+	}
+	for _, c := range cases {
+		got, ok := transientProviderReason(c.res)
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s: got (%q,%v) want (%q,%v)", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 func TestProviderBackoff(t *testing.T) {
 	for n, want := range map[int32]time.Duration{1: time.Minute, 2: 2 * time.Minute, 3: 4 * time.Minute, 4: 8 * time.Minute} {
 		if got := providerBackoff(n); got != want {

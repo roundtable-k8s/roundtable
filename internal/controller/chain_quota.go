@@ -198,28 +198,52 @@ const providerBackoffBase = time.Minute
 // transientStatusRe matches an HTTP status of a transient provider failure.
 var transientStatusRe = regexp.MustCompile(`(?i)\b(?:api error|http(?: status)?(?: code)?|status(?: code)?|error)[:= ]+(?:529|503|502|500)\b`)
 
-// transientProviderFailure reports whether a failed task result is a
-// transient model provider failure: the machine-readable transient flag, else
-// an HTTP 529/503/502/500 or "Overloaded"/"overloaded_error" in the error.
+// Transient failure reasons, as set by knights in transientReason (and
+// inferred from the error text for knights that do not set the flag).
+const (
+	transientOverloaded = "overloaded"
+	transientProvider5x = "provider_5xx"
+	transientNetwork    = "network"
+	transientUnknown    = "unknown"
+)
+
+// transientProviderReason reports whether a failed task result is a
+// transient model provider failure, and why: the machine-readable transient
+// flag first (its transientReason, or "unknown" when unset), else an HTTP
+// 529/503/502/500 or "Overloaded"/"overloaded_error" in the error text.
 // Plan-quota refusals are not transient (see quotaRefusal).
-func transientProviderFailure(res *natspkg.TaskResult) bool {
+func transientProviderReason(res *natspkg.TaskResult) (string, bool) {
 	if res == nil {
-		return false
+		return "", false
 	}
 	if _, refused := quotaRefusal(res); refused {
-		return false
+		return "", false
 	}
 	if res.Transient {
-		return true
+		switch res.TransientReason {
+		case transientOverloaded, transientProvider5x, transientNetwork:
+			return res.TransientReason, true
+		}
+		return transientUnknown, true
 	}
 	msg := res.GetError()
 	if msg == "" {
-		return false
+		return "", false
 	}
 	if strings.Contains(strings.ToLower(msg), "overloaded") {
-		return true
+		return transientOverloaded, true
 	}
-	return transientStatusRe.MatchString(msg)
+	if transientStatusRe.MatchString(msg) {
+		return transientProvider5x, true
+	}
+	return "", false
+}
+
+// transientProviderFailure reports whether a failed task result is a
+// transient model provider failure.
+func transientProviderFailure(res *natspkg.TaskResult) bool {
+	_, ok := transientProviderReason(res)
+	return ok
 }
 
 // providerBackoff is the delay before retry number n (1-based): 1m, 2m, 4m...
