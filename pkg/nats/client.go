@@ -17,6 +17,7 @@ limitations under the License.
 package nats
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -46,6 +47,13 @@ type Client interface {
 	// PublishJSONSeq publishes a JSON-encoded value and returns the stream
 	// sequence number JetStream assigned to it.
 	PublishJSONSeq(subject string, v any) (uint64, error)
+
+	// PublishJSONCtx is PublishJSON that injects the trace context carried by
+	// ctx into the message headers and records a producer span.
+	PublishJSONCtx(ctx context.Context, subject string, v any, opts ...PublishOption) error
+
+	// PublishJSONSeqCtx is PublishJSONSeq with trace-context propagation.
+	PublishJSONSeqCtx(ctx context.Context, subject string, v any, opts ...PublishOption) (uint64, error)
 
 	// ConsumerAckFloor returns the stream sequence at or below which every
 	// message has been acknowledged by the named consumer.
@@ -199,15 +207,27 @@ func (c *JetStreamClient) Publish(subject string, data []byte) error {
 
 // PublishJSON publishes a JSON-encoded value to a subject.
 func (c *JetStreamClient) PublishJSON(subject string, v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal JSON payload: %w", err)
-	}
-	return c.Publish(subject, data)
+	return c.PublishJSONCtx(context.Background(), subject, v)
 }
 
 // PublishJSONSeq publishes a JSON-encoded value and returns its stream sequence.
 func (c *JetStreamClient) PublishJSONSeq(subject string, v any) (uint64, error) {
+	return c.PublishJSONSeqCtx(context.Background(), subject, v)
+}
+
+// PublishJSONCtx publishes a JSON-encoded value with trace-context headers.
+func (c *JetStreamClient) PublishJSONCtx(ctx context.Context, subject string, v any, opts ...PublishOption) error {
+	_, err := c.PublishJSONSeqCtx(ctx, subject, v, opts...)
+	return err
+}
+
+// PublishJSONSeqCtx publishes a JSON-encoded value with trace-context headers
+// and returns its stream sequence. A producer span wraps the publish; with no
+// tracer provider configured it is a no-op and no headers are added unless ctx
+// already carries a span context.
+func (c *JetStreamClient) PublishJSONSeqCtx(
+	ctx context.Context, subject string, v any, opts ...PublishOption,
+) (uint64, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return 0, fmt.Errorf("marshal JSON payload: %w", err)
@@ -218,9 +238,10 @@ func (c *JetStreamClient) PublishJSONSeq(subject string, v any) (uint64, error) 
 	c.mu.Lock()
 	js := c.js
 	c.mu.Unlock()
-	ack, err := js.Publish(subject, data)
+
+	ack, err := PublishTraced(ctx, js, subject, data, taskIDOf(v), opts...)
 	if err != nil {
-		return 0, fmt.Errorf("NATS publish to %s failed: %w", subject, err)
+		return 0, err
 	}
 	return ack.Sequence, nil
 }

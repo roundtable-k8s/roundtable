@@ -276,3 +276,22 @@ steps:
 - Not valid on `forEach` (items get per-item runIds) or `loop` steps.
 - The PR feedback Chain uses it to send a CI failure to the session that
   opened the PR ([pr-feedback.md](pr-feedback.md)).
+
+## Trace context
+
+Task and result messages may carry W3C Trace Context as NATS message headers:
+`traceparent` and, optionally, `tracestate` (and `baggage`). The operator and
+the invoke gateway inject the caller's context into every task they publish,
+and extract it from the results they read, so a trace does not break at the
+NATS hop. JetStream preserves headers, so no payload field is needed.
+
+Knights should extract the headers from the task message, run the task as a
+child of that context, and inject the resulting context into the headers of the
+result message. Headers are optional: a message without them is handled exactly
+as before, and the operator adds none when it has no tracer provider.
+
+Producer spans are named `publish <subject>` and carry `messaging.system=nats`,
+`messaging.destination.name`, `messaging.operation.type=publish`,
+`roundtable.table` and `roundtable.task.id` when known. On consume the operator
+records `messaging.nats.delivery_count`; a redelivered result links to the
+original context instead of becoming a second child of it.

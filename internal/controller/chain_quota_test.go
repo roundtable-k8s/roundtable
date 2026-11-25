@@ -469,3 +469,7 @@ func TestQuotaDeferUntilUnknownReset(t *testing.T) {
 		t.Fatalf("deferUntil = now%+v, want about now+%v", d, quotaDeferFallback)
 	}
 }
+
+func (f *quotaFakeNATS) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
+	return f.PublishJSONSeq(subject, v)
+}

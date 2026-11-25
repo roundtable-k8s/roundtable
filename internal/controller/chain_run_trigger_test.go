@@ -399,3 +399,7 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		})
 	})
 })
+
+func (f *pickupFakeNATS) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
+	return f.PublishJSONSeq(subject, v)
+}

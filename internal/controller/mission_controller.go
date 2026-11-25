@@ -1007,7 +1007,7 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 			}
 		}
 		taskSubject := natspkg.TaskSubject(briefingPrefix, knight.Spec.Domain, mk.Name)
-		if err := natsCli.PublishJSON(taskSubject, taskPayload); err != nil {
+		if err := natsCli.PublishJSONCtx(ctx, taskSubject, taskPayload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
 			log.Error(err, "Failed to publish briefing to knight", "knight", mk.Name, "subject", taskSubject)
 			continue
 		}

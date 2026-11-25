@@ -211,7 +211,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		Model:  model,
 	}
 	subject := natspkg.TaskSubject(t.SubjectPrefix, t.Knight.Spec.Domain, knightName)
-	if err := s.Bus.Publish(subject, payload); err != nil {
+	if err := s.Bus.Publish(ctx, subject, payload, t.RoundTable); err != nil {
 		rec.Status = TaskFailed
 		rec.Error = "publish failed: " + err.Error()
 		done := s.now().UTC()

@@ -260,3 +260,11 @@ func (f *fakeNATSClient) PublishJSONSeq(subject string, v any) (uint64, error) {
 }
 func (f *fakeNATSClient) ConsumerAckFloor(string, string) (uint64, error)     { return 0, nil }
 func (f *fakeNATSClient) ConsumerDeliveredSeq(string, string) (uint64, error) { return 0, nil }
+
+func (f *fakeNATSClient) PublishJSONCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) error {
+	return f.PublishJSON(subject, v)
+}
+
+func (f *fakeNATSClient) PublishJSONSeqCtx(_ context.Context, subject string, v any, _ ...natspkg.PublishOption) (uint64, error) {
+	return f.PublishJSONSeq(subject, v)
+}
