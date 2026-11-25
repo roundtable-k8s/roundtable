@@ -11,3 +11,6 @@
 
 # Exclude test files
 **/*_test.go
+
+# Tilt dev build (Dockerfile.dev)
+!.tilt/

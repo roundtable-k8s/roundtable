@@ -5,6 +5,7 @@ Real-world examples of Round Table resources.
 | File | Description |
 |------|-------------|
 | [`quickstart/`](quickstart/) | Minimal RoundTable, Knight and two-step Chain for the [kind quickstart](../docs/getting-started.md) |
+| [`dev/`](dev/) | One RoundTable and one Knight for the [Tilt inner loop](../docs/local-development.md) |
 | [`knight-basic.yaml`](knight-basic.yaml) | A single knight — security domain with NATS config |
 | [`knight-scaled.yaml`](knight-scaled.yaml) | A horizontally scaled knight — ephemeral workspace, KEDA 0..N on pending tasks |
 | [`knight-scheduling.yaml`](knight-scheduling.yaml) | A coder knight pinned to large nodes with `nodeSelector` and a toleration |

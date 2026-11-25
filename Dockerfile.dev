@@ -1,0 +1,9 @@
+# Dev image for the Tilt inner loop (see Tiltfile, docs/local-development.md).
+# The Tiltfile cross-compiles the binaries on the host into .tilt/ and live-updates
+# them into the running pod. Not for releases: use the Dockerfile for that.
+FROM alpine:3.21
+WORKDIR /
+COPY .tilt/manager /manager
+COPY .tilt/gateway /gateway
+USER 65532:65532
+ENTRYPOINT ["/manager"]

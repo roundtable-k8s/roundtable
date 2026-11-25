@@ -1,0 +1,27 @@
+# Dev knight for the Tilt inner loop (docs/local-development.md). The API key
+# Secret is optional, so the Deployment is created without it; the pod only
+# starts once you create llm-api-keys. No LLM call is made by `tilt ci`.
+# To run a local pi-knight build, uncomment spec.image.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: dev-knight
+  namespace: roundtable
+spec:
+  domain: general
+  # image: pi-knight-dev:local
+  model: claude-sonnet-4-20250514
+  skills:
+    - general
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    stream: dev_tasks
+    resultsStream: dev_results
+    subjects:
+      - "dev.tasks.general.>"
+  envFrom:
+    - secretRef:
+        name: llm-api-keys
+        optional: true
+  concurrency: 1
+  taskTimeoutSeconds: 300
