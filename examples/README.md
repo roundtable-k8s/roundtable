@@ -13,6 +13,7 @@ Real-world examples of Round Table resources.
 | [`chain-model-override.yaml`](chain-model-override.yaml) | Per-step model override with RoundTable `modelAliases` |
 | [`chain-fan-out.yaml`](chain-fan-out.yaml) | `forEach` fan-out/fan-in over a planner's JSON list |
 | [`chain-scheduled-briefing.yaml`](chain-scheduled-briefing.yaml) | Scheduled briefing: a cron Chain fans out to domain knights in parallel, then `kay` writes the synthesis to `Briefings/` in the vault (see [Scheduled briefing](#scheduled-briefing)) |
+| [`chain-fleet-self-improvement.yaml`](chain-fleet-self-improvement.yaml) | Fleet self-improvement recipe: a weekly Chain where the lead lists the table's knights, collects a self-assessment from each via `forEach`, and writes one report ([docs](../docs/recipe-fleet-self-improvement.md)) |
 | [`chain-pr-pipeline.yaml`](chain-pr-pipeline.yaml) | PR pipeline: plan → implement (or `forEach` over sub-issues) → review → bounded fix `loop` → merge, or escalate via `when`. Rendered from the chart's `prPipeline` values ([docs](../docs/pr-pipeline.md)) |
 | [`roundtable-issue-pickup.yaml`](roundtable-issue-pickup.yaml) | Issue pickup: poll `rt:ready` issues and start one PR pipeline Chain per issue ([docs](../docs/issue-pickup.md)) |
 | [`observability/`](observability/) | Try-it-out tracing: Jaeger all-in-one plus the chart's OTel collector (`values-telemetry.yaml`), see [README](observability/README.md) and [docs](../docs/helm-values.md) |

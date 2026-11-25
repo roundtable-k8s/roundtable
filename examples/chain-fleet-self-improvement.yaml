@@ -1,0 +1,94 @@
+# Fleet self-improvement recipe (#493): a weekly, generic "what are we missing?"
+# review. A lead knight lists the table's knights, asks each one for a
+# self-assessment in a fixed JSON shape (forEach), and writes one report.
+# Knights never change their own manifests or skills: the output is a report
+# (or issues/PRs) for the owner's normal review. See
+# docs/recipe-fleet-self-improvement.md.
+#
+# Needs a RoundTable "fleet-a" and a lead knight "lead" (change both below).
+# Skip the discovery by giving the knights in spec.input, e.g.
+#   input: '{"knights": ["galahad", "tristan"]}'
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: fleet-self-improvement
+  namespace: roundtable
+spec:
+  description: "Weekly fleet self-improvement review: every knight reports missing tools and skills, the lead writes one report"
+  roundTableRef: {name: fleet-a}
+  schedule: "0 6 * * 1"          # Mondays 06:00
+  timeZone: Europe/London
+  timeoutSeconds: 7200
+  input: ""                      # optional: {"knights": ["name", ...]} to skip discovery
+  outputKnightRef: {name: lead}
+
+  steps:
+    # 1. The lead lists the table's knights as a JSON list.
+    - name: roster
+      knightRef: {name: lead}
+      timeoutSeconds: 600
+      task: |
+        Input (may be empty): {{ .Input }}
+        If the input names knights in a "knights" array, use exactly those.
+        Otherwise call find_knights and use every knight of this table except
+        yourself that is ready or suspended.
+        Reply with ONLY a fenced ```json block of the form
+        {"knights": [{"name": "galahad", "domain": "security"}]}
+
+    # 2. One task per knight. The step runs on the lead (a step has one
+    #    knightRef), and the lead asks each knight with nats_request.
+    - name: assess
+      knightRef: {name: lead}
+      dependsOn: [roster]
+      timeoutSeconds: 1200
+      forEach:
+        from: steps.roster
+        path: .knights
+        uniqueBy: name
+        maxItems: 30
+      maxParallel: 4
+      failurePolicy: continue      # one unreachable knight must not stop the review
+      task: |
+        Ask the knight "{{ .Item.name }}" (use nats_request; do not delegate
+        further) for a self-assessment of the tools and skills it lacks. Tell
+        it to reply with ONLY this JSON, based on what it actually tried in
+        recent work and not on guesses:
+        {"missing_tools": [{"name": "...", "nixpkgs": "<attribute>", "why": "..."}],
+         "missing_skills": [{"name": "...", "why": "..."}],
+         "broken_tools": [{"name": "...", "symptom": "..."}],
+         "efficiency_gaps": ["..."]}
+        Use empty lists when there is nothing to report.
+        Reply with ONLY a fenced ```json block of the form
+        {"knight": "{{ .Item.name }}", "assessment": <the knight's JSON>}
+
+    # 3. The lead groups the answers and writes one report.
+    - name: report
+      knightRef: {name: lead}
+      dependsOn: [assess]
+      timeoutSeconds: 1200
+      outputPath: "Reports/{{ .Date }}-{{ .Chain }}.md"
+      task: |
+        Each element below is {index, item, phase, output, error}; output holds
+        one knight's assessment. List knights whose phase is not Succeeded
+        under "No answer".
+        {{ .Steps.assess.Output }}
+
+        Write a markdown report: tools requested by more than one knight
+        first, then missing skills, broken tools, efficiency gaps. For each
+        requested tool give the nixpkgs attribute and the knights that asked.
+        End with proposed changes the owner can accept or drop. Do not change
+        any manifest or skill yourself.
+
+    # Variant: instead of (or after) the report, file one issue per accepted
+    # proposal against the fleet's manifests/arsenal repos. Uncomment and add
+    # the repo to the knight's GitHub scope. Still a proposal: the owner
+    # reviews and merges.
+    # - name: file_issues
+    #   knightRef: {name: lead}
+    #   dependsOn: [report]
+    #   task: |
+    #     From this report, open one GitHub issue per proposed change in the
+    #     right repo (fleet manifests for tools, arsenal for skills). Use
+    #     "gh issue create"; open pull requests only when the change is a
+    #     one-line addition. Never merge.
+    #     {{ .Steps.report.Output }}

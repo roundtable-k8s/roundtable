@@ -106,6 +106,7 @@ If an action is too dangerous to run unattended, the knight does not get the cap
 | The gateway API | The personal fleet: vault, briefings |
 | The dashboard | Homelab watch |
 | The knight runtimes and the task contract | Human checkpoints |
+| | [Fleet self-improvement](recipe-fleet-self-improvement.md) |
 | Triggers (planned) | |
 | Observability | |
 
