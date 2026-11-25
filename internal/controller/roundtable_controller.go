@@ -384,18 +384,22 @@ func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1
 		return fmt.Errorf("results stream: %w", err)
 	}
 
-	// Events stream: what NATS-source Triggers read. Limits retention with a
-	// max age, so events never pile up and several Triggers can read the
-	// same subjects (#402).
-	eventsStreamConfig := natspkg.StreamConfig{
-		Name:      rt.Spec.NATS.EventsStreamName(),
-		Subjects:  []string{natspkg.EventsStreamSubject(rt.Spec.NATS.SubjectPrefix)},
-		Retention: natspkg.RetentionLimits,
-		Storage:   natspkg.StorageFile,
-		MaxAge:    rt.Spec.NATS.EventsRetention(),
-	}
-	if err := natsCli.CreateStream(ctx, eventsStreamConfig); err != nil {
-		return fmt.Errorf("events stream: %w", err)
+	// Ephemeral (Mission) tables get no events stream: Mission cleanup only
+	// deletes the tasks and results streams, so it would be left behind.
+	if !rt.Spec.Ephemeral {
+		// Events stream: what NATS-source Triggers read. Limits retention with a
+		// max age, so events never pile up and several Triggers can read the
+		// same subjects (#402).
+		eventsStreamConfig := natspkg.StreamConfig{
+			Name:      rt.Spec.NATS.EventsStreamName(),
+			Subjects:  []string{natspkg.EventsStreamSubject(rt.Spec.NATS.SubjectPrefix)},
+			Retention: natspkg.RetentionLimits,
+			Storage:   natspkg.StorageFile,
+			MaxAge:    rt.Spec.NATS.EventsRetention(),
+		}
+		if err := natsCli.CreateStream(ctx, eventsStreamConfig); err != nil {
+			return fmt.Errorf("events stream: %w", err)
+		}
 	}
 
 	return r.ensureDeadLetters(ctx, rt, natsCli)

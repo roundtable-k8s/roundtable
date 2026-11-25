@@ -174,7 +174,7 @@ func (l *triggerLoop) run(ctx context.Context, cons jetstream.Consumer, handle t
 		if err == nil {
 			for msg := range batch.Messages() {
 				if ctx.Err() != nil {
-					// Not handled: leave it for redelivery after AckWait.
+					// Not handled: Nak so JetStream redelivers it right away.
 					_ = msg.Nak()
 					continue
 				}

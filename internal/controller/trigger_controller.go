@@ -320,7 +320,10 @@ func (r *TriggerReconciler) reconcileNATS(ctx context.Context, trg *aiv1alpha1.T
 	if err := r.consumers.ensure(nc, nn.String(), cfg, r.messageHandler(nn)); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerConsumerError, "%v", err)
 	}
-	return ctrl.Result{}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening,
+	// Re-check periodically: the fetch loop exits if its consumer is deleted
+	// (events stream recreated, JetStream storage lost); the next reconcile
+	// recreates the consumer and restarts the loop.
+	return ctrl.Result{RequeueAfter: RequeueVerySlow}, triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerListening,
 		fmt.Sprintf("Consumer %s on stream %s reads %s", durable, stream, src.Subject)), nil
 }
 
