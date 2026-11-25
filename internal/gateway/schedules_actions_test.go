@@ -37,8 +37,8 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 )
 
-// scheduleTrigger is a schedule Trigger targeting the Chain "digest".
-func scheduleTrigger(name string, labels map[string]string) *aiv1alpha1.Trigger {
+// actionTrigger is a schedule Trigger targeting the Chain "digest".
+func actionTrigger(name string, labels map[string]string) *aiv1alpha1.Trigger {
 	return &aiv1alpha1.Trigger{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS, Labels: labels},
 		Spec: aiv1alpha1.TriggerSpec{
@@ -48,30 +48,30 @@ func scheduleTrigger(name string, labels map[string]string) *aiv1alpha1.Trigger 
 	}
 }
 
-type scheduleEnv struct {
+type actionEnv struct {
 	env
 	k8s client.Client
 }
 
-// newScheduleEnv serves the gateway over a fake API holding the Chain
+// newActionEnv serves the gateway over a fake API holding the Chain
 // "digest", a Git-managed schedule "git-digest" (Flux Kustomization labels), a
 // schedule "suspended" with spec.suspend, a schedule "orphan" whose Chain is
 // missing and a NATS Trigger "events".
-func newScheduleEnv(t *testing.T, enabled bool) *scheduleEnv {
+func newActionEnv(t *testing.T, enabled bool) *actionEnv {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	_ = aiv1alpha1.AddToScheme(scheme)
-	suspended := scheduleTrigger("suspended", nil)
+	suspended := actionTrigger("suspended", nil)
 	suspended.Spec.Suspend = true
-	orphan := scheduleTrigger("orphan", nil)
+	orphan := actionTrigger("orphan", nil)
 	orphan.Spec.Target.ChainRef.Name = "gone"
-	knight := scheduleTrigger("knight-digest", nil)
+	knight := actionTrigger("knight-digest", nil)
 	knight.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "brief me"}}
-	events := scheduleTrigger("events", nil)
+	events := actionTrigger("events", nil)
 	events.Spec.Source = aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: "x.events.y"}}
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		templateChain("digest", false),
-		scheduleTrigger("git-digest", map[string]string{
+		actionTrigger("git-digest", map[string]string{
 			"kustomize.toolkit.fluxcd.io/name":      "apps",
 			"kustomize.toolkit.fluxcd.io/namespace": "flux-system",
 		}),
@@ -93,10 +93,10 @@ func newScheduleEnv(t *testing.T, enabled bool) *scheduleEnv {
 	}
 	srv := httptest.NewServer(Handler(svc, auth))
 	t.Cleanup(srv.Close)
-	return &scheduleEnv{env: env{svc: svc, server: srv}, k8s: k8s}
+	return &actionEnv{env: env{svc: svc, server: srv}, k8s: k8s}
 }
 
-func (e *scheduleEnv) trigger(t *testing.T, name string) *aiv1alpha1.Trigger {
+func (e *actionEnv) trigger(t *testing.T, name string) *aiv1alpha1.Trigger {
 	t.Helper()
 	trg := &aiv1alpha1.Trigger{}
 	if err := e.k8s.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, trg); err != nil {
@@ -108,7 +108,7 @@ func (e *scheduleEnv) trigger(t *testing.T, name string) *aiv1alpha1.Trigger {
 // playTrigger stands in for the trigger controller: it handles the run-now
 // annotation of name once, recording a firing that started the run (or was
 // skipped with skipReason), and removes the annotation.
-func (e *scheduleEnv) playTrigger(t *testing.T, name, skipReason string) {
+func (e *actionEnv) playTrigger(t *testing.T, name, skipReason string) {
 	ctx := context.Background()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -148,7 +148,7 @@ func (e *scheduleEnv) playTrigger(t *testing.T, name, skipReason string) {
 }
 
 func TestSuspendResumeGitManagedSchedule(t *testing.T) {
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	base := "/v1/schedules/" + testNS + "/git-digest"
 	before := e.trigger(t, "git-digest")
 
@@ -182,7 +182,7 @@ func TestSuspendResumeGitManagedSchedule(t *testing.T) {
 }
 
 func TestResumeKeepsSpecSuspend(t *testing.T) {
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	base := "/v1/schedules/" + testNS + "/suspended"
 	if resp, out := e.do(t, http.MethodPost, base+"/suspend", testToken, nil); resp.StatusCode != http.StatusOK ||
 		out["suspendedBy"] != "spec,annotation" {
@@ -199,7 +199,7 @@ func TestResumeKeepsSpecSuspend(t *testing.T) {
 }
 
 func TestRunGitManagedSchedule(t *testing.T) {
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	go e.playTrigger(t, "git-digest", "")
 	resp, out := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/git-digest/run", testToken, nil)
 	if resp.StatusCode != http.StatusCreated || out["state"] != ScheduleRunStarted {
@@ -222,7 +222,7 @@ func TestRunScheduleRecordsCallerAndPending(t *testing.T) {
 	old := scheduleRunWait
 	scheduleRunWait = 50 * time.Millisecond
 	t.Cleanup(func() { scheduleRunWait = old })
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	path := "/v1/schedules/" + testNS + "/suspended/run"
 
 	// Nobody handles it: 202 with the run it will start.
@@ -249,7 +249,7 @@ func TestRunScheduleRecordsCallerAndPending(t *testing.T) {
 func TestRunKnightSchedule(t *testing.T) {
 	old := scheduleRunWait
 	t.Cleanup(func() { scheduleRunWait = old })
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	path := "/v1/schedules/" + testNS + "/knight-digest/run"
 
 	// Handled: 201 with the task ID.
@@ -281,7 +281,7 @@ func TestRunKnightSchedule(t *testing.T) {
 }
 
 func TestRunScheduleSkipped(t *testing.T) {
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	go e.playTrigger(t, "git-digest", "concurrency Forbid: run x is active")
 	resp, out := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/git-digest/run", testToken, nil)
 	if resp.StatusCode != http.StatusConflict || out["state"] != ScheduleRunSkipped {
@@ -294,7 +294,7 @@ func TestRunScheduleSkipped(t *testing.T) {
 }
 
 func TestScheduleActionsNotFound(t *testing.T) {
-	e := newScheduleEnv(t, true)
+	e := newActionEnv(t, true)
 	for _, name := range []string{"nope", "events"} {
 		for _, action := range []string{"suspend", "resume", "run"} {
 			resp, _ := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/"+name+"/"+action, testToken, nil)
@@ -321,7 +321,7 @@ func TestScheduleActionsNotFound(t *testing.T) {
 }
 
 func TestScheduleActionsDisabled(t *testing.T) {
-	e := newScheduleEnv(t, false)
+	e := newActionEnv(t, false)
 	for _, action := range []string{"suspend", "resume", "run"} {
 		resp, _ := e.do(t, http.MethodPost, "/v1/schedules/"+testNS+"/git-digest/"+action, testToken, nil)
 		if resp.StatusCode != http.StatusNotFound {

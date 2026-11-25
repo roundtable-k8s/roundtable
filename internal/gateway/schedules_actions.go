@@ -54,11 +54,6 @@ const (
 	ScheduleRunSkipped = "skipped"
 )
 
-// SchedulesEnabled reports whether the schedule endpoints are served.
-func (s *Service) SchedulesEnabled() bool { return s.Schedules != nil }
-
-var errSchedulesDisabled = fmt.Errorf("%w: schedules are disabled on this gateway", ErrNotFound)
-
 // ScheduleState is the answer to suspend and resume: the schedule's effective
 // suspension after the change.
 type ScheduleState struct {
@@ -87,28 +82,6 @@ type ScheduleRun struct {
 	State      string `json:"state"`
 	SkipReason string `json:"skipReason,omitempty"`
 	Caller     string `json:"caller,omitempty"`
-}
-
-// fetchSchedule reads a Trigger with a schedule source; anything else is 404.
-func (s *Service) fetchSchedule(ctx context.Context, namespace, name string) (*aiv1alpha1.Trigger, error) {
-	if !s.SchedulesEnabled() {
-		return nil, errSchedulesDisabled
-	}
-	ns, err := s.namespace(namespace)
-	if err != nil {
-		return nil, err
-	}
-	trg := &aiv1alpha1.Trigger{}
-	if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, trg); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, ns, name)
-		}
-		return nil, k8sError("get schedule", err)
-	}
-	if trg.Spec.Source.Schedule == nil {
-		return nil, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, ns, name)
-	}
-	return trg, nil
 }
 
 // patchSchedule applies mutate to the schedule's annotations with a merge
