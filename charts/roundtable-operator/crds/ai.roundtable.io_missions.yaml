@@ -4545,6 +4545,40 @@ spec:
                         maximum: 10
                         minimum: 1
                         type: integer
+                      egress:
+                        description: |-
+                          egress is the default egress allowlist for the table's standing knights.
+                          A knight that sets its own spec.egress keeps it; allowlists are not
+                          merged. There is no table-level opt-out: opting out is explicit on the
+                          Knight.
+                        properties:
+                          allowedHosts:
+                            description: |-
+                              allowedHosts are the hostnames the knight may reach, each an exact host
+                              ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+                              matches subdomains of github.com but not github.com itself). Empty
+                              allows only DNS and NATS.
+                            items:
+                              maxLength: 253
+                              pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            maxItems: 64
+                            type: array
+                            x-kubernetes-list-type: set
+                          allowedPorts:
+                            default:
+                            - 443
+                            description: allowedPorts are the TCP ports allowed to
+                              the allowed hosts.
+                            items:
+                              format: int32
+                              maximum: 65535
+                              minimum: 1
+                              type: integer
+                            maxItems: 16
+                            type: array
+                            x-kubernetes-list-type: set
+                        type: object
                       image:
                         description: |-
                           image is the default container image for the table's standing knights.

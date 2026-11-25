@@ -1,0 +1,21 @@
+# Read-only GitHub access (clone, API, raw/release content).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: github-read
+  namespace: roundtable
+spec:
+  domain: github-read
+  skills:
+    - github-read
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.github-read.>"
+  egress:
+    allowedHosts:
+      - "github.com"
+      - "api.github.com"
+      - "*.githubusercontent.com"

@@ -1577,6 +1577,11 @@ func (in *RoundTableDefaults) DeepCopyInto(out *RoundTableDefaults) {
 		*out = new(v1.ResourceRequirements)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Egress != nil {
+		in, out := &in.Egress, &out.Egress
+		*out = new(KnightEgress)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.RuntimeClassName != nil {
 		in, out := &in.RuntimeClassName, &out.RuntimeClassName
 		*out = new(string)

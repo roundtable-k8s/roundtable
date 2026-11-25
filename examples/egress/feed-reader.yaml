@@ -1,0 +1,21 @@
+# Feed hosts only: list exactly the feeds this knight reads, nothing else.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: feed-reader
+  namespace: roundtable
+spec:
+  domain: feed-reader
+  skills:
+    - feed-reader
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.feed-reader.>"
+  egress:
+    allowedHosts:
+      - "hnrss.org"
+      - "feeds.arstechnica.com"
+      - "www.theregister.com"
