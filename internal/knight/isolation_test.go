@@ -189,8 +189,9 @@ func TestApplyTableDefaultsArsenals(t *testing.T) {
 	t.Run("inherited when the knight sets none", func(t *testing.T) {
 		k, _ := effective(t, isolationTestKnight(), defaults, DefaultIsolationSettings())
 		assert.Equal(t, tableArsenals, k.Spec.Arsenals)
-		var names []string
-		for _, c := range NewPodBuilder(k, "img").WithArsenal().WithGitSync().sidecars {
+		sidecars := NewPodBuilder(k, "img").WithArsenal().WithGitSync().sidecars
+		names := make([]string, 0, len(sidecars))
+		for _, c := range sidecars {
 			names = append(names, c.Name)
 		}
 		assert.Equal(t, []string{"git-sync-team", "git-sync-pack"}, names)
