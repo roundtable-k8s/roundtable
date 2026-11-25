@@ -1479,8 +1479,11 @@ var _ = Describe("Mission Controller - Sandbox mission knights", func() {
 			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
 			Expect(mission.Status.StartedAt).NotTo(BeNil())
 			Expect(mission.Status.ExpiresAt).NotTo(BeNil())
-			wantShutdown := mission.Status.StartedAt.Add(900 * time.Second).UTC().Format(time.RFC3339)
-			Expect(mission.Status.ExpiresAt.UTC().Format(time.RFC3339)).To(Equal(wantShutdown))
+			// ExpiresAt is fixed at status init (creation + TTL); StartedAt is
+			// reset at admission, so the two are no longer tied together.
+			wantShutdown := mission.Status.ExpiresAt.UTC().Format(time.RFC3339)
+			Expect(mission.Status.ExpiresAt.Time).To(BeTemporally("~",
+				mission.CreationTimestamp.Add(900*time.Second), 5*time.Second))
 
 			By("Verifying the knight is a direct mission knight on the sandbox runtime")
 			Expect(knight.Spec.Runtime).To(Equal("sandbox"))
