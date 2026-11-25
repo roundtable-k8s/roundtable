@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -62,6 +63,7 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		api.HandleFunc("GET /v1/runs", svc.handleListRuns)
 		api.HandleFunc("GET /v1/runs/{namespace}/{run}", svc.handleGetRun)
 		api.HandleFunc("GET /v1/runs/{namespace}/{run}/events", svc.handleRunEvents)
+		api.HandleFunc("POST /v1/runs/{namespace}/{run}/cancel", svc.handleCancelRun)
 	}
 	api.Handle("/mcp", MCPHandler(svc))
 
@@ -252,6 +254,24 @@ func (s *Service) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, err := s.GetRun(r.Context(), r.PathValue("namespace"), r.PathValue("run"), wait)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeRun(w, rec)
+}
+
+func (s *Service) handleCancelRun(w http.ResponseWriter, r *http.Request) {
+	var req CancelRunRequest
+	if r.Body != nil {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+			return
+		}
+	}
+	rec, err := s.CancelRun(r.Context(), r.PathValue("namespace"), r.PathValue("run"), req.Reason)
 	if err != nil {
 		writeError(w, err)
 		return

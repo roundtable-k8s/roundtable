@@ -335,6 +335,52 @@ func (s *Service) GetRun(ctx context.Context, namespace, name string, waitSecond
 	return runRecord(c, true), nil
 }
 
+// CancelRunRequest is the optional body of POST /v1/runs/{namespace}/{run}/cancel.
+type CancelRunRequest struct {
+	// Reason is recorded on the cancelled steps and the run's Cancelled condition.
+	Reason string `json:"reason,omitempty"`
+}
+
+// cancelWait is how long CancelRun waits for the chain controller to end the
+// run before returning its record as it is.
+const cancelWait = 10 * time.Second
+
+// CancelRun cancels an unfinished gateway run by annotating it; the chain
+// controller fails its unfinished steps and ends the run. Only runs the
+// gateway started can be cancelled, and a finished run is a conflict. Tasks
+// already published to a knight are not recalled.
+func (s *Service) CancelRun(ctx context.Context, namespace, name, reason string) (*RunRecord, error) {
+	if !s.RunsEnabled() {
+		return nil, errRunsDisabled
+	}
+	ns, err := s.namespace(namespace)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.fetchRun(ctx, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	if runDone(c) {
+		return nil, &ConflictError{State: string(c.Status.Phase),
+			Reason: fmt.Sprintf("run %s/%s is already %s", ns, name, c.Status.Phase)}
+	}
+	patch := client.MergeFromWithOptions(c.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[aiv1alpha1.AnnotationChainCancel] = reason
+	if err := s.Runs.Patch(ctx, c, patch); err != nil {
+		if apierrors.IsConflict(err) {
+			// The run moved under us (it may have just finished): re-check.
+			return s.CancelRun(ctx, ns, name, reason)
+		}
+		return nil, k8sError("cancel chain run", err)
+	}
+	s.Log.Info("Cancelling chain run", "run", name, "namespace", ns, "reason", reason)
+	return s.waitRun(ctx, ns, name, min(cancelWait, s.Opts.MaxTimeout))
+}
+
 // ListRuns lists gateway-started runs in a namespace, newest first, without
 // step details (get one run for those).
 func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, error) {

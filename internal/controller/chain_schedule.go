@@ -54,6 +54,9 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 		return false, ctrl.Result{}, nil
 	}
 
+	// A new run or a resume leaves the previous cancellation behind.
+	meta.RemoveStatusCondition(&chain.Status.Conditions, aiv1alpha1.ConditionChainCancelled)
+
 	now := metav1.Now()
 	if runPending {
 		r.initStepStatuses(chain)

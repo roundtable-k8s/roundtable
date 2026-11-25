@@ -103,6 +103,13 @@ type GetRunInput struct {
 	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the run to finish before returning (default 0)"`
 }
 
+// CancelRunInput is the input of the cancel_run tool.
+type CancelRunInput struct {
+	Run       string `json:"run" jsonschema:"name of the run to cancel (returned by run_chain)"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"namespace of the run; omit for the default"`
+	Reason    string `json:"reason,omitempty" jsonschema:"why the run is cancelled; recorded on its unfinished steps"`
+}
+
 // ListRunsOutput is the output of the list_runs tool.
 type ListRunsOutput struct {
 	Runs []*RunRecord `json:"runs"`
@@ -260,6 +267,17 @@ func addRunTools(s *mcp.Server, svc *Service) {
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetRunInput) (*mcp.CallToolResult, *RunRecord, error) {
 		rec, err := svc.GetRun(ctx, in.Namespace, in.Run, in.WaitSeconds)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runResult(rec), rec, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "cancel_run",
+		Description: "Cancel an unfinished chain run started by run_chain: its unfinished steps are marked failed with the reason and no new steps start. " +
+			"Tasks a knight already picked up are not recalled. A finished run is an error.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CancelRunInput) (*mcp.CallToolResult, *RunRecord, error) {
+		rec, err := svc.CancelRun(ctx, in.Namespace, in.Run, in.Reason)
 		if err != nil {
 			return nil, nil, err
 		}

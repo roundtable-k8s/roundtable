@@ -76,8 +76,8 @@ subjects:
     namespace: {{ .Release.Namespace }}
 {{- /* Objects the gateway writes: Missions, and run copies of opted-in Chains. */}}
 {{- $writes := list }}
-{{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions") }}{{ end }}
-{{- if $runs.enabled }}{{ $writes = append $writes (dict "suffix" "runs" "resource" "chains" "what" "Run copies of Chains labelled ai.roundtable.io/invokable=true (delete cleans up expired copies)") }}{{ end }}
+{{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions" "verbs" (list "get" "list" "watch" "create" "delete")) }}{{ end }}
+{{- if $runs.enabled }}{{ $writes = append $writes (dict "suffix" "runs" "resource" "chains" "what" "Run copies of Chains labelled ai.roundtable.io/invokable=true (delete cleans up expired copies, patch cancels a run)" "verbs" (list "get" "list" "watch" "create" "patch" "delete")) }}{{ end }}
 {{- range $w := $writes }}
 {{- if has "*" ($gw.allowedNamespaces | default list) }}
 ---
@@ -92,7 +92,7 @@ metadata:
 rules:
   - apiGroups: ["ai.roundtable.io"]
     resources: [{{ $w.resource | quote }}]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    verbs: {{ $w.verbs | toJson }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -124,7 +124,7 @@ metadata:
 rules:
   - apiGroups: ["ai.roundtable.io"]
     resources: [{{ $w.resource | quote }}]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    verbs: {{ $w.verbs | toJson }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -427,7 +427,7 @@ final output or get a run to poll. These endpoints are served when
   `ai.roundtable.io/run-of: <chain>`.
 - **Copies are cleaned up.** The gateway deletes its own copies
   `gateway.runTTL` (default 24h) after they finish. That is why it has
-  `create` and `delete` on Chains, granted per namespace like Missions (a
+  `create`, `patch` (to cancel a run) and `delete` on Chains, granted per namespace like Missions (a
   ClusterRole if `allowedNamespaces` holds `"*"`).
 
 ### `GET /v1/chains?namespace=`
@@ -484,6 +484,25 @@ run, then `Running`, `Succeeded`, `PartiallySucceeded` or `Failed`). Each
 step's `output` is cut at 64 KiB (`outputTruncated: true`). `output` is the
 output of the final step: the one step no other step depends on. If several
 steps have no dependents, `output` is omitted; read `steps`.
+
+### `POST /v1/runs/{namespace}/{run}/cancel`
+
+Cancels an unfinished run the gateway started. The optional body
+`{"reason": "..."}` is recorded on the run. The gateway sets the
+`ai.roundtable.io/cancel` annotation on the run copy; the chain controller then
+marks every Pending or Running step `Failed` with `error: "cancelled: <reason>"`,
+ends the run `Failed` with the condition `Cancelled=True`, emits a
+`RunCancelled` event and starts no further steps (loop rounds and fan-out items
+included). The call waits up to 10 seconds for that and returns the run record
+(**200** once the run is `Failed`, else **202** with a `Location` to poll).
+
+- A finished run is a **409** (`{"error": "...", "state": "<phase>"}`).
+- A Chain the gateway didn't start is a **404**.
+- A task a knight already picked up is not recalled: the knight finishes or
+  times out and its result is ignored.
+
+This needs `patch` on Chains, which the chart grants only when
+`gateway.runs.enabled` is true.
 
 ### `GET /v1/runs/{namespace}/{run}?waitSeconds=`
 
@@ -659,6 +678,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `list_chains` | `namespace?` | `{chains: [...]}`: the opted-in Chains with their description |
 | `run_chain` | `chain`, `input?` (a string or any JSON value), `waitSeconds?`, `namespace?` | Text content is the final step's output once done, else a note to call `get_run`. Structured content is the run record. A failed run is a tool error. |
 | `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
+| `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
 
 The mission tools are only listed when `gateway.missions.enabled` is true, the
