@@ -555,7 +555,13 @@ type ChainStepStatus struct {
 	// +optional
 	Knight string `json:"knight,omitempty"`
 
-	// deferUntil is when a Deferred step (a plan-quota refusal) runs again.
+	// providerRetries is the number of retries made after a transient model
+	// provider failure (HTTP 529/503/502/500, overloaded), #481.
+	// +optional
+	ProviderRetries int32 `json:"providerRetries,omitempty"`
+
+	// deferUntil is when a Deferred step (a plan-quota refusal or a provider
+	// overload backoff) runs again.
 	// +optional
 	DeferUntil *metav1.Time `json:"deferUntil,omitempty"`
 

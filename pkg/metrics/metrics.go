@@ -66,6 +66,16 @@ var (
 		[]string{"table", "chain"},
 	)
 
+	// ChainProviderRetriesTotal counts chain step retries after a transient
+	// model provider failure (overloaded, 5xx), #481.
+	ChainProviderRetriesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "roundtable_chain_provider_retries_total",
+			Help: "Chain step retries after a transient model provider failure",
+		},
+		[]string{"chain", "step"},
+	)
+
 	// ChainStepDurationSeconds observes how long a chain step took, when it
 	// finishes. status: succeeded, failed, skipped
 	ChainStepDurationSeconds = prometheus.NewHistogramVec(
@@ -134,6 +144,7 @@ func init() {
 		KnightWakeSeconds,
 		ChainRunsTotal,
 		ChainNoOpRunsTotal,
+		ChainProviderRetriesTotal,
 		ChainStepDurationSeconds,
 		Missions,
 		TableCostUSD,

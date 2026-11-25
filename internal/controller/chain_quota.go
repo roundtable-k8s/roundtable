@@ -133,12 +133,15 @@ func wakeDeferredSteps(chain *aiv1alpha1.Chain, now time.Time) *metav1.Time {
 		if ss.DeferUntil == nil || !ss.DeferUntil.After(now) {
 			// The refused plan window has reset: run the step again, on its
 			// primary knight (deferral exhausted the fallback too).
+			keepKnight := ss.Reason == stepReasonProviderOverloaded
 			ss.Phase = aiv1alpha1.ChainStepPhasePending
 			ss.Reason = ""
 			ss.Error = ""
 			ss.DeferUntil = nil
 			ss.CompletedAt = nil
-			ss.Knight = "" // deferral exhausted the fallback too; retry primary
+			if !keepKnight {
+				ss.Knight = "" // deferral exhausted the fallback too; retry primary
+			}
 			ss.Model = ""
 			ss.TaskID = ""
 			ss.TaskSeq = 0
@@ -177,4 +180,55 @@ func loopFallbackKnight(spec *aiv1alpha1.ChainStep, bs *aiv1alpha1.ChainLoopStep
 		return ""
 	}
 	return spec.FallbackRef.Name
+}
+
+// Transient model provider failures (#481): the provider, not the task, failed
+// (HTTP 529 Overloaded and friends). The step is retried after a backoff.
+
+// stepReasonProviderOverloaded marks a step deferred for a provider retry.
+const stepReasonProviderOverloaded = "ProviderOverloaded"
+
+// providerFallbackAfter is the number of retries after which the next attempt
+// goes to the fallback knight.
+const providerFallbackAfter = 2
+
+// providerBackoffBase is the first retry's delay; it doubles each retry.
+const providerBackoffBase = time.Minute
+
+// transientStatusRe matches an HTTP status of a transient provider failure.
+var transientStatusRe = regexp.MustCompile(`(?i)\b(?:api error|http(?: status)?(?: code)?|status(?: code)?|error)[:= ]+(?:529|503|502|500)\b`)
+
+// transientProviderFailure reports whether a failed task result is a
+// transient model provider failure: the machine-readable transient flag, else
+// an HTTP 529/503/502/500 or "Overloaded"/"overloaded_error" in the error.
+// Plan-quota refusals are not transient (see quotaRefusal).
+func transientProviderFailure(res *natspkg.TaskResult) bool {
+	if res == nil {
+		return false
+	}
+	if _, refused := quotaRefusal(res); refused {
+		return false
+	}
+	if res.Transient {
+		return true
+	}
+	msg := res.GetError()
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(msg), "overloaded") {
+		return true
+	}
+	return transientStatusRe.MatchString(msg)
+}
+
+// providerBackoff is the delay before retry number n (1-based): 1m, 2m, 4m...
+func providerBackoff(n int32) time.Duration {
+	if n < 1 {
+		n = 1
+	}
+	if n > 10 {
+		n = 10
+	}
+	return providerBackoffBase << (n - 1)
 }

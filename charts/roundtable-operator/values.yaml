@@ -46,6 +46,13 @@ keda: auto
 # Empty derives it from each knight's spec.nats.url host on port 8222.
 natsMonitoringEndpoint: ""
 
+# Transient model provider failures (#481). A chain step whose task fails with
+# HTTP 529/503/502/500 or "overloaded" is retried after a 1m, 2m, 4m, 8m...
+# backoff instead of failing the run. After 2 retries the step moves to
+# prPipeline.fallbackCoder when set. 0 disables the retry.
+providerOverload:
+  maxRetries: 4
+
 # Additional args to pass to the manager
 extraArgs: []
 

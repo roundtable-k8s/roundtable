@@ -759,8 +759,9 @@ spec:
                       format: date-time
                       type: string
                     deferUntil:
-                      description: deferUntil is when a Deferred step (a plan-quota
-                        refusal) runs again.
+                      description: |-
+                        deferUntil is when a Deferred step (a plan-quota refusal or a provider
+                        overload backoff) runs again.
                       format: date-time
                       type: string
                     error:
@@ -1067,6 +1068,12 @@ spec:
                         measured from here, not from startedAt.
                       format: date-time
                       type: string
+                    providerRetries:
+                      description: |-
+                        providerRetries is the number of retries made after a transient model
+                        provider failure (HTTP 529/503/502/500, overloaded), #481.
+                      format: int32
+                      type: integer
                     reason:
                       description: |-
                         reason is a short machine-readable reason for the step's phase, e.g.

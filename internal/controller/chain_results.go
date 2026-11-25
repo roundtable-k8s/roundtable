@@ -27,6 +27,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -279,6 +280,34 @@ func (r *ChainReconciler) applyStepError(ctx context.Context, chain *aiv1alpha1.
 				"Step %s refused for plan quota, deferred until %s", ss.Name, ss.DeferUntil)
 		}
 		return
+	}
+	// #481: a transient provider failure (529 Overloaded...) is retried after
+	// a backoff, on the fallback knight once it has retried twice.
+	if transientProviderFailure(result) {
+		if int(ss.ProviderRetries) < r.ProviderMaxRetries {
+			ss.ProviderRetries++
+			metrics.ChainProviderRetriesTotal.WithLabelValues(chain.Name, ss.Name).Inc()
+			ss.Phase = aiv1alpha1.ChainStepPhaseDeferred
+			ss.Reason = stepReasonProviderOverloaded
+			ss.Error = resultErr
+			ss.CompletedAt = nil
+			wait := providerBackoff(ss.ProviderRetries)
+			until := metav1.NewTime(time.Now().Add(wait))
+			ss.DeferUntil = &until
+			if ss.ProviderRetries >= providerFallbackAfter {
+				if fb := stepFallbackKnight(spec, ss); fb != "" {
+					ss.Knight = fb
+					ss.Model = ""
+				}
+			}
+			log.Info("Model provider overloaded: retrying step after backoff", "step", ss.Name, "retry", ss.ProviderRetries, "wait", wait.String())
+			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "StepProviderOverloaded",
+				"Step %s hit a transient provider error (retry %d/%d in %s): %s", ss.Name, ss.ProviderRetries, r.ProviderMaxRetries, wait, truncateUTF8(resultErr, 200))
+			return
+		}
+		if ss.ProviderRetries > 0 {
+			resultErr = fmt.Sprintf("%s (provider error; retried %d times)", resultErr, ss.ProviderRetries)
+		}
 	}
 	ss.Phase = aiv1alpha1.ChainStepPhaseFailed
 	ss.Error = resultErr

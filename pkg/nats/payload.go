@@ -74,6 +74,10 @@ type TaskResult struct {
 	// Result is the task result (pi-knight format).
 	Result string `json:"result,omitempty"`
 
+	// Transient marks a failure caused by the model provider rather than the
+	// task (overloaded, 5xx): the chain may retry it after a backoff (#481).
+	Transient bool `json:"transient,omitempty"`
+
 	// Error contains error details if the task failed.
 	Error string `json:"error,omitempty"`
 
