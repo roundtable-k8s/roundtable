@@ -1,0 +1,36 @@
+# A knight running on a local model served by Ollama in the cluster. pi-knight
+# talks to any OpenAI-compatible endpoint: spec.model "ollama/<tag>" selects the
+# model by its Ollama tag, and KNIGHT_MODEL_BASE_URL points the runtime at the
+# Service's /v1 API. No hosted provider key is set, so nothing leaves the
+# cluster. Egress stays default-deny: the in-cluster model Service is reached
+# through allowedServices (its pods, on the Service port), not allowedHosts.
+# See the runtime's local-model docs in roundtable-k8s/knights
+# (packages/pi-knight/docs/LOCAL-MODELS.md).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: local-coder
+  namespace: roundtable
+spec:
+  domain: coding
+  model: ollama/qwen2.5-coder:7b
+  skills:
+    - coding
+  env:
+    - name: KNIGHT_MODEL_BASE_URL
+      value: http://ollama.ollama.svc.cluster.local:11434/v1
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: fleet_a_tasks
+    resultsStream: fleet_a_results
+    subjects:
+      - "fleet-a.tasks.coding.>"
+  egress:
+    allowedServices:
+      - name: ollama
+        namespace: ollama
+        ports: [11434]
+  concurrency: 1
+  taskTimeoutSeconds: 900
+  workspace:
+    size: 2Gi
