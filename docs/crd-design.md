@@ -183,7 +183,9 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   each pod an `emptyDir` limited to `workspace.size` (RollingUpdate strategy)
   and sets `KNIGHT_WORKSPACE_MODE=ephemeral`. CEL on `Knight.spec` rejects
   `replicas`/`maxReplicas` above 1 on the default PVC (a ReadWriteMany
-  `existingClaim` is allowed) and on `runtime: sandbox`.
+  `existingClaim` is allowed) and on `runtime: sandbox`. See
+  [memory.md](memory.md) for how workspace, vault and shared mounts
+  relate to knight memory.
 - **Autoscaling.** With `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`
   the operator renders a KEDA `ScaledObject` (same name as the Knight):
   `nats-jetstream` trigger on `spec.nats.stream` / `<Knight>-consumer`,
