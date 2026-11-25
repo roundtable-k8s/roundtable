@@ -32,6 +32,18 @@ helm install roundtable charts/roundtable-operator \
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |
 | `extraArgs` | list | `[]` | Additional args for the manager binary (e.g. `--github-api-url=https://ghe.example.com/api/v3` for [issue pickup](issue-pickup.md)) |
 
+### Metrics
+
+Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com/v1` API is served. When `metrics.enabled` is set the operator runs with `--metrics-bind-address=:8080 --metrics-secure=false` (plain HTTP, so no TLS/authz config is needed on the monitor), with a `metrics` container port and a `<release>-metrics` Service.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `metrics.enabled` | bool | `false` | Enable the operator metrics endpoint, port and Service; gates all monitors |
+| `metrics.interval` | string | `1m` | Scrape interval for all monitors |
+| `metrics.labels` | map | `{}` | Extra labels on every monitor (for Prometheus selectors) |
+| `metrics.serviceMonitor.enabled` | bool | `false` | ServiceMonitors for the operator and, if `dashboard.enabled`, the dashboard |
+| `metrics.podMonitor.enabled` | bool | `false` | PodMonitor for knights (`podIP:3000/metrics`, container `app`); fills in `table` from the `ai.roundtable.io/round-table` pod label without overriding a `table` label the knight sets |
+
 ### Mission NetworkPolicy
 
 The egress NetworkPolicy the operator creates for each mission's knights. The NATS rule is derived from the mission's NATS URL (port, and namespace for `<svc>.<namespace>.svc[.cluster.local]` hosts; any other host allows the port to any destination). TCP 443 is allowed to anywhere. The policy is created once and never updated. Rendered into the operator's `MISSION_NETPOL_*` env vars.

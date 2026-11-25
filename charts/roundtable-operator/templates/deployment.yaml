@@ -44,9 +44,18 @@ spec:
             {{- with .Values.natsMonitoringEndpoint }}
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:8080
+            - --metrics-secure=false
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+          {{- end }}
           env:
             - name: DEFAULT_KNIGHT_IMAGE
               value: "{{ .Values.images.piKnight.repository }}:{{ .Values.images.piKnight.tag }}"
