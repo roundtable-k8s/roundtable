@@ -167,6 +167,9 @@ func (b *SandboxBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Knigh
 				return err
 			}
 		} else {
+			if v := knight.Annotations[aiv1alpha1.AnnotationShutdownTime]; v != "" {
+				log.Info("Ignoring unparsable shutdown-time annotation", "knight", knight.Name, "value", v)
+			}
 			unstructured.RemoveNestedField(sandbox.Object, "spec", "shutdownTime")
 		}
 		return unstructured.SetNestedField(sandbox.Object, SandboxOperatingModeRunning, "spec", "operatingMode")

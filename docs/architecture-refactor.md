@@ -1,5 +1,7 @@
 # Round Table Operator — Architecture Deep Dive
 
+> **Historical design document.** It records a past design and may not match the code. For how the system runs today, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Date:** 2026-03-14  
 **Codebase:** 13,328 LOC across 26 Go files  
 **Assessment:** Moderate coupling, several extraction opportunities

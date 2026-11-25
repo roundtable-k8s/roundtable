@@ -33,7 +33,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
-**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything. See [docs/principles.md](docs/principles.md). How knights remember and share files: [docs/memory.md](docs/memory.md). Runtime backends (Deployment vs agent-sandbox, gVisor, KEDA, egress): [docs/design/runtime-backends-adr.md](docs/design/runtime-backends-adr.md). Moving an agent off kagent: [docs/migrating-from-kagent.md](docs/migrating-from-kagent.md).
+**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything. See [docs/principles.md](docs/principles.md). How knights remember and share files: [docs/memory.md](docs/memory.md). Runtime backends (Deployment vs agent-sandbox, gVisor, KEDA, egress): [docs/design/runtime-backends-adr.md](docs/design/runtime-backends-adr.md). Moving an agent off kagent: [docs/migrating-from-kagent.md](docs/migrating-from-kagent.md). How it all fits together (JetStream topology, the knight environment, request flow): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Features
 
@@ -226,6 +226,21 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
     │  └─────────────┘  └─────────────┘          │
     └────────────────────────────────────────────┘
 ```
+
+## Observability
+
+Every component (operator, invoke gateway, dashboard, knights) emits
+OpenTelemetry traces through a collector to the backend you choose, with one
+trace per Chain run or Mission and the table on every signal. The chart also
+ships Grafana dashboards and Prometheus alerts. Prompts and responses are
+captured by default and redacted; turn that off per install or per table.
+
+- [docs/observability.md](docs/observability.md): architecture, the
+  `telemetry` values, exporter examples (Tempo, Jaeger, OTLP SaaS), TraceQL
+  queries, dashboards, alerts and privacy
+- [examples/observability/](examples/observability/): try it with Jaeger
+- [Telemetry conventions](docs/design/telemetry-conventions.md): span,
+  attribute and metric names
 
 ## Ecosystem
 
