@@ -18,6 +18,7 @@ package knight
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -55,6 +56,33 @@ func LoadTelemetry() Telemetry {
 		SDKDisabled:    os.Getenv("OTEL_SDK_DISABLED"),
 		CaptureContent: os.Getenv("ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT"),
 	}
+}
+
+// WithTable returns t with the table's overrides applied (nil: unchanged).
+// Fields the table sets replace the operator-wide values; disabled drops the
+// endpoint so Env yields only OTEL_SDK_DISABLED=true.
+func (t Telemetry) WithTable(o *aiv1alpha1.RoundTableTelemetry) Telemetry {
+	if o == nil {
+		return t
+	}
+	if o.OTLPEndpoint != "" {
+		t.Endpoint = o.OTLPEndpoint
+		t.SDKDisabled = ""
+	}
+	if o.OTLPProtocol != "" {
+		t.Protocol = o.OTLPProtocol
+	}
+	if o.SamplingRatio != nil {
+		t.Sampler = "parentbased_traceidratio"
+		t.SamplerArg = *o.SamplingRatio
+	}
+	if o.CaptureContent != nil {
+		t.CaptureContent = strconv.FormatBool(*o.CaptureContent)
+	}
+	if o.Disabled {
+		t.Endpoint = ""
+	}
+	return t
 }
 
 // processTelemetry returns the operator environment's settings, read once.

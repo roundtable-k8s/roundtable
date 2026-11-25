@@ -331,7 +331,8 @@ Two dashboards ship in `charts/roundtable-operator/dashboards/`: **Fleet overvie
 Sets the standard OpenTelemetry `OTEL_*` environment variables on the
 operator (`roundtable-operator`), gateway (`roundtable-gateway`) and dashboard
 (`roundtable-ui`) Deployments. With `telemetry.enabled=false` only
-`OTEL_SDK_DISABLED=true` is set. Knight pods are not affected.
+`OTEL_SDK_DISABLED=true` is set. Knight pods get the same values from the
+operator (see "Per-table override" below).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -342,6 +343,22 @@ operator (`roundtable-operator`), gateway (`roundtable-gateway`) and dashboard
 | `telemetry.captureContent` | bool | `true` | `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT`: prompt/response text on gen_ai spans, redacted before export |
 | `telemetry.resourceAttributes` | object | `{}` | Extra attributes, rendered sorted as `OTEL_RESOURCE_ATTRIBUTES=k=v,...` |
 | `telemetry.traceUrlTemplate` | string | `""` | Dashboard `TRACE_URL_TEMPLATE` deep link containing `{traceId}` |
+
+#### Per-table override
+
+A RoundTable can override these values for its own knights with
+`spec.telemetry`, so tables (tenants) can use different collectors:
+
+| Field | Effect on the table's knights |
+|-------|-------------------------------|
+| `otlpEndpoint` | replaces `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `otlpProtocol` (`grpc`, `http/protobuf`) | replaces `OTEL_EXPORTER_OTLP_PROTOCOL` |
+| `samplingRatio` (string, 0 to 1) | sets `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and `OTEL_TRACES_SAMPLER_ARG` |
+| `disabled` | `OTEL_SDK_DISABLED=true` (only that var is set) |
+| `captureContent` | `false` sets `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` and `ACTIVITY_CONTENT=none`; unset inherits `telemetry.captureContent` |
+
+Precedence: knight `spec.env` > table `spec.telemetry` > chart values. Unset
+table fields inherit the chart values. OTLP auth headers are not modelled.
 
 #### OpenTelemetry Collector
 

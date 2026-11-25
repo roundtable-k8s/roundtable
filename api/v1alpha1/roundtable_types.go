@@ -61,6 +61,12 @@ type RoundTableSpec struct {
 	// +optional
 	IssuePickup *IssuePickupSpec `json:"issuePickup,omitempty"`
 
+	// telemetry overrides the operator-wide OpenTelemetry settings (Helm
+	// telemetry.*) for the knights in this table. A knight's own spec.env
+	// still wins over it.
+	// +optional
+	Telemetry *RoundTableTelemetry `json:"telemetry,omitempty"`
+
 	// vault configures the shared Obsidian vault for the table's standing
 	// knights (those labelled ai.roundtable.io/round-table). A knight that sets
 	// its own spec.vault keeps it; the two are not merged.
@@ -165,6 +171,36 @@ type RoundTableNATS struct {
 	// used when createStreams is true. Defaults to 720h (30 days).
 	// +optional
 	DeadLetterMaxAge *metav1.Duration `json:"deadLetterMaxAge,omitempty"`
+}
+
+// RoundTableTelemetry overrides the operator-wide telemetry settings for one
+// table's knights. Precedence: knight env > table telemetry > chart values.
+type RoundTableTelemetry struct {
+	// otlpEndpoint replaces OTEL_EXPORTER_OTLP_ENDPOINT.
+	// +optional
+	OTLPEndpoint string `json:"otlpEndpoint,omitempty"`
+
+	// otlpProtocol replaces OTEL_EXPORTER_OTLP_PROTOCOL.
+	// +kubebuilder:validation:Enum=grpc;"http/protobuf"
+	// +optional
+	OTLPProtocol string `json:"otlpProtocol,omitempty"`
+
+	// samplingRatio is a decimal between 0 and 1; it sets the
+	// parentbased_traceidratio sampler argument.
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
+	// +optional
+	SamplingRatio *string `json:"samplingRatio,omitempty"`
+
+	// disabled turns telemetry off (OTEL_SDK_DISABLED=true) for this table's
+	// knights.
+	// +optional
+	Disabled bool `json:"disabled,omitempty"`
+
+	// captureContent sets whether prompt and response text is captured in
+	// traces and activity previews. nil inherits the chart value; false sets
+	// ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false and ACTIVITY_CONTENT=none.
+	// +optional
+	CaptureContent *bool `json:"captureContent,omitempty"`
 }
 
 // RoundTableDefaults defines default configuration inherited by knights in this table.

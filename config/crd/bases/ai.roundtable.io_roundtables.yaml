@@ -1726,6 +1726,39 @@ spec:
                 default: false
                 description: suspend, if true, suspends all knights in this table.
                 type: boolean
+              telemetry:
+                description: |-
+                  telemetry overrides the operator-wide OpenTelemetry settings (Helm
+                  telemetry.*) for the knights in this table. A knight's own spec.env
+                  still wins over it.
+                properties:
+                  captureContent:
+                    description: |-
+                      captureContent sets whether prompt and response text is captured in
+                      traces and activity previews. nil inherits the chart value; false sets
+                      ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false and ACTIVITY_CONTENT=none.
+                    type: boolean
+                  disabled:
+                    description: |-
+                      disabled turns telemetry off (OTEL_SDK_DISABLED=true) for this table's
+                      knights.
+                    type: boolean
+                  otlpEndpoint:
+                    description: otlpEndpoint replaces OTEL_EXPORTER_OTLP_ENDPOINT.
+                    type: string
+                  otlpProtocol:
+                    description: otlpProtocol replaces OTEL_EXPORTER_OTLP_PROTOCOL.
+                    enum:
+                    - grpc
+                    - http/protobuf
+                    type: string
+                  samplingRatio:
+                    description: |-
+                      samplingRatio is a decimal between 0 and 1; it sets the
+                      parentbased_traceidratio sampler argument.
+                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                    type: string
+                type: object
               vault:
                 description: |-
                   vault configures the shared Obsidian vault for the table's standing

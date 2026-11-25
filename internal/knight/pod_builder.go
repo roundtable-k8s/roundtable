@@ -922,8 +922,15 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 	if b.telemetry != nil {
 		tel = *b.telemetry
 	}
+	var tableTel []corev1.EnvVar
+	if rt := findTable(ctx, b.reader, b.knight, func(rt *aiv1alpha1.RoundTable) bool { return rt.Spec.Telemetry != nil }); rt != nil {
+		tel = tel.WithTable(rt.Spec.Telemetry)
+		if c := rt.Spec.Telemetry.CaptureContent; c != nil && !*c {
+			tableTel = append(tableTel, corev1.EnvVar{Name: "ACTIVITY_CONTENT", Value: "none"})
+		}
+	}
 	userEnv := append(append([]corev1.EnvVar{}, b.knight.Spec.Env...), b.env...)
-	env = mergeMissingEnv(env, tel.Env(b.knight, image), userEnv)
+	env = mergeMissingEnv(env, append(tel.Env(b.knight, image), tableTel...), userEnv)
 
 	// Append user-defined env vars
 	env = append(env, b.knight.Spec.Env...)
