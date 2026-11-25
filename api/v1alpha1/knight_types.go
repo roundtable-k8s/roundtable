@@ -130,6 +130,16 @@ type KnightSpec struct {
 	// +optional
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 
+	// egress restricts the knight's outbound traffic to DNS, its NATS server
+	// and an allowlist of hostnames. The operator renders it as a
+	// CiliumNetworkPolicy knight-<name>-egress with toFQDNs rules; without the
+	// cilium.io/v2 CiliumNetworkPolicy API it falls back to a NetworkPolicy that
+	// allows the allowed ports to any destination and reports
+	// EgressRestricted=False (FQDNPolicyUnavailable). When unset no egress
+	// policy is rendered.
+	// +optional
+	Egress *KnightEgress `json:"egress,omitempty"`
+
 	// concurrency is the maximum number of concurrent tasks the knight can process.
 	// When unset the knight's RoundTable spec.defaults.concurrency applies, and
 	// when that is unset too 2.
@@ -342,6 +352,29 @@ type KnightCapabilities struct {
 	// When true, the operator injects a browser sidecar and sets BROWSER_ENABLED=true.
 	// +optional
 	Browser bool `json:"browser,omitempty"`
+}
+
+// KnightEgress is a knight's egress allowlist.
+type KnightEgress struct {
+	// allowedHosts are the hostnames the knight may reach, each an exact host
+	// ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
+	// matches subdomains of github.com but not github.com itself). Empty
+	// allows only DNS and NATS.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +listType=set
+	// +optional
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+
+	// allowedPorts are the TCP ports allowed to the allowed hosts.
+	// +kubebuilder:default={443}
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:Minimum=1
+	// +kubebuilder:validation:items:Maximum=65535
+	// +listType=set
+	// +optional
+	AllowedPorts []int32 `json:"allowedPorts,omitempty"`
 }
 
 // KnightTools defines system-level tools the knight needs installed.
