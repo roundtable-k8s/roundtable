@@ -113,6 +113,16 @@ kubectl -n roundtable create secret generic roundtable-gateway-token \
 
 ## HTTP API
 
+The API is described as an OpenAPI 3.1 document at `GET /openapi.json`. It
+needs the same bearer token as `/v1`, reports the chart `appVersion` as
+`info.version` and lists only the route groups that are enabled (missions,
+chain runs, webhooks). It covers the REST routes, not the `/mcp` endpoint. A
+test keeps it in sync with the routes the gateway serves.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://roundtable-gateway/openapi.json
+```
+
 ### `POST /v1/knights/{name}/invoke`
 
 Request body fields:

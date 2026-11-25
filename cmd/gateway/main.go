@@ -52,13 +52,13 @@ func envOr(key, def string) string {
 
 func main() {
 	var (
-		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage string
-		defaultTimeout, maxTimeout, taskTTL, runTTL                                         time.Duration
-		maxInFlight, maxStreams                                                             int
-		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled                    bool
-		maxBudgetUSD, hookRate                                                              float64
-		maxMissionTTL, maxMissionTimeout, hookBurst                                         int
-		hookMaxBody                                                                         int64
+		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
+		defaultTimeout, maxTimeout, taskTTL, runTTL                                                     time.Duration
+		maxInFlight, maxStreams                                                                         int
+		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled                                bool
+		maxBudgetUSD, hookRate                                                                          float64
+		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
+		hookMaxBody                                                                                     int64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
 	flag.StringVar(&metricsListen, "metrics-listen", "",
@@ -78,6 +78,7 @@ func main() {
 	flag.IntVar(&maxStreams, "max-streams", 64, "Maximum concurrently open event streams (0 = unlimited).")
 	flag.StringVar(&defaultImage, "default-knight-image", os.Getenv("DEFAULT_KNIGHT_IMAGE"),
 		"The operator's DEFAULT_KNIGHT_IMAGE, used to infer knight runtimes for model validation.")
+	flag.StringVar(&apiVersion, "api-version", "dev", "Version reported by the OpenAPI document (the chart's appVersion).")
 	flag.BoolVar(&missionsEnabled, "missions", true,
 		"Serve the mission endpoints (needs RBAC to create, read and delete Missions).")
 	flag.Float64Var(&maxBudgetUSD, "mission-max-budget-usd", 10, "Upper bound on a mission's costBudgetUSD.")
@@ -154,6 +155,7 @@ func main() {
 		MaxInFlight:        maxInFlight,
 		MaxStreams:         maxStreams,
 		DefaultKnightImage: defaultImage,
+		Version:            apiVersion,
 		Missions: gateway.MissionOptions{
 			MaxBudgetUSD:         maxBudgetUSD,
 			MaxTTLSeconds:        int32(max(min(maxMissionTTL, math.MaxInt32), 0)),

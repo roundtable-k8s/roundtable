@@ -43,39 +43,69 @@ const minTokenLength = 16
 // which accepts only each Trigger's own credential (never the API tokens).
 func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	api := http.NewServeMux()
-	api.HandleFunc("GET /v1/knights", svc.handleListKnights)
-	api.HandleFunc("POST /v1/knights/{name}/invoke", svc.handleInvoke)
-	api.HandleFunc("GET /v1/tasks", svc.handleListTasks)
-	api.HandleFunc("GET /v1/tasks/{taskId}", svc.handleGetTask)
-	api.HandleFunc("GET /v1/tasks/{taskId}/events", svc.handleTaskEvents)
-	api.HandleFunc("GET /v1/dead-letters", svc.handleListDeadLetters)
-	api.HandleFunc("GET /v1/dead-letters/{taskId}", svc.handleGetDeadLetter)
-	api.HandleFunc("POST /v1/dead-letters/{taskId}/retry", svc.handleRetryDeadLetter)
-	if svc.MissionsEnabled() {
-		api.HandleFunc("POST /v1/missions", svc.handleStartMission)
-		api.HandleFunc("GET /v1/missions", svc.handleListMissions)
-		api.HandleFunc("GET /v1/missions/{namespace}/{name}", svc.handleGetMission)
-		api.HandleFunc("DELETE /v1/missions/{namespace}/{name}", svc.handleDeleteMission)
-	}
-	if svc.RunsEnabled() {
-		api.HandleFunc("GET /v1/chains", svc.handleListChains)
-		api.HandleFunc("POST /v1/chains/{name}/runs", svc.handleRunChain)
-		api.HandleFunc("GET /v1/runs", svc.handleListRuns)
-		api.HandleFunc("GET /v1/runs/{namespace}/{run}", svc.handleGetRun)
-		api.HandleFunc("GET /v1/runs/{namespace}/{run}/events", svc.handleRunEvents)
-		api.HandleFunc("POST /v1/runs/{namespace}/{run}/cancel", svc.handleCancelRun)
+	mux := http.NewServeMux()
+	for _, rt := range svc.routes() {
+		if rt.public {
+			mux.HandleFunc(rt.pattern, rt.handler)
+		} else {
+			api.HandleFunc(rt.pattern, rt.handler)
+		}
 	}
 	api.Handle("/mcp", MCPHandler(svc))
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
-	if svc.HooksEnabled() {
-		mux.HandleFunc("POST /v1/hooks/{namespace}/{trigger}", svc.handleHook)
-	}
 	mux.Handle("/", auth.Wrap(api))
 	return instrument(mux)
+}
+
+// route is one entry of the gateway's HTTP route table. The table is the
+// single source for Handler and for the OpenAPI document (/openapi.json), so
+// a route cannot be served without being described, or the reverse.
+type route struct {
+	// pattern is the http.ServeMux pattern, "METHOD /path".
+	pattern string
+	handler http.HandlerFunc
+	// public routes skip the bearer-token auth (they do their own, or none).
+	public bool
+}
+
+// routes lists the routes served for the Service's enabled features. /mcp is
+// not part of it: MCP tools describe themselves.
+func (s *Service) routes() []route {
+	rs := []route{
+		{pattern: "GET /healthz", public: true, handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		}},
+		{pattern: "GET /openapi.json", handler: s.handleOpenAPI},
+		{pattern: "GET /v1/knights", handler: s.handleListKnights},
+		{pattern: "POST /v1/knights/{name}/invoke", handler: s.handleInvoke},
+		{pattern: "GET /v1/tasks", handler: s.handleListTasks},
+		{pattern: "GET /v1/tasks/{taskId}", handler: s.handleGetTask},
+		{pattern: "GET /v1/tasks/{taskId}/events", handler: s.handleTaskEvents},
+		{pattern: "GET /v1/dead-letters", handler: s.handleListDeadLetters},
+		{pattern: "GET /v1/dead-letters/{taskId}", handler: s.handleGetDeadLetter},
+		{pattern: "POST /v1/dead-letters/{taskId}/retry", handler: s.handleRetryDeadLetter},
+	}
+	if s.MissionsEnabled() {
+		rs = append(rs,
+			route{pattern: "POST /v1/missions", handler: s.handleStartMission},
+			route{pattern: "GET /v1/missions", handler: s.handleListMissions},
+			route{pattern: "GET /v1/missions/{namespace}/{name}", handler: s.handleGetMission},
+			route{pattern: "DELETE /v1/missions/{namespace}/{name}", handler: s.handleDeleteMission},
+		)
+	}
+	if s.RunsEnabled() {
+		rs = append(rs,
+			route{pattern: "GET /v1/chains", handler: s.handleListChains},
+			route{pattern: "POST /v1/chains/{name}/runs", handler: s.handleRunChain},
+			route{pattern: "GET /v1/runs", handler: s.handleListRuns},
+			route{pattern: "GET /v1/runs/{namespace}/{run}", handler: s.handleGetRun},
+			route{pattern: "GET /v1/runs/{namespace}/{run}/events", handler: s.handleRunEvents},
+			route{pattern: "POST /v1/runs/{namespace}/{run}/cancel", handler: s.handleCancelRun},
+		)
+	}
+	if s.HooksEnabled() {
+		rs = append(rs, route{pattern: "POST /v1/hooks/{namespace}/{trigger}", public: true, handler: s.handleHook})
+	}
+	return rs
 }
 
 func (s *Service) handleListKnights(w http.ResponseWriter, r *http.Request) {
