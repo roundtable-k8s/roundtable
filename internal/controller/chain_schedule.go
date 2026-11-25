@@ -183,33 +183,45 @@ func (r *ChainReconciler) reconcileSchedule(ctx context.Context, chain *aiv1alph
 // cronSpec returns the cron expression prefixed with the chain's time zone
 // (robfig/cron's "CRON_TZ=" syntax). An unset zone means UTC.
 func cronSpec(chain *aiv1alpha1.Chain) string {
-	tz := chain.Spec.TimeZone
+	return cronExpr(chain.Spec.Schedule, chain.Spec.TimeZone)
+}
+
+// cronExpr prefixes schedule with its time zone; an unset zone means UTC.
+func cronExpr(schedule, tz string) string {
 	if tz == "" {
 		tz = "UTC"
 	}
-	return "CRON_TZ=" + tz + " " + chain.Spec.Schedule
+	return "CRON_TZ=" + tz + " " + schedule
 }
 
 // parseSchedule parses the chain's schedule in its time zone. It returns a
 // nil schedule and no error when the chain has no schedule.
 func parseSchedule(chain *aiv1alpha1.Chain) (cron.Schedule, error) {
-	if chain.Spec.TimeZone != "" {
-		if chain.Spec.TimeZone == "Local" {
-			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\"", chain.Spec.TimeZone)
+	return parseCron(chain.Spec.Schedule, chain.Spec.TimeZone, "spec.timeZone")
+}
+
+// parseCron parses a cron schedule in time zone tz (tzField names the field
+// that sets the zone, for error messages). It returns a nil schedule and no
+// error when schedule is empty. Shared by Chain.spec.schedule and schedule
+// Triggers.
+func parseCron(schedule, tz, tzField string) (cron.Schedule, error) {
+	if tz != "" {
+		if tz == "Local" {
+			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\"", tz)
 		}
-		if _, err := time.LoadLocation(chain.Spec.TimeZone); err != nil {
-			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\": %w", chain.Spec.TimeZone, err)
+		if _, err := time.LoadLocation(tz); err != nil {
+			return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\": %w", tz, err)
 		}
 	}
-	if chain.Spec.Schedule == "" {
+	if schedule == "" {
 		return nil, nil
 	}
-	if strings.Contains(chain.Spec.Schedule, "TZ=") {
-		return nil, fmt.Errorf("invalid schedule %q: set the time zone with spec.timeZone instead of a TZ= prefix", chain.Spec.Schedule)
+	if strings.Contains(schedule, "TZ=") {
+		return nil, fmt.Errorf("invalid schedule %q: set the time zone with %s instead of a TZ= prefix", schedule, tzField)
 	}
-	sched, err := cron.ParseStandard(cronSpec(chain))
+	sched, err := cron.ParseStandard(cronExpr(schedule, tz))
 	if err != nil {
-		return nil, fmt.Errorf("invalid schedule %q: %w", chain.Spec.Schedule, err)
+		return nil, fmt.Errorf("invalid schedule %q: %w", schedule, err)
 	}
 	return sched, nil
 }

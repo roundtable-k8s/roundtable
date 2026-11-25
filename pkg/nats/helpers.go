@@ -69,3 +69,28 @@ func KnightConsumerName(knightName string) string {
 func KnightTaskConsumerName(knightName string) string {
 	return util.Capitalize(knightName) + "-consumer"
 }
+
+// EventsStreamSubject is the subject a table's events stream captures.
+// Format: {prefix}.events.>
+func EventsStreamSubject(prefix string) string {
+	return StreamSubject(prefix, "events")
+}
+
+// EventsSubjectPrefix is the prefix every event subject of a table starts
+// with. Format: {prefix}.events.
+func EventsSubjectPrefix(prefix string) string {
+	return prefix + ".events."
+}
+
+// EventSubject constructs the subject of a named event.
+// Format: {prefix}.events.{name}
+func EventSubject(prefix, name string) string {
+	return EventsSubjectPrefix(prefix) + name
+}
+
+// TriggerConsumerName is the durable JetStream consumer a NATS-source Trigger
+// reads its events through. Format: trigger-{namespace}_{name} (Kubernetes
+// names have no "_", so the name is unambiguous).
+func TriggerConsumerName(namespace, name string) string {
+	return "trigger-" + namespace + "_" + name
+}

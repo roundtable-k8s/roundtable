@@ -342,4 +342,31 @@ const (
 	// ReasonNotifyURLNotAllowed indicates the webhook URL did not match the
 	// operator's allowed URL prefixes (SSRF guard) and was rejected.
 	ReasonNotifyURLNotAllowed = "URLNotAllowed"
+
+	// ===== Trigger Condition Types and Reasons =====
+
+	// ConditionTriggerReady is True while a Trigger is listening for events
+	// (its consumer runs, or its schedule is registered).
+	ConditionTriggerReady = "Ready"
+
+	// ReasonTriggerListening indicates the Trigger is listening.
+	ReasonTriggerListening = "Listening"
+
+	// ReasonTriggerSuspended indicates spec.suspend is set.
+	ReasonTriggerSuspended = "Suspended"
+
+	// ReasonTriggerInvalidSpec indicates a template, subject or schedule
+	// is invalid.
+	ReasonTriggerInvalidSpec = "InvalidSpec"
+
+	// ReasonTriggerTargetNotFound indicates the target Chain does not exist.
+	ReasonTriggerTargetNotFound = "TargetNotFound"
+
+	// ReasonTriggerRoundTableNotFound indicates roundTableRef does not
+	// resolve.
+	ReasonTriggerRoundTableNotFound = "RoundTableNotFound"
+
+	// ReasonTriggerConsumerError indicates the JetStream consumer could not
+	// be created or read.
+	ReasonTriggerConsumerError = "ConsumerError"
 )

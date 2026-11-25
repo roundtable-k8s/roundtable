@@ -1,0 +1,31 @@
+# A Trigger that starts a run of the security-report Chain for each deploy
+# event published to fleet-a.events.deploys.<env>. Needs the fleet-a
+# RoundTable (roundtable-fleet.yaml, createStreams: true, which creates the
+# events stream fleet_a_tasks_EVENTS) and chain-sequential.yaml.
+#
+#   nats pub fleet-a.events.deploys.prod '{"service":"api","version":"1.2.3"}' \
+#     -H Nats-Msg-Id:deploy-api-1.2.3
+#   kubectl -n roundtable get chains -l ai.roundtable.io/trigger=on-deploy
+#   kubectl -n roundtable get trigger on-deploy -o jsonpath='{.status.recentFirings}'
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: on-deploy
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    nats:
+      subject: fleet-a.events.deploys.>
+  target:
+    chainRef: {name: security-report}
+  # Rendered into the run's spec.input. .Event.Data is the parsed JSON payload.
+  input: |
+    Review the security impact of deploying {{ .Event.Data.service }} {{ .Event.Data.version }}
+    ({{ .Event.Subject }}, {{ .Event.Time.Format "2006-01-02T15:04:05Z07:00" }}).
+  # One run per service version, however often the event is published.
+  dedupeKey: "{{ .Event.Data.service }}@{{ .Event.Data.version }}"
+  concurrency:
+    policy: Allow
+    maxActive: 3
+  ttlSecondsAfterFinished: 86400

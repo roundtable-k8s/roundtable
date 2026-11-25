@@ -53,6 +53,7 @@ rules:
   - knights/finalizers
   - missions/finalizers
   - roundtables/finalizers
+  - triggers/finalizers
   verbs:
   - update
 - apiGroups:
@@ -62,10 +63,21 @@ rules:
   - knights/status
   - missions/status
   - roundtables/status
+  - triggers/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - ai.roundtable.io
+  resources:
+  - triggers
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - apps
   resources:

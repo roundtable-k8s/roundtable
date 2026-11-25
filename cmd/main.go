@@ -395,6 +395,16 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoundTable")
 		os.Exit(1)
 	}
+	// Triggers (#402) start Chain runs from NATS events and cron schedules.
+	if err := (&controller.TriggerReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("trigger-controller"), //nolint:staticcheck // SA1019: see note above
+		NATS:     natsProvider,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "Trigger")
+		os.Exit(1)
+	}
 	githubFactory := github.NewClientFactory(githubAPIURL)
 	// Issue pickup (#224) only acts on RoundTables that set spec.issuePickup.
 	if err := (&controller.IssuePickupReconciler{

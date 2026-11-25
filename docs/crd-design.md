@@ -34,6 +34,7 @@
 - **Mission** → references Knights (existing or ephemeral) and Chains
 - **Mission** → creates ephemeral Knights and temporary NATS subjects
 - **Chain** can optionally reference a **RoundTable** for NATS config
+- **Trigger** → starts copies of a **Chain** (owned by the Trigger) from a NATS event on the RoundTable's events stream or a cron schedule
 
 ### Ownership Hierarchy
 
@@ -63,6 +64,7 @@ All types are defined in `api/v1alpha1/` following the patterns established by `
 | Chain | `chain_types.go` | `ChainSpec` | `ChainStatus` |
 | Mission | `mission_types.go` | `MissionSpec` | `MissionStatus` |
 | RoundTable | `roundtable_types.go` | `RoundTableSpec` | `RoundTableStatus` |
+| Trigger | `trigger_types.go` | `TriggerSpec` | `TriggerStatus` |
 
 See the actual Go files for complete type definitions. Key design decisions:
 
@@ -172,6 +174,18 @@ and, within `maxActive`/`maxActivePerRepo`, copies the `chainRef` Chain to
 issue (`rt:in-progress` + comment). The copies are owned by the RoundTable;
 finished ones are deleted after `ttlSecondsAfterFinished`. Progress is in
 `status.issuePickup`. See [issue-pickup.md](issue-pickup.md).
+
+### Trigger controller (#402)
+
+A `Trigger` starts a copy of its target Chain per event, with `spec.input`
+rendered from the event by a Go template. A `nats` source gets one durable
+consumer (`trigger-<namespace>_<name>`) on the table's events stream
+(`<subjectPrefix>.events.>`, created with `createStreams`); each message is
+acked only after the run is created or deliberately skipped. A `schedule`
+source fires on a cron with the same catch-up rule as `Chain.spec.schedule`.
+`dedupeKey` names the run, so a repeated key starts nothing; `concurrency`
+(`Allow` with `maxActive`, `Forbid`, `Replace`) bounds active runs. Firings are
+recorded in `status.recentFirings`. See [triggers.md](triggers.md).
 
 ### Knight scaling (#215)
 

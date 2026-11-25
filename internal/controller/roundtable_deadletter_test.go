@@ -77,6 +77,14 @@ func TestEnsureStreamsCreatesDeadLetterStreams(t *testing.T) {
 		dlq.Config.Duplicates != deadletter.DuplicateWindow || dlq.Config.Subjects[0] != "rt-dev.dlq.>" {
 		t.Fatalf("DLQ stream config = %+v", dlq.Config)
 	}
+	events, err := cli.StreamInfo(ctx, "rt_dev_tasks_EVENTS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events.Config.Retention != jetstream.LimitsPolicy || events.Config.MaxAge != aiv1alpha1.DefaultEventsMaxAge ||
+		events.Config.Subjects[0] != "rt-dev.events.>" {
+		t.Fatalf("events stream config = %+v", events.Config)
+	}
 	if _, err := cli.StreamInfo(ctx, "rt_dev_tasks_ADVISORIES"); err != nil {
 		t.Fatal(err)
 	}

@@ -1529,6 +1529,18 @@ spec:
                       stream (<tasksStream>_DLQ), which records lost and failed tasks. Only
                       used when createStreams is true. Defaults to 720h (30 days).
                     type: string
+                  eventsMaxAge:
+                    description: |-
+                      eventsMaxAge is how long events are kept in the events stream. Only
+                      used when createStreams is true. Defaults to 168h (7 days).
+                    type: string
+                  eventsStream:
+                    description: |-
+                      eventsStream is the JetStream stream that captures the table's events
+                      (<subjectPrefix>.events.>), which NATS-source Triggers read. Created
+                      with Limits retention when createStreams is true. Defaults to
+                      <tasksStream>_EVENTS.
+                    type: string
                   resultsStream:
                     description: resultsStream is the JetStream stream name for results.
                     type: string

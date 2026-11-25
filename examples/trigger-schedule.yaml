@@ -1,0 +1,23 @@
+# A Trigger that starts the security-report Chain every weekday at 07:00 New
+# York time, with input computed from the schedule time. (For a fixed input,
+# Chain.spec.schedule is the short form.) Needs chain-sequential.yaml.
+#
+#   kubectl -n roundtable get trigger weekday-security-report   # Ready, Last Fired
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: weekday-security-report
+  namespace: roundtable
+spec:
+  source:
+    schedule:
+      cron: "0 7 * * 1-5"
+      timeZone: America/New_York
+      # A fire missed while the operator was down runs late only within 1h.
+      startingDeadlineSeconds: 3600
+  target:
+    chainRef: {name: security-report}
+  input: |
+    Generate the security report for {{ .Event.Time.Format "Monday 2006-01-02" }}.
+  concurrency:
+    policy: Forbid
