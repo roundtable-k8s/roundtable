@@ -163,6 +163,22 @@ Costs tracked at three levels:
 
 Budget enforcement: `spec.policies.costBudgetUSD` triggers OverBudget phase when exceeded.
 
+## Operator Metrics
+
+All operator metrics follow the `roundtable_*` scheme and carry the `table` label. The gauges are recomputed from the Knight and Mission lists on each RoundTable reconcile.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `roundtable_knights` | gauge | `table`, `phase` |
+| `roundtable_missions` | gauge | `table`, `phase` |
+| `roundtable_table_cost_usd` | gauge | `table` |
+| `roundtable_warm_pool_knights` | gauge | `table`, `state` |
+| `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` (`succeeded`, `partially_succeeded`, `failed`) |
+| `roundtable_chain_noop_runs_total` | counter | `table`, `chain` |
+| `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` |
+
+Knight pods carry `ROUNDTABLE_TABLE=<table>` (empty without a table) and the `ai.roundtable.io/round-table` pod label.
+
 ## Directory Structure
 
 ```

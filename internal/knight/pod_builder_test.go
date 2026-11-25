@@ -364,6 +364,35 @@ var _ = Describe("PodBuilder", func() {
 		})
 	})
 
+	Describe("ROUNDTABLE_TABLE", func() {
+		envOf := func() map[string]string {
+			spec := builder.Build(context.Background())
+			m := map[string]string{}
+			for _, c := range spec.Containers {
+				if c.Name == "app" {
+					for _, e := range c.Env {
+						m[e.Name] = e.Value
+					}
+				}
+			}
+			return m
+		}
+
+		It("is the knight's round-table label", func() {
+			knight.Labels = map[string]string{aiv1alpha1.LabelRoundTable: "x"}
+			Expect(envOf()).To(HaveKeyWithValue("ROUNDTABLE_TABLE", "x"))
+		})
+
+		It("falls back to the legacy table label", func() {
+			knight.Labels = map[string]string{LegacyTableLabel: "legacy"}
+			Expect(envOf()).To(HaveKeyWithValue("ROUNDTABLE_TABLE", "legacy"))
+		})
+
+		It("is empty when the knight has no table", func() {
+			Expect(envOf()).To(HaveKeyWithValue("ROUNDTABLE_TABLE", ""))
+		})
+	})
+
 	Describe("Build", func() {
 		It("creates a valid PodSpec with security context", func() {
 			builder.WithWorkspace().WithConfig("test-config")

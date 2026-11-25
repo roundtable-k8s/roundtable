@@ -17,238 +17,88 @@ limitations under the License.
 package metrics
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// ---------------------------------------------------------------------------
-// Registration sanity — if init() double-registers or panics we'd never get
-// this far, but an explicit nil-guard is cheap insurance.
-// ---------------------------------------------------------------------------
-
-func TestMetricsRegistered(t *testing.T) {
-	collectors := map[string]any{
-		"KnightsTotal":         KnightsTotal,
-		"TasksCompletedTotal":  TasksCompletedTotal,
-		"TaskDurationSeconds":  TaskDurationSeconds,
-		"ChainRunsTotal":       ChainRunsTotal,
-		"MissionsTotal":        MissionsTotal,
-		"CostTotalUSD":         CostTotalUSD,
-		"WarmPoolSize":         WarmPoolSize,
-		"ReconcileErrorsTotal": ReconcileErrorsTotal,
-	}
-	for name, c := range collectors {
-		if c == nil {
-			t.Errorf("%s is nil — metric was not initialised", name)
-		}
+func TestKnightsGaugeNameAndLabels(t *testing.T) {
+	Knights.Reset()
+	Knights.WithLabelValues("t1", "Ready").Set(2)
+	const want = `
+# HELP roundtable_knights Number of knights by table and phase
+# TYPE roundtable_knights gauge
+roundtable_knights{phase="Ready",table="t1"} 2
+`
+	if err := testutil.CollectAndCompare(Knights, strings.NewReader(want)); err != nil {
+		t.Error(err)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// GaugeVec tests
-// ---------------------------------------------------------------------------
-
-func TestKnightsTotal(t *testing.T) {
-	KnightsTotal.WithLabelValues("Ready", "test-table").Set(5)
-	val := testutil.ToFloat64(KnightsTotal.WithLabelValues("Ready", "test-table"))
-	if val != 5 {
-		t.Errorf("KnightsTotal: expected 5, got %v", val)
-	}
-
-	// Increment then verify
-	KnightsTotal.WithLabelValues("Ready", "test-table").Set(10)
-	val = testutil.ToFloat64(KnightsTotal.WithLabelValues("Ready", "test-table"))
-	if val != 10 {
-		t.Errorf("KnightsTotal after update: expected 10, got %v", val)
+func TestMissionsGaugeNameAndLabels(t *testing.T) {
+	Missions.Reset()
+	Missions.WithLabelValues("t1", "Active").Set(3)
+	const want = `
+# HELP roundtable_missions Number of missions by table and phase
+# TYPE roundtable_missions gauge
+roundtable_missions{phase="Active",table="t1"} 3
+`
+	if err := testutil.CollectAndCompare(Missions, strings.NewReader(want)); err != nil {
+		t.Error(err)
 	}
 }
 
-func TestKnightsTotalMultiplePhases(t *testing.T) {
-	phases := []string{"Ready", "Provisioning", "Degraded", "Suspended"}
-	for i, phase := range phases {
-		KnightsTotal.WithLabelValues(phase, "multi-table").Set(float64(i + 1))
+func TestTableCostAndWarmPool(t *testing.T) {
+	TableCostUSD.Reset()
+	WarmPoolKnights.Reset()
+	TableCostUSD.WithLabelValues("t1").Set(1.5)
+	WarmPoolKnights.WithLabelValues("t1", "available").Set(4)
+	const wantCost = `
+# HELP roundtable_table_cost_usd Total cost in USD by table
+# TYPE roundtable_table_cost_usd gauge
+roundtable_table_cost_usd{table="t1"} 1.5
+`
+	const wantPool = `
+# HELP roundtable_warm_pool_knights Warm pool knights by table and state
+# TYPE roundtable_warm_pool_knights gauge
+roundtable_warm_pool_knights{state="available",table="t1"} 4
+`
+	if err := testutil.CollectAndCompare(TableCostUSD, strings.NewReader(wantCost)); err != nil {
+		t.Error(err)
 	}
-	for i, phase := range phases {
-		val := testutil.ToFloat64(KnightsTotal.WithLabelValues(phase, "multi-table"))
-		expected := float64(i + 1)
-		if val != expected {
-			t.Errorf("KnightsTotal phase=%s: expected %v, got %v", phase, expected, val)
-		}
-	}
-}
-
-func TestMissionsTotal(t *testing.T) {
-	MissionsTotal.WithLabelValues("Active").Set(3)
-	MissionsTotal.WithLabelValues("Failed").Set(1)
-
-	if v := testutil.ToFloat64(MissionsTotal.WithLabelValues("Active")); v != 3 {
-		t.Errorf("MissionsTotal Active: expected 3, got %v", v)
-	}
-	if v := testutil.ToFloat64(MissionsTotal.WithLabelValues("Failed")); v != 1 {
-		t.Errorf("MissionsTotal Failed: expected 1, got %v", v)
+	if err := testutil.CollectAndCompare(WarmPoolKnights, strings.NewReader(wantPool)); err != nil {
+		t.Error(err)
 	}
 }
 
-func TestCostTotalUSD(t *testing.T) {
-	CostTotalUSD.WithLabelValues("prod-table").Set(42.50)
-	val := testutil.ToFloat64(CostTotalUSD.WithLabelValues("prod-table"))
-	if val != 42.50 {
-		t.Errorf("CostTotalUSD: expected 42.50, got %v", val)
+func TestChainCounters(t *testing.T) {
+	ChainRunsTotal.Reset()
+	ChainNoOpRunsTotal.Reset()
+	ChainRunsTotal.WithLabelValues("t1", "c1", "succeeded").Inc()
+	ChainNoOpRunsTotal.WithLabelValues("t1", "c1").Inc()
+	const wantRuns = `
+# HELP roundtable_chain_runs_total Total chain runs by terminal status
+# TYPE roundtable_chain_runs_total counter
+roundtable_chain_runs_total{chain="c1",status="succeeded",table="t1"} 1
+`
+	const wantNoop = `
+# HELP roundtable_chain_noop_runs_total Total chain runs that completed without executing any steps
+# TYPE roundtable_chain_noop_runs_total counter
+roundtable_chain_noop_runs_total{chain="c1",table="t1"} 1
+`
+	if err := testutil.CollectAndCompare(ChainRunsTotal, strings.NewReader(wantRuns)); err != nil {
+		t.Error(err)
 	}
-
-	// Add via Add (gauge supports Add)
-	CostTotalUSD.WithLabelValues("prod-table").Add(7.50)
-	val = testutil.ToFloat64(CostTotalUSD.WithLabelValues("prod-table"))
-	if val != 50 {
-		t.Errorf("CostTotalUSD after Add: expected 50, got %v", val)
-	}
-}
-
-func TestWarmPoolSize(t *testing.T) {
-	states := map[string]float64{
-		"available":    5,
-		"provisioning": 2,
-		"claimed":      3,
-	}
-	for state, expected := range states {
-		WarmPoolSize.WithLabelValues(state, "pool-table").Set(expected)
-		val := testutil.ToFloat64(WarmPoolSize.WithLabelValues(state, "pool-table"))
-		if val != expected {
-			t.Errorf("WarmPoolSize state=%s: expected %v, got %v", state, expected, val)
-		}
+	if err := testutil.CollectAndCompare(ChainNoOpRunsTotal, strings.NewReader(wantNoop)); err != nil {
+		t.Error(err)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// CounterVec tests
-// ---------------------------------------------------------------------------
-
-func TestTasksCompletedTotal(t *testing.T) {
-	TasksCompletedTotal.WithLabelValues("galahad", "security", "test-table").Add(0) // init
-	before := testutil.ToFloat64(TasksCompletedTotal.WithLabelValues("galahad", "security", "test-table"))
-
-	TasksCompletedTotal.WithLabelValues("galahad", "security", "test-table").Inc()
-	after := testutil.ToFloat64(TasksCompletedTotal.WithLabelValues("galahad", "security", "test-table"))
-
-	if after != before+1 {
-		t.Errorf("TasksCompletedTotal: expected %v, got %v", before+1, after)
-	}
-}
-
-func TestTasksCompletedTotalAddN(t *testing.T) {
-	before := testutil.ToFloat64(TasksCompletedTotal.WithLabelValues("lancelot", "research", "add-table"))
-	TasksCompletedTotal.WithLabelValues("lancelot", "research", "add-table").Add(10)
-	after := testutil.ToFloat64(TasksCompletedTotal.WithLabelValues("lancelot", "research", "add-table"))
-	if after != before+10 {
-		t.Errorf("TasksCompletedTotal Add(10): expected %v, got %v", before+10, after)
-	}
-}
-
-func TestChainRunsTotal(t *testing.T) {
-	ChainRunsTotal.WithLabelValues("deploy-chain", "succeeded").Add(0) // init
-	before := testutil.ToFloat64(ChainRunsTotal.WithLabelValues("deploy-chain", "succeeded"))
-
-	ChainRunsTotal.WithLabelValues("deploy-chain", "succeeded").Inc()
-	ChainRunsTotal.WithLabelValues("deploy-chain", "succeeded").Inc()
-
-	after := testutil.ToFloat64(ChainRunsTotal.WithLabelValues("deploy-chain", "succeeded"))
-	if after != before+2 {
-		t.Errorf("ChainRunsTotal succeeded: expected %v, got %v", before+2, after)
-	}
-
-	// Failed path
-	ChainRunsTotal.WithLabelValues("deploy-chain", "failed").Inc()
-	failVal := testutil.ToFloat64(ChainRunsTotal.WithLabelValues("deploy-chain", "failed"))
-	if failVal < 1 {
-		t.Errorf("ChainRunsTotal failed: expected >=1, got %v", failVal)
-	}
-}
-
-func TestReconcileErrorsTotal(t *testing.T) {
-	controllers := []string{
-		"knight-controller",
-		"chain-controller",
-		"mission-controller",
-		"roundtable-controller",
-	}
-	for _, ctrl := range controllers {
-		before := testutil.ToFloat64(ReconcileErrorsTotal.WithLabelValues(ctrl))
-		ReconcileErrorsTotal.WithLabelValues(ctrl).Inc()
-		after := testutil.ToFloat64(ReconcileErrorsTotal.WithLabelValues(ctrl))
-		if after != before+1 {
-			t.Errorf("ReconcileErrorsTotal controller=%s: expected %v, got %v", ctrl, before+1, after)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// HistogramVec tests
-// ---------------------------------------------------------------------------
-
-func TestTaskDurationSeconds(t *testing.T) {
-	TaskDurationSeconds.WithLabelValues("percival", "ops").Observe(1.5)
-	TaskDurationSeconds.WithLabelValues("percival", "ops").Observe(3.0)
-	TaskDurationSeconds.WithLabelValues("percival", "ops").Observe(30.0)
-
-	// Validate via CollectAndCount — histogram exposes _bucket, _count, _sum
-	count := testutil.CollectAndCount(TaskDurationSeconds)
-	if count == 0 {
-		t.Error("TaskDurationSeconds: expected >0 metric series, got 0")
-	}
-}
-
-func TestTaskDurationSecondsLint(t *testing.T) {
-	// Observe with a unique label set so the histogram has data
-	TaskDurationSeconds.WithLabelValues("lint-knight", "lint-domain").Observe(2.5)
-
-	problems, err := testutil.CollectAndLint(TaskDurationSeconds)
-	if err != nil {
-		t.Errorf("CollectAndLint error: %v", err)
-	}
-	for _, p := range problems {
-		t.Errorf("lint issue: %s", p.Text)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Lint all metrics — catches naming/help-text violations early.
-// ---------------------------------------------------------------------------
-
-func TestMetricsLint(t *testing.T) {
-	// Known lint issues: KnightsTotal and MissionsTotal are gauges with
-	// "_total" suffix which violates Prometheus naming conventions.
-	// These are tracked separately; skip them in the general lint pass.
-	knownSuffixIssues := map[string]bool{
-		"KnightsTotal":  true,
-		"MissionsTotal": true,
-	}
-
-	collectors := []struct {
-		name      string
-		collector prometheus.Collector
-	}{
-		{"KnightsTotal", KnightsTotal},
-		{"TasksCompletedTotal", TasksCompletedTotal},
-		{"TaskDurationSeconds", TaskDurationSeconds},
-		{"ChainRunsTotal", ChainRunsTotal},
-		{"MissionsTotal", MissionsTotal},
-		{"CostTotalUSD", CostTotalUSD},
-		{"WarmPoolSize", WarmPoolSize},
-		{"ReconcileErrorsTotal", ReconcileErrorsTotal},
-	}
-	for _, tc := range collectors {
-		problems, err := testutil.CollectAndLint(tc.collector)
-		if err != nil {
-			t.Errorf("%s CollectAndLint error: %v", tc.name, err)
-		}
-		for _, p := range problems {
-			if knownSuffixIssues[tc.name] && p.Text == `non-counter metrics should not have "_total" suffix` {
-				t.Logf("%s lint (known issue): %s", tc.name, p.Text)
-				continue
-			}
-			t.Errorf("%s lint: %s", tc.name, p.Text)
-		}
+func TestChainStepDurationLabels(t *testing.T) {
+	ChainStepDurationSeconds.Reset()
+	ChainStepDurationSeconds.WithLabelValues("t1", "c1", "s1", "succeeded").Observe(3)
+	if n := testutil.CollectAndCount(ChainStepDurationSeconds, "roundtable_chain_step_duration_seconds"); n != 1 {
+		t.Errorf("expected 1 series, got %d", n)
 	}
 }

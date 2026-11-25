@@ -300,6 +300,16 @@ const (
 	legacyTableLabel = "ai.roundtable.io/table"
 )
 
+// KnightTable returns the name of the table a knight belongs to, read from the
+// ai.roundtable.io/round-table label, then the legacy ai.roundtable.io/table
+// label. Empty when the knight has no table.
+func KnightTable(k *aiv1alpha1.Knight) string {
+	if t := k.Labels[aiv1alpha1.LabelRoundTable]; t != "" {
+		return t
+	}
+	return k.Labels[legacyTableLabel]
+}
+
 // LegacyTableLabel is the older knight-to-table label, read alongside
 // aiv1alpha1.LabelRoundTable when finding a knight's table.
 const LegacyTableLabel = legacyTableLabel
@@ -840,6 +850,8 @@ func (b *PodBuilder) Build(ctx context.Context) corev1.PodSpec {
 		env = append(env, corev1.EnvVar{Name: "BROWSER_ENABLED", Value: "true"})
 		env = append(env, corev1.EnvVar{Name: "BROWSER_CDP_URL", Value: "http://localhost:9222"})
 	}
+
+	env = append(env, corev1.EnvVar{Name: "ROUNDTABLE_TABLE", Value: KnightTable(b.knight)})
 
 	// Append user-defined env vars
 	env = append(env, b.knight.Spec.Env...)

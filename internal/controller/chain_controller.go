@@ -104,7 +104,7 @@ func (r *ChainReconciler) natsClient() (natspkg.Client, error) {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
-func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, retErr error) {
 	log := logf.FromContext(ctx)
 
 	chain := &aiv1alpha1.Chain{}
@@ -117,6 +117,11 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	if table := aiv1alpha1.RefName(chain.Spec.RoundTableRef); table != "" {
+		log = log.WithValues("table", table)
+		ctx = logf.IntoContext(ctx, log)
+	}
+
 	// Handle deletion
 	if chain.DeletionTimestamp != nil {
 		r.removeCronEntry(req.NamespacedName)
@@ -126,6 +131,15 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, nil
 	}
+
+	// Observe the duration of every step that reaches a terminal phase during
+	// this reconcile, once the status has been persisted.
+	prevStepPhases := stepPhaseSnapshot(chain)
+	defer func() {
+		if retErr == nil {
+			r.observeFinishedSteps(ctx, chain, prevStepPhases)
+		}
+	}()
 
 	// Add finalizer
 	if !util.ContainsString(chain.Finalizers, chainFinalizer) {
@@ -353,6 +367,55 @@ func (r *ChainReconciler) updateStatus(ctx context.Context, chain *aiv1alpha1.Ch
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// chainTable returns the name of the RoundTable a chain runs on: its
+// roundTableRef, else the table of its mission. Empty when unresolved.
+func (r *ChainReconciler) chainTable(ctx context.Context, chain *aiv1alpha1.Chain) string {
+	if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+		return name
+	}
+	if mName := aiv1alpha1.RefName(chain.Spec.MissionRef); mName != "" {
+		m := &aiv1alpha1.Mission{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: chain.Namespace, Name: mName}, m); err == nil {
+			return missionTable(m)
+		}
+	}
+	return ""
+}
+
+func isTerminalStepPhase(p aiv1alpha1.ChainStepPhase) bool {
+	return p == aiv1alpha1.ChainStepPhaseSucceeded || p == aiv1alpha1.ChainStepPhaseFailed || p == aiv1alpha1.ChainStepPhaseSkipped
+}
+
+// stepPhaseSnapshot records each step's phase by name.
+func stepPhaseSnapshot(chain *aiv1alpha1.Chain) map[string]aiv1alpha1.ChainStepPhase {
+	out := make(map[string]aiv1alpha1.ChainStepPhase, len(chain.Status.StepStatuses))
+	for _, ss := range chain.Status.StepStatuses {
+		out[ss.Name] = ss.Phase
+	}
+	return out
+}
+
+// observeFinishedSteps records roundtable_chain_step_duration_seconds for the
+// steps that were not terminal in prev but are now. Steps without both a start
+// and a completion time (skipped, restored) are not observed.
+func (r *ChainReconciler) observeFinishedSteps(ctx context.Context, chain *aiv1alpha1.Chain, prev map[string]aiv1alpha1.ChainStepPhase) {
+	var table string
+	resolved := false
+	for _, ss := range chain.Status.StepStatuses {
+		if !isTerminalStepPhase(ss.Phase) || isTerminalStepPhase(prev[ss.Name]) {
+			continue
+		}
+		if ss.StartedAt == nil || ss.CompletedAt == nil {
+			continue
+		}
+		if !resolved {
+			table, resolved = r.chainTable(ctx, chain), true
+		}
+		metrics.ChainStepDurationSeconds.WithLabelValues(table, chain.Name, ss.Name, strings.ToLower(string(ss.Phase))).
+			Observe(ss.CompletedAt.Sub(ss.StartedAt.Time).Seconds())
+	}
 }
 
 // validateKnightRefs checks that all knightRef values resolve to Knight CRs.
@@ -1036,6 +1099,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				ObservedGeneration: chain.Generation,
 			})
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain failed: %d step(s) failed without continueOnFailure", hardFailures)
+			metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "failed").Inc()
 		} else if softFailures > 0 {
 			// No hard failures, but some soft failures
 			chain.Status.Phase = aiv1alpha1.ChainPhasePartiallySucceeded
@@ -1048,6 +1112,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				ObservedGeneration: chain.Generation,
 			})
 			r.Recorder.Eventf(chain, corev1.EventTypeNormal, "Succeeded", "Chain partially succeeded: %d/%d steps succeeded", succeededSteps, totalSteps)
+			metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "partially_succeeded").Inc()
 		} else {
 			// All steps succeeded
 			chain.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
@@ -1060,6 +1125,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 				ObservedGeneration: chain.Generation,
 			})
 			r.Recorder.Event(chain, corev1.EventTypeNormal, "Succeeded", "Chain completed successfully")
+			metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "succeeded").Inc()
 		}
 
 		// A run that never published a single task (every terminal step was
@@ -1075,7 +1141,7 @@ func (r *ChainReconciler) reconcileRunning(ctx context.Context, chain *aiv1alpha
 			log.Info("Chain run completed without executing any steps")
 			r.Recorder.Event(chain, corev1.EventTypeWarning, "NoStepsExecuted",
 				"Chain run completed without executing any steps (all outputs restored from cache)")
-			metrics.ChainNoOpRunsTotal.WithLabelValues(chain.Name).Inc()
+			metrics.ChainNoOpRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name).Inc()
 		}
 
 		chain.Status.ObservedGeneration = chain.Generation

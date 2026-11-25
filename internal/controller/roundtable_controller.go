@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -85,6 +86,8 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return ctrl.Result{}, err
 	}
+	log = log.WithValues("table", rt.Name)
+	ctx = logf.IntoContext(ctx, log)
 
 	// Handle suspended state
 	if rt.Spec.Suspend {
@@ -221,17 +224,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	rt.Status.ObservedGeneration = rt.Generation
 
 	// Update Prometheus metrics
-	// Update cost metric
-	if totalCost > 0 {
-		rtmetrics.CostTotalUSD.WithLabelValues(rt.Name).Set(totalCost)
-	}
-
-	// Update warm pool metrics if configured
-	if rt.Status.WarmPool != nil {
-		rtmetrics.WarmPoolSize.WithLabelValues("available", rt.Name).Set(float64(rt.Status.WarmPool.Available))
-		rtmetrics.WarmPoolSize.WithLabelValues("provisioning", rt.Name).Set(float64(rt.Status.WarmPool.Provisioning))
-		rtmetrics.WarmPoolSize.WithLabelValues("claimed", rt.Name).Set(float64(rt.Status.WarmPool.Claimed))
-	}
+	r.updateMetrics(ctx, rt, knights, totalCost)
 
 	if err := r.Status().Update(ctx, rt); err != nil {
 		return ctrl.Result{}, err
@@ -633,4 +626,56 @@ func (r *RoundTableReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&aiv1alpha1.RoundTable{}).
 		Named("roundtable").
 		Complete(r)
+}
+
+// missionTable returns the name of the RoundTable a mission runs on: its
+// roundTableRef, else the ephemeral table recorded in status.
+func missionTable(m *aiv1alpha1.Mission) string {
+	if name := aiv1alpha1.RefName(m.Spec.RoundTableRef); name != "" {
+		return name
+	}
+	return m.Status.RoundTableName
+}
+
+// updateMetrics recomputes the table-scoped gauges (knights and missions per
+// phase, cost, warm pool). Each vector is reset for the table first so phases
+// that no longer have members disappear instead of going stale.
+func (r *RoundTableReconciler) updateMetrics(ctx context.Context, rt *aiv1alpha1.RoundTable, knights []aiv1alpha1.Knight, totalCost float64) {
+	log := logf.FromContext(ctx)
+	tableLabel := prometheus.Labels{"table": rt.Name}
+
+	rtmetrics.Knights.DeletePartialMatch(tableLabel)
+	knightPhases := map[string]int{}
+	for i := range knights {
+		knightPhases[string(knights[i].Status.Phase)]++
+	}
+	for phase, n := range knightPhases {
+		rtmetrics.Knights.WithLabelValues(rt.Name, phase).Set(float64(n))
+	}
+
+	missions := &aiv1alpha1.MissionList{}
+	if err := r.List(ctx, missions, client.InNamespace(rt.Namespace)); err != nil {
+		log.Error(err, "Failed to list missions for metrics", "table", rt.Name)
+	} else {
+		rtmetrics.Missions.DeletePartialMatch(tableLabel)
+		missionPhases := map[string]int{}
+		for i := range missions.Items {
+			if missionTable(&missions.Items[i]) == rt.Name {
+				missionPhases[string(missions.Items[i].Status.Phase)]++
+			}
+		}
+		for phase, n := range missionPhases {
+			rtmetrics.Missions.WithLabelValues(rt.Name, phase).Set(float64(n))
+		}
+	}
+
+	if totalCost > 0 {
+		rtmetrics.TableCostUSD.WithLabelValues(rt.Name).Set(totalCost)
+	}
+
+	if rt.Status.WarmPool != nil {
+		rtmetrics.WarmPoolKnights.WithLabelValues(rt.Name, "available").Set(float64(rt.Status.WarmPool.Available))
+		rtmetrics.WarmPoolKnights.WithLabelValues(rt.Name, "provisioning").Set(float64(rt.Status.WarmPool.Provisioning))
+		rtmetrics.WarmPoolKnights.WithLabelValues(rt.Name, "claimed").Set(float64(rt.Status.WarmPool.Claimed))
+	}
 }

@@ -22,36 +22,14 @@ import (
 )
 
 var (
-	// KnightsTotal tracks the total number of knights by phase and table.
-	// Labels: phase (Ready, Provisioning, Degraded, Suspended), table (roundtable name)
-	KnightsTotal = prometheus.NewGaugeVec(
+	// Knights is the number of knights per table and phase, recomputed from
+	// the Knight list on every RoundTable reconcile.
+	Knights = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "roundtable_knights_total",
-			Help: "Total number of knights by phase and table",
+			Name: "roundtable_knights",
+			Help: "Number of knights by table and phase",
 		},
-		[]string{"phase", "table"},
-	)
-
-	// TasksCompletedTotal tracks cumulative tasks completed by knights.
-	// Labels: knight (knight name), domain (knight domain), table (roundtable name)
-	TasksCompletedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "roundtable_tasks_completed_total",
-			Help: "Total tasks completed by knights",
-		},
-		[]string{"knight", "domain", "table"},
-	)
-
-	// TaskDurationSeconds tracks task execution duration as a histogram.
-	// Labels: knight (knight name), domain (knight domain)
-	// Buckets: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s (~17min)
-	TaskDurationSeconds = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "roundtable_task_duration_seconds",
-			Help:    "Task execution duration in seconds",
-			Buckets: prometheus.ExponentialBuckets(1, 2, 10), // 1s to ~17min
-		},
-		[]string{"knight", "domain"},
+		[]string{"table", "phase"},
 	)
 
 	// KnightWakeSeconds tracks wake latency: the time from a scaled-to-zero
@@ -67,66 +45,65 @@ var (
 		[]string{"knight", "namespace"},
 	)
 
-	// ChainRunsTotal tracks total chain runs by status.
-	// Labels: chain (chain name), status (succeeded, failed)
+	// ChainRunsTotal counts chain runs that reached a terminal phase.
+	// status: succeeded, partially_succeeded, failed
 	ChainRunsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "roundtable_chain_runs_total",
-			Help: "Total chain runs by status",
+			Help: "Total chain runs by terminal status",
 		},
-		[]string{"chain", "status"}, // status: succeeded, failed
+		[]string{"table", "chain", "status"},
 	)
 
 	// ChainNoOpRunsTotal tracks chain runs that completed without executing
 	// a single step (all outputs restored from cache). A nonzero rate usually
 	// means stale KV entries are masking a real problem.
-	// Labels: chain (chain name)
 	ChainNoOpRunsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "roundtable_chain_noop_runs_total",
 			Help: "Total chain runs that completed without executing any steps",
 		},
-		[]string{"chain"},
+		[]string{"table", "chain"},
 	)
 
-	// MissionsTotal tracks the total number of missions by phase.
-	// Labels: phase (Pending, Provisioning, Planning, Assembling, Active, Succeeded, Failed, etc.)
-	MissionsTotal = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "roundtable_missions_total",
-			Help: "Total missions by phase",
+	// ChainStepDurationSeconds observes how long a chain step took, when it
+	// finishes. status: succeeded, failed, skipped
+	ChainStepDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "roundtable_chain_step_duration_seconds",
+			Help:    "Chain step duration in seconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12), // 1s to ~34min
 		},
-		[]string{"phase"},
+		[]string{"table", "chain", "step", "status"},
 	)
 
-	// CostTotalUSD tracks cumulative cost in USD by table.
-	// Labels: table (roundtable name)
-	CostTotalUSD = prometheus.NewGaugeVec(
+	// Missions is the number of missions per table and phase, recomputed from
+	// the Mission list on every RoundTable reconcile.
+	Missions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "roundtable_cost_total_usd",
+			Name: "roundtable_missions",
+			Help: "Number of missions by table and phase",
+		},
+		[]string{"table", "phase"},
+	)
+
+	// TableCostUSD is the cumulative cost in USD of a table.
+	TableCostUSD = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "roundtable_table_cost_usd",
 			Help: "Total cost in USD by table",
 		},
 		[]string{"table"},
 	)
 
-	// WarmPoolSize tracks the number of warm pool knights by state.
-	// Labels: state (available, provisioning, claimed), table (roundtable name)
-	WarmPoolSize = prometheus.NewGaugeVec(
+	// WarmPoolKnights is the number of warm pool knights by state
+	// (available, provisioning, claimed).
+	WarmPoolKnights = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "roundtable_warm_pool_size",
-			Help: "Warm pool knights by state",
+			Name: "roundtable_warm_pool_knights",
+			Help: "Warm pool knights by table and state",
 		},
-		[]string{"state", "table"}, // state: available, provisioning, claimed
-	)
-
-	// ReconcileErrorsTotal tracks reconciliation errors by controller.
-	// Labels: controller (knight-controller, chain-controller, mission-controller, roundtable-controller)
-	ReconcileErrorsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "roundtable_reconcile_errors_total",
-			Help: "Total reconciliation errors by controller",
-		},
-		[]string{"controller"},
+		[]string{"table", "state"},
 	)
 )
 
@@ -153,16 +130,14 @@ var DeadLettersOpen = prometheus.NewGaugeVec(
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
-		KnightsTotal,
-		TasksCompletedTotal,
-		TaskDurationSeconds,
+		Knights,
 		KnightWakeSeconds,
 		ChainRunsTotal,
 		ChainNoOpRunsTotal,
-		MissionsTotal,
-		CostTotalUSD,
-		WarmPoolSize,
-		ReconcileErrorsTotal,
+		ChainStepDurationSeconds,
+		Missions,
+		TableCostUSD,
+		WarmPoolKnights,
 		TasksDeadLetteredTotal,
 		DeadLettersOpen,
 	)
