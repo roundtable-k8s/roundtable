@@ -67,8 +67,8 @@ type ScheduleState struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ScheduleRun is the answer to POST .../run.
-type ScheduleRun struct {
+// ScheduleRunNow is the answer to POST .../run.
+type ScheduleRunNow struct {
 	// Schedule and Namespace name the schedule.
 	Schedule  string `json:"schedule"`
 	Namespace string `json:"namespace"`
@@ -172,7 +172,7 @@ func (s *Service) ResumeSchedule(ctx context.Context, namespace, name string) (*
 // and run labels; it fires even while the schedule is suspended. Chain
 // targets: the run's name is known up front, so a pending answer names it too.
 // Knight targets: Run is the task ID, empty while the request is pending.
-func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*ScheduleRun, error) {
+func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*ScheduleRunNow, error) {
 	caller := callerOr(ctx)
 	id := newRunNowID(s.now())
 	var chain string
@@ -202,7 +202,7 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 		return nil, err
 	}
 	key := aiv1alpha1.TriggerRunNowKey(id)
-	out := &ScheduleRun{Schedule: trg.Name, Namespace: trg.Namespace, Key: key, Caller: caller, State: ScheduleRunPending}
+	out := &ScheduleRunNow{Schedule: trg.Name, Namespace: trg.Namespace, Key: key, Caller: caller, State: ScheduleRunPending}
 	if chain != "" {
 		// A Chain run's name derives from the firing's key; a knight task's
 		// ID is only known once the controller has sent the task.
@@ -214,7 +214,7 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 
 // waitScheduleRun polls the schedule's recent firings for the request's key
 // until the controller handled it or the wait ends (state stays pending).
-func (s *Service) waitScheduleRun(ctx context.Context, out *ScheduleRun, wait time.Duration) error {
+func (s *Service) waitScheduleRun(ctx context.Context, out *ScheduleRunNow, wait time.Duration) error {
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	tick := time.NewTicker(s.Opts.Runs.PollInterval)
