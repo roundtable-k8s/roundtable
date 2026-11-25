@@ -578,3 +578,54 @@ func TestApplyStepErrorOrdinaryNotRetried(t *testing.T) {
 		t.Fatalf("%+v", ss)
 	}
 }
+
+func TestDeferLoopForProvider(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(20), ProviderMaxRetries: 4}
+	chain := &aiv1alpha1.Chain{}
+	spec := &aiv1alpha1.ChainStep{Name: "fix", FallbackRef: corev1.LocalObjectReference{Name: "fb"}}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "fix"}
+	bs := &aiv1alpha1.ChainLoopStepStatus{Name: "round", Phase: aiv1alpha1.ChainStepPhaseRunning, TaskID: "t"}
+	res := &natspkg.TaskResult{Error: "API Error: 529 Overloaded"}
+	for i := int32(1); i <= 4; i++ {
+		bs.Phase, bs.TaskID = aiv1alpha1.ChainStepPhaseRunning, "t"
+		deferred, _ := r.deferLoopForProvider(context.Background(), chain, spec, bs, ss, res, res.Error)
+		if !deferred || ss.Phase != aiv1alpha1.ChainStepPhaseDeferred || ss.Reason != stepReasonProviderOverloaded ||
+			ss.ProviderRetries != i || ss.DeferUntil == nil || bs.Phase != aiv1alpha1.ChainStepPhasePending || bs.TaskID != "" {
+			t.Fatalf("retry %d: ss=%+v bs=%+v", i, ss, bs)
+		}
+		wantKnight := ""
+		if i >= 2 {
+			wantKnight = "fb"
+		}
+		if bs.Knight != wantKnight {
+			t.Fatalf("retry %d knight=%q want %q", i, bs.Knight, wantKnight)
+		}
+		// the backoff elapses: the loop wakes and keeps the fallback knight.
+		wake := &aiv1alpha1.Chain{Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{*ss}}}
+		wake.Status.StepStatuses[0].Loop = &aiv1alpha1.ChainLoopStatus{Steps: []aiv1alpha1.ChainLoopStepStatus{*bs}}
+		past := metav1.NewTime(time.Now().Add(-time.Second))
+		wake.Status.StepStatuses[0].DeferUntil = &past
+		wakeDeferredSteps(wake, time.Now())
+		*ss = wake.Status.StepStatuses[0]
+		*bs = ss.Loop.Steps[0]
+		ss.Loop = nil
+		if ss.Phase != aiv1alpha1.ChainStepPhasePending || bs.Knight != wantKnight {
+			t.Fatalf("wake %d: ss=%+v bs=%+v", i, ss, bs)
+		}
+	}
+	deferred, msg := r.deferLoopForProvider(context.Background(), chain, spec, bs, ss, res, res.Error)
+	if deferred || !strings.Contains(msg, "retried 4 times") {
+		t.Fatalf("want give-up after 4 retries: deferred=%v msg=%q", deferred, msg)
+	}
+}
+
+func TestDeferLoopForProviderOrdinaryFailure(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(20), ProviderMaxRetries: 4}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "fix"}
+	bs := &aiv1alpha1.ChainLoopStepStatus{Name: "round"}
+	res := &natspkg.TaskResult{Error: "tests failed"}
+	deferred, msg := r.deferLoopForProvider(context.Background(), &aiv1alpha1.Chain{}, &aiv1alpha1.ChainStep{Name: "fix"}, bs, ss, res, res.Error)
+	if deferred || msg != "tests failed" || ss.ProviderRetries != 0 || ss.Phase == aiv1alpha1.ChainStepPhaseDeferred {
+		t.Fatalf("deferred=%v msg=%q ss=%+v", deferred, msg, ss)
+	}
+}

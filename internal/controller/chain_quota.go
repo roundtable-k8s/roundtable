@@ -149,7 +149,7 @@ func wakeDeferredSteps(chain *aiv1alpha1.Chain, now time.Time) *metav1.Time {
 			ss.PickedUpAt = nil
 			if ss.Loop != nil {
 				for j := range ss.Loop.Steps {
-					if bs := &ss.Loop.Steps[j]; bs.Phase == aiv1alpha1.ChainStepPhasePending {
+					if bs := &ss.Loop.Steps[j]; bs.Phase == aiv1alpha1.ChainStepPhasePending && !keepKnight {
 						bs.Knight = ""
 					}
 				}
