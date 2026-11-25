@@ -108,7 +108,7 @@ func newRunEnv(t *testing.T, opts Options, enabled bool, extra ...client.Object)
 	}
 	srv := httptest.NewServer(Handler(svc, auth))
 	t.Cleanup(srv.Close)
-	return &runEnv{env: env{svc: svc, server: srv}, k8s: k8s}
+	return &runEnv{env: env{svc: svc, auth: auth, server: srv}, k8s: k8s}
 }
 
 // runs returns the gateway's run copies.

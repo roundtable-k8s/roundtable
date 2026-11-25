@@ -235,6 +235,7 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		Namespace:      ns,
 		RoundTable:     t.RoundTable,
 		Status:         TaskPending,
+		Caller:         callerName(ctx),
 		RequestedModel: model,
 		CreatedAt:      s.now().UTC(),
 		ResultSubject:  natspkg.ResultSubject(t.SubjectPrefix, taskID),

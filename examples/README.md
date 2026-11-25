@@ -21,6 +21,7 @@ Real-world examples of Round Table resources.
 | [`roundtable-issue-pickup.yaml`](roundtable-issue-pickup.yaml) | Issue pickup: poll `rt:ready` issues and start one PR pipeline Chain per issue ([docs](../docs/issue-pickup.md)) |
 | [`trigger-nats.yaml`](trigger-nats.yaml) | Trigger: start a Chain run per message on `fleet-a.events.deploys.>`, input rendered from the event ([docs](../docs/triggers.md)) |
 | [`trigger-webhook.yaml`](trigger-webhook.yaml) | Trigger: start a Chain run per Alertmanager webhook delivered through the gateway, authenticated with the Trigger's own token ([docs](../docs/triggers.md#webhook-source)) |
+| [`gateway-serviceaccount-cronjob.yaml`](gateway-serviceaccount-cronjob.yaml) | A CronJob that runs a chain through the gateway and waits, authenticated with its own projected ServiceAccount token instead of a stored one ([docs](../docs/gateway.md#calling-from-a-workload)) |
 | [`trigger-github.yaml`](trigger-github.yaml) | Trigger: start a Chain run per open issue labelled `security-review` in two repositories, then relabel it ([docs](../docs/triggers.md#github-source)) |
 | [`trigger-schedule.yaml`](trigger-schedule.yaml) | Trigger: start a Chain on a cron schedule with input computed from the schedule time ([docs](../docs/triggers.md)) |
 | [`trigger-knight-task.yaml`](trigger-knight-task.yaml) | Trigger: send one task straight to a knight, nightly and per alert, without a Chain ([docs](../docs/triggers.md#knight-target)) |

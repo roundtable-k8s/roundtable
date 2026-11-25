@@ -77,6 +77,9 @@ type TaskRecord struct {
 	Namespace  string     `json:"namespace"`
 	RoundTable string     `json:"roundTable,omitempty"`
 	Status     TaskStatus `json:"status"`
+	// Caller is who asked for the task: "<namespace>/<name>" for a
+	// ServiceAccount, the token's name for a static token.
+	Caller string `json:"caller,omitempty"`
 	// Output is the knight's answer (set once the task finished).
 	Output string `json:"output,omitempty"`
 	// Error is the knight's error (status failed).

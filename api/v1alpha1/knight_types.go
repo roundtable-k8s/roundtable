@@ -51,6 +51,11 @@ const (
 	// CreatedByGateway is the LabelCreatedBy value of gateway-created resources.
 	CreatedByGateway = "gateway"
 
+	// AnnotationCaller records who asked the invoke gateway for a chain run or
+	// mission: "<namespace>/<name>" for a Kubernetes ServiceAccount, the
+	// token's name for a static gateway token.
+	AnnotationCaller = "ai.roundtable.io/caller"
+
 	// AnnotationShutdownTime is an RFC 3339 timestamp after which a knight's
 	// runtime may be shut down. The mission assembler sets it on mission
 	// knights to the mission's expiry (start + ttlSeconds); the sandbox

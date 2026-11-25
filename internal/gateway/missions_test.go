@@ -82,7 +82,7 @@ func newMissionEnv(t *testing.T, opts Options, enabled bool, extra ...client.Obj
 	}
 	srv := httptest.NewServer(Handler(svc, auth))
 	t.Cleanup(srv.Close)
-	return &missionEnv{env: env{svc: svc, server: srv}, k8s: k8s}
+	return &missionEnv{env: env{svc: svc, auth: auth, server: srv}, k8s: k8s}
 }
 
 func (e *missionEnv) missions(t *testing.T) []aiv1alpha1.Mission {

@@ -4,6 +4,7 @@
 {{- $missions := $gw.missions | default dict }}
 {{- $runs := $gw.runs | default dict }}
 {{- $hooks := $gw.hooks | default dict }}
+{{- $saAuth := $gw.serviceAccountAuth | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -74,6 +75,38 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
+{{- if $saAuth.enabled }}
+---
+# ServiceAccount auth: the gateway validates callers' ServiceAccount tokens
+# with TokenReviews (gateway.serviceAccountAuth).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-sa-auth
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-sa-auth
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-sa-auth
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- /* Objects the gateway writes: Missions, and run copies of opted-in Chains. */}}
 {{- $writes := list }}
 {{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions" "verbs" (list "get" "list" "watch" "create" "delete")) }}{{ end }}
@@ -278,6 +311,11 @@ spec:
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
             - --token-file=/var/run/secrets/roundtable/gateway/token
+            - --service-account-auth={{ $saAuth.enabled | default false }}
+            {{- if $saAuth.enabled }}
+            - --service-account-audience={{ $saAuth.audience | default "roundtable-gateway" }}
+            - --service-account-namespaces={{ join "," ($saAuth.allowedNamespaces | default (list "*")) }}
+            {{- end }}
             - --missions={{ $missions.enabled | default false }}
             {{- if $missions.enabled }}
             - --mission-max-budget-usd={{ $missions.maxBudgetUSD | default 10 }}
