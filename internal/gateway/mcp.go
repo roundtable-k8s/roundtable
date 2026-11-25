@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -125,8 +127,8 @@ func NewMCPServer(svc *Service) *mcp.Server {
 		Description: "Send a task to a knight and wait for its answer. If the answer isn't ready within the timeout, " +
 			"the task is returned with status \"pending\": poll get_task with its taskId. " +
 			"Pass the returned runId on a later call to continue the same conversation.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in InvokeKnightInput) (*mcp.CallToolResult, *TaskRecord, error) {
-		rec, err := svc.Invoke(ctx, in.Knight, in.InvokeRequest)
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in InvokeKnightInput) (*mcp.CallToolResult, *TaskRecord, error) {
+		rec, err := svc.Invoke(withMCPProgress(ctx, req), in.Knight, in.InvokeRequest)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -236,7 +238,8 @@ func addRunTools(s *mcp.Server, svc *Service) {
 		Name: "run_chain",
 		Description: "Run a chain with your input and wait for its final output. If it isn't finished within " +
 			"waitSeconds, the run is returned unfinished: call get_run with its name (waitSeconds lets get_run wait too).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RunChainInput) (*mcp.CallToolResult, *RunRecord, error) {
+	}, func(ctx context.Context, mreq *mcp.CallToolRequest, in RunChainInput) (*mcp.CallToolResult, *RunRecord, error) {
+		ctx = withMCPProgress(ctx, mreq)
 		req := RunChainRequest{Namespace: in.Namespace, WaitSeconds: in.WaitSeconds}
 		if in.Input != nil {
 			raw, err := json.Marshal(in.Input)
@@ -336,6 +339,38 @@ func taskResult(rec *TaskRecord) *mcp.CallToolResult {
 			Text: "Task " + rec.TaskID + " is still running on knight " + rec.Knight +
 				". Call get_task with this taskId later. runId: " + rec.RunID}}}
 	}
+}
+
+// mcpProgressInterval is the minimum gap between (unforced) progress
+// notifications of one call.
+const mcpProgressInterval = 500 * time.Millisecond
+
+// withMCPProgress makes ctx report progress to the caller as MCP progress
+// notifications when the request carries a progress token.
+func withMCPProgress(ctx context.Context, req *mcp.CallToolRequest) context.Context {
+	if req == nil || req.Session == nil || req.Params == nil {
+		return ctx
+	}
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return ctx
+	}
+	var (
+		mu    sync.Mutex
+		count float64
+		last  time.Time
+	)
+	return withProgress(ctx, func(message string, force bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !force && time.Since(last) < mcpProgressInterval {
+			return
+		}
+		last = time.Now()
+		count++
+		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token, Progress: count, Message: message})
+	})
 }
 
 // MCPHandler serves the MCP streamable HTTP transport. It is stateless (no

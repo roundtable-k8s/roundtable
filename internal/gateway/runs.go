@@ -351,6 +351,12 @@ func (s *Service) waitRun(ctx context.Context, ns, name string, wait time.Durati
 	}
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
+	if progress := progressFrom(ctx); progress != nil {
+		// Report step changes and tool calls to an MCP client that asked for progress.
+		defer s.startProgress(wctx, progress, func(ctx context.Context, emit func(StreamEvent) error) error {
+			return s.followRun(ctx, ns, name, emit)
+		})()
+	}
 	tick := time.NewTicker(s.Opts.Runs.PollInterval)
 	defer tick.Stop()
 	for {

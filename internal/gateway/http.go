@@ -45,6 +45,7 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 	api.HandleFunc("POST /v1/knights/{name}/invoke", svc.handleInvoke)
 	api.HandleFunc("GET /v1/tasks", svc.handleListTasks)
 	api.HandleFunc("GET /v1/tasks/{taskId}", svc.handleGetTask)
+	api.HandleFunc("GET /v1/tasks/{taskId}/events", svc.handleTaskEvents)
 	api.HandleFunc("GET /v1/dead-letters", svc.handleListDeadLetters)
 	api.HandleFunc("GET /v1/dead-letters/{taskId}", svc.handleGetDeadLetter)
 	api.HandleFunc("POST /v1/dead-letters/{taskId}/retry", svc.handleRetryDeadLetter)
@@ -59,6 +60,7 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		api.HandleFunc("POST /v1/chains/{name}/runs", svc.handleRunChain)
 		api.HandleFunc("GET /v1/runs", svc.handleListRuns)
 		api.HandleFunc("GET /v1/runs/{namespace}/{run}", svc.handleGetRun)
+		api.HandleFunc("GET /v1/runs/{namespace}/{run}/events", svc.handleRunEvents)
 	}
 	api.Handle("/mcp", MCPHandler(svc))
 
