@@ -99,6 +99,9 @@ type Service struct {
 	// Runs creates, reads and deletes run copies of opted-in Chains. nil
 	// disables the chain-run endpoints.
 	Runs client.Client
+	// Schedules reads Triggers with a schedule source (and Chains, for their
+	// RoundTable). nil disables the schedule endpoints.
+	Schedules client.Client
 	// Hooks reads webhook Triggers, their RoundTables and their labelled
 	// credential Secrets. nil disables POST /v1/hooks/{namespace}/{trigger}.
 	Hooks client.Reader

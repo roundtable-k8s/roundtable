@@ -418,6 +418,13 @@ gateway:
     enabled: true
   # How long a finished run copy is kept before the gateway deletes it.
   runTTL: 24h
+  # Schedules (GET /v1/schedules, GET /v1/schedules/<namespace>/<name> and
+  # .../manifest, see docs/gateway.md): Triggers with a schedule source.
+  # When enabled, the gateway gets get, list and watch on Triggers in its
+  # namespace and allowedNamespaces (a ClusterRole if allowedNamespaces holds
+  # "*").
+  schedules:
+    enabled: true
   # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see
   # docs/triggers.md). Outside the bearer-token auth: each delivery must carry
   # the Trigger's own bearer token or HMAC signature, from a Secret in the

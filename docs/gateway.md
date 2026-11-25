@@ -751,6 +751,74 @@ done
 jq -r '.phase, .output' /tmp/run.json
 ```
 
+## Schedules
+
+A schedule is a [Trigger](triggers.md) with a `spec.source.schedule`. The
+gateway reads schedules and exports them as YAML; Triggers with any other
+source (NATS, webhook, GitHub) are not schedules and are a **404** on these
+routes. Served when `gateway.schedules.enabled` is true (the default), which
+grants `get`, `list` and `watch` on Triggers in the gateway's namespace and
+`allowedNamespaces` (a ClusterRole if `allowedNamespaces` holds `"*"`).
+
+### `managedBy`
+
+Every schedule says who owns it, so a client knows whether it may change it
+through the API:
+
+| `managedBy` | When |
+|---|---|
+| `git` | The Trigger carries a Flux or Helm ownership label or annotation: `kustomize.toolkit.fluxcd.io/name`, `helm.toolkit.fluxcd.io/name` or `app.kubernetes.io/managed-by: Helm`. Git is the source of truth: change it there. |
+| `api` | The Trigger is labelled `app.kubernetes.io/managed-by: roundtable-gateway` (created through the gateway). |
+| `other` | Anything else, for example applied with `kubectl`. |
+
+### `GET /v1/schedules?namespace=&table=`
+
+`{"schedules": [...]}`, by name. `table` keeps the schedules of one
+RoundTable. Each schedule:
+
+```json
+{
+  "name": "morning-digest",
+  "namespace": "roundtable",
+  "table": "fleet-a",
+  "cron": "0 7 * * 1-5",
+  "timeZone": "Europe/Berlin",
+  "description": "at 07:00 on Monday to Friday",
+  "target": {"kind": "chain", "summary": "chain digest", "chain": "digest"},
+  "suspended": false,
+  "nextRunAt": "2026-11-26T06:00:00Z",
+  "lastRunAt": "2026-11-25T06:00:02Z",
+  "lastResult": {"time": "2026-11-25T06:00:02Z", "outcome": "started", "run": "digest-trg-1a2b"},
+  "managedBy": "git"
+}
+```
+
+- `table` is the Trigger's `roundTableRef`, else the target Chain's.
+- `timeZone` is `UTC` when the Trigger sets none.
+- `description` is the cron in words; an expression it cannot put in words
+  comes back as `cron <expression>`.
+- `target.kind` is `chain` today; `summary` is a one-line description of
+  the target.
+- `nextRunAt` and `lastRunAt` are `status.nextScheduledAt` and
+  `status.lastFiredAt`. `lastResult` is the newest of `status.recentFirings`:
+  `outcome` is `started` (with the `run`) or `skipped` (with the
+  `skipReason`).
+
+### `GET /v1/schedules/{namespace}/{name}`
+
+One schedule, as above. **404** if it does not exist or is not a schedule.
+
+### `GET /v1/schedules/{namespace}/{name}/manifest`
+
+The Trigger as YAML (`Content-Type: application/yaml`), ready to commit to
+Git: no `status`, `managedFields`, `resourceVersion`, `uid`, `generation`,
+`creationTimestamp`, owner references, finalizers or
+`kubectl.kubernetes.io/last-applied-configuration`.
+
+```sh
+curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/manifest" > morning-digest.yaml
+```
+
 ## Webhooks
 
 `POST /v1/hooks/{namespace}/{trigger}` is the ingress for
