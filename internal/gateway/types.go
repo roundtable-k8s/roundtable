@@ -70,6 +70,10 @@ type TaskRecord struct {
 	Output string `json:"output,omitempty"`
 	// Error is the knight's error (status failed).
 	Error string `json:"error,omitempty"`
+	// UsageLimited marks a failure that is a plan-quota refusal (the knight's
+	// plan usage is used up), as opposed to an ordinary failure. Callers should
+	// back off rather than retry. Omitted otherwise.
+	UsageLimited bool `json:"usageLimited,omitempty"`
 	// RequestedModel is the resolved per-task model override sent with the task.
 	RequestedModel string `json:"requestedModel,omitempty"`
 	// Model is the model the knight reports having used.
