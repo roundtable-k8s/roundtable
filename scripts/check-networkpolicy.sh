@@ -16,8 +16,9 @@ render() { # [helm args...] -> rendered manifests
 fail() { echo "FAIL: $*" >&2; exit 1; }
 has() { grep -q -- "$2" <<<"$1" || fail "$3"; }
 lacks() { ! grep -q -- "$2" <<<"$1" || fail "$3"; }
-# Counts NetworkPolicy documents in a render.
-policies() { grep -c '^kind: NetworkPolicy$' <<<"$1" || true; }
+# Counts the NetworkPolicy documents rendered by templates/networkpolicy.yaml
+# (the gateway renders its own policy from templates/gateway.yaml).
+policies() { grep -c '^# Source: roundtable-operator/templates/networkpolicy.yaml$' <<<"$1" || true; }
 # Prints the NetworkPolicy document whose metadata.name is $2.
 doc() {
   awk -v want="  name: $2" '
@@ -65,6 +66,8 @@ nodash="$(render --set networkPolicy.enabled=true --set dashboard.enabled=false)
 # Empty peer lists render no ingress rule: no rule may exist without `from`.
 empty="$(render --set networkPolicy.enabled=true --set networkPolicy.metricsFrom=null --set dashboard.enabled=true)"
 [ "$(policies "$empty")" = 3 ] || fail "empty metricsFrom: expected 3 NetworkPolicies, got $(policies "$empty")"
-lacks "$empty" '^  ingress:' "empty peer lists still render an ingress rule"
+for name in operator dashboard knights; do
+  lacks "$(doc "$empty" "$base-$name")" '^  ingress:' "empty peer lists still render an ingress rule ($name)"
+done
 
 echo "check-networkpolicy: ok"
