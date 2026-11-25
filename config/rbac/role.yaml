@@ -32,6 +32,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - ai.roundtable.io
   resources:
   - chains

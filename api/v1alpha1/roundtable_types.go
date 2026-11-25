@@ -271,9 +271,9 @@ type RoundTableDefaults struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// egress is the default egress allowlist for the table's standing knights.
-	// A knight that sets its own spec.egress keeps it; allowlists are not
-	// merged. There is no table-level opt-out: opting out is explicit on the
+	// egress is the default egress allowlist (allowedHosts, allowedPorts and
+	// allowedServices) for the table's standing knights. A knight that sets
+	// its own spec.egress keeps it; allowlists are not merged. There is no table-level opt-out: opting out is explicit on the
 	// Knight.
 	// +optional
 	Egress *KnightEgress `json:"egress,omitempty"`

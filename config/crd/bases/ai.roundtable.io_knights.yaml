@@ -341,6 +341,52 @@ spec:
                     maxItems: 16
                     type: array
                     x-kubernetes-list-type: set
+                  allowedServices:
+                    description: |-
+                      allowedServices are in-cluster Services the knight may reach, each on
+                      its own ports. A "*.svc.cluster.local" name under allowedHosts does not
+                      open a Service: FQDN rules only match addresses outside the cluster.
+                      The policy selects the Service's pods (its namespace and pod selector),
+                      so a Service without a selector, or one that does not exist, is left out
+                      and reported on the EgressRestricted condition.
+                    items:
+                      description: EgressService is an in-cluster Service a knight
+                        may reach on the listed ports.
+                      properties:
+                        name:
+                          description: name is the Service's name.
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        namespace:
+                          description: namespace is the Service's namespace. Empty
+                            means the knight's namespace.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        ports:
+                          description: |-
+                            ports are the Service ports the knight dials. The policy allows each
+                            port's targetPort on the Service's pods (policies apply after the
+                            Service address is translated to a pod); a port the Service does not
+                            expose is allowed as a pod port as-is.
+                          items:
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          maxItems: 8
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-type: set
+                      required:
+                      - name
+                      - ports
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
                 type: object
               env:
                 description: env defines additional environment variables for the

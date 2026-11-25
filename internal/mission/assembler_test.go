@@ -2,6 +2,7 @@ package mission
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -331,6 +332,27 @@ func TestEphemeralKnightGetsIsolationDefaults(t *testing.T) {
 	}
 	if k.Spec.NATS.URL != rt.Spec.NATS.URL {
 		t.Fatalf("NATS URL = %q, want the table's (the policy's NATS peer)", k.Spec.NATS.URL)
+	}
+}
+
+// A mission knight gets its template's allowedServices (#517).
+func TestEphemeralKnightAllowedServicesFromTemplate(t *testing.T) {
+	mission, mk, rt := ephemeralFixtures()
+	tpl := rt.Spec.KnightTemplates["base"]
+	want := []aiv1alpha1.EgressService{{Name: "searxng", Namespace: "selfhosted", Ports: []int32{8080}}}
+	tpl.Egress = &aiv1alpha1.KnightEgress{AllowedServices: want}
+	rt.Spec.KnightTemplates["base"] = tpl
+	k, err := (&KnightAssembler{EgressDeny: true}).buildEphemeralKnight(mission, mk, rt)
+	if err != nil {
+		t.Fatalf("buildEphemeralKnight: %v", err)
+	}
+	knightpkg.ApplyIsolationDefaults(k, knightpkg.DefaultIsolationSettings())
+	if k.Spec.Egress == nil || !reflect.DeepEqual(k.Spec.Egress.AllowedServices, want) {
+		t.Fatalf("egress = %+v, want allowedServices %+v", k.Spec.Egress, want)
+	}
+	k.Spec.Egress.AllowedServices[0].Ports[0] = 1
+	if rt.Spec.KnightTemplates["base"].Egress.AllowedServices[0].Ports[0] != 8080 {
+		t.Fatal("the mission knight shares the template's allowedServices")
 	}
 }
 
