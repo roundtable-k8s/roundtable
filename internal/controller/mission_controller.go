@@ -79,14 +79,6 @@ func (r *MissionReconciler) emitMissionSpan(ctx context.Context, mission *aiv1al
 		missionpkg.SpanEnd{Start: start, End: time.Now(), ErrMsg: errMsg})
 }
 
-// natsClient returns the shared NATS client, or an error if the provider is not configured.
-func (r *MissionReconciler) natsClient() (natspkg.Client, error) {
-	if r.NATS == nil {
-		return nil, fmt.Errorf("NATS provider not configured")
-	}
-	return r.NATS.Client()
-}
-
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=missions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=missions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=missions/finalizers,verbs=update
