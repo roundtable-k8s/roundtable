@@ -19,9 +19,16 @@
 {{- $config := dict
   "receivers" (dict "otlp" (dict "protocols" (dict "grpc" (dict "endpoint" "0.0.0.0:4317") "http" (dict "endpoint" "0.0.0.0:4318"))))
   "processors" $procs
-  "exporters" $c.exporters
+  "exporters" (deepCopy $c.exporters)
   "service" (dict "pipelines" $pipelines "telemetry" (dict "metrics" (dict "level" "none"))) }}
 {{- $config = mustMergeOverwrite $config (deepCopy $c.extraConfig) }}
+{{- range $signal, $p := $config.service.pipelines }}
+{{- range $e := $p.exporters }}
+{{- if not (hasKey $config.exporters $e) }}
+{{- fail (printf "telemetry.collector.pipelines.%s names exporter %q, which is not defined in telemetry.collector.exporters" $signal $e) }}
+{{- end }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -45,8 +52,7 @@ metadata:
     app.kubernetes.io/component: otel-collector
 spec:
   selector:
-    {{- include "roundtable-operator.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: otel-collector
+    {{- include "roundtable-operator.collectorSelectorLabels" . | nindent 4 }}
   ports:
     - name: otlp-grpc
       port: 4317
@@ -67,15 +73,13 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "roundtable-operator.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: otel-collector
+      {{- include "roundtable-operator.collectorSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
         checksum/config: {{ toYaml $config | sha256sum }}
       labels:
-        {{- include "roundtable-operator.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: otel-collector
+        {{- include "roundtable-operator.collectorSelectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       securityContext:

@@ -51,12 +51,14 @@ Opt-in ingress NetworkPolicies for the operator, the dashboard and knight pods. 
 |-----|------|---------|-------------|
 | `networkPolicy.enabled` | bool | `false` | Render the operator, dashboard and knight policies |
 | `networkPolicy.metricsFrom` | list | monitoring namespace | NetworkPolicyPeers allowed to scrape metrics: the operator's metrics port and knights' `:3000/metrics`. The dashboard also accepts these peers. Empty denies all scraping |
+| `networkPolicy.otlpFrom` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed to send OTLP (4317/4318) to the collector; only rendered when `telemetry.collector.enabled`. Empty allows no one |
 | `networkPolicy.dashboardFrom` | list | `[]` | NetworkPolicyPeers allowed to reach the dashboard's `http` port, in addition to `metricsFrom`. Empty means only `metricsFrom` |
 | `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint; must match `--metrics-bind-address` in `extraArgs` (metrics are off by default) |
 
 What each policy allows:
 
 - **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and `operatorMetricsPort`, from `metricsFrom`.
+- **OpenTelemetry Collector** (`<release>-roundtable-operator-otel-collector`, only when `telemetry.collector.enabled`): ports 4317 and 4318, from `otlpFrom`. The collector pods use their own `app.kubernetes.io/name: roundtable-otel-collector`, so the operator policy and Deployment selector never match them.
 - **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
 - **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).
 
@@ -296,7 +298,7 @@ in #385.
 | `telemetry.collector.resources` | object | `{}` | Container resources |
 | `telemetry.collector.redaction.enabled` | bool | `true` | Add the `redaction` processor to every pipeline |
 | `telemetry.collector.redaction.blockedValues` | list | secret patterns | RE2 regexes; the default is ported from the knights' `redactSecrets` list (pi-knight `src/hooks.ts`). Setting it replaces the list |
-| `telemetry.collector.exporters` | object | `{debug: {}}` | Passed verbatim into the collector `exporters`. Helm merges maps, so remove the default with `--set telemetry.collector.exporters.debug=null` |
+| `telemetry.collector.exporters` | object | `{debug: {}}` | Passed into the collector `exporters`; every exporter a pipeline names must be defined here (or in `extraConfig`), otherwise rendering fails. Helm merges maps, so remove the default with `--set telemetry.collector.exporters.debug=null` |
 | `telemetry.collector.pipelines` | object | `traces/metrics/logs: [debug]` | Exporter names per signal; a signal set to an empty list or `null` gets no pipeline |
 | `telemetry.collector.extraConfig` | object | `{}` | Deep-merged last into the collector config |
 

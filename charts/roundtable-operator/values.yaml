@@ -143,6 +143,11 @@ networkPolicy:
   # NetworkPolicyPeers allowed to reach the dashboard's http port, in addition
   # to metricsFrom. Empty means only metricsFrom can reach it.
   dashboardFrom: []
+  # NetworkPolicyPeers allowed to send OTLP (4317/4318) to the collector when
+  # telemetry.collector.enabled. Default: pods in the release namespace; add
+  # a namespaceSelector for knights elsewhere. Empty allows no one.
+  otlpFrom:
+    - podSelector: {}
   # Port of the operator's metrics endpoint; must match --metrics-bind-address
   # in extraArgs (metrics are off by default).
   operatorMetricsPort: 8443

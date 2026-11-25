@@ -115,3 +115,13 @@ telemetry.otlp.protocol is http/protobuf (4318).
 {{- $port := ternary 4318 4317 (eq .Values.telemetry.otlp.protocol "http/protobuf") -}}
 {{- printf "http://%s.%s:%d" (include "roundtable-operator.collectorName" .) .Release.Namespace (int $port) }}
 {{- end }}
+
+{{/*
+Selector labels of the optional collector. Deliberately a different
+app.kubernetes.io/name from the operator so the operator's Deployment selector
+and NetworkPolicy never match collector pods.
+*/}}
+{{- define "roundtable-operator.collectorSelectorLabels" -}}
+app.kubernetes.io/name: roundtable-otel-collector
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
