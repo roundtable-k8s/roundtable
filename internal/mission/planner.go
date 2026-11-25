@@ -637,7 +637,7 @@ func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.M
 	sb.WriteString("3b. Do NOT set specOverrides.model unless the task truly needs a stronger model — omitting it inherits the base template's cheap default\n")
 	sb.WriteString("4. Design each ephemeral knight's tools.nix for its specific role — pick the right nixpkgs (e.g. go, python3, nmap, gh, nodejs_22, ripgrep, gopls, golangci-lint, kubectl, terraform)\n")
 	sb.WriteString("5. Chain phases can be: Setup, Active, or Teardown\n")
-	sb.WriteString("6. Steps can use Go template syntax like {{ .Steps.step_name.Output }} to pass data between steps\n")
+	sb.WriteString("6. A step can read an earlier step's output with {{ .Steps.step_name.Output }} (long outputs are cut to about 4000 characters with a \"[truncated\" marker). Output passes ONLY between steps of the SAME chain, and only from steps listed in the reader's dependsOn (directly or through other dependsOn steps). Chains in a plan start at the same time and cannot read each other's output, so put work that needs another step's result (for example gather, then write a report) into ONE chain with dependsOn steps; a plan that references another chain's step is rejected\n")
 	sb.WriteString("7. Use underscores (not hyphens) in STEP NAMES — hyphens break Go templates\n")
 	sb.WriteString("8. Use hyphens (not underscores) in KNIGHT NAMES — they become Kubernetes resource names (RFC 1123 DNS labels)\n")
 	sb.WriteString("9. Ensure step dependencies (dependsOn) form a valid DAG (no cycles)\n")
@@ -927,6 +927,10 @@ func (p *Planner) validatePlan(ctx context.Context, mission *aiv1alpha1.Mission,
 		if err := util.ValidateDAG(nodes); err != nil {
 			return fmt.Errorf("chain %q: %w", chain.Name, err)
 		}
+	}
+
+	if err := validateStepOutputRefs(plan.Chains); err != nil {
+		return err
 	}
 
 	if err := p.validateExistingChains(ctx, mission, plan, chainNames); err != nil {

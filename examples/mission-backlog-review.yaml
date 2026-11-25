@@ -1,0 +1,52 @@
+# Mission showcase (#409): a read-only backlog review on the roundtable-dev
+# table, planned by the built-in planner and run by two standing knights.
+#
+# Recorded run, 2026-11-25 (backlog-review-2026-11-25-b): Succeeded in about
+# 5 minutes for $1.58 (planning took 8 s). The plan recruited rt-operator and
+# rt-lead and wrote three chains: two data-gathering chains on rt-operator
+# ($0.10 and $0.28) and a report chain on rt-lead ($1.20).
+#
+# In that run the report chain could not read the other two chains' output
+# (chains of a plan start together and output passes only between steps of
+# one chain), so rt-lead gathered the data again, which was most of the cost.
+# Since #533 the planner is told to put gather-then-report work into one
+# chain with dependsOn steps, and a plan that reads another chain's step
+# output is rejected. Expect a lower cost than the recorded run.
+#
+# This manifest is reconstructed from the settings recorded in #409 (goal A,
+# $5 budget, 3600 s timeout, 7200 s TTL, 3 chains, 3 knights). The planner is
+# named explicitly; see #531 for using the role-labelled planner by default.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Mission
+metadata:
+  name: backlog-review
+  namespace: roundtable
+spec:
+  objective: |
+    Review the open backlog of roundtable-k8s/roundtable: list the remaining
+    work per milestone and every issue labelled needs-human with what it needs
+    from the owner, then write a short prioritised report of what the owner
+    should do first. Read-only: do not change issues, labels or code.
+  successCriteria: "A report with remaining work by milestone, a needs-human table and the top three owner actions"
+  roundTableRef: {name: roundtable-dev}
+  ttlSeconds: 7200
+  timeoutSeconds: 3600
+  costBudgetUSD: "5"
+
+  # Meta-mission: the planner writes the chains; recruitExisting lets it use
+  # the table's standing knights (rt-lead, rt-operator) instead of ephemeral ones.
+  metaMission: true
+  recruitExisting: true
+
+  planner:
+    knightRef: {name: roundtable-operator-planner}
+    timeoutSeconds: 300
+    maxChains: 3
+    maxKnights: 3
+    allowSkillGeneration: false
+    context: |
+      Use only standing knights: rt-operator for gathering data from GitHub,
+      rt-lead for writing the report. Put the gathering steps and the report
+      step in one chain, with the report step depending on the gathering steps.
+
+  retainResults: true
