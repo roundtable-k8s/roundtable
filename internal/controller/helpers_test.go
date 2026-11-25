@@ -218,38 +218,6 @@ var _ = Describe("Helper Functions", func() {
 		})
 	})
 
-	// ── shouldDeleteResources ─────────────────────────────────────────────
-	Describe("MissionReconciler.shouldDeleteResources", func() {
-		var reconciler *MissionReconciler
-
-		BeforeEach(func() {
-			reconciler = &MissionReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: record.NewFakeRecorder(10),
-			}
-		})
-
-		DescribeTable("cleanup policy behavior",
-			func(policy string, phase aiv1alpha1.MissionPhase, expected bool) {
-				mission := &aiv1alpha1.Mission{
-					Spec:   aiv1alpha1.MissionSpec{CleanupPolicy: policy},
-					Status: aiv1alpha1.MissionStatus{Phase: phase},
-				}
-				Expect(reconciler.shouldDeleteResources(mission)).To(Equal(expected))
-			},
-			Entry("Delete policy always deletes", "Delete", aiv1alpha1.MissionPhaseSucceeded, true),
-			Entry("Retain policy never deletes", "Retain", aiv1alpha1.MissionPhaseSucceeded, false),
-			Entry("Retain policy never deletes on failure", "Retain", aiv1alpha1.MissionPhaseFailed, false),
-			Entry("OnSuccess deletes on success", "OnSuccess", aiv1alpha1.MissionPhaseSucceeded, true),
-			Entry("OnSuccess retains on failure", "OnSuccess", aiv1alpha1.MissionPhaseFailed, false),
-			Entry("OnFailure deletes on failure", "OnFailure", aiv1alpha1.MissionPhaseFailed, true),
-			Entry("OnFailure retains on success", "OnFailure", aiv1alpha1.MissionPhaseSucceeded, false),
-			Entry("empty policy defaults to delete", "", aiv1alpha1.MissionPhaseSucceeded, true),
-			Entry("unknown policy defaults to delete", "SomethingElse", aiv1alpha1.MissionPhaseFailed, true),
-		)
-	})
-
 	// ── updateChainStatus ─────────────────────────────────────────────────
 	Describe("MissionReconciler.updateChainStatus", func() {
 		var reconciler *MissionReconciler

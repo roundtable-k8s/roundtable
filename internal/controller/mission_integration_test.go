@@ -161,10 +161,12 @@ var _ = Describe("Mission Integration Tests", func() {
 
 			// Reconcile until phase transitions from Pending
 			r := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Phase 1: Pending (validation)
@@ -312,10 +314,12 @@ var _ = Describe("Mission Integration Tests", func() {
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
 
 			r := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Progress through phases until Active
@@ -467,10 +471,12 @@ var _ = Describe("Mission Integration Tests", func() {
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
 
 			r := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Progress through phases
@@ -630,10 +636,12 @@ var _ = Describe("Mission Integration Tests", func() {
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
 
 			r := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Progress to Active phase
@@ -770,10 +778,12 @@ var _ = Describe("Mission Integration Tests", func() {
 			Expect(k8sClient.Create(ctx, mission)).To(Succeed())
 
 			r := &MissionReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Recorder:  record.NewFakeRecorder(100),
-				Assembler: &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Client:      k8sClient,
+				Scheme:      k8sClient.Scheme(),
+				Recorder:    record.NewFakeRecorder(100),
+				Assembler:   &missionpkg.KnightAssembler{Client: k8sClient, Scheme: k8sClient.Scheme()},
+				Cleaner:     &missionpkg.Cleaner{Client: k8sClient},
+				CostTracker: &missionpkg.CostTracker{Client: k8sClient},
 			}
 
 			// Progress to Active phase

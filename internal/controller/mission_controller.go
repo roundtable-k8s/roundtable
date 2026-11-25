@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -56,10 +55,12 @@ type MissionReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	NATS      *natspkg.Provider
-	Notify    *notify.Notifier
-	Planner   *missionpkg.Planner
-	Assembler *missionpkg.KnightAssembler
+	NATS        *natspkg.Provider
+	Notify      *notify.Notifier
+	Planner     *missionpkg.Planner
+	Assembler   *missionpkg.KnightAssembler
+	Cleaner     *missionpkg.Cleaner
+	CostTracker *missionpkg.CostTracker
 }
 
 // natsClient returns the shared NATS client, or an error if the provider is not configured.
@@ -576,7 +577,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 
 	// Check cost budget
 	if mission.Spec.CostBudgetUSD != "" && mission.Spec.CostBudgetUSD != "0" {
-		totalCost, err := r.aggregateMissionCost(ctx, mission)
+		totalCost, err := r.CostTracker.AggregateMissionCost(ctx, mission)
 		if err != nil {
 			log.Error(err, "Failed to aggregate mission cost")
 		} else {
@@ -589,7 +590,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 					log.Info("Mission cost budget exceeded", "totalCost", totalCost, "budget", budget)
 
 					// Suspend all mission-owned chains to prevent further cost
-					if err := r.suspendMissionChains(ctx, mission); err != nil {
+					if err := r.CostTracker.SuspendMissionChains(ctx, mission); err != nil {
 						log.Error(err, "Failed to suspend mission chains")
 					}
 
@@ -830,7 +831,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 
 	// Store results to NATS KV if retainResults is true and not already stored
 	if mission.Spec.RetainResults && mission.Status.ResultsConfigMap == "" {
-		if err := r.storeResultsToKV(ctx, mission); err != nil {
+		if err := r.Cleaner.StoreResultsToKV(ctx, mission); err != nil {
 			log.Error(err, "Failed to store results to NATS KV")
 			// Continue with cleanup even if this fails — set the key anyway
 			// to prevent infinite retry loop
@@ -839,19 +840,19 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 	}
 
 	// Determine if we should actually delete resources based on cleanupPolicy
-	shouldDelete := r.shouldDeleteResources(mission)
+	shouldDelete := r.Cleaner.ShouldDeleteResources(mission)
 
 	if shouldDelete {
 		// Step 1: Delete ephemeral Knight CRs
 		log.Info("Deleting ephemeral Knight CRs")
-		if err := r.deleteEphemeralKnights(ctx, mission); err != nil {
+		if err := r.Cleaner.DeleteEphemeralKnights(ctx, mission); err != nil {
 			log.Error(err, "Failed to delete ephemeral knights, retrying")
 			return ctrl.Result{RequeueAfter: RequeueDefault}, nil
 		}
 
 		// Step 2: Delete NATS consumers (best effort)
 		log.Info("Deleting NATS consumers")
-		if err := r.deleteNATSConsumers(mission); err != nil {
+		if err := r.Cleaner.DeleteNATSConsumers(mission); err != nil {
 			log.Error(err, "Failed to delete NATS consumers (best effort, continuing)")
 			// Continue even if this fails - consumers will be deleted when stream is deleted
 		}
@@ -861,7 +862,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			log.Info("Deleting NATS streams",
 				"tasksStream", mission.Status.NATSTasksStream,
 				"resultsStream", mission.Status.NATSResultsStream)
-			if err := r.deleteNATSStreams(mission); err != nil {
+			if err := r.Cleaner.DeleteNATSStreams(mission); err != nil {
 				log.Error(err, "Failed to delete NATS streams, retrying with backoff")
 				return ctrl.Result{RequeueAfter: RequeueModerate}, nil
 			}
@@ -870,7 +871,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 		// Step 4: Delete ephemeral RoundTable (owner ref handles cascade)
 		if mission.Status.RoundTableName != "" {
 			log.Info("Deleting ephemeral RoundTable", "name", mission.Status.RoundTableName)
-			if err := r.deleteEphemeralRoundTable(ctx, mission); err != nil {
+			if err := r.Cleaner.DeleteEphemeralRoundTable(ctx, mission); err != nil {
 				log.Error(err, "Failed to delete RoundTable, retrying")
 				return ctrl.Result{RequeueAfter: RequeueDefault}, nil
 			}
@@ -896,7 +897,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	log := logf.FromContext(ctx)
 
 	// Transition to terminal phase based on original outcome
-	mission.Status.Phase = terminalOutcome(mission)
+	mission.Status.Phase = missionpkg.TerminalOutcome(mission)
 
 	mission.Status.ObservedGeneration = mission.Generation
 	if err := r.Status().Update(ctx, mission); err != nil {
@@ -1022,213 +1023,6 @@ func (r *MissionReconciler) publishBriefing(ctx context.Context, mission *aiv1al
 			"Briefing delivered to %d of %d knights", published, attempted)
 	}
 	return nil
-}
-
-// storeResultsToKV stores mission results in a NATS KV bucket for retention.
-// Bucket: "mission-results", Key: mission name, Value: JSON with all results.
-// KV Put is idempotent — no "already exists" problem like ConfigMaps.
-func (r *MissionReconciler) storeResultsToKV(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	log := logf.FromContext(ctx)
-
-	natsCli, err := r.natsClient()
-	if err != nil || !natsCli.IsConnected() {
-		log.Info("NATS not available, skipping KV results storage")
-		return fmt.Errorf("NATS client not available: %w", err)
-	}
-
-	kvKey := mission.Name
-	const kvBucket = "mission-results"
-
-	// Build duration string
-	duration := ""
-	if mission.Status.StartedAt != nil && mission.Status.CompletedAt != nil {
-		dur := mission.Status.CompletedAt.Sub(mission.Status.StartedAt.Time)
-		duration = fmt.Sprintf("%.0fm%.0fs", dur.Minutes(), dur.Seconds()-dur.Minutes()*60)
-	}
-
-	// Build complete results document
-	results := map[string]any{
-		"summary": map[string]any{
-			"mission":   mission.Name,
-			"objective": mission.Spec.Objective,
-			"phase":     string(mission.Status.Phase),
-			"result":    mission.Status.Result,
-			"duration":  duration,
-			"totalCost": mission.Status.TotalCost,
-		},
-		"timeline": map[string]any{
-			"started":   "",
-			"completed": "",
-			"phases":    []map[string]string{},
-		},
-		"chains":  map[string]any{},
-		"knights": []map[string]any{},
-	}
-
-	// Timeline
-	timeline := results["timeline"].(map[string]any)
-	if mission.Status.StartedAt != nil {
-		timeline["started"] = mission.Status.StartedAt.Format(time.RFC3339)
-	}
-	if mission.Status.CompletedAt != nil {
-		timeline["completed"] = mission.Status.CompletedAt.Format(time.RFC3339)
-	}
-	for _, cond := range mission.Status.Conditions {
-		timeline["phases"] = append(timeline["phases"].([]map[string]string), map[string]string{
-			"type":      cond.Type,
-			"status":    string(cond.Status),
-			"reason":    cond.Reason,
-			"timestamp": cond.LastTransitionTime.Format(time.RFC3339),
-		})
-	}
-
-	// Chain results
-	chains := results["chains"].(map[string]any)
-	for _, cs := range mission.Status.ChainStatuses {
-		chain := &aiv1alpha1.Chain{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      cs.ChainCRName,
-			Namespace: mission.Namespace,
-		}, chain); err != nil {
-			log.Info("Failed to fetch chain for results", "chain", cs.ChainCRName, "error", err.Error())
-			continue
-		}
-
-		chainResult := map[string]any{
-			"name":   cs.Name,
-			"phase":  string(cs.Phase),
-			"steps":  []map[string]any{},
-			"output": "",
-		}
-		for _, stepStatus := range chain.Status.StepStatuses {
-			chainResult["steps"] = append(chainResult["steps"].([]map[string]any), map[string]any{
-				"name":   stepStatus.Name,
-				"output": stepStatus.Output,
-				"error":  stepStatus.Error,
-			})
-			if stepStatus.Output != "" {
-				chainResult["output"] = stepStatus.Output
-			}
-		}
-		chains[cs.Name] = chainResult
-	}
-
-	// Knight statuses
-	for _, ks := range mission.Status.KnightStatuses {
-		results["knights"] = append(results["knights"].([]map[string]any), map[string]any{
-			"name":      ks.Name,
-			"ready":     ks.Ready,
-			"ephemeral": ks.Ephemeral,
-		})
-	}
-
-	// Cost breakdown
-	if len(mission.Status.CostBreakdown) > 0 {
-		results["costs"] = map[string]any{
-			"breakdown": mission.Status.CostBreakdown,
-			"total":     mission.Status.TotalCost,
-		}
-	}
-
-	// Marshal and store — KVPut is idempotent (upsert)
-	resultsJSON, err := json.Marshal(results)
-	if err != nil {
-		return fmt.Errorf("failed to marshal results: %w", err)
-	}
-
-	if err := natsCli.KVPut(kvBucket, kvKey, resultsJSON); err != nil {
-		return fmt.Errorf("failed to store results in NATS KV: %w", err)
-	}
-
-	mission.Status.ResultsConfigMap = fmt.Sprintf("%s.%s", kvBucket, kvKey)
-	log.Info("Stored mission results to NATS KV", "bucket", kvBucket, "key", kvKey,
-		"chains", len(mission.Status.ChainStatuses), "bytes", len(resultsJSON))
-	return nil
-}
-
-// suspendMissionChains suspends all mission-owned chains to prevent further cost accumulation.
-//
-//nolint:unparam // error return kept so failures can propagate without a caller change
-func (r *MissionReconciler) suspendMissionChains(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	log := logf.FromContext(ctx)
-
-	for _, cs := range mission.Status.ChainStatuses {
-		if cs.ChainCRName == "" {
-			continue
-		}
-
-		chain := &aiv1alpha1.Chain{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      cs.ChainCRName,
-			Namespace: mission.Namespace,
-		}, chain); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				continue // Chain not found, skip
-			}
-			log.Error(err, "Failed to fetch chain for suspension", "chain", cs.ChainCRName)
-			continue
-		}
-
-		// Set suspended flag
-		if !chain.Spec.Suspend {
-			chain.Spec.Suspend = true
-			if err := r.Update(ctx, chain); err != nil {
-				log.Error(err, "Failed to suspend chain", "chain", cs.ChainCRName)
-				continue
-			}
-			log.Info("Suspended chain due to budget exceeded", "chain", cs.ChainCRName)
-		}
-	}
-
-	return nil
-}
-
-// aggregateMissionCost calculates the total cost across all mission knights and updates costBreakdown.
-func (r *MissionReconciler) aggregateMissionCost(ctx context.Context, mission *aiv1alpha1.Mission) (float64, error) {
-	var totalCost float64
-	costBreakdown := make([]aiv1alpha1.MissionKnightCost, 0, len(mission.Spec.Knights))
-
-	for _, mk := range mission.Spec.Knights {
-		knightName := mk.Name
-		knight := &aiv1alpha1.Knight{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      knightName,
-			Namespace: mission.Namespace,
-		}, knight); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				// Knight not found, add to breakdown with zero cost
-				costBreakdown = append(costBreakdown, aiv1alpha1.MissionKnightCost{
-					Name:      knightName,
-					CostUSD:   "0.0000",
-					Ephemeral: mk.Ephemeral,
-				})
-				continue
-			}
-			return 0, err
-		}
-
-		// Parse knight's total cost
-		knightCost := "0.0000"
-		if knight.Status.TotalCost != "" {
-			var cost float64
-			if _, err := fmt.Sscanf(knight.Status.TotalCost, "%f", &cost); err == nil {
-				totalCost += cost
-				knightCost = knight.Status.TotalCost
-			}
-		}
-
-		// Add to breakdown
-		costBreakdown = append(costBreakdown, aiv1alpha1.MissionKnightCost{
-			Name:      knightName,
-			CostUSD:   knightCost,
-			Ephemeral: mk.Ephemeral,
-		})
-	}
-
-	// Update mission status with breakdown
-	mission.Status.CostBreakdown = costBreakdown
-
-	return totalCost, nil
 }
 
 // ensureMissionChain creates a mission-scoped chain copy if it doesn't already exist.
@@ -1366,159 +1160,6 @@ func (r *MissionReconciler) updateChainStatus(mission *aiv1alpha1.Mission, chain
 		ChainCRName: chainCRName,
 		Phase:       phase,
 	})
-}
-
-// terminalOutcome returns the mission's terminal phase. The phase itself is
-// overwritten to CleaningUp while cleanup runs, so the outcome is read from
-// the Complete condition (recorded before cleanup starts); missions that
-// reach cleanup without one fall back to inferring from result and chains.
-func terminalOutcome(mission *aiv1alpha1.Mission) aiv1alpha1.MissionPhase {
-	switch mission.Status.Phase {
-	case aiv1alpha1.MissionPhaseSucceeded, aiv1alpha1.MissionPhaseFailed, aiv1alpha1.MissionPhaseExpired:
-		return mission.Status.Phase
-	}
-
-	if cond := meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete); cond != nil &&
-		cond.Status == metav1.ConditionTrue {
-		switch cond.Reason {
-		case aiv1alpha1.ReasonMissionSucceeded:
-			return aiv1alpha1.MissionPhaseSucceeded
-		case aiv1alpha1.ReasonMissionExpired:
-			return aiv1alpha1.MissionPhaseExpired
-		default: // Failed, ChainFailed, Timeout, OverBudget, ...
-			return aiv1alpha1.MissionPhaseFailed
-		}
-	}
-
-	// Legacy inference for missions completed before the condition was recorded.
-	if mission.Status.Result != "" && strings.Contains(mission.Status.Result, "failed") {
-		return aiv1alpha1.MissionPhaseFailed
-	}
-	for _, cs := range mission.Status.ChainStatuses {
-		if cs.Phase == aiv1alpha1.ChainPhaseFailed {
-			return aiv1alpha1.MissionPhaseFailed
-		}
-	}
-	return aiv1alpha1.MissionPhaseSucceeded
-}
-
-// shouldDeleteResources determines if resources should be deleted based on cleanup policy and mission outcome.
-func (r *MissionReconciler) shouldDeleteResources(mission *aiv1alpha1.Mission) bool {
-	switch mission.Spec.CleanupPolicy {
-	case cleanupPolicyDelete:
-		return true
-	case "Retain":
-		return false
-	case "OnSuccess":
-		return terminalOutcome(mission) == aiv1alpha1.MissionPhaseSucceeded
-	case "OnFailure":
-		return terminalOutcome(mission) == aiv1alpha1.MissionPhaseFailed
-	default:
-		return true // Default to Delete
-	}
-}
-
-// deleteEphemeralKnights deletes all ephemeral Knight CRs owned by this mission.
-func (r *MissionReconciler) deleteEphemeralKnights(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	for _, ks := range mission.Status.KnightStatuses {
-		if !ks.Ephemeral {
-			continue
-		}
-
-		knightName := fmt.Sprintf("%s-%s", mission.Name, ks.Name)
-		knight := &aiv1alpha1.Knight{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      knightName,
-			Namespace: mission.Namespace,
-		}, knight); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				continue // Already deleted
-			}
-			return err
-		}
-
-		if err := r.Delete(ctx, knight); err != nil {
-			return fmt.Errorf("failed to delete knight %s: %w", knightName, err)
-		}
-	}
-	return nil
-}
-
-// deleteNATSConsumers deletes all NATS consumers for this mission's streams (best effort).
-//
-//nolint:unparam // error return kept so failures can propagate without a caller change
-func (r *MissionReconciler) deleteNATSConsumers(mission *aiv1alpha1.Mission) error {
-	natsCli, err := r.natsClient()
-	if err != nil {
-		return nil // Gracefully skip if no NATS client
-	}
-
-	tasksStream := mission.Status.NATSTasksStream
-	resultsStream := mission.Status.NATSResultsStream
-
-	for _, ks := range mission.Status.KnightStatuses {
-		if !ks.Ephemeral {
-			continue
-		}
-
-		consumerName := fmt.Sprintf("msn-%s-%s", mission.Name, ks.Name)
-
-		// Delete from tasks stream (best effort)
-		if tasksStream != "" {
-			_ = natsCli.DeleteConsumer(tasksStream, consumerName)
-		}
-
-		// Delete from results stream (best effort)
-		if resultsStream != "" {
-			_ = natsCli.DeleteConsumer(resultsStream, consumerName)
-		}
-	}
-
-	return nil
-}
-
-// deleteNATSStreams deletes the mission's task and result streams.
-func (r *MissionReconciler) deleteNATSStreams(mission *aiv1alpha1.Mission) error {
-	natsCli, err := r.natsClient()
-	if err != nil {
-		return nil // Gracefully skip if no NATS client
-	}
-
-	// Delete tasks stream
-	if mission.Status.NATSTasksStream != "" {
-		if err := natsCli.DeleteStream(mission.Status.NATSTasksStream); err != nil {
-			return fmt.Errorf("failed to delete tasks stream: %w", err)
-		}
-	}
-
-	// Delete results stream
-	if mission.Status.NATSResultsStream != "" {
-		if err := natsCli.DeleteStream(mission.Status.NATSResultsStream); err != nil {
-			return fmt.Errorf("failed to delete results stream: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// deleteEphemeralRoundTable deletes the mission's ephemeral RoundTable CR.
-func (r *MissionReconciler) deleteEphemeralRoundTable(ctx context.Context, mission *aiv1alpha1.Mission) error {
-	if mission.Status.RoundTableName == "" {
-		return nil // No RoundTable to delete
-	}
-
-	rt := &aiv1alpha1.RoundTable{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      mission.Status.RoundTableName,
-		Namespace: mission.Namespace,
-	}, rt); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			return nil // Already deleted
-		}
-		return err
-	}
-
-	return r.Delete(ctx, rt)
 }
 
 // SetupWithManager sets up the controller with the Manager.

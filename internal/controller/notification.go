@@ -30,6 +30,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 )
 
@@ -224,7 +225,7 @@ func missionNotifyPayload(mission *aiv1alpha1.Mission) notify.Payload {
 		}}
 	}
 
-	phase := string(terminalOutcome(mission))
+	phase := string(missionpkg.TerminalOutcome(mission))
 	return notify.Payload{
 		Schema:         notify.SchemaV1,
 		Kind:           "Mission",
