@@ -321,15 +321,16 @@ func TestHookDuplicateDeliveryPublishesOnce(t *testing.T) {
 func TestHookNotFoundLooksTheSame(t *testing.T) {
 	e := newHookEnv(t, HookOptions{}, true)
 	h := map[string]string{"Authorization": "Bearer " + hookBearer}
-	var bodies []string
-	for _, path := range []string{
+	paths := []string{
 		"/v1/hooks/" + testNS + "/missing",
 		"/v1/hooks/" + testNS + "/nats-only",
 		// A Trigger exists there with this credential, but the namespace is
 		// not in allowedNamespaces.
 		"/v1/hooks/" + hookOtherNS + "/alerts",
 		"/v1/hooks/" + testNS + "/Not_A_Name",
-	} {
+	}
+	bodies := make([]string, 0, len(paths))
+	for _, path := range paths {
 		resp, out := e.post(t, path, []byte(`{}`), h)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s: status %d %v", path, resp.StatusCode, out)

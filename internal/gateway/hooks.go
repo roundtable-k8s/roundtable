@@ -191,7 +191,7 @@ func (s *Service) hookCredential(ctx context.Context, trg *aiv1alpha1.Trigger) (
 	if err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: ref.Name}, sec); err != nil {
 		return nil, fmt.Errorf("get secret %s: %w", ref.Name, err)
 	}
-	if sec.Labels[aiv1alpha1.LabelWebhookSecret] != "true" {
+	if sec.Labels[aiv1alpha1.LabelWebhookSecret] != labelTrue {
 		return nil, fmt.Errorf("secret %s is not labelled %s=true", ref.Name, aiv1alpha1.LabelWebhookSecret)
 	}
 	val := []byte(strings.TrimRight(string(sec.Data[ref.Key]), "\r\n"))
