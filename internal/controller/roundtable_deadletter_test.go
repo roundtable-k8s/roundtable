@@ -77,10 +77,54 @@ func TestEnsureStreamsCreatesDeadLetterStreams(t *testing.T) {
 		dlq.Config.Duplicates != deadletter.DuplicateWindow || dlq.Config.Subjects[0] != "rt-dev.dlq.>" {
 		t.Fatalf("DLQ stream config = %+v", dlq.Config)
 	}
+	events, err := cli.StreamInfo(ctx, "rt_dev_tasks_EVENTS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events.Config.Retention != jetstream.LimitsPolicy || events.Config.MaxAge != aiv1alpha1.DefaultEventsMaxAge ||
+		events.Config.Subjects[0] != "rt-dev.events.>" {
+		t.Fatalf("events stream config = %+v", events.Config)
+	}
 	if _, err := cli.StreamInfo(ctx, "rt_dev_tasks_ADVISORIES"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cli.ConsumerAckFloor(ctx, "rt_dev_tasks_ADVISORIES", deadletter.ConsumerName); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEnsureStreamsSkipsEventsStreamForEphemeralTables(t *testing.T) {
+	opts := natstest.DefaultTestOptions
+	opts.Port = -1
+	opts.JetStream = true
+	opts.StoreDir = t.TempDir()
+	ctx := context.Background()
+	ns := natstest.RunServer(&opts)
+	defer ns.Shutdown()
+
+	cli := natspkg.NewClient(natspkg.Config{URL: ns.ClientURL()}, logr.Discard())
+	if err := cli.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cli.Close() }()
+	r := &RoundTableReconciler{NATS: natspkg.NewProviderWithClient(cli, logr.Discard())}
+
+	rt := &aiv1alpha1.RoundTable{
+		ObjectMeta: metav1.ObjectMeta{Name: "msn", Namespace: "roundtable"},
+		Spec: aiv1alpha1.RoundTableSpec{
+			Ephemeral: true,
+			NATS: aiv1alpha1.RoundTableNATS{
+				SubjectPrefix: "msn", TasksStream: "msn_tasks", ResultsStream: "msn_results", CreateStreams: true,
+			},
+		},
+	}
+	if err := r.ensureStreams(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.StreamInfo(ctx, "msn_tasks"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.StreamInfo(ctx, "msn_tasks_EVENTS"); err == nil {
+		t.Fatal("ephemeral table must not get an events stream")
 	}
 }

@@ -1,0 +1,350 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: triggers.ai.roundtable.io
+spec:
+  group: ai.roundtable.io
+  names:
+    categories:
+    - roundtable
+    kind: Trigger
+    listKind: TriggerList
+    plural: triggers
+    shortNames:
+    - trg
+    singular: trigger
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.target.chainRef.name
+      name: Chain
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.lastFiredAt
+      name: Last Fired
+      type: date
+    - jsonPath: .spec.suspend
+      name: Suspend
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Trigger starts a run of a Chain with input rendered from an event: a
+          message on the RoundTable's events stream or a cron schedule.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Trigger
+            properties:
+              concurrency:
+                description: concurrency bounds how many runs are active at once.
+                properties:
+                  maxActive:
+                    description: |-
+                      maxActive caps active runs under Allow; a firing at the cap is
+                      skipped. 0 means no cap. Ignored by Forbid and Replace.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  policy:
+                    default: Allow
+                    description: |-
+                      policy is Allow (start next to active runs, up to maxActive), Forbid
+                      (skip while a run is active) or Replace (delete the active runs, then
+                      start). Defaults to Allow.
+                    enum:
+                    - Allow
+                    - Forbid
+                    - Replace
+                    type: string
+                type: object
+              dedupeKey:
+                description: |-
+                  dedupeKey is a Go template (same data as input) whose result
+                  identifies the event: an event whose key matches a run that still
+                  exists starts nothing. Defaults to the Nats-Msg-Id header (else the
+                  stream sequence) for NATS, and the scheduled time for schedule.
+                type: string
+              input:
+                description: |-
+                  input is a Go template rendered into the run's spec.input. The event
+                  is available as .Event: .Event.Subject, .Event.Data (the payload
+                  parsed as JSON, or the raw string), .Event.Headers (map of header name
+                  to value) and .Event.Time; .Trigger has .Name and .Namespace. A
+                  missing map key is an error. toJson encodes a value as JSON. Empty
+                  keeps the target Chain's own spec.input.
+                type: string
+              roundTableRef:
+                description: |-
+                  roundTableRef names the RoundTable (same namespace) whose events
+                  stream a NATS source reads. Required for source.nats.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              source:
+                description: source is where events come from.
+                properties:
+                  github:
+                    description: github is reserved for the GitHub source.
+                    type: object
+                  nats:
+                    description: |-
+                      nats fires on each message published to a subject on the RoundTable's
+                      events stream (<subjectPrefix>.events.>).
+                    properties:
+                      subject:
+                        description: |-
+                          subject is the subject filter (wildcards allowed). It must sit under
+                          the table's "<subjectPrefix>.events.", for example
+                          "fleet-a.events.deploys.>".
+                        maxLength: 512
+                        minLength: 1
+                        pattern: ^[^\s]+$
+                        type: string
+                    required:
+                    - subject
+                    type: object
+                  schedule:
+                    description: schedule fires on a cron schedule.
+                    properties:
+                      cron:
+                        description: cron is a standard five-field cron expression,
+                          e.g. "0 7 * * 1-5".
+                        minLength: 1
+                        type: string
+                      startingDeadlineSeconds:
+                        description: |-
+                          startingDeadlineSeconds bounds catch-up: a missed fire still runs only
+                          if fewer than this many seconds have passed since it was due. Unset
+                          always catches up (at most one run).
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      timeZone:
+                        description: |-
+                          timeZone is the IANA time zone the schedule is evaluated in. Defaults
+                          to UTC. "Local" is not accepted.
+                        maxLength: 64
+                        pattern: ^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$
+                        type: string
+                    required:
+                    - cron
+                    type: object
+                  webhook:
+                    description: webhook is reserved for the gateway webhook source
+                      (#176).
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: set exactly one of source.nats, source.schedule, source.webhook
+                    or source.github
+                  rule: '[has(self.nats), has(self.schedule), has(self.webhook), has(self.github)].filter(x,
+                    x).size() == 1'
+                - message: source.webhook is not implemented yet (#176)
+                  rule: '!has(self.webhook)'
+                - message: source.github is not implemented yet
+                  rule: '!has(self.github)'
+              suspend:
+                description: |-
+                  suspend stops firing. A NATS source's consumer is deleted, so events
+                  published while suspended do not fire on resume.
+                type: boolean
+              target:
+                description: target is what each firing starts.
+                properties:
+                  chainRef:
+                    description: chainRef names the Chain (same namespace) a firing
+                      starts a copy of.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - chainRef
+                type: object
+              ttlSecondsAfterFinished:
+                default: 86400
+                description: |-
+                  ttlSecondsAfterFinished deletes a finished run this long after it
+                  completed. Its dedupe key is forgotten then too. 0 keeps finished runs.
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - source
+            - target
+            type: object
+            x-kubernetes-validations:
+            - message: roundTableRef is required for source.nats
+              rule: '!has(self.source.nats) || has(self.roundTableRef)'
+          status:
+            description: status defines the observed state of Trigger
+            properties:
+              activeRuns:
+                description: |-
+                  activeRuns are the names of the Trigger's runs that are running or
+                  pending.
+                items:
+                  type: string
+                type: array
+              conditions:
+                description: 'conditions: Ready is True while the Trigger is listening.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              consumer:
+                description: consumer is the NATS source's durable consumer.
+                type: string
+              lastFiredAt:
+                description: lastFiredAt is when a firing last started a run.
+                format: date-time
+                type: string
+              lastScheduledAt:
+                description: lastScheduledAt is the last schedule time handled (schedule
+                  source).
+                format: date-time
+                type: string
+              nextScheduledAt:
+                description: nextScheduledAt is the next schedule time (schedule source).
+                format: date-time
+                type: string
+              observedGeneration:
+                description: observedGeneration is the generation last reconciled.
+                format: int64
+                type: integer
+              recentFirings:
+                description: recentFirings are the latest firings, newest first (at
+                  most 10).
+                items:
+                  description: TriggerFiring records one event a Trigger handled.
+                  properties:
+                    key:
+                      description: key is the event's dedupe key.
+                      type: string
+                    run:
+                      description: run is the Chain the firing started.
+                      type: string
+                    skipReason:
+                      description: skipReason says why the firing started nothing.
+                      type: string
+                    time:
+                      description: time is when the event was handled.
+                      format: date-time
+                      type: string
+                  required:
+                  - time
+                  type: object
+                type: array
+              stream:
+                description: stream is the JetStream stream the NATS source's consumer
+                  is on.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: 'metadata.name must be at most 63 characters: it labels the Trigger''s
+            runs'
+          rule: self.metadata.name.size() <= 63
+    served: true
+    storage: true
+    subresources:
+      status: {}

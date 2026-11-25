@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -171,6 +173,39 @@ type RoundTableNATS struct {
 	// used when createStreams is true. Defaults to 720h (30 days).
 	// +optional
 	DeadLetterMaxAge *metav1.Duration `json:"deadLetterMaxAge,omitempty"`
+
+	// eventsStream is the JetStream stream that captures the table's events
+	// (<subjectPrefix>.events.>), which NATS-source Triggers read. Created
+	// with Limits retention when createStreams is true. Defaults to
+	// <tasksStream>_EVENTS.
+	// +optional
+	EventsStream string `json:"eventsStream,omitempty"`
+
+	// eventsMaxAge is how long events are kept in the events stream. Only
+	// used when createStreams is true. Defaults to 168h (7 days).
+	// +optional
+	EventsMaxAge *metav1.Duration `json:"eventsMaxAge,omitempty"`
+}
+
+// DefaultEventsMaxAge is the events stream retention when
+// spec.nats.eventsMaxAge is unset.
+const DefaultEventsMaxAge = 7 * 24 * time.Hour
+
+// EventsStreamName is spec.nats.eventsStream, or <tasksStream>_EVENTS when
+// unset.
+func (n *RoundTableNATS) EventsStreamName() string {
+	if n.EventsStream != "" {
+		return n.EventsStream
+	}
+	return n.TasksStream + "_EVENTS"
+}
+
+// EventsRetention is spec.nats.eventsMaxAge, or DefaultEventsMaxAge.
+func (n *RoundTableNATS) EventsRetention() time.Duration {
+	if n.EventsMaxAge != nil && n.EventsMaxAge.Duration > 0 {
+		return n.EventsMaxAge.Duration
+	}
+	return DefaultEventsMaxAge
 }
 
 // RoundTableTelemetry overrides the operator-wide telemetry settings for one

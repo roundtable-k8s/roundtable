@@ -342,3 +342,18 @@ func TestKnightTaskConsumerName(t *testing.T) {
 		}
 	}
 }
+
+func TestEventHelpers(t *testing.T) {
+	if got := EventsStreamSubject("fleet-a"); got != "fleet-a.events.>" {
+		t.Errorf("EventsStreamSubject = %q", got)
+	}
+	if got := EventsSubjectPrefix("fleet-a"); got != "fleet-a.events." {
+		t.Errorf("EventsSubjectPrefix = %q", got)
+	}
+	if got := EventSubject("fleet-a", "deploys.prod"); got != "fleet-a.events.deploys.prod" {
+		t.Errorf("EventSubject = %q", got)
+	}
+	if got := TriggerConsumerName("roundtable", "on-deploy"); got != "trigger-roundtable_on-deploy" {
+		t.Errorf("TriggerConsumerName = %q", got)
+	}
+}

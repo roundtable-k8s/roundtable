@@ -75,6 +75,8 @@ func TestExamplesDecodeStrictly(t *testing.T) {
 				obj = &Mission{}
 			case "RoundTable":
 				obj = &RoundTable{}
+			case "Trigger":
+				obj = &Trigger{}
 			default:
 				t.Errorf("%s doc %d: unknown kind %q", f, i, meta.Kind)
 				continue
