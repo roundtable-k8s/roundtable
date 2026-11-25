@@ -1,0 +1,20 @@
+# Helm values for the observability example: turns on OpenTelemetry export, the
+# chart's collector (telemetry.collector, #386) and sends traces to the Jaeger
+# Service in jaeger.yaml. Metrics and logs have no exporter here, so their
+# pipelines are dropped.
+#
+#   helm upgrade --install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
+#     -n roundtable -f examples/observability/values-telemetry.yaml
+telemetry:
+  enabled: true
+  collector:
+    enabled: true
+    exporters:
+      debug: null                      # helm merges maps; null removes the default
+      otlp/jaeger:
+        endpoint: jaeger.roundtable.svc.cluster.local:4317
+        tls: {insecure: true}          # in-cluster plaintext to Jaeger
+    pipelines:
+      traces: [otlp/jaeger]
+      metrics: []
+      logs: []

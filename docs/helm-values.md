@@ -405,6 +405,9 @@ telemetry:
       logs: []
 ```
 
+A try-it-out setup with Jaeger as the trace viewer is in
+[`examples/observability/`](../examples/observability/) (`values-telemetry.yaml`).
+
 ### Scheduling
 
 | Key | Type | Default | Description |
