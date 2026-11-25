@@ -305,7 +305,7 @@ var _ = Describe("PodBuilder", func() {
 				}
 			}
 			Expect(found).To(BeTrue())
-			want := corev1.VolumeMount{Name: "arsenal-oci-arsenal", MountPath: "/arsenal/arsenal", ReadOnly: true}
+			want := corev1.VolumeMount{Name: "arsenal-oci-arsenal", MountPath: "/arsenal-oci/arsenal", ReadOnly: true}
 			Expect(builder.mounts).To(ContainElement(want))
 			Expect(builder.sidecars[0].VolumeMounts).To(ContainElement(want))
 		})
@@ -315,10 +315,11 @@ var _ = Describe("PodBuilder", func() {
 			knight.Spec.Arsenals = []aiv1alpha1.KnightArsenal{
 				{Name: "personal", OCI: &aiv1alpha1.KnightArsenalOCI{Reference: ref, PullPolicy: corev1.PullAlways}},
 			}
-			builder.WithArsenal().WithGitSync()
+			builder.WithArsenal().WithGitSync().WithSkillFilter()
 
-			Expect(builder.sidecars).To(HaveLen(1))
+			Expect(builder.sidecars).To(HaveLen(2))
 			Expect(builder.sidecars[0].Name).To(Equal("git-sync"))
+			Expect(builder.sidecars[1].Name).To(Equal("skill-filter"))
 			var imgs int
 			for _, v := range builder.volumes {
 				if v.Image != nil {
@@ -329,7 +330,9 @@ var _ = Describe("PodBuilder", func() {
 			}
 			Expect(imgs).To(Equal(1))
 			Expect(builder.mounts).To(ContainElement(
-				corev1.VolumeMount{Name: "arsenal-oci-personal", MountPath: "/arsenal/personal", ReadOnly: true}))
+				corev1.VolumeMount{Name: "arsenal-oci-personal", MountPath: "/arsenal-oci/personal", ReadOnly: true}))
+			// skill-filter lists both arsenals in merge order (git, then OCI).
+			Expect(builder.sidecars[1].Args[0]).To(ContainSubstring(`ARSENALS="/arsenal/arsenal /arsenal-oci/personal"`))
 		})
 	})
 

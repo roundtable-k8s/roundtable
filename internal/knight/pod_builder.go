@@ -600,7 +600,8 @@ func (b *PodBuilder) WithArsenal() *PodBuilder {
 	b.mounts = append(b.mounts,
 		corev1.VolumeMount{Name: "arsenal", MountPath: "/arsenal", ReadOnly: true},
 	)
-	// OCI arsenals are image volumes nested under /arsenal.
+	// OCI arsenals are image volumes mounted under /arsenal-oci (not nested in
+	// the read-only /arsenal emptyDir, where no mountpoint could be created).
 	for _, a := range b.arsenals() {
 		if a.OCI == nil {
 			continue
@@ -644,6 +645,9 @@ func ociArsenalName(ref string) string {
 }
 
 const (
+	// ociArsenalRoot is the parent directory of OCI arsenal image volumes.
+	ociArsenalRoot = "/arsenal-oci"
+
 	defaultArsenalRepo                = "https://github.com/roundtable-k8s/arsenal"
 	defaultArsenalRef                 = "main"
 	defaultArsenalPeriodSeconds int32 = 300
@@ -721,9 +725,15 @@ func (b *PodBuilder) arsenals() []resolvedArsenal {
 		} else {
 			seen[a.Name] = 1
 		}
+		// OCI image volumes mount outside the read-only /arsenal emptyDir:
+		// the runtime cannot create a mountpoint inside a read-only mount.
+		path := "/arsenal/" + a.Name
+		if a.OCI != nil {
+			path = ociArsenalRoot + "/" + a.Name
+		}
 		out = append(out, resolvedArsenal{
 			KnightArsenal: a,
-			path:          "/arsenal/" + a.Name,
+			path:          path,
 			primary:       primary && i == 0,
 		})
 	}

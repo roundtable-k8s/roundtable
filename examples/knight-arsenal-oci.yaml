@@ -2,6 +2,10 @@
 # The reference must be pinned by digest. Needs a cluster with image volumes
 # (Kubernetes 1.35+, or the ImageVolume feature gate on 1.31+).
 # Mixed lists work: spec.arsenal (git) plus spec.arsenals (OCI).
+# OCI arsenals mount at /arsenal-oci/<name>. Set `name` explicitly: the default
+# is the image basename, which can collide with the default git arsenal.
+# Existing Knights have `repo` saved from the old CRD default: remove
+# `spec.arsenal.repo` before adding `oci` to the same entry (oci and repo are exclusive).
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Knight
 metadata:
