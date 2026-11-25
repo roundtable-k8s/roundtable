@@ -23,9 +23,43 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+
+	gh "github.com/google/go-github/v93/github"
 )
+
+// pagedServer serves total items over pages of size per, wrapping each page
+// with wrap and advertising the next page in a Link header. It records the
+// requested page numbers.
+func pagedServer(t *testing.T, total int, wrap func(items []map[string]any) any, pages *[]string) *httptest.Server {
+	t.Helper()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := 1
+		if v := r.URL.Query().Get("page"); v != "" {
+			p, _ = strconv.Atoi(v)
+		}
+		*pages = append(*pages, strconv.Itoa(p))
+		start, end := (p-1)*100, min(p*100, total)
+		items := make([]map[string]any, 0, end-start)
+		for i := start; i < end; i++ {
+			items = append(items, map[string]any{"id": i + 1, "number": i + 1})
+		}
+		if end < total {
+			u := *r.URL
+			q := u.Query()
+			q.Set("page", strconv.Itoa(p+1))
+			w.Header().Set("Link", `<`+srv.URL+u.Path+"?"+q.Encode()+`>; rel="next"`)
+		}
+		_ = json.NewEncoder(w).Encode(wrap(items))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func bare(items []map[string]any) any { return items }
 
 func TestListOpenIssuesFiltersPullRequests(t *testing.T) {
 	var gotPath, gotQuery, gotAuth string
@@ -76,8 +110,8 @@ func TestAPIError(t *testing.T) {
 	defer srv.Close()
 
 	err := NewClient(srv.URL, "t").Comment(context.Background(), "acme/widgets", 3, "hi")
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden || apiErr.Message != "Resource not accessible by integration" {
+	var apiErr *gh.ErrorResponse
+	if !errors.As(err, &apiErr) || apiErr.Response.StatusCode != http.StatusForbidden || apiErr.Message != "Resource not accessible by integration" {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := NewClient(srv.URL, "t").ListOpenIssues(context.Background(), "no-slash", "x"); err == nil {
@@ -108,20 +142,7 @@ func TestListOpenPullRequestsFiltersByLabel(t *testing.T) {
 
 func TestListOpenPullsFollowsPages(t *testing.T) {
 	var pages []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pages = append(pages, r.URL.Query().Get("page"))
-		n := 100
-		if r.URL.Query().Get("page") == "2" {
-			n = 3
-		}
-		out := make([]map[string]any, n)
-		for i := range out {
-			out[i] = map[string]any{"number": i + 1}
-		}
-		_ = json.NewEncoder(w).Encode(out)
-	}))
-	defer srv.Close()
-
+	srv := pagedServer(t, 103, bare, &pages)
 	pulls, err := NewClient(srv.URL, "tok").ListOpenPulls(context.Background(), "o/r")
 	if err != nil {
 		t.Fatal(err)
@@ -131,26 +152,71 @@ func TestListOpenPullsFollowsPages(t *testing.T) {
 	}
 }
 
+func TestListOpenIssuesFollowsPages(t *testing.T) {
+	var pages []string
+	srv := pagedServer(t, 230, bare, &pages)
+	c := NewClient(srv.URL, "tok")
+	issues, err := c.ListOpenIssues(context.Background(), "o/r", "rt:ready")
+	if err != nil || len(issues) != 230 || len(pages) != 3 {
+		t.Fatalf("got %d issues over pages %v err %v", len(issues), pages, err)
+	}
+	pages = nil
+	issues, err = c.ListOpenIssuesWithLabel(context.Background(), "o/r", "rt:ready")
+	if err != nil || len(issues) != 230 || len(pages) != 3 {
+		t.Fatalf("got %d issues over pages %v err %v", len(issues), pages, err)
+	}
+}
+
+func TestListOpenPullRequestsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := pagedServer(t, 150, func(items []map[string]any) any {
+		for _, it := range items {
+			it["labels"] = []map[string]any{{"name": "breaking"}}
+		}
+		return items
+	}, &pages)
+	prs, err := NewClient(srv.URL, "tok").ListOpenPullRequests(context.Background(), "o/r", "breaking")
+	if err != nil || len(prs) != 150 || len(pages) != 2 {
+		t.Fatalf("got %d prs over pages %v err %v", len(prs), pages, err)
+	}
+}
+
+func TestListReviewsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := pagedServer(t, 120, bare, &pages)
+	reviews, err := NewClient(srv.URL, "tok").ListReviews(context.Background(), "o/r", 7)
+	if err != nil || len(reviews) != 120 || len(pages) != 2 || reviews[119].ID != 120 {
+		t.Fatalf("got %d reviews over pages %v err %v", len(reviews), pages, err)
+	}
+}
+
+func TestListCheckRunsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := pagedServer(t, 130, func(items []map[string]any) any {
+		return map[string]any{"total_count": 130, "check_runs": items}
+	}, &pages)
+	runs, err := NewClient(srv.URL, "tok").ListCheckRuns(context.Background(), "o/r", "abc")
+	if err != nil || len(runs) != 130 || len(pages) != 2 {
+		t.Fatalf("got %d check runs over pages %v err %v", len(runs), pages, err)
+	}
+}
+
+func TestListRunJobsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := pagedServer(t, 101, func(items []map[string]any) any {
+		return map[string]any{"total_count": 101, "jobs": items}
+	}, &pages)
+	jobs, err := NewClient(srv.URL, "tok").ListRunJobs(context.Background(), "o/r", 9)
+	if err != nil || len(jobs) != 101 || len(pages) != 2 {
+		t.Fatalf("got %d jobs over pages %v err %v", len(jobs), pages, err)
+	}
+}
+
 func TestListMergeGroupRunsFollowsPages(t *testing.T) {
 	var pages []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/o/r/actions/runs" || r.URL.Query().Get("event") != "merge_group" {
-			t.Errorf("unexpected request %s", r.URL)
-		}
-		p := r.URL.Query().Get("page")
-		pages = append(pages, p)
-		n, base := 100, 0
-		if p == "2" {
-			n, base = 3, 100
-		}
-		runs := make([]map[string]any, n)
-		for i := range runs {
-			runs[i] = map[string]any{"id": base + i + 1}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
-	}))
-	defer srv.Close()
-
+	srv := pagedServer(t, 103, func(items []map[string]any) any {
+		return map[string]any{"total_count": 103, "workflow_runs": items}
+	}, &pages)
 	runs, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r")
 	if err != nil {
 		t.Fatal(err)
@@ -161,23 +227,33 @@ func TestListMergeGroupRunsFollowsPages(t *testing.T) {
 }
 
 func TestListMergeGroupRunsStopsAtMaxPages(t *testing.T) {
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		runs := make([]map[string]any, 100)
-		for i := range runs {
-			runs[i] = map[string]any{"id": i}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
-	}))
-	defer srv.Close()
-
+	var pages []string
+	srv := pagedServer(t, 100*(maxPages+3), func(items []map[string]any) any {
+		return map[string]any{"workflow_runs": items}
+	}, &pages)
 	runs, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != maxPages || len(runs) != maxPages*100 {
-		t.Fatalf("calls=%d runs=%d", calls, len(runs))
+	if len(pages) != maxPages || len(runs) != maxPages*100 {
+		t.Fatalf("pages=%v runs=%d", pages, len(runs))
+	}
+}
+
+func TestEnableAutoMergeSendsGraphQL(t *testing.T) {
+	var path, body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		path, body = r.URL.Path, string(b)
+		_, _ = io.WriteString(w, `{"errors":[{"message":"nope"}]}`)
+	}))
+	defer srv.Close()
+	err := NewClient(srv.URL, "tok").EnableAutoMerge(context.Background(), "PR_1")
+	if path != "/graphql" || !strings.Contains(body, "enablePullRequestAutoMerge") || !strings.Contains(body, "PR_1") {
+		t.Fatalf("path %q body %s", path, body)
+	}
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -197,8 +273,12 @@ func TestCommentKeepsLiteralAngleBrackets(t *testing.T) {
 	}
 }
 
-func TestJobLogReturnsRawText(t *testing.T) {
+func TestJobLogFollowsRedirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			http.Redirect(w, r, "http://"+r.Host+"/blob/log.txt", http.StatusFound)
+			return
+		}
 		_, _ = io.WriteString(w, "line 1\n##[error]boom\n")
 	}))
 	defer srv.Close()
@@ -209,7 +289,8 @@ func TestJobLogReturnsRawText(t *testing.T) {
 }
 
 func TestIsNotFound(t *testing.T) {
-	if !IsNotFound(&APIError{Status: 404}) || !IsNotFound(&APIError{Status: 410}) || IsNotFound(&APIError{Status: 500}) || IsNotFound(errors.New("x")) {
+	er := func(code int) error { return &gh.ErrorResponse{Response: &http.Response{StatusCode: code}} }
+	if !IsNotFound(er(404)) || !IsNotFound(er(410)) || IsNotFound(er(500)) || IsNotFound(errors.New("x")) {
 		t.Fatal("IsNotFound wrong")
 	}
 }
