@@ -34,8 +34,5 @@ spec:
           - "fleet-a.tasks.general.>"
 
   policies:
-    maxConcurrentTasks: 20
-    maxKnights: 15
     maxMissions: 5
     costBudgetUSD: "50"
-    costResetSchedule: "0 0 1 * *"  # Monthly

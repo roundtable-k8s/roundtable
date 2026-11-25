@@ -208,3 +208,54 @@ var _ = Describe("RoundTable health with knights at rest", func() {
 		Expect(cond.Message).To(Equal("5 knights: 1 ready, 2 scaled to zero, 1 suspended, 1 not ready"))
 	})
 })
+
+var _ = Describe("RoundTable deprecated policies", func() {
+	table := func(ephemeral bool, p *aiv1alpha1.RoundTablePolicies) *aiv1alpha1.RoundTable {
+		return &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Generation: 1},
+			Spec:       aiv1alpha1.RoundTableSpec{Ephemeral: ephemeral, Policies: p},
+		}
+	}
+	run := func(rt *aiv1alpha1.RoundTable) (*metav1.Condition, *record.FakeRecorder) {
+		rec := record.NewFakeRecorder(10)
+		r := &RoundTableReconciler{Recorder: rec}
+		r.setDeprecatedFieldsCondition(rt)
+		r.setDeprecatedFieldsCondition(rt) // repeated reconcile, same generation
+		return meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed), rec
+	}
+
+	DescribeTable("reports each deprecated field on a standing table",
+		func(p *aiv1alpha1.RoundTablePolicies, field string) {
+			c, rec := run(table(false, p))
+			Expect(c).NotTo(BeNil())
+			Expect(c.Status).To(Equal(metav1.ConditionTrue))
+			Expect(c.Message).To(ContainSubstring(field))
+			Expect(countEvents(rec, aiv1alpha1.ReasonRoundTableDeprecatedFieldsUsed)).To(Equal(1))
+		},
+		Entry("costResetSchedule", &aiv1alpha1.RoundTablePolicies{CostResetSchedule: "0 0 1 * *"}, "policies.costResetSchedule"),
+		Entry("maxConcurrentTasks", &aiv1alpha1.RoundTablePolicies{MaxConcurrentTasks: 5}, "policies.maxConcurrentTasks"),
+		Entry("maxKnights", &aiv1alpha1.RoundTablePolicies{MaxKnights: 3}, "policies.maxKnights"),
+	)
+
+	It("is silent when only enforced policies are set", func() {
+		c, rec := run(table(false, &aiv1alpha1.RoundTablePolicies{MaxMissions: 2, MaxConcurrentPlanTasks: 3, CostBudgetUSD: "5", MaxKnights: 0}))
+		Expect(c).To(BeNil())
+		Expect(drainEvents(rec)).To(BeEmpty())
+	})
+
+	It("is silent on an ephemeral table", func() {
+		c, rec := run(table(true, &aiv1alpha1.RoundTablePolicies{CostResetSchedule: "0 0 1 * *", MaxKnights: 3, MaxConcurrentTasks: 2}))
+		Expect(c).To(BeNil())
+		Expect(drainEvents(rec)).To(BeEmpty())
+	})
+
+	It("clears the condition when the fields are removed", func() {
+		rt := table(false, &aiv1alpha1.RoundTablePolicies{MaxKnights: 3})
+		c, _ := run(rt)
+		Expect(c).NotTo(BeNil())
+		rt.Spec.Policies.MaxKnights = 0 //nolint:staticcheck // exercising the deprecated field
+		rt.Generation = 2
+		c, _ = run(rt)
+		Expect(c).To(BeNil())
+	})
+})

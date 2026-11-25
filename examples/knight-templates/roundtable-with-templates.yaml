@@ -93,6 +93,5 @@ spec:
   
   # Policies
   policies:
-    maxConcurrentTasks: 20
     costBudgetUSD: "500"
     maxMissions: 10

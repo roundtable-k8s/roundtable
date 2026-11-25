@@ -261,9 +261,21 @@ the operator does not commit results to git.
 
    The Knight CRD has no schema defaults for these fields, so "unset" means unset. `status.model` (the `Model` column of `kubectl get knight`) shows the effective model. A change to a table's defaults or vault re-reconciles the knights labelled with it, and their pods roll when the rendered pod template changes. Chains and the gateway read knights with the same defaults applied (effective image, concurrency and model).
 4. **Policy Enforcement:**
-   - Count total concurrent tasks across knights. If exceeding `maxConcurrentTasks`, pause NATS consumers on lowest-priority knights.
-   - Aggregate costs. If exceeding `costBudgetUSD`, suspend all knights (set annotation `roundtable.ai.roundtable.io/budget-suspended=true`).
-   - Check cost reset schedule, reset counter when due.
+   - `policies.costBudgetUSD`: aggregate costs. If exceeding it, the table goes `OverBudget` and all knights are suspended.
+   - `policies.maxConcurrentPlanTasks`: caps plan-backed knights' replicas (see Knight `PlanCapLimited`).
+   - `policies.maxMissions`: caps concurrently active missions; extra missions wait in `Pending`.
+   - Not enforced (deprecated): `policies.maxConcurrentTasks`, `policies.maxKnights` and `policies.costResetSchedule`. They are still accepted; a standing table that sets them gets a `DeprecatedFieldsUsed=True` condition and a Warning event. The reported cost is cumulative; nothing resets it.
+   - To cap the number of knights in a namespace, use a Kubernetes `ResourceQuota`:
+
+     ```yaml
+     apiVersion: v1
+     kind: ResourceQuota
+     metadata:
+       name: knight-count
+     spec:
+       hard:
+         count/knights.ai.roundtable.io: "15"
+     ```
 5. **Health Aggregation** — Count knights as ready, scaled to zero (KEDA, `ScaledToZero` or `Waking`), suspended (`spec.suspend`) or not ready (`status.knightsReady`, `knightsScaledToZero`, `knightsSuspended`, `knightsNotReady`; `kubectl get rt` shows the `Idle` column). Compute phase: Ready (no knight that should run is down; scaled-to-zero and suspended knights count as healthy), Degraded (some not ready), Suspended, OverBudget.
 6. **Mission Counting** — Count active Missions referencing this table.
 
@@ -437,10 +449,7 @@ spec:
     taskTimeoutSeconds: 120
     concurrency: 2
   policies:
-    maxConcurrentTasks: 20
     costBudgetUSD: "50.00"
-    costResetSchedule: "0 0 1 * *"
-    maxKnights: 15
     maxMissions: 5   # concurrent active missions; 0 = unlimited. Extra missions wait in Pending (Admitted=False, TableAtMissionLimit), oldest first
   knightSelector:
     matchLabels:
@@ -637,7 +646,6 @@ spec:
     concurrency: 2
   policies:
     costBudgetUSD: "50.00"
-    costResetSchedule: "0 0 1 * *"
 EOF
 ```
 
