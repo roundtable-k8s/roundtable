@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -80,10 +81,10 @@ var kubeAPIFallbackPorts = []int32{443, 6443}
 
 // EgressAllowlist is the input to the egress policy renderers. Every policy
 // allows the baseline: DNS, NATS, the Kubernetes API, BaseHosts (on 443) and
-// GitHosts (on their ports). AllowedHosts are allowed on AllowedPorts on top,
-// and each of Services on its own ports.
+// GitHosts (on their ports). AllowedHosts are allowed on top, each on its own
+// ports or, without any, on AllowedPorts, and each of Services on its own ports.
 type EgressAllowlist struct {
-	AllowedHosts []string
+	AllowedHosts []aiv1alpha1.EgressHost
 	AllowedPorts []int32
 	// BaseHosts are the operator's base hosts (KNIGHT_EGRESS_BASE_HOSTS).
 	BaseHosts []string
@@ -119,7 +120,6 @@ func (r *KnightReconciler) egressAllowlistOf(k *aiv1alpha1.Knight) *EgressAllowl
 		return nil
 	}
 	return &EgressAllowlist{
-		AllowedHosts: k.Spec.Egress.AllowedHosts,
 		AllowedPorts: k.Spec.Egress.AllowedPorts,
 		BaseHosts:    r.Isolation.BaseHosts,
 		GitHosts:     knightpkg.ArsenalGitHosts(k),
@@ -175,9 +175,75 @@ func (a EgressAllowlist) ports() []int32 {
 func (a EgressAllowlist) hosts() []string {
 	out := make([]string, 0, len(a.AllowedHosts))
 	for _, h := range a.AllowedHosts {
-		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
-			out = append(out, h)
+		if name := strings.ToLower(strings.TrimSpace(h.Host)); name != "" {
+			out = append(out, name)
 		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// hostPorts returns each allowed host (lower-cased, sorted, deduplicated)
+// with its ports: the union of the ports of its entries, where an entry
+// without ports uses AllowedPorts (default 443).
+func (a EgressAllowlist) hostPorts() map[string][]int32 {
+	out := map[string][]int32{}
+	for _, h := range a.AllowedHosts {
+		name := strings.ToLower(strings.TrimSpace(h.Host))
+		if name == "" {
+			continue
+		}
+		ports := h.Ports
+		if len(ports) == 0 {
+			ports = a.ports()
+		}
+		out[name] = append(out[name], ports...)
+	}
+	for name, ports := range out {
+		slices.Sort(ports)
+		out[name] = slices.Compact(ports)
+	}
+	return out
+}
+
+// hostGroup is a set of allowed hosts that share the same ports.
+type hostGroup struct {
+	Hosts []string
+	Ports []int32
+}
+
+// hostGroups groups the allowed hosts by port set, sorted by ports, each
+// group's hosts sorted. Without per-host ports it is a single group.
+func (a EgressAllowlist) hostGroups() []hostGroup {
+	byPorts := map[string]*hostGroup{}
+	for name, ports := range a.hostPorts() {
+		key := fmt.Sprint(ports)
+		g, ok := byPorts[key]
+		if !ok {
+			g = &hostGroup{Ports: ports}
+			byPorts[key] = g
+		}
+		g.Hosts = append(g.Hosts, name)
+	}
+	out := make([]hostGroup, 0, len(byPorts))
+	for _, g := range byPorts {
+		slices.Sort(g.Hosts)
+		out = append(out, *g)
+	}
+	slices.SortFunc(out, func(x, y hostGroup) int { return slices.Compare(x.Ports, y.Ports) })
+	return out
+}
+
+// hasHostPorts reports whether any allowedHosts entry has its own ports.
+func (a EgressAllowlist) hasHostPorts() bool {
+	return slices.ContainsFunc(a.AllowedHosts, func(h aiv1alpha1.EgressHost) bool { return len(h.Ports) > 0 })
+}
+
+// allHostPorts is the union of the ports of all allowed hosts.
+func (a EgressAllowlist) allHostPorts() []int32 {
+	out := make([]int32, 0, len(a.AllowedHosts))
+	for _, ports := range a.hostPorts() {
+		out = append(out, ports...)
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
@@ -210,11 +276,11 @@ func (r *KnightReconciler) egressNetPolSettings() missionpkg.NetPolSettings {
 // RenderCiliumEgressPolicy renders the knight's CiliumNetworkPolicy: egress
 // is allowed to (a) the cluster DNS with a DNS proxy rule (needed for FQDN
 // tracking), (b) the knight's NATS server, (c) the Kubernetes API server,
-// (d) the base and arsenal git hosts and (e) each allowed host on the allowed
-// ports. Everything else is denied. The endpoint selector uses the
+// (d) the base and arsenal git hosts and (e) each allowed host on its own
+// ports or the allowed ports (one rule per distinct port set). Everything else is denied. The endpoint selector uses the
 // knight's pod labels, so it covers both runtime backends.
 func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s missionpkg.NetPolSettings) *unstructured.Unstructured {
-	egress := []any{
+	egress := []any{ //nolint:prealloc // the rule count depends on several optional sources
 		map[string]any{
 			"toEndpoints": []any{map[string]any{"matchLabels": stringMap(ciliumPeerLabels(dnsNamespace(s), s.DNSPodLabels))}},
 			"toPorts": []any{map[string]any{
@@ -229,8 +295,8 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 	for _, p := range slices.Sorted(maps.Keys(baseline)) {
 		egress = append(egress, ciliumFQDNRule(baseline[p], []int32{p}))
 	}
-	if hosts := allow.hosts(); len(hosts) > 0 {
-		egress = append(egress, ciliumFQDNRule(hosts, allow.ports()))
+	for _, g := range allow.hostGroups() {
+		egress = append(egress, ciliumFQDNRule(g.Hosts, g.Ports))
 	}
 	for _, svc := range allow.Services {
 		egress = append(egress, ciliumServiceRule(svc))
@@ -327,9 +393,7 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 	}
 	allowed := slices.Clone(kubeAPIFallbackPorts)
 	allowed = slices.AppendSeq(allowed, maps.Keys(allow.baselineHostsByPort()))
-	if len(allow.hosts()) > 0 {
-		allowed = append(allowed, allow.ports()...)
-	}
+	allowed = append(allowed, allow.allHostPorts()...)
 	slices.Sort(allowed)
 	allowed = slices.Compact(allowed)
 	ports := make([]networkingv1.NetworkPolicyPort, 0, len(allowed))
@@ -417,7 +481,15 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		meta.RemoveStatusCondition(&k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		return r.deleteEgressPolicies(ctx, k)
 	}
-	services, missing, err := r.resolveEgressServices(ctx, k)
+	// Fail closed: render the policy from the valid entries only, so a bad
+	// entry never leaves the knight without a policy; report the dropped ones.
+	// An EgressAllowlist holds decoded hosts, so the raw entries are parsed here.
+	hosts, dropped := aiv1alpha1.ParseEgressHosts(k.Spec.Egress.AllowedHosts)
+	allow.AllowedHosts = hosts
+	var err error
+	var services []EgressServicePeer
+	var missing []string
+	services, missing, err = r.resolveEgressServices(ctx, k)
 	if err == nil {
 		allow.Services = services
 		err = r.applyEgressPolicy(ctx, k, *allow)
@@ -448,6 +520,9 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		cond.Message = fmt.Sprintf("%s CiliumNetworkPolicy is not served, so hostnames can't be enforced; "+
 			"NetworkPolicy %s allows DNS, NATS, the Kubernetes API (ports 443 and 6443) and the allowed ports to any destination",
 			rtruntime.CiliumNetworkPolicyGVK.GroupVersion(), egressPolicyName(k))
+		if allow.hasHostPorts() {
+			cond.Message += "; per-host ports are not enforced, so the union of all host ports is allowed to any destination"
+		}
 		if n := len(allow.Services); n > 0 {
 			cond.Message += fmt.Sprintf(", and %d Service(s) on their ports", n)
 		}
@@ -467,6 +542,12 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 			}
 		}
 	}
+	if err == nil && len(dropped) > 0 {
+		err = fmt.Errorf("%d allowedHosts entr(ies) invalid and not allowed: %w", len(dropped), errors.Join(dropped...))
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = aiv1alpha1.ReasonEgressPolicyFailed
+		cond.Message = fmt.Sprintf("%s; the policy was rendered from the valid entries only (%s)", err.Error(), cond.Message)
+	}
 	meta.SetStatusCondition(&k.Status.Conditions, cond)
 	return err
 }
@@ -478,7 +559,7 @@ const eventReasonInClusterHost = "InClusterAllowedHost"
 // inClusterHostWarnings returns a warning for each allowedHosts entry that is
 // an in-cluster name (ending in .svc or .cluster.local): it resolves to a
 // ClusterIP, which FQDN rules never match.
-func inClusterHostWarnings(hosts []string) []string {
+func inClusterHostWarnings(hosts []aiv1alpha1.EgressHost) []string {
 	var out []string
 	for _, h := range (EgressAllowlist{AllowedHosts: hosts}).hosts() {
 		if strings.HasSuffix(h, ".svc") || strings.HasSuffix(h, ".cluster.local") {

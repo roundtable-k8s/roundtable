@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
@@ -100,7 +102,7 @@ func removeEgress(k *aiv1alpha1.Knight) {
 }
 
 var _ = Describe("Knight egress allowlist (#348)", func() {
-	allow := &aiv1alpha1.KnightEgress{AllowedHosts: []string{"api.anthropic.com", "*.github.com"}}
+	allow := &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("api.anthropic.com", "*.github.com")}
 
 	It("renders nothing for a knight without spec.egress", func() {
 		k := egressKnight("egress-none", nil)
@@ -113,16 +115,70 @@ var _ = Describe("Knight egress allowlist (#348)", func() {
 		Expect(meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)).To(BeNil())
 	})
 
-	It("defaults allowedPorts to 443 and rejects invalid hosts", func() {
-		k := egressKnight("egress-defaults", &aiv1alpha1.KnightEgress{AllowedHosts: []string{"api.anthropic.com"}})
+	It("defaults allowedPorts to 443", func() {
+		k := egressKnight("egress-defaults", &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("api.anthropic.com")})
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		DeferCleanup(deleteKnight, k)
 		Expect(getKnight(k).Spec.Egress.AllowedPorts).To(Equal([]int32{443}))
+	})
 
-		for _, host := range []string{"https://api.anthropic.com", "api.anthropic.com/v1", "a.*.com", "*", "Upper.com"} {
-			bad := egressKnight("egress-bad", &aiv1alpha1.KnightEgress{AllowedHosts: []string{host}})
-			Expect(k8sClient.Create(ctx, bad)).NotTo(Succeed(), host)
-		}
+	It("accepts string and object allowedHosts entries and keeps them as written (#525)", func() {
+		mixed := &aiv1alpha1.KnightEgress{AllowedHosts: []aiv1alpha1.EgressHostEntry{
+			aiv1alpha1.NewEgressHostEntry("api.anthropic.com"), aiv1alpha1.NewEgressHostEntry("odd.example.com", 8443),
+		}}
+		k := egressKnight("egress-mixed", mixed)
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		DeferCleanup(deleteKnight, k)
+		Expect(getKnight(k).Spec.Egress.AllowedHosts).To(Equal(mixed.AllowedHosts))
+	})
+
+	It("keeps listing Knights and fails closed with malformed or invalid allowedHosts entries (#525)", func() {
+		name := "egress-bad-hosts"
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(aiv1alpha1.GroupVersion.WithKind("Knight"))
+		good := egressKnight(name, &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("ok.example.com")})
+		raw, err := k8sruntime.DefaultUnstructuredConverter.ToUnstructured(good)
+		Expect(err).NotTo(HaveOccurred())
+		u.Object = raw
+		u.SetGroupVersionKind(aiv1alpha1.GroupVersion.WithKind("Knight"))
+		Expect(unstructured.SetNestedSlice(u.Object, []any{
+			"ok.example.com", "Bad.Example.com", int64(5),
+			map[string]any{"host": "typo.example.com", "port": int64(1)},
+			map[string]any{"host": "ports.example.com", "ports": []any{int64(8443)}},
+		}, "spec", "egress", "allowedHosts")).To(Succeed())
+		Expect(k8sClient.Create(ctx, u)).To(Succeed())
+		DeferCleanup(deleteKnight, good)
+
+		// A non-array value is still rejected by the schema.
+		bad := u.DeepCopy()
+		bad.SetName(name + "-str")
+		Expect(unstructured.SetNestedField(bad.Object, "just-a-string", "spec", "egress", "allowedHosts")).To(Succeed())
+		Expect(k8sClient.Create(ctx, bad)).NotTo(Succeed())
+
+		// Listing still works and the entries are written back unchanged.
+		list := &aiv1alpha1.KnightList{}
+		Expect(k8sClient.List(ctx, list, client.InNamespace(good.Namespace))).To(Succeed())
+		got := getKnight(good)
+		Expect(got.Spec.Egress.AllowedHosts).To(HaveLen(5))
+		Expect(string(got.Spec.Egress.AllowedHosts[2].Raw)).To(Equal("5"))
+
+		r := newScalingReconciler(false)
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: good.Namespace}})
+		Expect(err).To(HaveOccurred())
+
+		cond := meta.FindStatusCondition(getKnight(good).Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonEgressPolicyFailed))
+		Expect(cond.Message).To(ContainSubstring("Bad.Example.com"))
+		Expect(cond.Message).To(ContainSubstring("typo.example.com"))
+
+		// The policy is still rendered, from the valid entries only.
+		np, err := getEgressNetPol(good)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(npPorts(np.Spec.Egress[2])).To(ContainElement(int32(8443)))
+		// ...and the pod is created behind it.
+		Expect(getKnightDeployment(good)).NotTo(BeNil())
 	})
 
 	It("falls back to a NetworkPolicy without the Cilium API", func() {
@@ -264,7 +320,7 @@ func testEgressKnight(runtime string) *aiv1alpha1.Knight {
 			Runtime: runtime,
 			Domain:  "research",
 			NATS:    aiv1alpha1.KnightNATS{URL: egressTestNATSURL},
-			Egress:  &aiv1alpha1.KnightEgress{AllowedHosts: []string{"api.anthropic.com", "*.github.com"}},
+			Egress:  &aiv1alpha1.KnightEgress{AllowedHosts: aiv1alpha1.EgressHostNames("api.anthropic.com", "*.github.com")},
 		},
 	}
 }
@@ -308,7 +364,7 @@ func TestRenderEgressBaselineAndPorts(t *testing.T) {
 	assert.Equal(t, []int32{443, 6443}, npPorts(np.Spec.Egress[2]))
 
 	// Explicit ports, deduplicated and sorted; hosts lower-cased.
-	allow := EgressAllowlist{AllowedHosts: []string{"Example.com", "example.com"}, AllowedPorts: []int32{8443, 443, 8443}}
+	allow := EgressAllowlist{AllowedHosts: plainHosts("Example.com", "example.com"), AllowedPorts: []int32{8443, 443, 8443}}
 	cnp = RenderCiliumEgressPolicy(k, allow, s)
 	egress, _, _ = unstructured.NestedSlice(cnp.Object, "spec", "egress")
 	require.Len(t, egress, 4)
@@ -349,7 +405,7 @@ func TestRenderEgressIsolationBaseline(t *testing.T) {
 	k := testEgressKnight("")
 	s := missionpkg.DefaultNetPolSettings()
 	allow := EgressAllowlist{
-		AllowedHosts: []string{"example.com"},
+		AllowedHosts: plainHosts("example.com"),
 		BaseHosts:    []string{"OpenRouter.ai", "api.anthropic.com", "openrouter.ai"},
 		GitHosts: []knightpkg.GitHost{
 			{Host: "github.com", Port: 443},
@@ -450,7 +506,7 @@ func TestEgressServiceRefs(t *testing.T) {
 }
 
 func TestInClusterHostWarnings(t *testing.T) {
-	got := inClusterHostWarnings([]string{"api.anthropic.com", "searxng.selfhosted.svc.cluster.local", "hass.home.svc", "svc.example.com"})
+	got := inClusterHostWarnings(plainHosts("api.anthropic.com", "searxng.selfhosted.svc.cluster.local", "hass.home.svc", "svc.example.com"))
 	require.Len(t, got, 2)
 	assert.Contains(t, got[0], `"hass.home.svc"`)
 	assert.Contains(t, got[0], "allowedServices")
@@ -542,7 +598,7 @@ var _ = Describe("Knight egress allowedServices (#517)", Ordered, func() {
 	It("renders the Service's pods on its target ports, reports a missing Service and re-renders on a selector change", func() {
 		newService("searxng", map[string]string{"app": "searxng"})
 		k := egressKnight("egress-svc", &aiv1alpha1.KnightEgress{
-			AllowedHosts: []string{"searxng.default.svc.cluster.local"},
+			AllowedHosts: aiv1alpha1.EgressHostNames("searxng.default.svc.cluster.local"),
 			AllowedServices: []aiv1alpha1.EgressService{
 				{Name: "searxng", Namespace: "default", Ports: []int32{80}},
 				{Name: "miniflux", Ports: []int32{8080}},
@@ -640,3 +696,87 @@ var _ = Describe("Knight egress allowedServices (#517)", Ordered, func() {
 		Expect(serviceRules(member)).To(HaveLen(1))
 	})
 })
+
+func TestRenderEgressPerHostPorts(t *testing.T) {
+	k := testEgressKnight("")
+	s := missionpkg.DefaultNetPolSettings()
+	allow := EgressAllowlist{
+		AllowedHosts: []aiv1alpha1.EgressHost{
+			{Host: "api.example.com"},
+			{Host: "Odd.example.com", Ports: []int32{8443, 443, 8443}},
+			{Host: "*.other.example.com"},
+			{Host: "api.example.com", Ports: []int32{9000}},
+			{Host: "metrics.example.com", Ports: []int32{443, 8443}},
+		},
+	}
+	cnp := RenderCiliumEgressPolicy(k, allow, s)
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	require.Len(t, egress, 6) // DNS, NATS, kube-apiserver, three port sets
+	assert.Equal(t, ciliumFQDNRule([]string{"*.other.example.com"}, []int32{443}), egress[3])
+	assert.Equal(t, ciliumFQDNRule([]string{"metrics.example.com", "odd.example.com"}, []int32{443, 8443}), egress[4])
+	assert.Equal(t, ciliumFQDNRule([]string{"api.example.com"}, []int32{443, 9000}), egress[5])
+
+	// An object entry's ports don't leak to the string entries.
+	only := EgressAllowlist{AllowedHosts: []aiv1alpha1.EgressHost{{Host: "a.example.com"}, {Host: "b.example.com", Ports: []int32{8080}}}, AllowedPorts: []int32{443}}
+	groups := only.hostGroups()
+	require.Len(t, groups, 2)
+	assert.Equal(t, hostGroup{Hosts: []string{"a.example.com"}, Ports: []int32{443}}, groups[0])
+	assert.Equal(t, hostGroup{Hosts: []string{"b.example.com"}, Ports: []int32{8080}}, groups[1])
+
+	// The fallback NetworkPolicy unions the ports.
+	np := RenderEgressNetworkPolicy(k, allow, s)
+	assert.Equal(t, []int32{443, 6443, 8443, 9000}, npPorts(np.Spec.Egress[2]))
+	assert.True(t, allow.hasHostPorts())
+	assert.False(t, EgressAllowlist{AllowedHosts: plainHosts("a.example.com")}.hasHostPorts())
+}
+
+func TestEgressHostJSON(t *testing.T) {
+	const in = `["a.example.com",{"host":"b.example.com","ports":[8080]},{"host":"c.example.com"}]`
+	var got []aiv1alpha1.EgressHostEntry
+	require.NoError(t, json.Unmarshal([]byte(in), &got))
+	hosts := make([]aiv1alpha1.EgressHost, 0, len(got))
+	for _, e := range got {
+		h, err := e.Parse()
+		require.NoError(t, err)
+		hosts = append(hosts, h)
+	}
+	assert.Equal(t, []aiv1alpha1.EgressHost{{Host: "a.example.com"}, {Host: "b.example.com", Ports: []int32{8080}}, {Host: "c.example.com"}}, hosts)
+	out, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(out))
+
+	// Malformed entries decode without error, round-trip unchanged and fail Parse.
+	const badIn = `[{"host":"a.example.com","port":1},5,{"host":"a.example.com","ports":"x"},[1],null]`
+	require.NoError(t, json.Unmarshal([]byte(badIn), &got))
+	out, err = json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, badIn, string(out))
+	for _, e := range got[:4] {
+		_, err := e.Parse()
+		assert.Error(t, err, string(e.Raw))
+	}
+	valid, dropped := aiv1alpha1.ParseEgressHosts(append(aiv1alpha1.EgressHostNames("ok.example.com"), got...))
+	assert.Equal(t, []aiv1alpha1.EgressHost{{Host: "ok.example.com"}}, valid)
+	assert.Len(t, dropped, 5)
+
+	assert.NoError(t, aiv1alpha1.ValidateEgressHost(aiv1alpha1.EgressHost{Host: "*.a.com", Ports: []int32{1, 65535}}))
+	assert.Error(t, aiv1alpha1.ValidateEgressHost(aiv1alpha1.EgressHost{Host: "Bad.com"}))
+	assert.Error(t, aiv1alpha1.ValidateEgressHost(aiv1alpha1.EgressHost{Host: "a.com", Ports: []int32{0}}))
+	assert.Error(t, aiv1alpha1.ValidateEgressHost(aiv1alpha1.EgressHost{Host: "a.com", Ports: []int32{70000}}))
+	for _, host := range []string{"https://api.anthropic.com", "api.anthropic.com/v1", "a.*.com", "*", "Upper.com", ""} {
+		valid, dropped := aiv1alpha1.ParseEgressHosts(aiv1alpha1.EgressHostNames(host))
+		assert.Empty(t, valid, host)
+		assert.Len(t, dropped, 1, host)
+	}
+	valid, dropped = aiv1alpha1.ParseEgressHosts(aiv1alpha1.EgressHostNames(make([]string, 65)...))
+	assert.Empty(t, valid)
+	assert.Len(t, dropped, 65)
+}
+
+func plainHosts(names ...string) []aiv1alpha1.EgressHost {
+	out := make([]aiv1alpha1.EgressHost, 0, len(names))
+	for _, n := range names {
+		out = append(out, aiv1alpha1.EgressHost{Host: n})
+	}
+	return out
+}

@@ -807,15 +807,26 @@ spec:
                               description: |-
                                 allowedHosts are the hostnames the knight may reach, each an exact host
                                 ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                                matches subdomains of github.com but not github.com itself). Empty
-                                allows only DNS and NATS.
+                                matches subdomains of github.com but not github.com itself). An entry
+                                is either a string (allowed on allowedPorts) or an object
+                                {host, ports} (allowed on its own ports only). Empty allows only DNS
+                                and NATS.
                               items:
-                                maxLength: 253
-                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                                type: string
+                                description: |-
+                                  EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                                  the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                                  EgressHost.
+
+                                  The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                                  the items open, because a schema cannot express a string-or-object union.
+                                  The operator validates the entries when it renders the policy
+                                  (ParseEgressHosts), drops the invalid ones and reports them on the
+                                  EgressRestricted condition. Decoding never fails and the original JSON is
+                                  written back unchanged, so one malformed entry can't break listing or
+                                  caching Knights.
+                                x-kubernetes-preserve-unknown-fields: true
                               maxItems: 64
                               type: array
-                              x-kubernetes-list-type: set
                             allowedPorts:
                               default:
                               - 443
@@ -2309,15 +2320,26 @@ spec:
                               description: |-
                                 allowedHosts are the hostnames the knight may reach, each an exact host
                                 ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                                matches subdomains of github.com but not github.com itself). Empty
-                                allows only DNS and NATS.
+                                matches subdomains of github.com but not github.com itself). An entry
+                                is either a string (allowed on allowedPorts) or an object
+                                {host, ports} (allowed on its own ports only). Empty allows only DNS
+                                and NATS.
                               items:
-                                maxLength: 253
-                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                                type: string
+                                description: |-
+                                  EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                                  the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                                  EgressHost.
+
+                                  The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                                  the items open, because a schema cannot express a string-or-object union.
+                                  The operator validates the entries when it renders the policy
+                                  (ParseEgressHosts), drops the invalid ones and reports them on the
+                                  EgressRestricted condition. Decoding never fails and the original JSON is
+                                  written back unchanged, so one malformed entry can't break listing or
+                                  caching Knights.
+                                x-kubernetes-preserve-unknown-fields: true
                               maxItems: 64
                               type: array
-                              x-kubernetes-list-type: set
                             allowedPorts:
                               default:
                               - 443
@@ -3530,15 +3552,26 @@ spec:
                               description: |-
                                 allowedHosts are the hostnames the knight may reach, each an exact host
                                 ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                                matches subdomains of github.com but not github.com itself). Empty
-                                allows only DNS and NATS.
+                                matches subdomains of github.com but not github.com itself). An entry
+                                is either a string (allowed on allowedPorts) or an object
+                                {host, ports} (allowed on its own ports only). Empty allows only DNS
+                                and NATS.
                               items:
-                                maxLength: 253
-                                pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                                type: string
+                                description: |-
+                                  EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                                  the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                                  EgressHost.
+
+                                  The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                                  the items open, because a schema cannot express a string-or-object union.
+                                  The operator validates the entries when it renders the policy
+                                  (ParseEgressHosts), drops the invalid ones and reports them on the
+                                  EgressRestricted condition. Decoding never fails and the original JSON is
+                                  written back unchanged, so one malformed entry can't break listing or
+                                  caching Knights.
+                                x-kubernetes-preserve-unknown-fields: true
                               maxItems: 64
                               type: array
-                              x-kubernetes-list-type: set
                             allowedPorts:
                               default:
                               - 443
@@ -5106,15 +5139,26 @@ spec:
                             description: |-
                               allowedHosts are the hostnames the knight may reach, each an exact host
                               ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                              matches subdomains of github.com but not github.com itself). Empty
-                              allows only DNS and NATS.
+                              matches subdomains of github.com but not github.com itself). An entry
+                              is either a string (allowed on allowedPorts) or an object
+                              {host, ports} (allowed on its own ports only). Empty allows only DNS
+                              and NATS.
                             items:
-                              maxLength: 253
-                              pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                              type: string
+                              description: |-
+                                EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                                the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                                EgressHost.
+
+                                The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                                the items open, because a schema cannot express a string-or-object union.
+                                The operator validates the entries when it renders the policy
+                                (ParseEgressHosts), drops the invalid ones and reports them on the
+                                EgressRestricted condition. Decoding never fails and the original JSON is
+                                written back unchanged, so one malformed entry can't break listing or
+                                caching Knights.
+                              x-kubernetes-preserve-unknown-fields: true
                             maxItems: 64
                             type: array
-                            x-kubernetes-list-type: set
                           allowedPorts:
                             default:
                             - 443
@@ -6225,15 +6269,26 @@ spec:
                             description: |-
                               allowedHosts are the hostnames the knight may reach, each an exact host
                               ("api.anthropic.com") or a "*." wildcard prefix ("*.github.com", which
-                              matches subdomains of github.com but not github.com itself). Empty
-                              allows only DNS and NATS.
+                              matches subdomains of github.com but not github.com itself). An entry
+                              is either a string (allowed on allowedPorts) or an object
+                              {host, ports} (allowed on its own ports only). Empty allows only DNS
+                              and NATS.
                             items:
-                              maxLength: 253
-                              pattern: ^(\*\.)?([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                              type: string
+                              description: |-
+                                EgressHostEntry is one allowedHosts entry as stored: a string (the host, on
+                                the allowed ports) or an object {host, ports}. Use Parse for the decoded
+                                EgressHost.
+
+                                The CRD schema keeps allowedHosts an array of at most 64 items but leaves
+                                the items open, because a schema cannot express a string-or-object union.
+                                The operator validates the entries when it renders the policy
+                                (ParseEgressHosts), drops the invalid ones and reports them on the
+                                EgressRestricted condition. Decoding never fails and the original JSON is
+                                written back unchanged, so one malformed entry can't break listing or
+                                caching Knights.
+                              x-kubernetes-preserve-unknown-fields: true
                             maxItems: 64
                             type: array
-                            x-kubernetes-list-type: set
                           allowedPorts:
                             default:
                             - 443

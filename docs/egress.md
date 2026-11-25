@@ -50,8 +50,9 @@ Every knight's policy allows, even with an empty allowlist:
 | `isolation.egress.baseHosts` (`KNIGHT_EGRESS_BASE_HOSTS`, default `openrouter.ai`, `api.anthropic.com`) | the model providers | `toFQDNs` on 443 |
 | The hosts of the knight's arsenal repos (`spec.arsenal.repo`, `spec.arsenals[].repo`) | the git-sync sidecars share the pod's network | `toFQDNs` on the URL's port (443 for https, 22 for ssh / `git@host:`) |
 
-The knight's own `allowedHosts` are added on top, on its `allowedPorts`, and
-each of its `allowedServices` on that Service's ports.
+The knight's own `allowedHosts` are added on top, each on its own `ports` or,
+for a plain string, on `allowedPorts`, and each of its `allowedServices` on that
+Service's ports.
 
 ## The fields
 
@@ -61,13 +62,34 @@ egress:
   allowedHosts:            # exact hosts or "*." wildcards; empty = the baseline only
     - api.anthropic.com
     - "*.githubusercontent.com"   # subdomains only, not githubusercontent.com itself
-  allowedPorts: [443]      # TCP, default 443
+    - host: api.example.com       # an object limits the host to its own ports
+      ports: [8443]
+  allowedPorts: [443]      # TCP, default 443; applies to the plain string hosts
   allowedServices:         # in-cluster Services, each on its own ports (at most 32)
     - name: searxng
       namespace: selfhosted  # empty = the knight's namespace
       ports: [8080]          # required, 1 to 8 Service ports
 ```
 
+- An `allowedHosts` entry is a string (the host, on `allowedPorts`) or an
+  object `{host, ports}` (the host on those ports only, at most 16, TCP
+  1-65535). The string form is unchanged. The operator renders one
+  `toFQDNs` rule per distinct port set, so an object entry's ports never open
+  for the other hosts. A host listed twice gets the union of its ports. On
+  the plain `NetworkPolicy` fallback (no Cilium) hostnames are not enforced
+  anyway, so the union of all host ports is allowed to any destination, and the
+  `EgressRestricted` condition message says so.
+- **The operator checks the hosts, not `kubectl apply`.** The CRD schema only
+  requires `allowedHosts` to be an array of at most 64 items, because a schema
+  can't express a string-or-object entry; a bad entry (a wrong shape such as
+  `5` or `{host, port: 1}`, an upper-case or malformed host name, a port outside
+  1-65535, more than 16 ports) is accepted by the API server. The operator
+  reports it on the `EgressRestricted` condition as `False` with reason
+  `EgressPolicyFailed`, naming each rejected entry, and the reconcile
+  keeps failing until it is fixed. It **fails closed**: the policy is still
+  rendered, from the valid entries only, so the rejected hosts are *not*
+  allowed and the pod never runs without a policy (under `deny` or default-deny
+  too). Entries past the 64th are dropped the same way.
 - A knight's own `egress` wins over the table's. Allowlists are **not merged**
   (same rule as `resources`); an explicit `egress: {}` is its own value and
   means the baseline only.
