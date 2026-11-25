@@ -34,10 +34,28 @@ leaderElection:
   renewDeadline: 40s
   retryPeriod: 5s
 
-# Node selector, tolerations, affinity
+# Pod scheduling and pull settings applied to every Deployment the chart
+# renders (operator, gateway, dashboard, collector). gateway.*, dashboard.* and
+# telemetry.collector.* may set their own nodeSelector, tolerations and
+# affinity, each replacing the global value when non-empty.
 nodeSelector: {}
 tolerations: []
 affinity: {}
+priorityClassName: ""
+# Pull secrets for the operator, gateway, dashboard and collector pods,
+# e.g. [{name: regcred}]. Knight pods are configured on the Knight.
+imagePullSecrets: []
+# Extra labels/annotations on the operator, gateway and dashboard pods.
+podAnnotations: {}
+podLabels: {}
+
+# PodDisruptionBudget for the gateway and dashboard; only rendered for a
+# component with more than one replica. maxUnavailable wins when set.
+# The operator (leader election) has none.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
 
 # agent-sandbox runtime backend (Knight spec.runtime: sandbox).
 #   auto  - enable only if the cluster serves agents.x-k8s.io/v1beta1 Sandbox
@@ -233,6 +251,10 @@ telemetry:
   # operator/gateway/dashboard export to this collector's Service.
   collector:
     enabled: false
+    # Pod scheduling for the collector (empty = use the global values).
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
     image:
       repository: otel/opentelemetry-collector-contrib
       tag: "0.120.0"
@@ -261,7 +283,7 @@ telemetry:
 dashboard:
   enabled: true
   replicas: 1
-  # Pod scheduling for the dashboard Deployment (empty = unset).
+  # Pod scheduling for the dashboard Deployment (empty = use the global values).
   nodeSelector: {}
   affinity: {}
   tolerations: []
@@ -298,6 +320,10 @@ dashboard:
 gateway:
   enabled: true
   replicas: 1
+  # Pod scheduling for the gateway (empty = use the global values).
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
   # Image; defaults to the operator image (image.repository:image.tag).
   image:
     repository: ""

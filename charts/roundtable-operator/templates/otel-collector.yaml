@@ -82,6 +82,9 @@ spec:
         {{- include "roundtable-operator.collectorSelectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

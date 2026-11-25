@@ -87,19 +87,17 @@ spec:
       labels:
         app.kubernetes.io/name: roundtable-dashboard
         app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "roundtable-operator.fullname" . }}-dashboard
-      {{- with .Values.dashboard.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.dashboard.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.dashboard.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" .Values.dashboard) }}
+      {{- . | nindent 6 }}
       {{- end }}
       securityContext:
         runAsNonRoot: true
@@ -182,6 +180,7 @@ spec:
                 path: token
         {{- end }}
       {{- end }}
+{{ include "roundtable-operator.pdb" (dict "root" . "name" (printf "%s-dashboard" (include "roundtable-operator.fullname" .)) "component" .Values.dashboard "app" "roundtable-dashboard" "label" "dashboard") }}
 ---
 apiVersion: v1
 kind: Service

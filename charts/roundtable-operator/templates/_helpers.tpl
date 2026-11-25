@@ -125,3 +125,65 @@ and NetworkPolicy never match collector pods.
 app.kubernetes.io/name: roundtable-otel-collector
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Pod-spec scheduling fields shared by every component: nodeSelector,
+affinity, tolerations, priorityClassName and imagePullSecrets. The component's
+own nodeSelector/affinity/tolerations, when non-empty, replace the global
+value. Call with (dict "root" . "component" <values block>) and indent the
+result to the pod spec.
+*/}}
+{{- define "roundtable-operator.podScheduling" -}}
+{{- $v := .root.Values -}}
+{{- $c := .component | default dict -}}
+{{- with (or $c.nodeSelector $v.nodeSelector) }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with (or $c.affinity $v.affinity) }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with (or $c.tolerations $v.tolerations) }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $v.priorityClassName }}
+priorityClassName: {{ . | quote }}
+{{- end }}
+{{- with $v.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+PodDisruptionBudget for a replicated component. Call with
+(dict "root" . "name" <deployment name> "component" <values block>
+"app" <app.kubernetes.io/name> "label" <component label>). Renders only when
+podDisruptionBudget.enabled and the component runs more than one replica.
+*/}}
+{{- define "roundtable-operator.pdb" -}}
+{{- $v := .root.Values -}}
+{{- if and $v.podDisruptionBudget.enabled (gt (int .component.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .name }}
+  namespace: {{ .root.Release.Namespace }}
+  labels:
+    {{- include "roundtable-operator.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: {{ .label }}
+spec:
+  {{- if $v.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ $v.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $v.podDisruptionBudget.minAvailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .app }}
+      app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- end }}
+{{- end }}
