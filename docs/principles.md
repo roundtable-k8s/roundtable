@@ -4,6 +4,8 @@
 
 Round Table is an opinionated, open-source reference platform for running fleets of AI agents on Kubernetes. It is a showcase people can copy, not a company product and not a neutral, CNCF-style tool. The maintainer's own fleets are the showcase. The install has to work, but it does not need to be generic. Standards are adopted only where they serve one of the opinions below.
 
+The individual decisions behind these principles, with the owner's words, are in the [decision register](decisions.md).
+
 Anything described here as **target** is not on `main` yet. The linked issue tracks it.
 
 ## The principles
