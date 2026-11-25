@@ -1,0 +1,30 @@
+# Schedule Trigger: groom the backlog every weekday at 06:00 (UTC). The input
+# is the chain's settings as JSON; change repo and labels here. OWNER/REPO is
+# a placeholder.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: backlog-grooming
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    schedule:
+      cron: "0 6 * * 1-5"
+      timeZone: UTC
+      # A fire missed while the operator was down runs late only within 1h.
+      startingDeadlineSeconds: 3600
+  target:
+    chainRef: {name: backlog-grooming}
+  input: |
+    {
+      "repo": "OWNER/REPO",
+      "epicLabel": "epic",
+      "issueLabel": "groomed",
+      "humanLabel": "needs-human",
+      "maxIssuesPerRun": 3,
+      "maxOpenGroomed": 10
+    }
+  # A slow run is not doubled by the next fire.
+  concurrency:
+    policy: Forbid
