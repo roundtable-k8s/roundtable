@@ -61,6 +61,9 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/suspend", svc.handleSuspendSchedule)
 		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/resume", svc.handleResumeSchedule)
 		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/run", svc.handleRunSchedule)
+		api.HandleFunc("POST /v1/schedules", svc.handleCreateSchedule)
+		api.HandleFunc("PUT /v1/schedules/{namespace}/{name}", svc.handleReplaceSchedule)
+		api.HandleFunc("DELETE /v1/schedules/{namespace}/{name}", svc.handleDeleteSchedule)
 	}
 	api.Handle("/mcp", MCPHandler(svc))
 	mux.Handle("/", auth.Wrap(api))
@@ -264,6 +267,59 @@ func (s *Service) handleDeleteMission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": ns + "/" + name})
 }
 
+// decodeSchedule reads a ScheduleRequest, rejecting unknown fields (labels,
+// annotations, status) and trailing data.
+func decodeSchedule(w http.ResponseWriter, r *http.Request) (ScheduleRequest, error) {
+	var req ScheduleRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return req, fmt.Errorf("%w: body: %v", ErrInvalid, err)
+	}
+	if dec.More() {
+		return req, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid)
+	}
+	return req, nil
+}
+
+func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
+	req, err := decodeSchedule(w, r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	rec, err := s.CreateSchedule(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/schedules/"+rec.Namespace+"/"+rec.Name)
+	writeJSON(w, http.StatusCreated, rec)
+}
+
+func (s *Service) handleReplaceSchedule(w http.ResponseWriter, r *http.Request) {
+	req, err := decodeSchedule(w, r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	rec, err := s.ReplaceSchedule(r.Context(), r.PathValue("namespace"), r.PathValue("name"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	if err := s.DeleteSchedule(r.Context(), ns, name); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": ns + "/" + name})
+}
+
 func (s *Service) handleListChains(w http.ResponseWriter, r *http.Request) {
 	chains, err := s.ListChains(r.Context(), r.URL.Query().Get("namespace"))
 	if err != nil {
@@ -410,8 +466,18 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeError(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
-	var conflict *ConflictError
+	var (
+		conflict   *ConflictError
+		gitManaged *GitManagedError
+		field      *FieldError
+	)
 	switch {
+	case errors.As(err, &gitManaged):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "managedBy": string(ManagedByGit)})
+		return
+	case errors.As(err, &field):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field.Field})
+		return
 	case errors.As(err, &conflict):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "state": conflict.State})
 		return

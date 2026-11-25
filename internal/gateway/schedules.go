@@ -47,6 +47,9 @@ const (
 	ManagedByOther ManagedBy = "other"
 )
 
+// defaultScheduleTimeZone is the time zone of a schedule that sets none.
+const defaultScheduleTimeZone = "UTC"
+
 // Ownership labels and annotations read by ScheduleManagedBy.
 const (
 	labelManagedBy        = "app.kubernetes.io/managed-by"
@@ -259,7 +262,7 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *Schedul
 		v.Table = chainTables[chain]
 	}
 	if v.TimeZone == "" {
-		v.TimeZone = "UTC"
+		v.TimeZone = defaultScheduleTimeZone
 	}
 	if ts := t.Status.NextScheduledAt; ts != nil {
 		n := ts.UTC()

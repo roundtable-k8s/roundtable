@@ -243,7 +243,7 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.missions.maxTTLSeconds` | int | `86400` | Upper bound on a mission's `ttlSeconds` |
 | `gateway.missions.maxTimeoutSeconds` | int | `21600` | Upper bound on a mission's `timeoutSeconds` |
 | `gateway.missions.allowSkillGeneration` | bool | `false` | Let callers set `planner.allowSkillGeneration` |
-| `gateway.schedules.enabled` | bool | `true` | Serve `GET /v1/schedules` and its routes (read only) and grant `get`, `list` and `watch` on Triggers in the gateway's namespaces ([gateway.md](gateway.md#schedules)) |
+| `gateway.schedules.enabled` | bool | `true` | Serve the `/v1/schedules` routes (list, get, manifest, create, replace, delete) and grant `get`, `list`, `watch`, `create`, `update`, `patch` and `delete` on Triggers in the gateway's namespaces ([gateway.md](gateway.md#schedules)) |
 | `gateway.hooks.enabled` | bool | `true` | Serve `POST /v1/hooks/{namespace}/{trigger}` for webhook Triggers; grants `get` on Triggers and `get` on Secrets in the gateway's namespaces (only Secrets labelled `ai.roundtable.io/webhook-secret: "true"` are used) ([gateway.md](gateway.md#webhooks)) |
 | `gateway.hooks.maxBodyBytes` | int | `1048576` | Largest webhook body (413 beyond) |
 | `gateway.hooks.rate` / `.burst` | number / int | `2` / `20` | Per-Trigger rate limit: deliveries per second and at once (429 beyond) |
