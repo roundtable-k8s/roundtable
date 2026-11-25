@@ -592,6 +592,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 		if result.Model != "" {
 			bs.Model = result.Model
 		}
+		r.recordUsage(ctx, chain, ss, loopTaskKnight(body, bs), result)
 		errMsg, output = result.GetError(), result.GetOutput()
 		structured = result.Structured()
 		if errMsg == "" && isEmptyStepOutput(output) {

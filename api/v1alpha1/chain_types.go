@@ -499,6 +499,22 @@ const (
 	ChainStepPhaseDeferred ChainStepPhase = "Deferred"
 )
 
+// TokenTotals is a sum of input and output tokens.
+type TokenTotals struct {
+	// input is the number of input tokens.
+	// +optional
+	Input int64 `json:"input,omitempty"`
+
+	// output is the number of output tokens.
+	// +optional
+	Output int64 `json:"output,omitempty"`
+}
+
+// AnnotationRunTemplate names the template Chain a run copy was started from
+// (by issue pickup, a Trigger or the gateway). Metrics label the run by it, so
+// their cardinality stays bounded.
+const AnnotationRunTemplate = "ai.roundtable.io/run-template"
+
 // ChainStepStatus tracks the execution status of an individual step.
 type ChainStepStatus struct {
 	// name matches the step name from the spec.
@@ -554,6 +570,15 @@ type ChainStepStatus struct {
 	// the fallback knight. Empty before the step's first dispatch.
 	// +optional
 	Knight string `json:"knight,omitempty"`
+
+	// costUSD is the step's cost in USD, summed over its retries and fan-out
+	// items or loop rounds. Subscription-billed models report a notional cost.
+	// +optional
+	CostUSD string `json:"costUSD,omitempty"`
+
+	// tokens is the step's token use, summed like costUSD.
+	// +optional
+	Tokens *TokenTotals `json:"tokens,omitempty"`
 
 	// providerRetries is the number of retries made after a transient model
 	// provider failure (HTTP 529/503/502/500, overloaded), #481.
@@ -825,6 +850,15 @@ type ChainStatus struct {
 	// completedAt is when the current chain run finished.
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// costUSD is the cost in USD of the current (or most recent) run: the sum
+	// of its steps' costUSD.
+	// +optional
+	CostUSD string `json:"costUSD,omitempty"`
+
+	// tokens is the token use of the current (or most recent) run.
+	// +optional
+	Tokens *TokenTotals `json:"tokens,omitempty"`
 
 	// runsCompleted is the total number of successful chain runs.
 	// +optional

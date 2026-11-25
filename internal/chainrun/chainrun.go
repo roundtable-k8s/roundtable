@@ -82,6 +82,7 @@ func Start(ctx context.Context, c client.Client, scheme *runtime.Scheme, tmpl *a
 			existing.Annotations = map[string]string{}
 		}
 		existing.Annotations[aiv1alpha1.AnnotationChainRun] = opts.Trigger
+		existing.Annotations[aiv1alpha1.AnnotationRunTemplate] = tmpl.Name
 		if opts.Source != "" {
 			if existing.Labels == nil {
 				existing.Labels = map[string]string{}
@@ -102,6 +103,7 @@ func Start(ctx context.Context, c client.Client, scheme *runtime.Scheme, tmpl *a
 	annotations := map[string]string{}
 	maps.Copy(annotations, opts.Annotations)
 	annotations[aiv1alpha1.AnnotationChainRun] = opts.Trigger
+	annotations[aiv1alpha1.AnnotationRunTemplate] = tmpl.Name
 
 	chain := &aiv1alpha1.Chain{
 		ObjectMeta: metav1.ObjectMeta{

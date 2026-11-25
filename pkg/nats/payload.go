@@ -59,6 +59,12 @@ type TaskPayload struct {
 	PreviousFailure string `json:"previousFailure,omitempty"`
 }
 
+// TokenUsage is the input and output token count of a task.
+type TokenUsage struct {
+	Input  int64 `json:"input,omitempty"`
+	Output int64 `json:"output,omitempty"`
+}
+
 // TaskResult is the JSON payload received from NATS for a completed task.
 // Supports both controller format (taskId/output) and pi-knight format (task_id/result).
 type TaskResult struct {
@@ -86,6 +92,18 @@ type TaskResult struct {
 
 	// Model is the model the knight actually used for the task (optional).
 	Model string `json:"model,omitempty"`
+
+	// Cost is the task's cost in USD (optional). For subscription-billed
+	// models it is a notional cost; see Billing.
+	Cost float64 `json:"cost,omitempty"`
+
+	// Tokens is the task's token use (optional).
+	Tokens *TokenUsage `json:"tokens,omitempty"`
+
+	// Billing says how the model is billed, e.g. "api" or "subscription"
+	// (optional). Subscription cost is notional, so dashboards separate it
+	// from real spend.
+	Billing string `json:"billing,omitempty"`
 
 	// PRs lists pull requests the task opened or updated (optional).
 	PRs []PRRef `json:"prs,omitempty"`

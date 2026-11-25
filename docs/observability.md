@@ -306,7 +306,8 @@ ConfigMaps or `GrafanaDashboard` CRs.
   per minute, task error rate, active tasks, NATS connected, KEDA desired vs
   actual replicas.
 - *Round Table / Cost and tokens*: 24h spend, spend rate per model and per
-  knight, spend per table, tokens per model and per knight.
+  knight, spend per table, tokens per model and per knight, cost per job
+  (chain, step, knight) and cost per mission.
 
 Every dashboard has a `table` variable applied to every `roundtable_*` query.
 
@@ -327,6 +328,50 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query.
 When an alert names a chain or knight, use the TraceQL queries above with the
 same `table`, `chain` or `knight` to find the slow or failing span. Details and
 thresholds: [helm-values.md](helm-values.md#grafana-dashboards).
+
+## Cost and token totals per run, step and mission
+
+Each finished task attempt reports `cost` (USD), `tokens` (`input`, `output`)
+and `billing` in its result. The operator sums them:
+
+- **Status.** `Chain.status.costUSD` and `status.tokens` are the totals of the
+  current (or most recent) run; every step has the same `costUSD` and `tokens`,
+  summed over its retries, fan-out items and loop rounds.
+  `Mission.status.totalCost` and `status.tokens` sum the mission's chains
+  (`status.chainStatuses[]` carries each chain's numbers); `totalCost` is never
+  below what `costBudgetUSD` is checked against.
+- **Metrics**, incremented once per finished attempt (a retried step counts
+  every attempt):
+
+| Metric | Labels |
+|---|---|
+| `roundtable_chain_step_cost_usd_total` | `table`, `chain`, `step`, `knight`, `billing` |
+| `roundtable_chain_step_tokens_total` | `table`, `chain`, `step`, `knight`, `type` (`input`, `output`) |
+| `roundtable_mission_cost_usd_total` | `table`, `mission`, `billing` |
+
+The `chain` label of a run copy started by issue pickup, a Trigger or the
+gateway is the **template or target chain's name**, not the per-run copy's
+(read from the `ai.roundtable.io/run-template` annotation), so cardinality
+stays bounded by the number of templates. Look up a single run's cost in its
+`status`.
+
+`billing` is what the result reports (`api`, `subscription`, ...), or
+`unknown` when it reports none. Subscription-billed models report a notional
+cost; filter on `billing` to separate real spend.
+
+```promql
+# cost per job (chain) per day
+sum by (chain) (increase(roundtable_chain_step_cost_usd_total[1d]))
+
+# real spend only
+sum by (table) (increase(roundtable_chain_step_cost_usd_total{billing!="subscription"}[1d]))
+
+# cost per mission over 24h, real spend only
+sum by (mission) (increase(roundtable_mission_cost_usd_total{billing!="subscription"}[24h]))
+
+# output tokens per step
+sum by (chain, step) (increase(roundtable_chain_step_tokens_total{type="output"}[1d]))
+```
 
 ## Privacy
 

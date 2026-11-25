@@ -609,6 +609,11 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 		if err != nil {
 			log.Error(err, "Failed to aggregate mission cost")
 		} else {
+			// The chains' own totals count too: take the larger, so the
+			// budget and status agree with the chain numbers.
+			if chainCost, _ := missionpkg.SumChainUsage(mission); chainCost > totalCost {
+				totalCost = chainCost
+			}
 			mission.Status.TotalCost = fmt.Sprintf("%.4f", totalCost)
 
 			// Parse budget
@@ -643,6 +648,17 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 		if err != nil {
 			log.Error(err, "Failed to reconcile mission chains")
 			return ctrl.Result{RequeueAfter: RequeueDefault}, nil
+		}
+
+		// Expose the chains' cost and tokens on the mission.
+		chainCost, chainTokens := missionpkg.SumChainUsage(mission)
+		mission.Status.Tokens = chainTokens
+		if chainCost > 0 {
+			var current float64
+			_, _ = fmt.Sscanf(mission.Status.TotalCost, "%f", &current)
+			if chainCost > current {
+				mission.Status.TotalCost = fmt.Sprintf("%.4f", chainCost)
+			}
 		}
 
 		// FIX #2: Guard transition to terminal state - ensure all chains in status.chainStatuses

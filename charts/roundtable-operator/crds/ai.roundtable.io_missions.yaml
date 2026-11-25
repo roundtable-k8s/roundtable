@@ -6379,6 +6379,10 @@ spec:
                       description: chainCRName is the actual Chain CR name created
                         for this mission.
                       type: string
+                    costUSD:
+                      description: costUSD is the chain's cost in USD (the chain's
+                        status.costUSD).
+                      type: string
                     name:
                       description: name is the chain reference name from the spec.
                       type: string
@@ -6392,6 +6396,18 @@ spec:
                       - Suspended
                       - PartiallySucceeded
                       type: string
+                    tokens:
+                      description: tokens is the chain's token use (the chain's status.tokens).
+                      properties:
+                        input:
+                          description: input is the number of input tokens.
+                          format: int64
+                          type: integer
+                        output:
+                          description: output is the number of output tokens.
+                          format: int64
+                          type: integer
+                      type: object
                   required:
                   - name
                   type: object
@@ -6614,6 +6630,18 @@ spec:
                 description: startedAt is when the mission began.
                 format: date-time
                 type: string
+              tokens:
+                description: tokens is the token use of the mission's chains.
+                properties:
+                  input:
+                    description: input is the number of input tokens.
+                    format: int64
+                    type: integer
+                  output:
+                    description: output is the number of output tokens.
+                    format: int64
+                    type: integer
+                type: object
               totalCost:
                 description: totalCost is the cumulative cost in USD of all tasks
                   during this mission.

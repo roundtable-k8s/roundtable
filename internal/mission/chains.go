@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,6 +107,7 @@ func (m *ChainManager) ReconcileChains(ctx context.Context, mission *aiv1alpha1.
 
 		// Update mission.status.chainStatuses
 		m.UpdateChainStatus(mission, chainRef.Name, missionChainName, chain.Status.Phase)
+		m.UpdateChainUsage(mission, chainRef.Name, chain)
 
 		// Check chain status
 		switch chain.Status.Phase {
@@ -257,4 +259,36 @@ func (m *ChainManager) UpdateChainStatus(mission *aiv1alpha1.Mission, chainRefNa
 		ChainCRName: chainCRName,
 		Phase:       phase,
 	})
+}
+
+// UpdateChainUsage copies a chain's run cost and token totals into the
+// mission's chainStatuses entry for it.
+func (m *ChainManager) UpdateChainUsage(mission *aiv1alpha1.Mission, chainRefName string, chain *aiv1alpha1.Chain) {
+	for i := range mission.Status.ChainStatuses {
+		cs := &mission.Status.ChainStatuses[i]
+		if cs.Name != chainRefName {
+			continue
+		}
+		cs.CostUSD = chain.Status.CostUSD
+		cs.Tokens = chain.Status.Tokens.DeepCopy()
+		return
+	}
+}
+
+// SumChainUsage totals the cost (USD) and tokens of the mission's chains as
+// last copied into status.chainStatuses by UpdateChainUsage.
+func SumChainUsage(mission *aiv1alpha1.Mission) (cost float64, tokens *aiv1alpha1.TokenTotals) {
+	for _, cs := range mission.Status.ChainStatuses {
+		if v, err := strconv.ParseFloat(cs.CostUSD, 64); err == nil {
+			cost += v
+		}
+		if cs.Tokens != nil {
+			if tokens == nil {
+				tokens = &aiv1alpha1.TokenTotals{}
+			}
+			tokens.Input += cs.Tokens.Input
+			tokens.Output += cs.Tokens.Output
+		}
+	}
+	return cost, tokens
 }

@@ -693,6 +693,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              costUSD:
+                description: |-
+                  costUSD is the cost in USD of the current (or most recent) run: the sum
+                  of its steps' costUSD.
+                type: string
               lastRetryTrigger:
                 description: |-
                   lastRetryTrigger is the last value of the ai.roundtable.io/retry-failed
@@ -757,6 +762,11 @@ spec:
                     completedAt:
                       description: completedAt is when the step finished execution.
                       format: date-time
+                      type: string
+                    costUSD:
+                      description: |-
+                        costUSD is the step's cost in USD, summed over its retries and fan-out
+                        items or loop rounds. Subscription-billed models report a notional cost.
                       type: string
                     deferUntil:
                       description: |-
@@ -1100,10 +1110,35 @@ spec:
                         used to detect knight pickup (the knight's consumer acknowledging it).
                       format: int64
                       type: integer
+                    tokens:
+                      description: tokens is the step's token use, summed like costUSD.
+                      properties:
+                        input:
+                          description: input is the number of input tokens.
+                          format: int64
+                          type: integer
+                        output:
+                          description: output is the number of output tokens.
+                          format: int64
+                          type: integer
+                      type: object
                   required:
                   - name
                   type: object
                 type: array
+              tokens:
+                description: tokens is the token use of the current (or most recent)
+                  run.
+                properties:
+                  input:
+                    description: input is the number of input tokens.
+                    format: int64
+                    type: integer
+                  output:
+                    description: output is the number of output tokens.
+                    format: int64
+                    type: integer
+                type: object
               traceContext:
                 description: |-
                   traceContext is the W3C trace context of the current (or most recent)

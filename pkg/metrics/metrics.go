@@ -87,6 +87,36 @@ var (
 		[]string{"table", "chain", "step", "status"},
 	)
 
+	// ChainStepCostUSDTotal is the cost in USD of finished step attempts. The
+	// chain label is the template's name for run copies. billing separates
+	// real spend from the notional cost of subscription-billed models.
+	ChainStepCostUSDTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "roundtable_chain_step_cost_usd_total",
+			Help: "Cost in USD of finished chain step attempts",
+		},
+		[]string{"table", "chain", "step", "knight", "billing"},
+	)
+
+	// ChainStepTokensTotal counts tokens of finished step attempts.
+	// type: input, output
+	ChainStepTokensTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "roundtable_chain_step_tokens_total",
+			Help: "Tokens used by finished chain step attempts",
+		},
+		[]string{"table", "chain", "step", "knight", "type"},
+	)
+
+	// MissionCostUSDTotal is the cost in USD of a mission's finished step attempts.
+	MissionCostUSDTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "roundtable_mission_cost_usd_total",
+			Help: "Cost in USD of the finished step attempts of a mission's chains",
+		},
+		[]string{"table", "mission", "billing"},
+	)
+
 	// Missions is the number of missions per table and phase, recomputed from
 	// the Mission list on every RoundTable reconcile.
 	Missions = prometheus.NewGaugeVec(
@@ -159,6 +189,9 @@ func init() {
 		ChainNoOpRunsTotal,
 		ChainProviderRetriesTotal,
 		ChainStepDurationSeconds,
+		ChainStepCostUSDTotal,
+		ChainStepTokensTotal,
+		MissionCostUSDTotal,
 		Missions,
 		TableCostUSD,
 		KnightIsolated,
