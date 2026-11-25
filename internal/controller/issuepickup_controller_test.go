@@ -293,7 +293,14 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	var body map[string]any
 	if req.Body != nil {
-		_ = json.NewDecoder(req.Body).Decode(&body)
+		var raw any
+		_ = json.NewDecoder(req.Body).Decode(&raw)
+		switch v := raw.(type) {
+		case map[string]any:
+			body = v
+		case []any: // add-labels is a bare JSON array
+			body = map[string]any{"labels": v}
+		}
 	}
 	switch {
 	case m[3] == "" && req.Method == http.MethodPatch:
@@ -305,6 +312,8 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				is.Labels = append(is.Labels, github.Label{Name: l.(string)})
 			}
 		}
+		_, _ = w.Write([]byte(`[]`)) // the real API returns the label list
+		return
 	case m[3] == "/labels" && req.Method == http.MethodDelete:
 		name, _ := url.PathUnescape(m[4])
 		if !is.HasLabel(name) {
