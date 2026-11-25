@@ -92,3 +92,42 @@ func TestChainStepDurationLabels(t *testing.T) {
 		t.Errorf("expected 1 series, got %d", n)
 	}
 }
+
+func TestTriggerFiringsNameAndLabels(t *testing.T) {
+	TriggerFiringsTotal.Reset()
+	TriggerFiringsTotal.WithLabelValues("t1", "nightly", "schedule", "started").Inc()
+	const want = `
+# HELP roundtable_trigger_firings_total Trigger events by table, trigger, source and outcome
+# TYPE roundtable_trigger_firings_total counter
+roundtable_trigger_firings_total{outcome="started",source="schedule",table="t1",trigger="nightly"} 1
+`
+	if err := testutil.CollectAndCompare(TriggerFiringsTotal, strings.NewReader(want)); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestTriggerLastFiredNameAndLabels(t *testing.T) {
+	TriggerLastFiredTimestampSeconds.Reset()
+	TriggerLastFiredTimestampSeconds.WithLabelValues("t1", "nightly").Set(1700000000)
+	const want = `
+# HELP roundtable_trigger_last_fired_timestamp_seconds Unix time of the Trigger's last started run, by table and trigger
+# TYPE roundtable_trigger_last_fired_timestamp_seconds gauge
+roundtable_trigger_last_fired_timestamp_seconds{table="t1",trigger="nightly"} 1.7e+09
+`
+	if err := testutil.CollectAndCompare(TriggerLastFiredTimestampSeconds, strings.NewReader(want)); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestGatewayRequestsNameAndLabels(t *testing.T) {
+	GatewayRequestsTotal.Reset()
+	GatewayRequestsTotal.WithLabelValues("GET /v1/knights", "200", "none").Inc()
+	const want = `
+# HELP roundtable_gateway_requests_total Invoke gateway HTTP requests by route template, status code and table
+# TYPE roundtable_gateway_requests_total counter
+roundtable_gateway_requests_total{code="200",route="GET /v1/knights",table="none"} 1
+`
+	if err := testutil.CollectAndCompare(GatewayRequestsTotal, strings.NewReader(want)); err != nil {
+		t.Error(err)
+	}
+}

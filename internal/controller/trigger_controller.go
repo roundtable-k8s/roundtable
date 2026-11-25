@@ -28,6 +28,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,6 +47,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	"github.com/roundtable-k8s/roundtable/internal/github"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -110,6 +112,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if apierrors.IsNotFound(err) {
 			r.consumers.stop(req.String())
 			r.pollers.stop(req.String())
+			deleteTriggerLastFired(req.Name)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -429,6 +432,7 @@ func (r *TriggerReconciler) reconcileSchedule(ctx context.Context, trg *aiv1alph
 			if err := r.recordFiring(ctx, nn, firing, markDue); err != nil {
 				return ctrl.Result{}, metav1.Condition{}, err
 			}
+			countTriggerFiring(r.triggerTable(ctx, trg), trg, triggerOutcomeSkipped)
 		} else {
 			out, err := r.fire(ctx, nn, TriggerEvent{Time: due, Headers: map[string]string{}}, key, "", markDue)
 			if out == triggerRetry {
@@ -509,7 +513,7 @@ func (r *TriggerReconciler) fireLock(nn types.NamespacedName) *sync.Mutex {
 // fire handles one event: render the input and dedupe key, apply dedupe and
 // concurrency, start the run, and record the firing. mutate, if set, also
 // changes the status written with the firing.
-func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, mutate func(*aiv1alpha1.TriggerStatus)) (triggerOutcome, error) {
+func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, mutate func(*aiv1alpha1.TriggerStatus)) (_ triggerOutcome, retErr error) {
 	mu := r.fireLock(nn)
 	mu.Lock()
 	defer mu.Unlock()
@@ -528,10 +532,27 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	now := r.now()
 	firing := aiv1alpha1.TriggerFiring{Time: metav1.NewTime(now)}
+	table := r.triggerTable(ctx, trg)
+	// A failed attempt is retried (and counted again) until it succeeds.
+	defer func() {
+		if retErr != nil {
+			countTriggerFiring(table, trg, triggerOutcomeError)
+		}
+	}()
+	// metricOutcome overrides how skip counts a firing (deduped).
+	metricOutcome := ""
 	skip := func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error) {
 		firing.SkipReason = fmt.Sprintf(format, args...)
 		if err := r.recordFiring(ctx, nn, firing, mutate); err != nil {
 			return triggerRetry, err
+		}
+		switch {
+		case metricOutcome != "":
+			countTriggerFiring(table, trg, metricOutcome)
+		case outcome == triggerTerm:
+			countTriggerFiring(table, trg, triggerOutcomeError)
+		default:
+			countTriggerFiring(table, trg, triggerOutcomeSkipped)
 		}
 		if outcome == triggerTerm {
 			r.event(trg, corev1.EventTypeWarning, "EventRejected", "%s", firing.SkipReason)
@@ -594,6 +615,8 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	// next poll: apply the claim now.
 	duplicate := func() (triggerOutcome, error) {
 		if pendingGitHubClaim(trg, ev) == nil {
+			metricOutcome = triggerOutcomeDeduped
+			defer func() { metricOutcome = "" }()
 			return skip(triggerHandled, "duplicate dedupe key: run %s exists", name)
 		}
 		if reason := r.githubAfterRun(ctx, trg, ev, name); reason != "" {
@@ -707,6 +730,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 
 	firing.Run = name
+	countTriggerFiring(table, trg, triggerOutcomeStarted)
 	// Claim only once the run exists: a failed claim leaves the item
 	// selected, and the next poll retries the claim (the run is found by
 	// name, so nothing starts twice).
@@ -714,6 +738,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	if err := r.recordFiring(ctx, nn, firing, func(st *aiv1alpha1.TriggerStatus) {
 		at := metav1.NewTime(now)
 		st.LastFiredAt = &at
+		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(table, trg.Name).Set(float64(now.Unix()))
 		if !slices.Contains(st.ActiveRuns, name) {
 			st.ActiveRuns = append(st.ActiveRuns, name)
 		}
@@ -731,6 +756,58 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		r.event(trg, corev1.EventTypeNormal, "Fired", "Started run %s", name)
 	}
 	return triggerHandled, nil
+}
+
+// noTableLabel is the table label of a signal with no table.
+const noTableLabel = "none"
+
+// deleteTriggerLastFired drops a deleted Trigger's last-fired gauge series, so
+// an alert on its age does not fire forever. The counter is left alone: a
+// counter series that stops growing is normal.
+func deleteTriggerLastFired(trigger string) {
+	metrics.TriggerLastFiredTimestampSeconds.DeletePartialMatch(prometheus.Labels{"trigger": trigger})
+}
+
+// Outcomes of roundtable_trigger_firings_total.
+const (
+	triggerOutcomeStarted = "started"
+	triggerOutcomeDeduped = "deduped"
+	triggerOutcomeSkipped = "skipped"
+	triggerOutcomeError   = "error"
+)
+
+// triggerTable is the table label of a Trigger's metrics: its target chain's
+// roundTableRef, else the Trigger's own, else none.
+func (r *TriggerReconciler) triggerTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
+	chain := &aiv1alpha1.Chain{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Spec.Target.ChainRef.Name}, chain); err == nil {
+		if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+			return name
+		}
+	}
+	if name := aiv1alpha1.RefName(trg.Spec.RoundTableRef); name != "" {
+		return name
+	}
+	return noTableLabel
+}
+
+// triggerSource names the Trigger's source for the source label.
+func triggerSource(trg *aiv1alpha1.Trigger) string {
+	switch src := trg.Spec.Source; {
+	case src.Schedule != nil:
+		return "schedule"
+	case src.Webhook != nil:
+		return "webhook"
+	case src.GitHub != nil:
+		return "github"
+	case src.NATS != nil:
+		return "nats"
+	}
+	return "unknown"
+}
+
+func countTriggerFiring(table string, trg *aiv1alpha1.Trigger, outcome string) {
+	metrics.TriggerFiringsTotal.WithLabelValues(table, trg.Name, triggerSource(trg), outcome).Inc()
 }
 
 // recordFiring prepends firing to status.recentFirings (bounded) and applies

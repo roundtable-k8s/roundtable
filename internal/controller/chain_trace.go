@@ -394,7 +394,7 @@ func (r *ChainReconciler) emitRunSpans(ctx context.Context, chain *aiv1alpha1.Ch
 	tableOf := func() string {
 		if table == "" {
 			if table = r.chainTable(ctx, chain); table == "" {
-				table = "none"
+				table = noTableLabel
 			}
 		}
 		return table

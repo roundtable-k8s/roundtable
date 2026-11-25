@@ -35,11 +35,13 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -763,4 +765,38 @@ func TestInvokeIdempotencyKeyReplayPending(t *testing.T) {
 		t.Fatalf("pending replay: %d/%d %v %v", r1.StatusCode, r2.StatusCode, b1, b2)
 	}
 	close(e.knight.release)
+}
+
+func TestRequestMetrics(t *testing.T) {
+	metrics.GatewayRequestsTotal.Reset()
+	metrics.GatewayRequestDurationSeconds.Reset()
+	e := newEnv(t, Options{})
+	e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "hello"})
+	e.do(t, "POST", "/v1/knights/nobody/invoke", testToken, InvokeRequest{Task: "hello"})
+	e.do(t, "GET", "/v1/knights", "", nil)
+	e.do(t, "GET", "/v1/knights", testToken, nil)
+	e.do(t, "GET", "/v1/tasks/some-id", testToken, nil)
+	e.do(t, "GET", "/scanner/probe-1", testToken, nil)
+	e.do(t, "GET", "/scanner/probe-2", testToken, nil)
+
+	for _, c := range []struct {
+		route, code, table string
+		want               float64
+	}{
+		// The table is the knight's RoundTable; the path holds no knight name.
+		{"POST /v1/knights/{name}/invoke", "200", "dev", 1},
+		{"POST /v1/knights/{name}/invoke", "404", "none", 1},
+		{"GET /v1/knights", "200", "none", 1},
+		{"GET /v1/tasks/{taskId}", "404", "none", 1},
+		// A refused token and unknown paths share one route label.
+		{"unmatched", "401", "none", 1},
+		{"unmatched", "404", "none", 2},
+	} {
+		if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(c.route, c.code, c.table)); got != c.want {
+			t.Errorf("requests{%s,%s,%s} = %v, want %v", c.route, c.code, c.table, got, c.want)
+		}
+	}
+	if n := testutil.CollectAndCount(metrics.GatewayRequestDurationSeconds); n != 4 {
+		t.Errorf("duration series = %d, want 4 (one per route template)", n)
+	}
 }

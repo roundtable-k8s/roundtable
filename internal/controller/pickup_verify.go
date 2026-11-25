@@ -133,6 +133,10 @@ type prRef struct {
 	number int
 }
 
+// verdictUnknownText is the String of a verdict that is neither ship it nor
+// needs changes.
+const verdictUnknownText = "unknown"
+
 func (v verdict) String() string {
 	switch v {
 	case verdictShipIt:
@@ -140,7 +144,7 @@ func (v verdict) String() string {
 	case verdictNeedsChanges:
 		return "needs changes"
 	}
-	return "none"
+	return verdictUnknownText
 }
 
 func (p prRef) String() string { return fmt.Sprintf("%s#%d", p.repo, p.number) }
