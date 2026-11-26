@@ -120,9 +120,9 @@ What happens on missed, overlapping, lost and deleted runs is in
 ## Moving a cron job
 
 A cron job that ran a script (collect some data, ask an agent to judge it,
-file the result) moves in four steps: shape the script, change the persona
-knight, send one task from a Trigger, then run old and new side by side before
-the cutover.
+file the result) moves in three steps (shape the script, change the persona knight, send one
+task from a Trigger), then you run old and new side by side before the
+cutover.
 
 ### 1. The script contract
 
@@ -210,7 +210,8 @@ Outcome: failed <reason>
 ```
 
 That line turns the task into `success: false` (the knight runtime
-parses it, `parseTaskFailure` in knights `packages/core/src/structured.ts`). The firing is then recorded with `outcome: failed` in the
+parses it, `parseTaskFailure` in knights `packages/core/src/structured.ts`).
+The firing is then recorded with `outcome: failed` in the
 Trigger's `status.recentFirings`, in the schedule run history, and on the
 Schedules page of the dashboard:
 
@@ -227,14 +228,24 @@ and [See and control schedules](scheduled-work.md#see-and-control-schedules).
 
 1. Deploy the new Trigger writing to a **separate** folder: a different
    `OUTPUT_DIR` for the script and a matching `writablePaths` entry
-   (`Reports/nightly-new` next to the old `Reports/nightly`). Leave the old
-   cron job running.
-2. Let both run for 3 to 7 runs. Compare the dated outputs by hand, one day at
-   a time: same days written, same items, differences you can explain. Check
-   `status.recentFirings` for failed or skipped firings.
-3. Cutover: point `OUTPUT_DIR` and `writablePaths` at the real folder (drop the
-   `-new` one), and suspend the old cron job
-   (`kubectl -n <ns> patch cronjob <name> -p '{"spec":{"suspend":true}}'`).
+   (`Reports/nightly-new` next to the old `Reports/nightly`). `OUTPUT_DIR` is
+   an environment variable of the script; set it where the Trigger task text
+   runs the script, for example
+   `OUTPUT_DIR=/vault/Reports/nightly-new python3 job.py --file answers.json`.
+   Leave the old cron job running.
+2. Let both run for 3 to 7 runs, then compare them with the arsenal `shared`
+   skill `side-by-side`: `compare-outputs <old-dir> <new-dir>` prints one line
+   per day for the last N days (same days written or not). The skill checks
+   the days, not the content, so the owner still reads a few days by hand:
+   same items, differences you can explain. Check `status.recentFirings` for
+   failed or skipped firings.
+3. Cutover, in this order. First suspend the old cron job, so the two jobs
+   cannot both write the same day's file. If Flux or Helm manages the
+   CronJob, set `suspend: true` in Git: a
+   `kubectl -n <ns> patch cronjob <name> -p '{"spec":{"suspend":true}}'` is
+   reverted at the next reconcile. Then, in the same change or right after,
+   point `OUTPUT_DIR` and `writablePaths` at the real folder (drop the `-new`
+   one).
 4. Delete the old cron job a week later, once nothing needed it.
 
 A job that another job links to must keep its output path at cutover: change
@@ -390,6 +401,9 @@ For a cron job (a scheduled knight):
    and a `spec.vault.writablePaths` entry for the new output folder only.
 3. Add the Trigger: the task names the skill and both commands, and says to end
    with `Outcome: failed <reason>` when `--file` rejects the answer.
-4. Run side by side for 3 to 7 runs into the separate folder; compare.
-5. Cut over: switch the folder (keep paths other jobs link to), suspend the old
-   cron job, delete it a week later.
+4. Run side by side for 3 to 7 runs into the separate folder; compare with
+   `compare-outputs <old-dir> <new-dir>` (arsenal `shared/side-by-side`) and
+   read a few days of content yourself.
+5. Cut over: suspend the old cron job first (in Git if Flux or Helm manages
+   it), then switch the folder (keep paths other jobs link to), and delete the
+   old job a week later.
