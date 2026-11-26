@@ -33,7 +33,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
-**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything · don't rebuild the wheel. See [docs/principles.md](docs/principles.md) and the [decision register](docs/decisions.md). How knights remember and share files: [docs/memory.md](docs/memory.md). Snapshotting and forking a knight's workspace: [docs/workspace-snapshots.md](docs/workspace-snapshots.md). Runtime backends (Deployment vs agent-sandbox, gVisor, KEDA, egress): [docs/design/runtime-backends-adr.md](docs/design/runtime-backends-adr.md). Scheduled tasks, chains and missions: [docs/scheduled-work.md](docs/scheduled-work.md). Moving an agent off kagent: [docs/migrating-from-kagent.md](docs/migrating-from-kagent.md). How it all fits together (JetStream topology, the knight environment, request flow): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything · don't rebuild the wheel. See [docs/principles.md](docs/principles.md), the [decision register](docs/decisions.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). More in [docs/](docs/): [memory](docs/memory.md), [workspace snapshots](docs/workspace-snapshots.md), [runtime backends](docs/design/runtime-backends-adr.md), [scheduled work](docs/scheduled-work.md), [migrating from kagent](docs/migrating-from-kagent.md).
 
 ## Features
 
@@ -45,7 +45,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 
 📡 **NATS JetStream** — durable task routing with WorkQueue retention, fan-out, and KV store for results
 
-🛡️ **Pod-Level Isolation** — each knight gets its own pod, ServiceAccount, NetworkPolicy, and workspace PVC
+🛡️ **Pod-Level Isolation** — each knight gets its own pod, ServiceAccount, workspace PVC, gVisor sandbox and default-deny egress NetworkPolicy
 
 📦 **Arsenal** — git-synced skill repository, auto-distributed to knights via sidecar
 
@@ -75,10 +75,6 @@ spec:
   concurrency: 2
   workspace:
     size: 2Gi
-  resources:
-    requests:
-      memory: 256Mi
-      cpu: 100m
 ```
 
 The operator reconciles this into a Deployment, PVC, ConfigMaps, NATS consumer, and optional ServiceAccount. One YAML, fully wired agent.
@@ -144,10 +140,7 @@ spec:
     - name: report
       knightRef: {name: kay}
       dependsOn: [verify]
-      task: |
-        Write a threat report:
-        - Scan results: {{ .Steps.scan.Output }}
-        - Exposure analysis: {{ .Steps.verify.Output }}
+      task: "Write a threat report from {{ .Steps.scan.Output }} and {{ .Steps.verify.Output }}"
       timeoutSeconds: 600
 ```
 
@@ -195,63 +188,24 @@ apiVersion: ai.roundtable.io/v1alpha1
 kind: Trigger
 metadata:
   name: weekday-security-report
-  namespace: roundtable
 spec:
   source:
     schedule:
       cron: "0 7 * * 1-5"
       timeZone: America/New_York
-      startingDeadlineSeconds: 3600
   target:
     chainRef: {name: security-report}
   input: |
     Generate the security report for {{ .Event.Time.Format "Monday 2006-01-02" }}.
-  concurrency:
-    policy: Forbid
 ```
 
-The full file is [`examples/trigger-schedule.yaml`](examples/trigger-schedule.yaml). Sources, dedupe keys and the status fields are in [docs/triggers.md](docs/triggers.md); the schedule behaviour is in [docs/scheduled-work.md](docs/scheduled-work.md).
+The full file (with concurrency and deadline settings) is [`examples/trigger-schedule.yaml`](examples/trigger-schedule.yaml). Sources, dedupe keys and the status fields are in [docs/triggers.md](docs/triggers.md); the schedule behaviour is in [docs/scheduled-work.md](docs/scheduled-work.md).
 
 ---
 
 ## Architecture
 
-```
-                        ┌──────────────────────┐
-                        │   roundtable-ui      │
-                        │   (Dashboard)        │
-                        └──────────┬───────────┘
-                                   │ K8s API
-┌──────────────────────────────────┼──────────────────────────────────┐
-│                     Round Table Operator                            │
-│                                  │                                  │
-│  ┌──────────────┐  ┌────────────┴───┐  ┌────────────────────────┐  │
-│  │   Knight      │  │   Mission      │  │   Chain                │  │
-│  │   Controller  │  │   Controller   │  │   Controller           │  │
-│  └──────┬───────┘  └───────┬────────┘  └──────────┬─────────────┘  │
-│         │                  │                       │                │
-└─────────┼──────────────────┼───────────────────────┼────────────────┘
-          │                  │                       │
-    ┌─────▼──────────────────▼───────────────────────▼─────┐
-    │                    NATS JetStream                      │
-    │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐ │
-    │  │ Tasks Stream │  │Results Stream│  │  KV Store    │ │
-    │  └──────┬──────┘  └──────────────┘  └──────────────┘ │
-    └─────────┼────────────────────────────────────────────┘
-              │
-    ┌─────────┼──────────────────────────────────┐
-    │         │           Knight Pods             │
-    │  ┌──────▼──────┐  ┌─────────────┐          │
-    │  │  pi-knight   │  │  pi-knight  │  ...     │
-    │  │  (runtime)   │  │  (runtime)  │          │
-    │  ├─────────────┤  ├─────────────┤          │
-    │  │ skill-filter │  │ skill-filter│          │
-    │  ├─────────────┤  ├─────────────┤          │
-    │  │ git-sync     │  │ git-sync    │          │
-    │  │ (arsenal)    │  │ (arsenal)   │          │
-    │  └─────────────┘  └─────────────┘          │
-    └────────────────────────────────────────────┘
-```
+The operator runs a Knight, Mission, Chain and Trigger controller. They route work over NATS JetStream (tasks, results, KV) to knight pods: the runtime plus skill-filter and git-sync sidecars. The dashboard reads through the Kubernetes API. Diagrams and request flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Observability
 
@@ -329,11 +283,7 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 
 - **Dashboard** — monitor the fleet, chain runs and missions from the browser ([roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui)).
 - **kubectl** — apply CRs and read their status, as in the examples above.
-- **NATS** — the low-level path. Publish a task straight to a knight's subject ([knight task contract](docs/knight-task-contract.md)):
-
-  ```bash
-  nats pub fleet-a.tasks.security.scan '{"task": "Scan example.com for open ports"}'
-  ```
+- **NATS** — the low-level path: publish a task straight to a knight's subject, e.g. `nats pub fleet-a.tasks.security.scan '{"task": "..."}'` ([task contract](docs/knight-task-contract.md)).
 
 ### Recipes
 
@@ -365,25 +315,24 @@ make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
 
 ## Roadmap
 
-- [x] **Phase 1** — Knight operator (CRD → Pod + NATS consumer)
-- [x] **Phase 2** — Chains (DAG workflows with output chaining)
-- [x] **Phase 3a** — Missions with existing knights
-- [x] **Phase 3b** — Ephemeral missions (dynamic knight provisioning + teardown)
-- [x] **Phase 4** — Observability (OpenTelemetry tracing, cost tracking); the trace backend stack is still open ([docs/observability.md](docs/observability.md))
-- [x] **Triggers** — schedule, NATS, webhook and GitHub sources ([docs/triggers.md](docs/triggers.md))
-- [x] **Invoke gateway** — ask a knight, run a chain, launch a mission ([docs/gateway.md](docs/gateway.md))
-- [x] **Isolation by default** — gVisor and default-deny egress ([docs/runtime-isolation.md](docs/runtime-isolation.md), [docs/egress.md](docs/egress.md))
-- [ ] **Phase 5** — Multi-cluster federation
+Shipped: the operator, Chains, Missions (existing and ephemeral knights), Triggers, the invoke gateway and isolation by default (gVisor, default-deny egress). Open work follows the GitHub milestones:
+
+- [ ] **M6** — Expose the API outside the cluster (auth, Cloudflare, NATS users)
+- [ ] **M7** — Isolated by default + API front door (finishing the sandbox opt-out and gateway work)
+- [ ] **M8** — Restore the fleet + retire kagent
+- [ ] **M8.5** — Codebase health & DevEx (shared runtime core, typed task contract, operator decomposition)
+- [ ] **M9** — Fleet platform (agent cards and discovery, never-lose-a-task, pluggable memory, triggers and recipes)
+- [ ] **M10** — Observability standard (OTel everywhere, `roundtable_*` metrics; the backend is still being chosen, [docs/observability.md](docs/observability.md))
 
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-Areas where help is needed:
-- Multi-cluster support
-- Observability backend stack ([docs/observability.md](docs/observability.md))
+Areas where help is needed (see the milestones above):
+- Exposing the API outside the cluster (M6)
+- Codebase health and DevEx (M8.5)
+- Observability stack and dashboards (M10)
 - Additional knight runtime implementations
-- Dashboard improvements
 - Documentation
 
 ## License
