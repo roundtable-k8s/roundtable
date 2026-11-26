@@ -23,7 +23,8 @@ import (
 
 var (
 	// Knights is the number of knights per table and phase, recomputed from
-	// the Knight list on every RoundTable reconcile.
+	// the Knight list on every RoundTable reconcile. Knights without a table
+	// are counted under table="none" by the Knight reconciler.
 	Knights = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "roundtable_knights",
@@ -119,7 +120,8 @@ var (
 	)
 
 	// Missions is the number of missions per table and phase, recomputed from
-	// the Mission list on every RoundTable reconcile.
+	// the Mission list on every RoundTable reconcile. Missions without a table
+	// are counted under table="none" by the Mission reconciler.
 	Missions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "roundtable_missions",

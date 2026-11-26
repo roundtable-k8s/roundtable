@@ -180,6 +180,10 @@ const runtimeDeployment = "deployment"
 func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Count table-less knights (roundtable_knights{table="none"}); the
+	// RoundTable reconciler only counts knights of a table.
+	defer updateUnownedKnightMetrics(ctx, r.Client)
+
 	// Fetch the Knight resource
 	knight := &aiv1alpha1.Knight{}
 	if err := r.Get(ctx, req.NamespacedName, knight); err != nil {
