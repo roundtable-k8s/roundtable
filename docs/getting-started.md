@@ -137,4 +137,7 @@ picked up. The overall chain `timeout` still counts from the start of the run.
 - [Example Manifests](../examples/) — Real-world Knight, Chain, Mission examples
 - [Helm Values Reference](helm-values.md) — Full configuration options
 - [Architecture Overview](ARCHITECTURE.md) — How it all works under the hood
-- [API Reference](api-reference.md) — Complete CRD field documentation
+- [CRD Design](crd-design.md) — Complete CRD field documentation
+- [Gateway](gateway.md) — The HTTP API (its OpenAPI document is served at `/openapi.json`)
+- [Keeping Mission Output](keeping-mission-output.md) — Write a Mission's results somewhere durable
+- [Local Development](local-development.md) — The Tilt inner loop for working on the operator

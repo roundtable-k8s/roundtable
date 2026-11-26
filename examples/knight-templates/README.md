@@ -213,6 +213,5 @@ Error: template "my-template" not found in mission.spec.knightTemplates or round
 
 ## See Also
 
-- [Knight CRD Documentation](../../docs/knight-crd.md)
-- [Mission CRD Documentation](../../docs/mission-crd.md)
-- [RoundTable CRD Documentation](../../docs/roundtable-crd.md)
+- [CRD Design](../../docs/crd-design.md) — Knight, Mission and RoundTable fields
+- [Helm Values Reference](../../docs/helm-values.md)
