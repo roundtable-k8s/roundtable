@@ -162,6 +162,9 @@ spec:
               path: /api/health
               port: http
             initialDelaySeconds: 3
+      {{- if and .Values.dashboard.gateway.serviceAccountToken (not .Values.gateway.serviceAccountAuth.enabled) }}
+      {{- fail "dashboard.gateway.serviceAccountToken=true requires gateway.serviceAccountAuth.enabled=true" }}
+      {{- end }}
       {{- if or .Values.dashboard.vault.enabled .Values.gateway.enabled }}
       volumes:
         {{- if .Values.dashboard.vault.enabled }}
@@ -173,11 +176,20 @@ spec:
         # Mounted as a file (not an env var) so a rotated token reaches the
         # dashboard without a restart.
         - name: gateway-token
+          {{- if .Values.dashboard.gateway.serviceAccountToken }}
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.gateway.serviceAccountAuth.audience }}
+                  expirationSeconds: 3600
+                  path: token
+          {{- else }}
           secret:
             secretName: {{ .Values.dashboard.gateway.tokenSecret | default (include "roundtable-operator.gatewayTokenSecret" .) }}
             items:
               - key: {{ .Values.dashboard.gateway.tokenKey | default .Values.gateway.auth.secretKey | default "token" }}
                 path: token
+          {{- end }}
         {{- end }}
       {{- end }}
 {{ include "roundtable-operator.pdb" (dict "root" . "name" (printf "%s-dashboard" (include "roundtable-operator.fullname" .)) "component" .Values.dashboard "app" "roundtable-dashboard" "label" "dashboard") }}

@@ -203,7 +203,7 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 
 ### Invoke gateway
 
-`dashboard.gateway.tokenSecret` / `tokenKey` (default empty = the gateway's Secret and key) give the dashboard its own token.
+`dashboard.gateway.tokenSecret` / `tokenKey` (default empty = the gateway's Secret and key) give the dashboard its own token. `dashboard.gateway.serviceAccountToken` (bool, default `false`) mounts a projected ServiceAccount token (audience `gateway.serviceAccountAuth.audience`, `expirationSeconds` 3600) at the same path instead of the Secret; `tokenSecret`/`tokenKey` are then ignored, and the chart fails to render unless `gateway.serviceAccountAuth.enabled` is true.
 
 Synchronous HTTP API + MCP endpoint for knights (see [gateway.md](gateway.md)).
 On by default. With no `gateway.auth.existingSecret` the chart generates a token Secret
