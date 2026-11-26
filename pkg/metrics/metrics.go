@@ -195,6 +195,17 @@ var TriggerFiringsTotal = prometheus.NewCounterVec(
 	[]string{"table", "trigger", "source", "outcome"},
 )
 
+// TriggerRunsFinishedTotal counts the knight and mission firings of a Trigger
+// that reached a final outcome. Labels: table, trigger, source, outcome
+// (succeeded, failed, lost). Chain targets are in ChainRunsTotal.
+var TriggerRunsFinishedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "roundtable_trigger_runs_finished_total",
+		Help: "Finished knight and mission Trigger runs by table, trigger, source and outcome",
+	},
+	[]string{"table", "trigger", "source", "outcome"},
+)
+
 // TriggerLastFiredTimestampSeconds is the Unix time a Trigger last started a
 // run. Labels: table, trigger.
 var TriggerLastFiredTimestampSeconds = prometheus.NewGaugeVec(
@@ -248,6 +259,7 @@ func init() {
 		TasksDeadLetteredTotal,
 		DeadLettersOpen,
 		TriggerFiringsTotal,
+		TriggerRunsFinishedTotal,
 		TriggerLastFiredTimestampSeconds,
 		GatewayRequestsTotal,
 		GatewayRequestDurationSeconds,

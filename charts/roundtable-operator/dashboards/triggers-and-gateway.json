@@ -342,6 +342,39 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Finished trigger runs by outcome (1h)",
+      "description": "roundtable_trigger_runs_finished_total by outcome (succeeded, failed, lost) for knight and mission targets",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (outcome) (increase(roundtable_trigger_runs_finished_total{table=~\"$table\"}[1h]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     }
   ]
 }

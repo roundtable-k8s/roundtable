@@ -246,6 +246,11 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Status().Patch(ctx, latest, patch); err != nil {
 		return ctrl.Result{}, err
 	}
+	// Count after the patch so a conflict-retried reconcile cannot count a
+	// firing twice: the outcome is persisted exactly once.
+	if latest.Spec.Target.Knight != nil || latest.Spec.Target.Mission != nil {
+		r.countFinishedRuns(ctx, orig, latest)
+	}
 
 	if gcAfter > 0 && (res.RequeueAfter == 0 || gcAfter < res.RequeueAfter) {
 		res.RequeueAfter = gcAfter
@@ -1146,6 +1151,37 @@ func triggerSource(trg *aiv1alpha1.Trigger) string {
 		return "nats"
 	}
 	return "unknown"
+}
+
+// countFinishedRuns counts the firings of a knight or mission target whose
+// outcome went from empty to a final value between before and after.
+func (r *TriggerReconciler) countFinishedRuns(ctx context.Context, before, after *aiv1alpha1.Trigger) {
+	pending := map[string]bool{}
+	for _, f := range before.Status.RecentFirings {
+		if f.Run != "" && f.Outcome == "" && f.SkipReason == "" {
+			pending[f.Run] = true
+		}
+	}
+	if len(pending) == 0 {
+		return
+	}
+	table := ""
+	for _, f := range after.Status.RecentFirings {
+		if !pending[f.Run] || f.Outcome == "" {
+			continue
+		}
+		if table == "" {
+			table = r.triggerTable(ctx, after)
+		}
+		countTriggerRunFinished(table, after, string(f.Outcome))
+		delete(pending, f.Run)
+	}
+}
+
+// countTriggerRunFinished counts a knight or mission firing that reached a
+// final outcome (succeeded, failed, lost).
+func countTriggerRunFinished(table string, trg *aiv1alpha1.Trigger, outcome string) {
+	metrics.TriggerRunsFinishedTotal.WithLabelValues(table, trg.Name, triggerSource(trg), outcome).Inc()
 }
 
 func countTriggerFiring(table string, trg *aiv1alpha1.Trigger, outcome string) {

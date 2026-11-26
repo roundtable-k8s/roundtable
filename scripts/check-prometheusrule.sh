@@ -46,9 +46,10 @@ grep -q 'for: 15m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$on")" || fail "
 kn="$(render --set alerts.enabled=true "${api[@]}" --set alerts.knightNotReadyMinutes=30)"
 grep -q 'for: 30m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$kn")" || fail "knightNotReadyMinutes not applied"
 grep -q 'kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}' <<<"$on" || fail "tools image build alert expr missing"
-for a in RoundtableScheduleMissed RoundtableScheduleJobFailed RoundtableTriggerFiringErrors; do
+for a in RoundtableScheduleMissed RoundtableScheduleJobFailed RoundtableTriggerFiringErrors RoundtableScheduledRunFailed; do
   grep -q "alert: $a\$" <<<"$on" || fail "alert $a missing"
 done
+grep -q 'roundtable_trigger_runs_finished_total{outcome=~"failed|lost"}' <<<"$on" || fail "RoundtableScheduledRunFailed expr missing"
 grep -q 'roundtable.triggers' <<<"$on" || fail "roundtable.triggers group missing"
 grep -q 'kube_cronjob_spec_suspend == 0' <<<"$on" || fail "RoundtableScheduleMissed does not skip suspended CronJobs"
 grep -q 'cronjob=~"trigger-.+"' <<<"$on" || fail "schedule alerts not limited to trigger- CronJobs"

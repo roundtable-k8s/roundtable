@@ -211,6 +211,7 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	firing.Run = rec.TaskID
 	if rec.Done() {
 		firing.Outcome = taskOutcome(rec)
+		countTriggerRunFinished(f.table, trg, string(firing.Outcome))
 	}
 	countTriggerFiring(f.table, trg, triggerOutcomeStarted)
 	if err := r.recordFiring(ctx, f.nn, firing, func(st *aiv1alpha1.TriggerStatus) {
