@@ -23,7 +23,7 @@ func mcpKnight(env ...corev1.EnvVar) *aiv1alpha1.Knight {
 		Spec: aiv1alpha1.KnightSpec{
 			Domain: "d", Env: env,
 			MCPServers: []aiv1alpha1.KnightMCPServer{
-				{Name: "vault", URL: "http://vault/mcp", ToolFilter: &aiv1alpha1.KnightMCPToolFilter{Exclude: []string{"delete", "write"}}}, //nolint:staticcheck // exercising the deprecated field,
+				{Name: "vault", URL: "http://vault/mcp"},
 				{Name: "feeds", URL: "http://feeds/sse", Transport: "sse"},
 			},
 		},
@@ -58,8 +58,8 @@ func TestMCPServersRenderedForClaude(t *testing.T) {
 	if string(gb) != string(wb) {
 		t.Errorf("MCP_SERVERS_JSON = %s, want %s", gb, wb)
 	}
-	if v := env["CLAUDE_DISALLOWED_TOOLS"]; v != "mcp__vault__delete,mcp__vault__write" {
-		t.Errorf("CLAUDE_DISALLOWED_TOOLS = %q", v)
+	if _, ok := env["CLAUDE_DISALLOWED_TOOLS"]; ok {
+		t.Errorf("CLAUDE_DISALLOWED_TOOLS rendered without a user value")
 	}
 }
 
@@ -77,7 +77,7 @@ func TestMCPServersMergeWithUserEnv(t *testing.T) {
 	if len(s) != 3 || s["mine"]["url"] != "http://mine" || s["vault"]["url"] != "http://override" || s["feeds"]["type"] != "sse" {
 		t.Errorf("merged servers = %v", s)
 	}
-	if v := env["CLAUDE_DISALLOWED_TOOLS"]; v != "Bash,mcp__vault__delete,mcp__vault__write" {
+	if v := env["CLAUDE_DISALLOWED_TOOLS"]; v != "Bash,mcp__vault__delete" {
 		t.Errorf("CLAUDE_DISALLOWED_TOOLS = %q", v)
 	}
 }
@@ -134,8 +134,8 @@ func TestMCPServersValueFromNotDuplicated(t *testing.T) {
 	if len(js) != 1 || js[0].ValueFrom == nil {
 		t.Errorf("MCP_SERVERS_JSON must stay the user's single valueFrom entry: %+v", js)
 	}
-	if len(dt) != 2 || dt[0].ValueFrom == nil || dt[1].Value != "$(CLAUDE_DISALLOWED_TOOLS),mcp__vault__delete,mcp__vault__write" {
-		t.Errorf("deny list must keep the user's ref and append via expansion: %+v", dt)
+	if len(dt) != 1 || dt[0].ValueFrom == nil {
+		t.Errorf("deny list must stay the user's single valueFrom entry: %+v", dt)
 	}
 }
 
