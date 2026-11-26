@@ -41,16 +41,21 @@ To put these in a GitOps repo, add the three files to the Flux path you
 reconcile (for example with a `Kustomization`). Set `values:` in
 `helmrelease.yaml` for chart options; see [Helm values](helm-values.md).
 
-The `semver` constraint in `ocirepository.yaml` (`^0.22.0`) takes patch
+The `semver` constraint in `ocirepository.yaml` (`^0.23.0`) takes patch
 releases only. Widen it to pick up later 0.x minor releases; check the release
 notes first, since minor releases can change the CRDs.
+
+The version pins here, in `examples/flux/ocirepository.yaml` (comment and
+`semver`) and in the `helm install` command below are bumped when a release is
+cut. If `scripts/check-install-versions.sh` fails after a release, bump those
+three.
 
 ## 2. Helm (`helm install`)
 
 ```bash
 helm install roundtable \
   oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
-  --version 0.22.0 \
+  --version 0.23.0 \
   --namespace roundtable --create-namespace
 ```
 

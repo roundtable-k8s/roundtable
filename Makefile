@@ -192,6 +192,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml) and chec
 	scripts/check-observability-doc.sh
 	scripts/check-metrics-doc.sh
 	scripts/check-doc-links.sh
+	scripts/check-install-versions.sh
 	scripts/check-helm-values-doc.sh
 	HELM="$(HELM)" scripts/check-isolation-env.sh
 	HELM="$(HELM)" scripts/check-minimal-values.sh
