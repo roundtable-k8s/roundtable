@@ -242,14 +242,59 @@ kubectl get knight galahad -o jsonpath='{.status.conditions[?(@.type=="EgressRes
 
 ## Tool installs need egress
 
-`tools.pip` downloads its packages **when the pod starts**, and a failed
-install is only a warning: the knight still starts and reports Ready, but
-without the tools. Under default-deny, allow the package hosts in
-`allowedHosts` (for example `pypi.org` and `files.pythonhosted.org`), or use
-`tools.nix`, which needs no egress at pod start. `tools.apt` and `tools.mise`
-are deprecated (see [CRD design](crd-design.md#deprecated-fields)); move them to
-`tools.nix` or `tools.flakes`. When enabling isolation on an existing knight,
-check its `tools` first; see `examples/tristan.yaml`.
+`tools.nix` and `tools.flakes` need no egress at pod start. The operator's
+builder Job builds the packages into a tools image, and the knight mounts that
+image read-only at `/nix` as a Kubernetes image volume. Nothing is downloaded
+when the pod starts, so the knight needs no package hosts in `allowedHosts`.
+Changing the tool set builds a new image; the builder Job pushes it to the
+registry, which is not part of the knight's allowlist.
+
+`tools.apt` and `tools.mise` are deprecated (see
+[CRD design](crd-design.md#deprecated-fields)); move them to `tools.nix` or
+`tools.flakes`. When enabling isolation on an existing knight, check its `tools`
+first; see `examples/tristan.yaml`.
+
+## Rules the allowlist cannot express
+
+`spec.egress` stays hosts, ports and services. It will not gain L7 rules,
+CIDRs, entities or ICMP rules. For those, write your own `CiliumNetworkPolicy`
+in the knight's namespace. The operator does not manage it: it never creates,
+updates or deletes it, and it is not removed when the Knight is.
+
+Select the knight's pods with the same two labels the operator's policy uses,
+`app.kubernetes.io/name: knight` and `app.kubernetes.io/instance: <name>`. Both
+runtime backends set them. Cilium allow rules are additive, so a second policy
+adds allowances on top of `knight-<name>-egress` and cannot remove one. This is
+standard Cilium behaviour; it has not been tested on a live cluster for this
+operator.
+
+```yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: galahad-extra-egress
+  namespace: roundtable
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: knight
+      app.kubernetes.io/instance: galahad
+  egress:
+    - toCIDR:
+        - 10.20.0.0/16        # a LAN range that has no DNS name
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+```
+
+To filter HTTP requests as well, add a `rules.http` list under the `toPorts`
+entry, as in Cilium's own documentation. Keep the policy's selector to the two
+labels above so it covers exactly one knight.
+
+On a cluster without Cilium, a plain `NetworkPolicy` with the same selector is
+also additive, but it cannot express L7 rules, and the example above is a
+Cilium policy, so it applies only where `cilium.io/v2` is served.
 
 ## Finding the hosts a knight needs
 
