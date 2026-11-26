@@ -19,6 +19,7 @@ package gateway
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 const (
@@ -89,14 +91,34 @@ type ScheduleRun struct {
 	ResultAvailable bool `json:"resultAvailable"`
 }
 
-// ScheduleRunResult is the result of one run of a schedule: the run's record
-// (for a chain target, its steps and final output) and the schedule it
-// belongs to.
+// ScheduleTaskResult is the result of a knight-target run: the task the
+// firing sent.
+type ScheduleTaskResult struct {
+	// Run is the task ID.
+	Run    string `json:"run"`
+	Knight string `json:"knight"`
+	// Status is pending, succeeded or failed.
+	Status      string          `json:"status"`
+	Output      string          `json:"output,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Model       string          `json:"model,omitempty"`
+	Verdict     string          `json:"verdict,omitempty"`
+	PRs         []natspkg.PRRef `json:"prs,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+}
+
+// ScheduleRunResult is the result of one run of a schedule and the schedule
+// it belongs to. Exactly one of the run's record (chain target, flattened
+// into this object), Task (knight target) and Mission (mission target) is
+// set, matching Target.
 type ScheduleRunResult struct {
 	Schedule string `json:"schedule"`
-	// Target is the kind of target that ran: chain.
+	// Target is the kind of target that ran: chain, knight or mission.
 	Target string `json:"target"`
-	RunRecord
+	*RunRecord
+	Task    *ScheduleTaskResult `json:"task,omitempty"`
+	Mission *MissionView        `json:"mission,omitempty"`
 }
 
 // ScheduleRunsFilter narrows ListScheduleRuns.
@@ -196,8 +218,6 @@ func (s *Service) ListScheduleRuns(ctx context.Context, f ScheduleRunsFilter) ([
 					r.Outcome = scheduleOutcomeRunning
 				}
 			}
-			// Extension point (#564): a knight-target task's result is
-			// readable while its task record is kept.
 			out = append(out, r)
 		}
 	}
@@ -210,7 +230,34 @@ func (s *Service) ListScheduleRuns(ctx context.Context, f ScheduleRunsFilter) ([
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	s.markResultsAvailable(ctx, trg, out)
 	return out, nil
+}
+
+// markResultsAvailable sets ResultAvailable on the knight-target runs whose
+// task record is still kept and the mission-target runs whose Mission still
+// exists. A lookup that fails leaves the run marked unavailable.
+func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trigger, runs []*ScheduleRun) {
+	switch {
+	case trg.Spec.Target.Knight != nil && s.Bus != nil:
+		for _, r := range runs {
+			if r.Run == "" || r.ResultAvailable {
+				continue
+			}
+			if _, err := s.firedTask(ctx, trg, r.Run); err == nil {
+				r.ResultAvailable = true
+			}
+		}
+	case trg.Spec.Target.Mission != nil:
+		for _, r := range runs {
+			if r.Run == "" || r.ResultAvailable {
+				continue
+			}
+			if m, err := s.firedMission(ctx, trg, r.Run); err == nil && m != nil {
+				r.ResultAvailable = true
+			}
+		}
+	}
 }
 
 // chainScheduleRun projects a Chain a schedule started.
@@ -250,12 +297,10 @@ func scheduleChainOutcome(rec *RunRecord) string {
 	return strings.ToLower(runPhasePending)
 }
 
-// ScheduleRunResult returns the result of one run of a schedule. A run that
-// does not belong to the schedule is a 404.
-//
-// Extension points, one case per target kind: a knight target (#564) returns
-// the task's result from the task record, a mission target (#567) the
-// mission's report.
+// ScheduleRunResult returns the result of one run of a schedule: a chain
+// target's steps and final output, a knight target's task result (from the
+// task record) or a mission target's Mission. A run that does not belong to
+// the schedule is a 404.
 func (s *Service) ScheduleRunResult(ctx context.Context, namespace, name, run string) (*ScheduleRunResult, error) {
 	trg, err := s.lookupScheduleRuns(ctx, namespace, name)
 	if err != nil {
@@ -265,12 +310,78 @@ func (s *Service) ScheduleRunResult(ctx context.Context, namespace, name, run st
 	case trg.Spec.Target.ChainRef != nil:
 		return s.chainScheduleRunResult(ctx, trg, run)
 	case trg.Spec.Target.Knight != nil:
-		// TODO(#564): read the task record of run (Bus.GetRecord) and check
-		// it was sent for this schedule.
-		return nil, fmt.Errorf("%w: results of knight-target schedules are not served yet", ErrUnprocessable)
+		return s.knightScheduleRunResult(ctx, trg, run)
+	case trg.Spec.Target.Mission != nil:
+		return s.missionScheduleRunResult(ctx, trg, run)
 	}
-	// TODO(#567): a mission target returns the mission's report.
 	return nil, fmt.Errorf("%w: schedule %s/%s has no target whose results are served", ErrUnprocessable, trg.Namespace, trg.Name)
+}
+
+func scheduleRunNotFound(trg *aiv1alpha1.Trigger, run string) error {
+	return fmt.Errorf("%w: run %s/%s of schedule %s", ErrNotFound, trg.Namespace, run, trg.Name)
+}
+
+// firedTask loads the task record of run, provided the schedule sent it: the
+// run must be a firing in the Trigger's status.recentFirings. An expired
+// record or a task of anything else is a 404.
+func (s *Service) firedTask(ctx context.Context, trg *aiv1alpha1.Trigger, run string) (*TaskRecord, error) {
+	if s.Bus == nil || run == "" || !slices.ContainsFunc(trg.Status.RecentFirings, func(f aiv1alpha1.TriggerFiring) bool {
+		return f.SkipReason == "" && f.Run == run
+	}) {
+		return nil, scheduleRunNotFound(trg, run)
+	}
+	rec, err := s.GetTask(ctx, run)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, scheduleRunNotFound(trg, run)
+		}
+		return nil, err
+	}
+	if rec.Namespace != "" && rec.Namespace != trg.Namespace {
+		return nil, scheduleRunNotFound(trg, run)
+	}
+	return rec, nil
+}
+
+func (s *Service) knightScheduleRunResult(ctx context.Context, trg *aiv1alpha1.Trigger, run string) (*ScheduleRunResult, error) {
+	rec, err := s.firedTask(ctx, trg, run)
+	if err != nil {
+		return nil, err
+	}
+	return &ScheduleRunResult{Schedule: trg.Name, Target: "knight", Task: &ScheduleTaskResult{
+		Run: rec.TaskID, Knight: rec.Knight, Status: string(rec.Status), Output: rec.Output, Error: rec.Error,
+		Model: rec.Model, Verdict: rec.Verdict, PRs: rec.PRs, CreatedAt: rec.CreatedAt.UTC(),
+		CompletedAt: rec.CompletedAt,
+	}}, nil
+}
+
+// firedMission reads the Mission run, provided trg created it; otherwise nil.
+func (s *Service) firedMission(ctx context.Context, trg *aiv1alpha1.Trigger, run string) (*aiv1alpha1.Mission, error) {
+	if len(validation.IsDNS1123Subdomain(run)) > 0 {
+		return nil, nil //nolint:nilnil // an invalid name is a missing run
+	}
+	m := &aiv1alpha1.Mission{}
+	if err := s.ScheduleReader.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: run}, m); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil //nolint:nilnil // a deleted run is a missing run
+		}
+		return nil, k8sError("get schedule run", err)
+	}
+	if !metav1.IsControlledBy(m, trg) || !m.DeletionTimestamp.IsZero() {
+		return nil, nil //nolint:nilnil // another Trigger's Mission is not this schedule's run
+	}
+	return m, nil
+}
+
+func (s *Service) missionScheduleRunResult(ctx context.Context, trg *aiv1alpha1.Trigger, run string) (*ScheduleRunResult, error) {
+	m, err := s.firedMission(ctx, trg, run)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, scheduleRunNotFound(trg, run)
+	}
+	return &ScheduleRunResult{Schedule: trg.Name, Target: "mission", Mission: s.missionView(ctx, m, true)}, nil
 }
 
 func (s *Service) chainScheduleRunResult(ctx context.Context, trg *aiv1alpha1.Trigger, run string) (*ScheduleRunResult, error) {
@@ -282,7 +393,7 @@ func (s *Service) chainScheduleRunResult(ctx context.Context, trg *aiv1alpha1.Tr
 	if c == nil || c.Labels[aiv1alpha1.LabelTrigger] != trg.Name || !metav1.IsControlledBy(c, trg) {
 		return nil, notFound
 	}
-	return &ScheduleRunResult{Schedule: trg.Name, Target: "chain", RunRecord: *runRecord(c, true)}, nil
+	return &ScheduleRunResult{Schedule: trg.Name, Target: "chain", RunRecord: runRecord(c, true)}, nil
 }
 
 // fetchChainFrom reads a Chain through r; a missing one is nil, not an error.
