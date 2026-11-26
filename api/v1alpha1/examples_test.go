@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -165,5 +166,45 @@ func TestBacklogGroomingRecipe(t *testing.T) {
 		if strings.Contains(string(b), "roundtable-k8s") || strings.Contains(string(b), "dapperdivers") {
 			t.Errorf("%s names a real org", f)
 		}
+	}
+}
+
+// TestOllamaKnightExample pins the local-model Knight: it runs an ollama/<tag>
+// model against the in-cluster endpoint from KNIGHT_MODEL_BASE_URL, reaches
+// that Service through allowedServices (not an open host), and holds no
+// hosted provider key.
+func TestOllamaKnightExample(t *testing.T) {
+	data, err := os.ReadFile("../../examples/knight-ollama.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var knight Knight
+	if err := yaml.UnmarshalStrict(data, &knight); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(knight.Spec.Model, "ollama/") || len(knight.Spec.Model) == len("ollama/") {
+		t.Errorf("model = %q, want ollama/<tag>", knight.Spec.Model)
+	}
+	var baseURL string
+	for _, e := range knight.Spec.Env {
+		switch e.Name {
+		case "KNIGHT_MODEL_BASE_URL":
+			baseURL = e.Value
+		case "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY":
+			t.Errorf("hosted provider key %s must not be set", e.Name)
+		}
+	}
+	if !strings.HasPrefix(baseURL, "http://") || !strings.HasSuffix(baseURL, "/v1") {
+		t.Errorf("KNIGHT_MODEL_BASE_URL = %q, want http(s) URL ending in /v1", baseURL)
+	}
+	if knight.Spec.Egress == nil || len(knight.Spec.Egress.AllowedServices) == 0 {
+		t.Fatal("egress.allowedServices must name the model Service")
+	}
+	svc := knight.Spec.Egress.AllowedServices[0]
+	if !strings.Contains(baseURL, svc.Name+"."+svc.Namespace+".svc") {
+		t.Errorf("KNIGHT_MODEL_BASE_URL %q does not point at allowedServices[0] %s/%s", baseURL, svc.Namespace, svc.Name)
+	}
+	if !slices.Contains(svc.Ports, 11434) {
+		t.Errorf("allowedServices[0] ports = %v, want Ollama port 11434", svc.Ports)
 	}
 }
