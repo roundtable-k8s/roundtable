@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	// cleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes resources.
-	cleanupPolicyDelete = "Delete"
+	// CleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes resources.
+	CleanupPolicyDelete = "Delete"
 	// resultsKVBucket is the NATS KV bucket holding retained mission results.
 	resultsKVBucket = natspkg.ResultsBucket
 )
@@ -39,7 +39,7 @@ func (c *Cleaner) natsClient() (natspkg.Client, error) {
 // ShouldDeleteResources determines if resources should be deleted based on cleanup policy and mission outcome.
 func (c *Cleaner) ShouldDeleteResources(mission *aiv1alpha1.Mission) bool {
 	switch mission.Spec.CleanupPolicy {
-	case cleanupPolicyDelete:
+	case CleanupPolicyDelete:
 		return true
 	case "Retain":
 		return false

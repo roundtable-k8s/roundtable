@@ -177,9 +177,17 @@ func Name(base string, parts ...string) string {
 		suffix = "-" + clean[n-1]
 		clean = clean[:n-1]
 	}
+	if len(suffix) > maxNameLen {
+		suffix = strings.TrimRight(suffix[:maxNameLen], "-")
+	}
 	prefix := strings.Join(append([]string{base}, clean...), "-")
-	if limit := maxNameLen - len(suffix); len(prefix) > limit {
+	if limit := max(maxNameLen-len(suffix), 0); len(prefix) > limit {
 		prefix = strings.TrimRight(prefix[:limit], "-")
+	}
+	if prefix == "" {
+		// Nothing of the base survived: drop the separator so the name does
+		// not start with "-".
+		return strings.TrimPrefix(suffix, "-")
 	}
 	return prefix + suffix
 }

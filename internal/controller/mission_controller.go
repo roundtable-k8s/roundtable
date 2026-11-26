@@ -44,8 +44,6 @@ import (
 
 const (
 	missionFinalizer = "ai.roundtable.io/mission-finalizer"
-	// cleanupPolicyDelete is the Mission.Spec.CleanupPolicy value that deletes the mission after its TTL.
-	cleanupPolicyDelete = "Delete"
 )
 
 // MissionReconciler reconciles a Mission object.
@@ -297,14 +295,6 @@ func (r *MissionReconciler) initKnightStatuses(mission *aiv1alpha1.Mission) {
 			Ephemeral: mk.Ephemeral,
 		}
 	}
-}
-
-// natsPrefix returns the NATS subject prefix for this mission.
-func natsPrefix(mission *aiv1alpha1.Mission) string {
-	if mission.Spec.NATSPrefix != "" {
-		return mission.Spec.NATSPrefix
-	}
-	return fmt.Sprintf("mission-%s", mission.Name)
 }
 
 // reconcilePending validates the mission spec before provisioning.
@@ -843,7 +833,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// Self-delete if cleanupPolicy=Delete and TTL expired
-	if mission.Spec.CleanupPolicy == cleanupPolicyDelete &&
+	if mission.Spec.CleanupPolicy == missionpkg.CleanupPolicyDelete &&
 		mission.Status.ExpiresAt != nil &&
 		time.Now().After(mission.Status.ExpiresAt.Time) {
 		log.Info("Deleting expired mission", "mission", mission.Name)
@@ -854,7 +844,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	}
 
 	// If cleanupPolicy=Delete but TTL hasn't expired yet, requeue
-	if mission.Spec.CleanupPolicy == cleanupPolicyDelete && mission.Status.ExpiresAt != nil {
+	if mission.Spec.CleanupPolicy == missionpkg.CleanupPolicyDelete && mission.Status.ExpiresAt != nil {
 		remaining := time.Until(mission.Status.ExpiresAt.Time)
 		if remaining > 0 {
 			return ctrl.Result{RequeueAfter: remaining}, nil
@@ -884,6 +874,21 @@ func (r *MissionReconciler) updateKnightStatuses(ctx context.Context, mission *a
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	for _, dep := range []struct {
+		name string
+		nil  bool
+	}{
+		{"Planner", r.Planner == nil},
+		{"Assembler", r.Assembler == nil},
+		{"Cleaner", r.Cleaner == nil},
+		{"CostTracker", r.CostTracker == nil},
+		{"Briefer", r.Briefer == nil},
+		{"Chains", r.Chains == nil},
+	} {
+		if dep.nil {
+			return fmt.Errorf("MissionReconciler.%s must be set", dep.name)
+		}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Mission{}).
 		Owns(&aiv1alpha1.Chain{}).
