@@ -62,3 +62,13 @@ func TestIDGeneratorHonoursPresetIDs(t *testing.T) {
 		t.Fatal("random IDs expected")
 	}
 }
+
+func TestLogValues(t *testing.T) {
+	if got := LogValues(""); len(got) != 0 {
+		t.Fatalf("empty trace ID: got %v, want nothing", got)
+	}
+	got := LogValues("abc")
+	if len(got) != 2 || got[0] != "trace_id" || got[1] != "abc" {
+		t.Fatalf("got %v", got)
+	}
+}

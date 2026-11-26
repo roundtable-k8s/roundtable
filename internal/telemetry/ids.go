@@ -120,3 +120,14 @@ func ChildSpanContext(root trace.SpanContext, key string) trace.SpanContext {
 // is the W3C traceparent of the mission's root span, and the chain's run
 // trace becomes a part of the mission's trace instead of a new one.
 const AnnotationParentTraceparent = "ai.roundtable.io/parent-traceparent"
+
+// LogValues returns the key/value pair that puts a run's trace ID on a log
+// line, or nothing when the ID is empty (telemetry off), so lines are
+// unchanged then. The operator's spans are emitted after the fact from stored
+// IDs, so the ID comes from the resource status, not from a span in ctx.
+func LogValues(traceID string) []any {
+	if traceID == "" {
+		return nil
+	}
+	return []any{"trace_id", traceID}
+}
