@@ -73,7 +73,10 @@ func (f *fakeNATSClient) PublishJSON(subject string, v any) error {
 }
 
 func (f *fakeNATSClient) CreateStream(context.Context, natspkg.StreamConfig) error { return nil }
-func (f *fakeNATSClient) DeleteStream(context.Context, string) error               { return nil }
+func (f *fakeNATSClient) EnsureStreamMaxAge(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (f *fakeNATSClient) DeleteStream(context.Context, string) error { return nil }
 func (f *fakeNATSClient) StreamInfo(context.Context, string) (*jetstream.StreamInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }

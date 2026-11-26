@@ -4213,6 +4213,15 @@ spec:
                       with Limits retention when createStreams is true. Defaults to
                       <tasksStream>_EVENTS.
                     type: string
+                  resultsMaxAge:
+                    description: |-
+                      resultsMaxAge bounds how long unread task results stay in the results
+                      stream, so results that arrive after their step timed out, was
+                      cancelled or lost its Chain do not accumulate. Unset keeps results
+                      until they are read. Must be longer than the longest step timeout and,
+                      where the gateway keeps task results in the stream, longer than the
+                      task TTL. Only used when createStreams is true.
+                    type: string
                   resultsStream:
                     description: resultsStream is the JetStream stream name for results.
                     type: string
