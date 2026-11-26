@@ -27,16 +27,16 @@ network reach. A job that needs more than the others gets its own persona.
 
 ## Field mapping
 
-| kagent | Round Table | Not supported yet |
-|--------|-------------|-------------------|
-| `AgentTemplate.systemPrompt` | The job Chain step's `task`, verbatim, then `{{ .Input }}` for the caller's request (`ChainStep.Task`, `Chain.spec.input`) | |
-| `ModelConfig` | The step's `model` (`ChainStep.Model`): a model ID or a RoundTable `modelAliases` name. It must suit the knight's runtime: Claude models on claude-knight, `provider/model` on pi-knight | |
-| `Agent` (+ `Harness`) | A persona `Knight`: `spec.image` (claude-knight or pi-knight), `spec.prompt.identity` / `spec.prompt.instructions` (who it is and its limits only, not the job), `spec.tools.nix`, `spec.serviceAccountName`, `spec.concurrency`, `spec.workspace` | |
-| Vault MCP server | `spec.vault` (`claimName`, `readOnly`, `writablePaths`), mounted at `/vault` | |
-| `Harness` tool settings | `spec.env`: `CLAUDE_DISALLOWED_TOOLS` and `MCP_SERVERS_JSON` on claude-knight | |
-| `RemoteMCPServer` | A CLI tool in `spec.tools.nix`, a skill, or `MCP_SERVERS_JSON` on claude-knight | Declarative MCP servers: [#211](https://github.com/roundtable-k8s/roundtable/issues/211) |
-| `EgressPolicy` | `spec.egress` per-knight allow-lists, see [egress](egress.md) | Deny-all by default: [#387](https://github.com/roundtable-k8s/roundtable/issues/387) |
-| Sandbox / isolation | `spec.runtimeClassName` (e.g. gVisor), see [runtime isolation](runtime-isolation.md) | |
+| kagent | Round Table |
+|--------|-------------|
+| `AgentTemplate.systemPrompt` | The job Chain step's `task`, verbatim, then `{{ .Input }}` for the caller's request (`ChainStep.Task`, `Chain.spec.input`) |
+| `ModelConfig` | The step's `model` (`ChainStep.Model`): a model ID or a RoundTable `modelAliases` name. It must suit the knight's runtime: Claude models on claude-knight, `provider/model` on pi-knight |
+| `Agent` (+ `Harness`) | A persona `Knight`: `spec.image` (claude-knight or pi-knight), `spec.prompt.identity` / `spec.prompt.instructions` (who it is and its limits only, not the job), `spec.tools.nix`, `spec.serviceAccountName`, `spec.concurrency`, `spec.workspace` |
+| Vault MCP server | `spec.vault` (`claimName`, `readOnly`, `writablePaths`), mounted at `/vault` |
+| `Harness` tool settings | `spec.env`: `CLAUDE_DISALLOWED_TOOLS` on claude-knight |
+| `RemoteMCPServer` | `spec.mcpServers` (`name`, `url`, optional `headersFrom` to send a token from a Secret key as a header such as `Authorization`, see [`examples/knight-mcp-headers.yaml`](../examples/knight-mcp-headers.yaml)). The operator allows the server's URL in the knight's egress by itself. A CLI tool in `spec.tools.nix` or a skill also works. `MCP_SERVERS_JSON` in `spec.env` is the alternative on claude-knight |
+| `EgressPolicy` | `spec.egress` per-knight allow-lists. A knight is isolated by default (deny-all) and reaches only what its egress allows, see [egress](egress.md) |
+| Sandbox / isolation | `spec.runtimeClassName` (e.g. gVisor), see [runtime isolation](runtime-isolation.md) |
 
 ### Tool-less is not tool-free on claude-knight
 
@@ -116,6 +116,129 @@ spec:
 
 What happens on missed, overlapping, lost and deleted runs is in
 [Scheduled work](scheduled-work.md#when-a-run-is-missed-overlapping-lost-or-deleted).
+
+## Moving a cron job
+
+A cron job that ran a script (collect some data, ask an agent to judge it,
+file the result) moves in four steps: shape the script, change the persona
+knight, send one task from a Trigger, then run old and new side by side before
+the cutover.
+
+### 1. The script contract
+
+Split the script into two modes. The agent does only the judging between them.
+
+- `--collect` prints one JSON document: the items to judge, the instructions
+  and the shape of the answer. It **writes nothing**.
+- `--file ANSWERS.json` validates the answer and does **every write**. When the
+  answer is bad it exits non-zero with a reason on stderr. When it succeeds it
+  prints a fixed last line, `<job>: ok`.
+- The old wrapper mode (the one the cron job calls) stays in the script until
+  the cron job retires, so both can run side by side.
+
+```sh
+S=/skills/ops/nightly-report/scripts
+$S/run-job --collect > /tmp/collect.json   # items, instructions, answer shape; no writes
+# the knight reads collect.json and writes /tmp/answers.json
+$S/run-job --file /tmp/answers.json        # validates, writes, prints "nightly-report: ok"
+```
+
+### 2. Change the persona knight
+
+- **The script** arrives as a skill in an arsenal: `spec.arsenals` takes a git
+  source or an OCI image ([`examples/knight-arsenal-oci.yaml`](../examples/knight-arsenal-oci.yaml)).
+  Pin an OCI reference by digest (`@sha256:...`), not by tag.
+- **Interpreters** the script needs (`python3`, `jq`) go in `spec.tools.nix`.
+- **Vault output**: `spec.vault.writablePaths` lists only the output folder
+  the job writes to, nothing wider.
+- **Model**: a job that needs a different model than the knight sets
+  `target.model` on the Trigger (a model ID or a `modelAliases` name); it
+  applies to that task only.
+
+```yaml
+spec:
+  tools:
+    nix: [python3, jq]
+  vault:
+    claimName: vault
+    writablePaths:
+      - Reports/nightly-new
+```
+
+### 3. The Trigger task text
+
+The task names the skill and the two commands, and tells the knight what its
+answer is:
+
+```yaml
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: nightly-report
+  namespace: roundtable
+spec:
+  source:
+    schedule:
+      cron: "30 3 * * *"
+      timeZone: Europe/London
+      startingDeadlineSeconds: 3600
+  target:
+    knight:
+      name: tristan
+      model: haiku
+      task: |
+        Use the ops/nightly-report skill for {{ .Event.Time.Format "2006-01-02" }}.
+        Run `run-job --collect`, judge the items as its instructions say, write
+        your answer in the shape it gives to /tmp/answers.json, then run
+        `run-job --file /tmp/answers.json`. Your answer is the last line `file`
+        printed.
+        If `--file` rejects the answer and you cannot fix it, end with
+        `Outcome: failed <reason>`. Never claim success without the `ok` line.
+      timeoutSeconds: 1800
+  concurrency:
+    policy: Forbid
+```
+
+### Failing loudly
+
+A cron job that fails shows up as a failed Job. A knight that merely says it
+could not finish shows up as a success. To make a failure visible, the task
+text tells the knight to end with a final line:
+
+```text
+Outcome: failed <reason>
+```
+
+That line turns the task into `success: false` (the knight runtime
+parses it, `parseTaskFailure` in knights `packages/core/src/structured.ts`). The firing is then recorded with `outcome: failed` in the
+Trigger's `status.recentFirings`, in the schedule run history, and on the
+Schedules page of the dashboard:
+
+```sh
+kubectl -n roundtable get trigger nightly-report -o jsonpath='{.status.recentFirings[0]}'
+```
+
+Tell the knight to use it when `--file` rejects the answer and it cannot fix
+it, and never to claim success without the script's `ok` line. See
+[Scheduled work](scheduled-work.md#a-job-that-is-one-task-naming-a-skill-and-a-script)
+and [See and control schedules](scheduled-work.md#see-and-control-schedules).
+
+### Side by side, then cutover
+
+1. Deploy the new Trigger writing to a **separate** folder: a different
+   `OUTPUT_DIR` for the script and a matching `writablePaths` entry
+   (`Reports/nightly-new` next to the old `Reports/nightly`). Leave the old
+   cron job running.
+2. Let both run for 3 to 7 runs. Compare the dated outputs by hand, one day at
+   a time: same days written, same items, differences you can explain. Check
+   `status.recentFirings` for failed or skipped firings.
+3. Cutover: point `OUTPUT_DIR` and `writablePaths` at the real folder (drop the
+   `-new` one), and suspend the old cron job
+   (`kubectl -n <ns> patch cronjob <name> -p '{"spec":{"suspend":true}}'`).
+4. Delete the old cron job a week later, once nothing needed it.
+
+A job that another job links to must keep its output path at cutover: change
+the folder the new job writes to, not the path its readers use.
 
 ## The caller
 
@@ -251,9 +374,22 @@ except UsageLimited as e:
 
 ## Checklist
 
+For a chat or API agent (a Chain):
+
 1. Create the persona Knight, or reuse one at the same trust level.
 2. Add the job Chain: the old `systemPrompt` as the step `task`, ending in
    `{{ .Input }}`, a step `model`, the `ai.roundtable.io/invokable` label.
-3. Run old and new side by side on the same inputs and compare the answers.
+3. Run old and new on the same inputs and compare the answers.
 4. Switch the caller to the gateway (`run_chain` or the `run_chain` MCP tool).
 5. Delete the kagent Agent.
+
+For a cron job (a scheduled knight):
+
+1. Split the script into `--collect` and `--file`, keeping the old wrapper mode.
+2. Ship it as a skill in an arsenal (OCI pinned by digest); add `spec.tools.nix`
+   and a `spec.vault.writablePaths` entry for the new output folder only.
+3. Add the Trigger: the task names the skill and both commands, and says to end
+   with `Outcome: failed <reason>` when `--file` rejects the answer.
+4. Run side by side for 3 to 7 runs into the separate folder; compare.
+5. Cut over: switch the folder (keep paths other jobs link to), suspend the old
+   cron job, delete it a week later.

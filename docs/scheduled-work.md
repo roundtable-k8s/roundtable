@@ -154,6 +154,11 @@ spec:
     policy: Forbid
 ```
 
+A knight reports a failure the script cannot hide by ending its answer with a
+final line `Outcome: failed <reason>`. That makes the task `success: false`, so
+the firing shows as failed in `status.recentFirings` instead of succeeded. See
+[Failing loudly](migrating-from-kagent.md#failing-loudly).
+
 ## When a run is missed, overlapping, lost or deleted
 
 | Situation | What happens | Rests on |
