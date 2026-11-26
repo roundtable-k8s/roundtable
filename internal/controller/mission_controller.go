@@ -92,6 +92,10 @@ func (r *MissionReconciler) emitMissionSpan(ctx context.Context, mission *aiv1al
 func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Count table-less missions (roundtable_missions{table="none"}); the
+	// RoundTable reconciler only counts missions of a table.
+	defer updateUnownedMissionMetrics(ctx, r.Client)
+
 	mission := &aiv1alpha1.Mission{}
 	if err := r.Get(ctx, req.NamespacedName, mission); err != nil {
 		if client.IgnoreNotFound(err) == nil {
