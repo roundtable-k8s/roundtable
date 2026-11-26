@@ -197,3 +197,89 @@ func TestSkillFilterExitsOnSIGTERM(t *testing.T) {
 		t.Fatal("skill-filter did not exit on SIGTERM")
 	}
 }
+
+func TestSkillFilterFlatArsenalLayout(t *testing.T) {
+	root := t.TempDir()
+	platform := filepath.Join(root, "arsenal", "arsenal")
+	personal := filepath.Join(root, "arsenal", "personal")
+
+	// Flat Agent Skills layout: the skill directory sits at the arsenal root.
+	mkSkill(t, filepath.Join(personal, "pdf"))
+	if err := os.MkdirAll(filepath.Join(personal, "pdf", "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(personal, "pdf", "scripts", "run.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Mixed: a platform category layout next to the flat personal skill.
+	mkSkill(t, filepath.Join(platform, "shared", "web-search"))
+
+	k := &aiv1alpha1.Knight{}
+	k.Spec.Skills = []string{"shared", "pdf"}
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "arsenal"}, {Name: "personal", Repo: "https://github.com/x/roundtable-arsenal"}}
+
+	out := runSkillFilter(t, k, root)
+	if strings.Contains(out, "WARN: category pdf") {
+		t.Errorf("flat skill must not warn as a missing category:\n%s", out)
+	}
+
+	skills := filepath.Join(root, "skills")
+	got, err := os.Readlink(filepath.Join(skills, "pdf", "pdf"))
+	if err != nil {
+		t.Fatalf("pdf/pdf should link the flat skill: %v", err)
+	}
+	if got != filepath.Join(personal, "pdf") {
+		t.Errorf("pdf/pdf -> %s, want %s", got, filepath.Join(personal, "pdf"))
+	}
+	// The skill's own contents must not be treated as skills.
+	entries, err := os.ReadDir(filepath.Join(skills, "pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "pdf" {
+		t.Errorf("skills/pdf should hold only the pdf link, got %v", entries)
+	}
+	if _, err := os.Stat(filepath.Join(skills, "pdf", "pdf", "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md should be reachable through the link: %v", err)
+	}
+	if got, _ := os.Readlink(filepath.Join(skills, "shared", "web-search")); got != filepath.Join(platform, "shared", "web-search") {
+		t.Errorf("mixed category skill should still merge, got %q", got)
+	}
+
+	// A later flat arsenal overrides an earlier category skill of the same name.
+	mkSkill(t, filepath.Join(platform, "pdf", "pdf"))
+	runSkillFilter(t, k, root)
+	got, _ = os.Readlink(filepath.Join(skills, "pdf", "pdf"))
+	if got != filepath.Join(personal, "pdf") {
+		t.Errorf("later flat arsenal should win over the category skill, got %s", got)
+	}
+}
+
+func TestSkillFilterSwitchesFlatToCategoryLayout(t *testing.T) {
+	root := t.TempDir()
+	personal := filepath.Join(root, "arsenal", "personal")
+	mkSkill(t, filepath.Join(personal, "pdf"))
+
+	k := &aiv1alpha1.Knight{}
+	k.Spec.Skills = []string{"pdf"}
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "personal"}}
+	runSkillFilter(t, k, root)
+	if _, err := os.Readlink(filepath.Join(root, "skills", "pdf", "pdf")); err != nil {
+		t.Fatalf("flat layout should link pdf/pdf: %v", err)
+	}
+
+	// The arsenal moves to a category layout: pdf/ now holds a skill named extra.
+	if err := os.RemoveAll(filepath.Join(personal, "pdf", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	mkSkill(t, filepath.Join(personal, "pdf", "extra"))
+	runSkillFilter(t, k, root)
+
+	if _, err := os.Lstat(filepath.Join(root, "skills", "pdf", "pdf")); !os.IsNotExist(err) {
+		t.Errorf("stale flat link pdf/pdf should be pruned: %v", err)
+	}
+	got, err := os.Readlink(filepath.Join(root, "skills", "pdf", "extra"))
+	if err != nil || got != filepath.Join(personal, "pdf", "extra") {
+		t.Errorf("pdf/extra -> %q (%v), want %s", got, err, filepath.Join(personal, "pdf", "extra"))
+	}
+}

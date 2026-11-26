@@ -822,6 +822,13 @@ sync_skills() {
     want=""
     for a in $ARSENALS; do
       [ -d "$a/$cat" ] || continue
+      # Flat Agent Skills layout: $cat/SKILL.md at the arsenal root makes the
+      # directory itself the skill, linked as /skills/$cat/$cat.
+      if [ -f "$a/$cat/SKILL.md" ]; then
+        want="$(echo "$want" | awk -v n="$cat" '$1 != n')
+$cat $a/$cat"
+        continue
+      fi
       for src in "$a/$cat"/*; do
         [ -e "$src" ] || continue
         name="${src##*/}"
