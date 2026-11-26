@@ -106,8 +106,8 @@ condition:
 
 | Status / reason | Meaning |
 |---|---|
-| `False` / `SnapshotNotReady` | The `VolumeSnapshot` does not exist or is not `readyToUse`. The PVC is **not created** yet and the knight has no pod; the operator looks again every 30 seconds |
-| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API was not served when the operator started |
+| `False` / `SnapshotNotReady` | The `VolumeSnapshot` does not exist or is not `readyToUse`. The PVC is **not created** yet, so the knight's pod stays `Pending` until the PVC exists; the operator looks again every 30 seconds |
+| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API was not served when the operator started. The PVC is not created, so the pod stays `Pending`; the operator looks again every 30 seconds |
 | `True` / `RestoredFromSnapshot` | The PVC was created from the snapshot |
 | `True` / `FromSnapshotIgnored` | The PVC already existed (not created from this snapshot), so `fromSnapshot` was not applied |
 
@@ -117,7 +117,8 @@ An existing PVC is kept: to get a restored workspace, create a new knight (a for
 
 - `pvc` mode only. `fromSnapshot` is rejected (at admission) with
   `workspace.existingClaim` (even an empty one) and with `workspace.mode: ephemeral`.
-  Snapshots are not taken for ephemeral workspaces.
+  Snapshots are not taken for ephemeral workspaces. Taking snapshots does work for a knight
+  that uses `existingClaim`: the operator snapshots that claim.
 - `fromSnapshot` applies only when the PVC is created. An existing PVC is never replaced or
   modified.
 - The snapshot must be in the knight's own namespace.
