@@ -175,7 +175,7 @@ var _ = Describe("IssuePickup trigger engine", func() {
 				NATS: aiv1alpha1.RoundTableNATS{
 					SubjectPrefix: "ptrg", TasksStream: "ptrg_tasks", ResultsStream: "ptrg_results", CreateStreams: true,
 				},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "ptrg-gh"}, Key: "token"}},
 				IssuePickup: &aiv1alpha1.IssuePickupSpec{
 					Engine:    aiv1alpha1.IssuePickupEngineTrigger,

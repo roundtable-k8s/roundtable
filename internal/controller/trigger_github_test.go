@@ -311,7 +311,7 @@ var _ = Describe("Trigger GitHub source", func() {
 				NATS: aiv1alpha1.RoundTableNATS{
 					SubjectPrefix: prefix, TasksStream: "trgh_tasks", ResultsStream: "trgh_results", CreateStreams: true,
 				},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "trgh-gh"}, Key: "token"}},
 			},
 		}

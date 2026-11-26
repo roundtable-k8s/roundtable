@@ -1994,6 +1994,12 @@ spec:
                             github.tokenSecretRef is set it overrides the RoundTable's
                             spec.github.tokenSecretRef.
                           properties:
+                            disableAdditionalTokens:
+                              description: |-
+                                disableAdditionalTokens, if true, keeps the RoundTable's
+                                spec.github.additionalTokens out of this knight: no extra token volumes
+                                are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+                              type: boolean
                             tokenSecretRef:
                               description: |-
                                 tokenSecretRef selects the key of a Secret (in the knight's namespace)
@@ -4566,6 +4572,12 @@ spec:
                             github.tokenSecretRef is set it overrides the RoundTable's
                             spec.github.tokenSecretRef.
                           properties:
+                            disableAdditionalTokens:
+                              description: |-
+                                disableAdditionalTokens, if true, keeps the RoundTable's
+                                spec.github.additionalTokens out of this knight: no extra token volumes
+                                are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+                              type: boolean
                             tokenSecretRef:
                               description: |-
                                 tokenSecretRef selects the key of a Secret (in the knight's namespace)
@@ -6868,6 +6880,12 @@ spec:
                             github.tokenSecretRef is set it overrides the RoundTable's
                             spec.github.tokenSecretRef.
                           properties:
+                            disableAdditionalTokens:
+                              description: |-
+                                disableAdditionalTokens, if true, keeps the RoundTable's
+                                spec.github.additionalTokens out of this knight: no extra token volumes
+                                are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+                              type: boolean
                             tokenSecretRef:
                               description: |-
                                 tokenSecretRef selects the key of a Secret (in the knight's namespace)
@@ -9516,6 +9534,12 @@ spec:
                           github.tokenSecretRef is set it overrides the RoundTable's
                           spec.github.tokenSecretRef.
                         properties:
+                          disableAdditionalTokens:
+                            description: |-
+                              disableAdditionalTokens, if true, keeps the RoundTable's
+                              spec.github.additionalTokens out of this knight: no extra token volumes
+                              are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+                            type: boolean
                           tokenSecretRef:
                             description: |-
                               tokenSecretRef selects the key of a Secret (in the knight's namespace)

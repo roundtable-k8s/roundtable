@@ -417,7 +417,7 @@ var _ = Describe("IssuePickup controller", func() {
 				NATS: aiv1alpha1.RoundTableNATS{
 					URL: "nats://localhost:4222", SubjectPrefix: "pick", TasksStream: "pick_tasks", ResultsStream: "pick_results",
 				},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pickup-gh"}, Key: "token"}},
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pickup-gh"}, Key: "token"}},
 				IssuePickup: &aiv1alpha1.IssuePickupSpec{
 					Repos:     []string{repo},
 					ChainRef:  corev1.LocalObjectReference{Name: tmplName},

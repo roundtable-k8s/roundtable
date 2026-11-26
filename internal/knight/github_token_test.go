@@ -37,7 +37,7 @@ var _ = Describe("WithGitHubToken", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "t", TasksStream: "t", ResultsStream: "r"},
-				GitHub: &aiv1alpha1.GitHubConfig{
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{
 					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: key},
 				},
 			},
