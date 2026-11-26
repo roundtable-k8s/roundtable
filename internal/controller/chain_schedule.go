@@ -100,7 +100,10 @@ func (r *ChainReconciler) handleRunTriggers(ctx context.Context, chain *aiv1alph
 			// A loop resumes in the round it stopped in (a failed body step
 			// re-runs) or, when exhausted, gets another maxIterations rounds.
 			loop := resetLoopForRetry(ss.Loop, specs[ss.Name])
-			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending, FanOut: fanOut, Loop: loop}
+			// The attempts already run keep their cost and tokens: the run
+			// totals and the Mission budget include them, as the metrics do.
+			costUSD, tokens := ss.CostUSD, ss.Tokens.DeepCopy()
+			*ss = aiv1alpha1.ChainStepStatus{Name: ss.Name, Phase: aiv1alpha1.ChainStepPhasePending, FanOut: fanOut, Loop: loop, CostUSD: costUSD, Tokens: tokens}
 			retried++
 		}
 	}
