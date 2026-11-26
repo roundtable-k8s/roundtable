@@ -81,6 +81,36 @@ Open <http://localhost:8080> and open the `hello-chain` run to see both steps an
 output. The same output is in `kubectl -n roundtable get chain hello-chain -o yaml`
 under `status.stepStatuses`.
 
+## 6. Ask the knight directly
+
+The invoke gateway (see [gateway.md](gateway.md)) sends a task straight to a Knight and
+returns the answer in the same HTTP request. It serves the release namespace by default,
+so no extra values are needed. Open a port-forward to the gateway in a second terminal:
+
+```bash
+kubectl -n roundtable port-forward svc/roundtable-operator-gateway 8081:80
+```
+
+Then, in the first terminal, read the token the chart generated and ask `arthur`:
+
+```bash
+TOKEN=$(kubectl -n roundtable get secret roundtable-operator-gateway-token \
+  -o jsonpath='{.data.token}' | base64 -d)
+curl -s -X POST localhost:8081/v1/knights/arthur/invoke \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"task":"In one sentence, what is a Kubernetes operator?","timeoutSeconds":120}'
+```
+
+A `200` response is the finished task record. The answer is in `output` and the
+task ID in `taskId` (`status` is `succeeded`, or `failed` with an `error`):
+
+```json
+{"taskId": "invoke-arthur-…", "knight": "arthur", "status": "succeeded", "output": "…"}
+```
+
+A `202` means the knight is still running when the wait ended. Poll the task with the
+same token: `curl -s -H "Authorization: Bearer $TOKEN" localhost:8081/v1/tasks/<taskId>`.
+
 ## Clean up
 
 ```bash
