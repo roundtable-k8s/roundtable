@@ -64,8 +64,10 @@ const (
 // KnightReconciler reconciles a Knight object
 type KnightReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	Recorder     record.EventRecorder
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+	// BrowserImage is the browser sidecar image (KNIGHT_BROWSER_IMAGE); empty uses the built-in pinned default.
+	BrowserImage string
 	DefaultImage string // Default pi-knight image (set via DEFAULT_KNIGHT_IMAGE env var)
 
 	// APIReader reads Pods uncached, so the operator keeps no cluster-wide
@@ -887,6 +889,7 @@ func (r *KnightReconciler) BuildPodSpec(ctx context.Context, k *aiv1alpha1.Knigh
 	builder := knightpkg.NewPodBuilder(k, r.DefaultImage).
 		WithSecurity(r.KnightSecurity).
 		WithCardsBucket(r.CardsBucket).
+		WithBrowserImage(r.BrowserImage).
 		WithReader(r.Client).
 		WithWorkspace().
 		WithMemory().

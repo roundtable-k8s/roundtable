@@ -931,3 +931,38 @@ var _ = Describe("Knight memory volume (#388)", func() {
 		})
 	})
 })
+
+var _ = Describe("PodBuilder browser image", func() {
+	browserImage := func(b *PodBuilder) string {
+		spec := b.WithBrowser().Build(context.Background())
+		for _, c := range spec.Containers {
+			if c.Name == "browser" {
+				return c.Image
+			}
+		}
+		return ""
+	}
+	newKnight := func() *aiv1alpha1.Knight {
+		return &aiv1alpha1.Knight{
+			ObjectMeta: metav1.ObjectMeta{Name: "k", Namespace: "default"},
+			Spec:       aiv1alpha1.KnightSpec{Model: "m", Domain: "d"},
+		}
+	}
+
+	It("uses the pinned default and never a floating tag", func() {
+		img := browserImage(NewPodBuilder(newKnight(), "img:1"))
+		Expect(img).To(Equal(DefaultBrowserImage))
+		Expect(img).NotTo(HaveSuffix(":latest"))
+		Expect(img).To(ContainSubstring(":"))
+	})
+
+	It("uses the configured image", func() {
+		img := browserImage(NewPodBuilder(newKnight(), "img:1").WithBrowserImage("reg.example.com/chrome:1.2.3"))
+		Expect(img).To(Equal("reg.example.com/chrome:1.2.3"))
+	})
+
+	It("reads KNIGHT_BROWSER_IMAGE", func() {
+		GinkgoT().Setenv("KNIGHT_BROWSER_IMAGE", "reg.example.com/chrome:9")
+		Expect(BrowserImageFromEnv()).To(Equal("reg.example.com/chrome:9"))
+	})
+})

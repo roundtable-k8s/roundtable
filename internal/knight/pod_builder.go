@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
@@ -62,6 +63,8 @@ type PodBuilder struct {
 	envFrom    []corev1.EnvFromSource
 	telemetry  *Telemetry // nil: read from the operator environment
 	defaultImg string
+	// browserImg is the browser sidecar image; empty means DefaultBrowserImage.
+	browserImg string
 	security   PodSecurity
 	reader     client.Reader
 	// cardsBucket is the agent cards KV bucket (KNIGHT_CARDS_BUCKET).
@@ -929,11 +932,40 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 	return b
 }
 
+// DefaultBrowserImage is the browser sidecar image used when the operator is
+// not configured with KNIGHT_BROWSER_IMAGE. Pinned to a version tag so knight
+// pods are reproducible; bump deliberately.
+//
+// To bump: pick a current stable Chrome tag from
+// https://hub.docker.com/r/chromedp/headless-shell/tags, confirm it exists
+// (`crane digest docker.io/chromedp/headless-shell:<tag>`), update this
+// constant (as `<tag>@<digest>`) and the default shown in docs/helm-values.md. Nothing (e.g.
+// Renovate) tracks this constant automatically, and CI never pulls the image.
+// The current value is tag 159.0.8154.13 (published 2026-11-23, the 'stable'
+// tag at the time) pinned by digest, verified 2026-11-26. Keep the
+// `tag@sha256:digest` form so the tag stays readable and the digest is what
+// the kubelet resolves.
+const DefaultBrowserImage = "docker.io/chromedp/headless-shell:159.0.8154.13@sha256:381353d3530ab9d579d2fe8b9c0f4519c995617f5a71daf6bb649e2d12005bd9"
+
+// BrowserImageFromEnv returns KNIGHT_BROWSER_IMAGE, or "" when unset.
+func BrowserImageFromEnv() string { return os.Getenv("KNIGHT_BROWSER_IMAGE") }
+
+// WithBrowserImage overrides the browser sidecar image. Empty keeps
+// DefaultBrowserImage.
+func (b *PodBuilder) WithBrowserImage(image string) *PodBuilder {
+	b.browserImg = image
+	return b
+}
+
 // WithBrowser adds a headless Chrome sidecar with agent-browser for web automation.
 func (b *PodBuilder) WithBrowser() *PodBuilder {
+	browserImage := b.browserImg
+	if browserImage == "" {
+		browserImage = DefaultBrowserImage
+	}
 	browserContainer := corev1.Container{
 		Name:  "browser",
-		Image: "docker.io/chromedp/headless-shell:latest",
+		Image: browserImage,
 		Ports: []corev1.ContainerPort{
 			{ContainerPort: 9222, Name: "cdp", Protocol: corev1.ProtocolTCP},
 		},

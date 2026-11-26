@@ -98,6 +98,11 @@ spec:
             {{- include "roundtable-operator.telemetryEnv" (dict "root" . "service" "roundtable-operator") | nindent 12 }}
             - name: DEFAULT_KNIGHT_IMAGE
               value: "{{ .Values.images.piKnight.repository }}:{{ .Values.images.piKnight.tag }}"
+            {{- with .Values.knight.browserImage }}
+            # Browser sidecar image; unset uses the operator's pinned default.
+            - name: KNIGHT_BROWSER_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
             # Pod security context applied to knight pods.
             - name: KNIGHT_RUN_AS_USER
               value: "{{ .Values.knightSecurity.runAsUser }}"
