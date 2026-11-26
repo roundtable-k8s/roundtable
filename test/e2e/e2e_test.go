@@ -75,8 +75,8 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			"-n", coreNamespace, "--create-namespace", "-f", coreValues, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the operator chart")
 
-		// The knights' streams must exist before their pods start, or the
-		// runtime cannot bind its consumer and never turns Ready.
+		// The knights consume from these streams; create them up front so the
+		// runtime can bind its consumers as soon as the pods start.
 		By("port-forwarding NATS and creating the core streams")
 		natsForward = exec.Command("kubectl", "port-forward", "-n", natsNamespace, "svc/nats", natsLocalPort+":4222")
 		Expect(natsForward.Start()).To(Succeed())
