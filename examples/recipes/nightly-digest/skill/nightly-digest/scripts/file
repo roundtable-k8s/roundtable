@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# file <digest.json>
+# Validates the digest and writes <namespace>-<date>.json and .md to
+# $DIGEST_DIR (default /data/digests). Last line on success: nightly-digest: ok
+set -euo pipefail
+
+fail() { echo "nightly-digest: invalid: $*" >&2; exit 1; }
+[ $# -eq 1 ] || { echo "usage: file <digest.json>" >&2; exit 2; }
+in=$1
+[ -f "$in" ] || fail "no such file: $in"
+jq -e . "$in" >/dev/null 2>&1 || fail "not valid JSON"
+
+jq -e '
+  type == "object"
+  and (.namespace | type == "string" and test("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"))
+  and (.date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+  and (.summary | type == "string" and length > 0)
+  and (.changes | type == "array")
+  and (.concerns | type == "array")
+  and ([.changes[], .concerns[]]
+       | all(type == "object"
+             and (.kind | type == "string" and length > 0)
+             and (.name | type == "string" and length > 0)
+             and (.detail | type == "string")))
+' "$in" >/dev/null 2>&1 || fail "need namespace, date (YYYY-MM-DD), non-empty summary, and changes/concerns arrays of {kind,name,detail}"
+
+ns=$(jq -r .namespace "$in")
+date=$(jq -r .date "$in")
+dir=${DIGEST_DIR:-/data/digests}
+mkdir -p "$dir"
+cp "$in" "$dir/$ns-$date.json"
+jq -r '
+  "# Digest of \(.namespace), \(.date)\n\n\(.summary)\n",
+  "## Changes\n", (.changes[] | "- \(.kind) \(.name): \(.detail)"),
+  "\n## Concerns\n", (.concerns[] | "- \(.kind) \(.name): \(.detail)")
+' "$in" >"$dir/$ns-$date.md"
+
+echo "filed $dir/$ns-$date.json"
+echo "nightly-digest: ok"
