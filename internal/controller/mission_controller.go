@@ -681,6 +681,10 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 
 		// Expose the chains' cost and tokens on the mission.
 		missionpkg.ApplyChainUsage(mission)
+		// Per-knight cost breakdown, with or without a budget.
+		if _, err := r.CostTracker.AggregateMissionCost(ctx, mission); err != nil {
+			log.Error(err, "Failed to aggregate mission cost breakdown")
+		}
 
 		// FIX #2: Guard transition to terminal state - ensure all chains in status.chainStatuses
 		// have reached terminal phase before allowing mission to transition to Succeeded/Failed.
