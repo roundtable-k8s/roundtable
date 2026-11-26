@@ -1,0 +1,24 @@
+# Values for the official nats Helm chart: one server with JetStream, a
+# memory store and a small file store, at the operator's default URL (nats://nats.database.svc:4222).
+fullnameOverride: nats
+config:
+  cluster:
+    enabled: false
+  jetstream:
+    enabled: true
+    memoryStore:
+      enabled: true
+      maxSize: 256Mi
+    # The operator creates its streams with file storage, so the file store
+    # must be on (a disabled file store sets max_file_store: 0).
+    fileStore:
+      enabled: true
+      pvc:
+        enabled: true
+        size: 1Gi
+  nats:
+    port: 4222
+natsBox:
+  enabled: false
+promExporter:
+  enabled: false

@@ -57,6 +57,9 @@ make build
 # Run tests
 make test
 
+# End-to-end tests (needs Docker, kind, helm and kubectl; no LLM)
+make e2e TIER=core
+
 # Generate CRDs after type changes
 make manifests generate
 
@@ -66,6 +69,21 @@ make run
 # Build Docker image
 make docker-build IMG=roundtable-operator:dev
 ```
+
+`make e2e TIER=core` builds the operator image, creates a kind cluster
+(`roundtable-operator-test-e2e`), loads the image, installs NATS with JetStream
+(official `nats` chart, pinned) into `database` and `charts/roundtable-operator`
+with the local image (dashboard, gateway and planner off), then checks that the
+operator pod is Ready, logs no errors in the first minute and that a minimal
+Knight (`test/e2e/testdata/knight-core.yaml`) gets a Deployment with one
+available replica. The cluster is deleted afterwards, also on failure.
+`make test-e2e` is an alias.
+
+Scenarios are gated by Ginkgo labels, one per tier; `TIER` picks the tier
+(`core` by default, `trace` for the Chain trace case, `all` for everything).
+A new tier adds its own label and files without touching core. Plain
+`go test ./...` does not build the e2e package (it needs `-tags=e2e`).
+
 
 ### Helm Chart
 

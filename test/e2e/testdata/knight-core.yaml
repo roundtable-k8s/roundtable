@@ -1,0 +1,27 @@
+# A minimal Knight for the e2e core tier. The image is never started for real
+# work: the test only needs the Deployment to become available, so it runs the
+# public pi-knight image with isolation off (kind has no gVisor).
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: core-knight
+  namespace: roundtable-core
+spec:
+  domain: e2e
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: core_tasks
+    resultsStream: core_results
+    subjects:
+      - "core.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e core tier on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 64Mi
+  concurrency: 1
+  taskTimeoutSeconds: 60
