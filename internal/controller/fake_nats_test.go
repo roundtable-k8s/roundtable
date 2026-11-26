@@ -27,6 +27,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
+	"github.com/roundtable-k8s/roundtable/pkg/nats/contract/contracttest"
 )
 
 // fakeNATSClient is an in-memory natspkg.Client that records publishes and
@@ -55,10 +56,18 @@ func (f *fakeNATSClient) Publish(subject string, data []byte) error {
 	return nil
 }
 
+// PublishJSON records v. A task payload (chain step, fan-out item, loop body,
+// mission task) must validate against the knight task contract schema; one
+// that does not fails the publish, so the test that built it fails.
 func (f *fakeNATSClient) PublishJSON(subject string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
+	}
+	if _, ok := v.(natspkg.TaskPayload); ok {
+		if err := contracttest.ValidateTask(data); err != nil {
+			return fmt.Errorf("task payload breaks the knight task contract: %w", err)
+		}
 	}
 	return f.Publish(subject, data)
 }

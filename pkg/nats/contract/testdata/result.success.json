@@ -1,0 +1,14 @@
+{
+  "task_id": "t-1",
+  "knight": "galahad",
+  "success": true,
+  "result": "Done.",
+  "duration_ms": 5000,
+  "cost": 0.0125,
+  "tokens": {
+    "input": 1200,
+    "output": 340
+  },
+  "model": "claude-opus-5-5",
+  "timestamp": "2026-11-24T10:00:05.000Z"
+}

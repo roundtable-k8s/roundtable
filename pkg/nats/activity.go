@@ -16,9 +16,14 @@ limitations under the License.
 
 package nats
 
-import "fmt"
+import (
+	"fmt"
 
-// Task activity events (docs/design/task-activity-events.md).
+	"github.com/roundtable-k8s/roundtable/pkg/nats/contract"
+)
+
+// Task activity events (docs/design/task-activity-events.md; schema in
+// contract/schema/task-activity-events.schema.json).
 //
 // Knights publish these on core NATS (fire-and-forget) while a task runs so
 // dashboards can show live progress. They are never stored in JetStream.
@@ -41,15 +46,15 @@ const (
 )
 
 // ActivityType identifies the kind of activity event.
-type ActivityType string
+type ActivityType = contract.TaskActivityEventType
 
 const (
-	ActivityTaskStarted      ActivityType = "task.started"
-	ActivityTaskHeartbeat    ActivityType = "task.heartbeat"
-	ActivityToolStarted      ActivityType = "tool.started"
-	ActivityToolFinished     ActivityType = "tool.finished"
-	ActivityAssistantMessage ActivityType = "assistant.message"
-	ActivityTaskFinished     ActivityType = "task.finished"
+	ActivityTaskStarted      = contract.TaskActivityEventTypeTaskStarted
+	ActivityTaskHeartbeat    = contract.TaskActivityEventTypeTaskHeartbeat
+	ActivityToolStarted      = contract.TaskActivityEventTypeToolStarted
+	ActivityToolFinished     = contract.TaskActivityEventTypeToolFinished
+	ActivityAssistantMessage = contract.TaskActivityEventTypeAssistantMessage
+	ActivityTaskFinished     = contract.TaskActivityEventTypeTaskFinished
 )
 
 // ActivityTypes lists every defined event type.
@@ -82,21 +87,25 @@ func IntrospectPublishSubject(prefix, knight string) string {
 	return fmt.Sprintf("%s.introspect.%s.>", prefix, knight)
 }
 
-// ActivityEvent is one task activity event. Common fields are always present
-// unless marked optional; type-specific fields are only set for their types.
+// ActivityEvent is one task activity event (contract.TaskActivityEvent).
+// Common fields are always present unless marked optional; type-specific
+// fields are only set for their types.
 type ActivityEvent struct {
 	// Common fields.
 	V         int          `json:"v"`
 	Type      ActivityType `json:"type"`
 	Timestamp string       `json:"ts"` // RFC 3339, UTC, millisecond precision
 	Knight    string       `json:"knight"`
-	Pod       string       `json:"pod"`            // POD_NAME
-	Node      string       `json:"node,omitempty"` // NODE_NAME
+	Table     string       `json:"table,omitempty"` // the knight's RoundTable
+	Pod       string       `json:"pod"`             // POD_NAME
+	Node      string       `json:"node,omitempty"`  // NODE_NAME
 	TaskID    string       `json:"taskId"`
 	RunID     string       `json:"runId,omitempty"`
 	Chain     string       `json:"chainName,omitempty"`
 	Step      string       `json:"stepName,omitempty"`
 	Model     string       `json:"model,omitempty"`
+	// Attempt is the task's 1-based attempt number (manual retry only).
+	Attempt int `json:"attempt,omitempty"`
 	// Seq is per-task, starts at 1 and increases by one for every event
 	// published for the task, so consumers can detect gaps.
 	Seq       int64 `json:"seq"`

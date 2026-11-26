@@ -58,6 +58,30 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
+# Knight task contract (pkg/nats/contract): schemas and fixtures copied from
+# roundtable-k8s/knights at a pinned commit, plus Go types generated from them.
+KNIGHTS_REPO ?= https://github.com/roundtable-k8s/knights.git
+CONTRACT_DIR := pkg/nats/contract
+
+.PHONY: contract-sync
+contract-sync: ## Copy the knight task contract schemas and fixtures from roundtable-k8s/knights at KNIGHTS_REF (a commit), then regenerate the Go types.
+	@test -n "$(KNIGHTS_REF)" || { echo "usage: make contract-sync KNIGHTS_REF=<knights commit>" >&2; exit 1; }
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	git -C "$$tmp" init -q; \
+	git -C "$$tmp" fetch -q --depth 1 "$(KNIGHTS_REPO)" "$(KNIGHTS_REF)"; \
+	git -C "$$tmp" checkout -q FETCH_HEAD; \
+	rm -f $(CONTRACT_DIR)/schema/*.schema.json $(CONTRACT_DIR)/testdata/*.json; \
+	mkdir -p $(CONTRACT_DIR)/schema $(CONTRACT_DIR)/testdata; \
+	cp "$$tmp"/packages/core/contract/*.schema.json $(CONTRACT_DIR)/schema/; \
+	cp "$$tmp"/packages/core/contract/fixtures/*.json $(CONTRACT_DIR)/testdata/; \
+	git -C "$$tmp" rev-parse HEAD > $(CONTRACT_DIR)/VERSION; \
+	echo "contract synced to knights@$$(cat $(CONTRACT_DIR)/VERSION)"
+	$(MAKE) generate-contract
+
+.PHONY: generate-contract
+generate-contract: ## Regenerate pkg/nats/contract/zz_generated.go from the vendored schemas (go-jsonschema, pinned as a go.mod tool).
+	CGO_ENABLED=0 go generate ./$(CONTRACT_DIR)
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...

@@ -433,6 +433,12 @@ func TestQuotaRefusalDetection(t *testing.T) {
 		"usage-limited without reset time":     {refused("Task refused: Claude plan five_hour window 91% used"), true, false},
 		"usage-limited with unparseable reset": {refused("Task refused: Claude plan five_hour limit reached (resets soon)"), true, false},
 		"usage-limited with bare flag":         {&natspkg.TaskResult{UsageLimited: true, Error: "limit reached"}, true, false},
+		// #431: refused "quota" is the contract's signal and works like usage_limited.
+		"refused quota": {&natspkg.TaskResult{Refused: natspkg.RefusedQuota, Error: "Task refused: Claude plan five_hour limit reached (resets " +
+			resets.Format(time.RFC3339) + ")"}, true, true},
+		"refused quota with bare flag": {&natspkg.TaskResult{Refused: natspkg.RefusedQuota, Error: "limit reached"}, true, false},
+		// refused "credits" stays a plain failure.
+		"refused credits": {&natspkg.TaskResult{Refused: natspkg.RefusedCredits, Error: "402 This request requires more credits"}, false, false},
 		// Prefix only (no flag) still needs a parseable reset time.
 		"prefix without reset time":     {prefixOnly("Task refused: Claude plan five_hour window 91% used"), false, false},
 		"prefix with unparseable reset": {prefixOnly("Task refused: Claude plan limit (resets soon)"), false, false},

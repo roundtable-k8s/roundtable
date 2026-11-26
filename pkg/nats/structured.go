@@ -20,25 +20,28 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/roundtable-k8s/roundtable/pkg/nats/contract"
 )
 
 // Review verdicts a knight may report in TaskResult.Verdict.
 const (
-	VerdictShipIt       = "ship_it"
-	VerdictNeedsChanges = "needs_changes"
+	VerdictShipIt       = string(contract.TaskResultVerdictShipIt)
+	VerdictNeedsChanges = string(contract.TaskResultVerdictNeedsChanges)
 )
 
 // PR actions a knight may report in PRRef.Action.
 const (
-	PRActionOpened  = "opened"
-	PRActionUpdated = "updated"
+	PRActionOpened  = string(contract.TaskResultPrsElemActionOpened)
+	PRActionUpdated = string(contract.TaskResultPrsElemActionUpdated)
 	// PRActionQueued and PRActionMerged are the PR pipeline merge step's
 	// success shape (#591): a PR in the merge queue (auto-merge on) is done.
+	// Operator-only: read from the merge step's prose, not in the contract.
 	PRActionQueued = "queued"
 	PRActionMerged = "merged"
 )
 
-// PRRef is a pull request a task opened or updated.
+// PRRef is a pull request a task opened or updated (contract.TaskResultPrsElem).
 type PRRef struct {
 	Repo   string `json:"repo,omitempty"`
 	Number int    `json:"number,omitempty"`

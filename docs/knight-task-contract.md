@@ -3,6 +3,45 @@
 How the operator hands a task to a knight runtime (claude-knight, pi-knight) over
 NATS, and what it expects back. Go types: `pkg/nats/payload.go`.
 
+## Source of truth
+
+The message shapes are defined by the JSON Schemas in the knights core,
+[`roundtable-k8s/knights` `packages/core/contract/`](https://github.com/roundtable-k8s/knights/tree/main/packages/core/contract):
+`task-payload.schema.json`, `task-result.schema.json` and
+`task-activity-events.schema.json`, with golden fixtures in `fixtures/`. Field
+lists, types and enum values live there; this page covers semantics only (what
+the operator does with each field).
+
+The operator vendors them in `pkg/nats/contract/` at a pinned knights commit
+(`VERSION`): the schemas in `schema/`, the fixtures in `testdata/`, and Go types
+generated from the schemas with
+[go-jsonschema](https://github.com/atombender/go-jsonschema) in
+`zz_generated.go`. The `pkg/nats` types (`TaskPayload`, `TaskResult`, `PRRef`,
+`ActivityEvent`) take their enum values from the generated code, and
+`go test ./pkg/nats/...` checks that:
+
+- every fixture validates against its schema, decodes into the `pkg/nats`
+  type and re-encodes without losing a field;
+- every schema property has a field in the `pkg/nats` type, or is listed as a
+  knight-side alias the operator ignores;
+- every task payload the operator and gateway build (chain step, fan-out
+  item, loop body, gateway invoke) validates against the task schema;
+- `zz_generated.go` matches what the generator produces from the vendored
+  schemas.
+
+To pick up a contract change, bump the pin and regenerate:
+
+```bash
+make contract-sync KNIGHTS_REF=<knights commit>   # copies the files, writes VERSION, runs generate-contract
+go test ./pkg/nats/...
+```
+
+A field the knights add that the operator lacks then fails the tests here.
+`make generate-contract` alone regenerates `zz_generated.go` from the vendored
+schemas. Operator-only fields not in the schema yet: `effort` on the task, the
+legacy `taskId`/`output` result spellings and the `queued`/`merged` PR actions
+(read from the merge step's prose).
+
 ## Task payload
 
 Published by the chain controller and the [invoke gateway](gateway.md) to
@@ -128,20 +167,21 @@ All input sent to the model is `input + cacheRead + cacheWrite`. The cache
 fields are additive: a knight that does not send them reports as before, and
 its totals have no cached input.
 
-### Refusals: `usage_limited` and `refused`
+### Refusals: `refused` and `usage_limited`
 
 Optional fields a knight sets when it declines a task before running it:
 
 | Field | Meaning |
 |-------|---------|
-| `usage_limited` | Boolean, `true` on a plan-quota refusal (claude-knight: a plan window is at the knight reserve). Not a failure: the caller should defer the task or use the fallback coder. The operator does not escalate it (#321). |
-| `refused` | Optional string naming the refusal reason. Today only `"credits"` (pi-knight): the provider answered 402 or the account is out of credits, which does not reset on its own. |
+| `refused: "quota"` | A plan quota window is used up (claude-knight: a plan window is at the knight reserve). Resets later. Not a failure: the operator defers the step until the window resets or re-runs it on the fallback coder, and does not escalate it (#321). |
+| `refused: "credits"` | The provider is out of credits (pi-knight, e.g. OpenRouter 402). Does not reset on its own. |
+| `usage_limited` | Deprecated boolean, `true` on a plan-quota refusal. claude-knight still sends it next to `refused: "quota"` during the transition. The operator treats it exactly like `refused: "quota"`. |
 
-The operator parses `refused` (`TaskResult.Refused`) but does not act on it
-yet: a result carrying it is handled as a plain failure and escalated as
-usual. Dead-letter entries use reason `refused` when it is set. Pipeline
-behaviour for `refused: "credits"` (for example routing to another knight) is
-not defined.
+`TaskResult.QuotaRefused()` reads either quota signal; the chain quota
+handling, the gateway's `usageLimited` task field and the dead-letter reason
+`usage_limited` all use it. `refused: "credits"` is handled as a plain failure
+and escalated as usual (dead-letter reason `refused`); pipeline behaviour for it
+(for example routing to another knight) is not defined.
 
 Readers use the fields when present and otherwise fall back to the prose
 `output` (`pkg/nats.ParseStructured`): a `Verdict: SHIP IT` / `Verdict: needs
@@ -250,8 +290,8 @@ What lands there, on `<prefix>.dlq.<knight>.<taskId>`:
   sequence) and `taskId: seq-<n>`.
 - **Failed tasks**: every result with `success: false` (or an `error` and no
   `success`) on `<prefix>.results.>`. `reason` is `lost` for a result with
-  `lost: true`, `usage_limited` for `usage_limited: true`, `refused` when
-  `refused` is set, `timeout` when the error mentions a timeout, else `failed`.
+  `lost: true`, `usage_limited` for `usage_limited: true` or
+  `refused: "quota"`, `refused` when `refused` is set otherwise, `timeout` when the error mentions a timeout, else `failed`.
   Include the original task payload as `task` in failure results so the entry
   can be retried. The operator reads results with a core subscription, so
   failures published while the operator is down are not captured (the knight's

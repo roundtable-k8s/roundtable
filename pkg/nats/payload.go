@@ -16,7 +16,50 @@ limitations under the License.
 
 package nats
 
-// TaskPayload is the JSON payload published to NATS for a chain step or knight task.
+import (
+	"encoding/json"
+
+	"github.com/roundtable-k8s/roundtable/pkg/nats/contract"
+)
+
+// The knight task contract (task, result and activity event) is defined by
+// the JSON Schemas in roundtable-k8s/knights, vendored with Go types generated
+// from them in pkg/nats/contract. The types in this package are the operator's
+// view of those messages: plain values instead of pointers, lenient decoding
+// of both spellings older knights send, and a few operator-only fields. Enum
+// values come from the generated code, and contract_test.go fails when a
+// schema property has no field here or a golden fixture does not survive a
+// decode and re-encode through these types.
+
+// Refusal reasons a knight may report in TaskResult.Refused.
+const (
+	// RefusedCredits: the provider account is out of credits (pi-knight, e.g.
+	// OpenRouter 402). Does not reset on its own; the operator treats it as a
+	// plain failure.
+	RefusedCredits = string(contract.TaskResultRefusedCredits)
+	// RefusedQuota: a plan quota window is used up (claude-knight). Resets
+	// later; the operator defers the step like UsageLimited (#321).
+	RefusedQuota = string(contract.TaskResultRefusedQuota)
+)
+
+// Transient failure reasons a knight may report in TaskResult.TransientReason.
+const (
+	TransientOverloaded  = string(contract.TaskResultTransientReasonOverloaded)
+	TransientProvider5xx = string(contract.TaskResultTransientReasonProvider5Xx)
+	TransientNetwork     = string(contract.TaskResultTransientReasonNetwork)
+)
+
+// Billing modes a knight may report in TaskResult.Billing.
+const (
+	BillingAPI          = string(contract.TaskResultBillingApi)
+	BillingSubscription = string(contract.TaskResultBillingSubscription)
+	BillingLocal        = string(contract.TaskResultBillingLocal)
+)
+
+// TaskPayload is the JSON payload published to NATS for a chain step or knight
+// task (contract.TaskPayload). It holds the fields the operator sends; the
+// schema's snake_case and legacy aliases are knight-to-knight spellings the
+// operator neither sends nor reads.
 type TaskPayload struct {
 	// TaskID is the unique task identifier.
 	TaskID string `json:"taskId"`
@@ -43,6 +86,7 @@ type TaskPayload struct {
 	// Effort overrides the knight's reasoning effort for this task only
 	// (optional): low, medium, high, xhigh or max. Empty means the knight's
 	// configured effort (KNIGHT_EFFORT, from Knight.spec.effort).
+	// Operator-only: not in the knights contract schema yet.
 	Effort string `json:"effort,omitempty"`
 
 	// Attempt is the 1-based attempt number of this task (optional; absent
@@ -69,27 +113,69 @@ type TokenUsage struct {
 	CacheWrite int64 `json:"cacheWrite,omitempty"`
 }
 
-// TaskResult is the JSON payload received from NATS for a completed task.
-// Supports both controller format (taskId/output) and pi-knight format (task_id/result).
+// TaskResult is the JSON payload received from NATS for a completed task
+// (contract.TaskResult). Supports both the legacy controller format
+// (taskId/output, operator-only) and the contract format (task_id/result).
+// Every field is optional here: required contract fields that an older knight
+// leaves out decode to their zero value instead of failing.
 type TaskResult struct {
-	// TaskID is the task identifier (controller format).
+	// TaskID is the task identifier (legacy controller format, operator-only).
 	TaskID string `json:"taskId,omitempty"`
 
-	// TaskID2 is the task identifier (pi-knight format using snake_case).
+	// TaskID2 is the task identifier (contract format, snake_case).
 	TaskID2 string `json:"task_id,omitempty"`
 
-	// Output is the task output (controller format).
+	// Output is the task output (legacy controller format, operator-only).
 	Output string `json:"output,omitempty"`
 
-	// Result is the task result (pi-knight format).
+	// Result is the task result (contract format).
 	Result string `json:"result,omitempty"`
+
+	// ResultTruncated marks a Result cut to fit the NATS payload limit (head
+	// and tail kept with an omission line between them).
+	ResultTruncated bool `json:"result_truncated,omitempty"`
+
+	// Knight is the knight that ran the task.
+	Knight string `json:"knight,omitempty"`
+
+	// DurationMs is the wall-clock run time in ms.
+	DurationMs float64 `json:"duration_ms,omitempty"`
+
+	// Timestamp is when the result was published (RFC 3339). Kept as a
+	// string so an unparseable value does not fail the whole result.
+	Timestamp string `json:"timestamp,omitempty"`
+
+	// ToolCalls is the number of tool calls the agent made (pi-knight).
+	ToolCalls float64 `json:"tool_calls,omitempty"`
+
+	// Turns is the number of agent turns (claude-knight).
+	Turns float64 `json:"turns,omitempty"`
+
+	// Runtime names the knight runtime (claude-knight: "claude-knight").
+	Runtime string `json:"runtime,omitempty"`
+
+	// Lost marks a task delivered to a knight that stopped before finishing
+	// it (max_deliver=1); it was not re-run.
+	Lost bool `json:"lost,omitempty"`
+
+	// Attempt echoes the task's attempt number (manual retry only).
+	Attempt int `json:"attempt,omitempty"`
+
+	// RetryOf echoes the task's retryOf (manual retry only).
+	RetryOf string `json:"retry_of,omitempty"`
+
+	// Task is the original task, on failure results only, so the operator can
+	// dead-letter and retry it. The contract sends a TaskPayload object; it is
+	// kept raw because some runtimes sent the bare prompt string, and a type
+	// mismatch must not fail decoding the whole result.
+	Task json.RawMessage `json:"task,omitempty"`
 
 	// Transient marks a failure caused by the model provider rather than the
 	// task (overloaded, 5xx): the chain may retry it after a backoff (#481).
 	Transient bool `json:"transient,omitempty"`
 
-	// TransientReason says why a Transient failure happened: "overloaded",
-	// "provider_5xx" or "network". Hand-written; to be generated by #431.
+	// TransientReason says why a Transient failure happened: TransientOverloaded,
+	// TransientProvider5xx or TransientNetwork.
 	TransientReason string `json:"transientReason,omitempty"`
 
 	// Error contains error details if the task failed.
@@ -108,8 +194,8 @@ type TaskResult struct {
 	// Tokens is the task's token use (optional).
 	Tokens *TokenUsage `json:"tokens,omitempty"`
 
-	// Billing says how the model is billed, e.g. "api" or "subscription"
-	// (optional). Subscription cost is notional, so dashboards separate it
+	// Billing says how the model is billed: BillingAPI, BillingSubscription or
+	// BillingLocal (optional). Subscription cost is notional, so dashboards separate it
 	// from real spend.
 	Billing string `json:"billing,omitempty"`
 
@@ -123,14 +209,21 @@ type TaskResult struct {
 	// UsageLimited marks a plan-quota refusal: the knight refused the task
 	// before running it because a plan window (claude-knight: "Task refused:
 	// Claude plan ... (resets ...)") is at the knight reserve. Not a failure:
-	// the caller should re-run or defer, not escalate (#321).
+	// the caller should re-run or defer, not escalate (#321). Deprecated in
+	// the contract in favour of Refused == RefusedQuota; claude-knight sends
+	// both during the transition. Use QuotaRefused to read either.
 	UsageLimited bool `json:"usage_limited,omitempty"`
 
 	// Refused names why the knight refused the task before running it
-	// (optional). Today only pi-knight's "credits": the provider account is
-	// out of credits, which does not reset on its own. The operator parses it
-	// but treats the result as a plain failure.
+	// (optional): RefusedCredits or RefusedQuota. RefusedQuota is handled
+	// like UsageLimited; RefusedCredits is a plain failure.
 	Refused string `json:"refused,omitempty"`
+}
+
+// QuotaRefused reports whether the knight refused the task because a plan
+// quota window is used up: usage_limited (deprecated) or refused "quota".
+func (r *TaskResult) QuotaRefused() bool {
+	return r.UsageLimited || r.Refused == RefusedQuota
 }
 
 // GetTaskID returns the task ID from whichever field was populated.

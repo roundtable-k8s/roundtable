@@ -16,6 +16,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0
@@ -28,6 +29,15 @@ require (
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.23.1
 	sigs.k8s.io/yaml v1.6.0
+)
+
+require (
+	dario.cat/mergo v1.0.2 // indirect
+	github.com/atombender/go-jsonschema v0.24.1 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
+	github.com/sanity-io/litter v1.5.8 // indirect
+	github.com/sosodev/duration v1.4.0 // indirect
 )
 
 require (
@@ -87,7 +97,7 @@ require (
 	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
-	github.com/spf13/cobra v1.10.0 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
@@ -128,3 +138,5 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 )
+
+tool github.com/atombender/go-jsonschema
