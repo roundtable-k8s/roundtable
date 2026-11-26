@@ -126,6 +126,13 @@ kubectl -n roundtable get secret <fullname>-gateway-token \
   -o jsonpath='{.data.token}' | base64 -d
 ```
 
+**The dashboard** uses the static token by default. Set
+`dashboard.gateway.serviceAccountToken=true` to give it a projected
+ServiceAccount token (audience `gateway.serviceAccountAuth.audience`, 1h,
+rotated by the kubelet) at the same `GATEWAY_TOKEN_FILE` path instead; this
+requires `gateway.serviceAccountAuth.enabled=true` (the chart refuses to render
+otherwise). The static token stays for other callers.
+
 To use your own token, create a Secret and set `gateway.auth.existingSecret`;
 to rotate, put old and new tokens on separate lines, switch callers, then drop
 the old one (mounted files update without restarts). Note `helm template`

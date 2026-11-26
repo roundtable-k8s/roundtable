@@ -33,6 +33,19 @@ dash="$(render --set dashboard.gateway.tokenSecret=dash --set dashboard.gateway.
 has "$dash" 'secretName: dash' "dashboard.gateway.tokenSecret ignored"
 has "$dash" '- key: k$' "dashboard.gateway.tokenKey ignored"
 
+# Dashboard ServiceAccount token: opt-in; default keeps the Secret volume.
+lacks "$def" 'serviceAccountToken' "projected token rendered by default"
+dsa="$(render --set dashboard.gateway.serviceAccountToken=true)"
+has "$dsa" 'audience: roundtable-gateway$' "dashboard projected token lacks the gateway audience"
+has "$dsa" 'expirationSeconds: 3600' "dashboard projected token expiration not 3600"
+has "$dsa" 'name: GATEWAY_TOKEN_FILE' "GATEWAY_TOKEN_FILE dropped with the projected token"
+[ "$(grep -c 'secretName: rt-roundtable-operator-gateway-token' <<<"$dsa")" = 1 ] || fail "dashboard still mounts the token Secret (only the gateway should)"
+has "$(render --set dashboard.gateway.serviceAccountToken=true --set gateway.serviceAccountAuth.audience=other)" 'audience: other$' "projected token audience ignores serviceAccountAuth.audience"
+if err="$(render --set dashboard.gateway.serviceAccountToken=true --set gateway.serviceAccountAuth.enabled=false 2>&1)"; then
+  fail "render succeeded with serviceAccountToken and serviceAccountAuth disabled"
+fi
+has "$err" 'requires gateway.serviceAccountAuth.enabled=true' "missing fail message"
+
 has "$def" 'name: rt-roundtable-operator-gateway-hook-secrets' "webhook secret Role missing by default"
 has "$def" '--hooks=true' "webhook endpoint not enabled by default"
 hook_role="$(awk 'BEGIN{RS="\n---\n"} /kind: Role\n/ && /name: rt-roundtable-operator-gateway-hook-secrets/' <<<"$def")"

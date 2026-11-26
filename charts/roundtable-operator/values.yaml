@@ -311,6 +311,11 @@ dashboard:
   gateway:
     tokenSecret: ""
     tokenKey: ""
+    # Opt in: send a projected ServiceAccount token (audience
+    # gateway.serviceAccountAuth.audience, 1h, rotated by the kubelet) instead
+    # of the static token Secret. Requires gateway.serviceAccountAuth.enabled;
+    # tokenSecret/tokenKey are then ignored.
+    serviceAccountToken: false
 
 # Invoke gateway: a synchronous HTTP API and MCP (streamable HTTP) endpoint in
 # front of the knights. Callers POST a task, the gateway publishes it on the
