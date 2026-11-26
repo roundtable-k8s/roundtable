@@ -1,0 +1,322 @@
+{
+  "uid": "roundtable-knight-activity",
+  "title": "Round Table / Knight activity",
+  "tags": [
+    "roundtable"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(roundtable_knights, namespace)",
+          "refId": "namespace"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": false,
+        "current": {},
+        "hide": 0,
+        "allValue": ".*"
+      },
+      {
+        "name": "table",
+        "label": "Table",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(roundtable_knights{namespace=~\"$namespace\"}, table)",
+          "refId": "table"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {},
+        "hide": 0,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Task duration (p50/p95/p99) by knight",
+      "description": "Time from task start to result.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, knight) (rate(roundtable_knight_task_duration_seconds_bucket{namespace=~\"$namespace\", table=~\"$table\"}[5m])))",
+          "legendFormat": "p50 {{knight}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, knight) (rate(roundtable_knight_task_duration_seconds_bucket{namespace=~\"$namespace\", table=~\"$table\"}[5m])))",
+          "legendFormat": "p95 {{knight}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, knight) (rate(roundtable_knight_task_duration_seconds_bucket{namespace=~\"$namespace\", table=~\"$table\"}[5m])))",
+          "legendFormat": "p99 {{knight}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tool calls per minute by tool and status",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (tool, status) (rate(roundtable_knight_tool_calls_total{namespace=~\"$namespace\", table=~\"$table\"}[5m])) * 60",
+          "legendFormat": "{{tool}} {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Tool call p95 duration by tool",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(roundtable_knight_tool_call_duration_seconds_bucket{namespace=~\"$namespace\", table=~\"$table\"}[5m])))",
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Blocked tool calls (1h) by tool and reason",
+      "description": "Tool calls refused by policy.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (tool, reason) (increase(roundtable_knight_tool_calls_blocked_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
+          "legendFormat": "{{tool}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "NATS reconnects (1h) by knight",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (knight) (increase(roundtable_knight_nats_reconnects_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
+          "legendFormat": "{{knight}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Prompt-cache hit ratio by knight",
+      "description": "cache_read / (cache_read + input); input excludes cached reads.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / clamp_min(sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m])), 1e-9)",
+          "legendFormat": "{{knight}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Prompt-cache hit ratio by model",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / clamp_min(sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m])), 1e-9)",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

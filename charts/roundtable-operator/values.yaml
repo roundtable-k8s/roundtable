@@ -725,7 +725,8 @@ alerts:
     pending: 10
     forMinutes: 15
 
-# Grafana dashboards (fleet overview, cost and tokens), built on the
+# Grafana dashboards (fleet overview, cost and tokens, chains and platform,
+# triggers and gateway, knight activity), built on the
 # roundtable_* metrics. Off by default: nothing is rendered. They need
 # Prometheus scraping the operator and knights; see docs/helm-values.md.
 dashboards:
