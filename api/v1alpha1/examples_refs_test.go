@@ -56,7 +56,7 @@ func TestExampleCrossReferences(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var objs []exampleObject
+			objs := make([]exampleObject, 0, len(files))
 			for _, f := range files {
 				objs = append(objs, decodeExampleFile(t, f)...)
 			}
@@ -183,7 +183,7 @@ func orDefault(v, def string) string {
 }
 
 func subjectPrefixes(tables map[string]*RoundTable) []string {
-	var out []string
+	out := make([]string, 0, len(tables))
 	for _, rt := range tables {
 		out = append(out, rt.Spec.NATS.SubjectPrefix)
 	}
