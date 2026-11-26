@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 func TestLeaderElectionTimingsValidate(t *testing.T) {
@@ -44,5 +46,22 @@ func TestIsLeaderElectionLost(t *testing.T) {
 	}
 	if isLeaderElectionLost(errors.New("boom")) || isLeaderElectionLost(nil) {
 		t.Error("want false otherwise")
+	}
+}
+
+func TestManagerOptionsReleaseOnCancel(t *testing.T) {
+	lt := leaderElectionTimings{60 * time.Second, 40 * time.Second, 5 * time.Second}
+	opts := managerOptions(scheme, metricsserver.Options{}, nil, ":8081", true, lt)
+	if !opts.LeaderElectionReleaseOnCancel {
+		t.Error("LeaderElectionReleaseOnCancel must be true")
+	}
+	if !opts.LeaderElection || opts.LeaderElectionID == "" {
+		t.Error("leader election not configured")
+	}
+	if *opts.LeaseDuration != lt.LeaseDuration || *opts.RenewDeadline != lt.RenewDeadline || *opts.RetryPeriod != lt.RetryPeriod {
+		t.Error("timings not propagated")
+	}
+	if shutdownTimeout >= 10*time.Second {
+		t.Errorf("shutdownTimeout %s must stay under terminationGracePeriodSeconds (10s)", shutdownTimeout)
 	}
 }

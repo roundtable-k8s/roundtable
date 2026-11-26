@@ -193,6 +193,22 @@ func (m *Manager) StopAll() {
 	}
 }
 
+// StopAllContext is StopAll bounded by ctx: it returns ctx.Err() if the
+// watchers have not stopped by then (they keep stopping in the background).
+func (m *Manager) StopAllContext(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.StopAll()
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // ensureStream creates cfg's stream or updates it when subjects, max age or
 // duplicate window differ.
 func ensureStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) error {
