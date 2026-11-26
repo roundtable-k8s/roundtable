@@ -256,6 +256,10 @@ A Trigger with `source.schedule` runs as a CronJob `trigger-<name>` the operator
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `triggers.gatewayURL` | string | `""` | Gateway base URL the firing pod calls. Empty = the chart's gateway Service (`http://<fullname>-gateway.<namespace>.svc:<port>`) when `gateway.enabled`; with the gateway disabled and no URL, scheduled Triggers are not Ready |
+| `triggers.imagePullSecrets` | list of strings | `[]` | Names of imagePullSecrets on the firing pod. Secrets are namespaced: they must exist in the Trigger's namespace (the chart does not create or copy them), or the pod stays `ImagePullBackOff` |
+| `triggers.nodeSelector` | object | `{}` | nodeSelector of the firing pod |
+| `triggers.tolerations` | list | `[]` | Tolerations of the firing pod |
+| `triggers.priorityClassName` | string | `""` | priorityClassName of the firing pod |
 
 ### Knights
 

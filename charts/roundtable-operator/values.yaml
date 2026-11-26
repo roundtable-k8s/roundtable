@@ -485,6 +485,13 @@ triggers:
   # gateway.enabled; with the gateway disabled and no URL, scheduled Triggers
   # are not Ready.
   gatewayURL: ""
+  # Scheduling of the firing pod. Secrets are namespaced: imagePullSecrets is a
+  # list of Secret names you create in each Trigger's namespace (the chart
+  # does not copy them).
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  priorityClassName: ""
 
 # Knights to create alongside the operator
 # Example:

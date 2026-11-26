@@ -80,6 +80,13 @@ type TriggerScheduleConfig struct {
 	Image string
 	// ImagePullPolicy of the firing pod ("" = the cluster default).
 	ImagePullPolicy corev1.PullPolicy
+	// ImagePullSecrets of the firing pod; they must exist in the Trigger's
+	// namespace.
+	ImagePullSecrets []corev1.LocalObjectReference
+	// NodeSelector, Tolerations and PriorityClassName place the firing pod.
+	NodeSelector      map[string]string
+	Tolerations       []corev1.Toleration
+	PriorityClassName string
 	// GatewayURL is the gateway base URL the firing pod calls.
 	GatewayURL string
 	// Audience is the gateway's ServiceAccount token audience.
@@ -137,6 +144,10 @@ func desiredTriggerCronJob(trg *aiv1alpha1.Trigger, src *aiv1alpha1.TriggerSched
 		ServiceAccountName:           TriggerServiceAccountName(trg.Name),
 		AutomountServiceAccountToken: new(false),
 		RestartPolicy:                corev1.RestartPolicyNever,
+		ImagePullSecrets:             cfg.ImagePullSecrets,
+		NodeSelector:                 cfg.NodeSelector,
+		Tolerations:                  cfg.Tolerations,
+		PriorityClassName:            cfg.PriorityClassName,
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot:   new(true),
 			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},

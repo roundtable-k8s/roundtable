@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -111,7 +112,7 @@ func main() {
 	var triggerTaskBucket string
 	var triggerTaskTTL, scheduleResultRetention time.Duration
 	var triggerSchedule controller.TriggerScheduleConfig
-	var triggerPullPolicy string
+	var triggerPullPolicy, triggerPullSecrets, triggerNodeSelector, triggerTolerations string
 	var chainScheduleMode string
 	flag.StringVar(&chainScheduleMode, "chain-schedule-mode", string(controller.ChainScheduleModeInProcess),
 		"How Chain.spec.schedule runs: inprocess (the operator's cron runs the Chain itself) or trigger "+
@@ -121,6 +122,14 @@ func main() {
 			"`/manager fire-trigger`). Empty leaves scheduled Triggers not Ready.")
 	flag.StringVar(&triggerPullPolicy, "trigger-image-pull-policy", "",
 		"Image pull policy of a scheduled Trigger's firing pod (empty = the cluster default).")
+	flag.StringVar(&triggerPullSecrets, "trigger-image-pull-secrets", "",
+		"Comma-separated names of imagePullSecrets on a scheduled Trigger's firing pod; they must exist in the Trigger's namespace.")
+	flag.StringVar(&triggerNodeSelector, "trigger-node-selector", "",
+		"JSON object: nodeSelector of a scheduled Trigger's firing pod.")
+	flag.StringVar(&triggerTolerations, "trigger-tolerations", "",
+		"JSON array of tolerations of a scheduled Trigger's firing pod.")
+	flag.StringVar(&triggerSchedule.PriorityClassName, "trigger-priority-class-name", "",
+		"priorityClassName of a scheduled Trigger's firing pod.")
 	flag.StringVar(&triggerSchedule.GatewayURL, "trigger-gateway-url", "",
 		"Gateway base URL a scheduled Trigger's firing pod calls. Empty leaves scheduled Triggers not Ready.")
 	flag.StringVar(&triggerSchedule.Audience, "trigger-gateway-audience", controller.DefaultTriggerGatewayAudience,
@@ -190,6 +199,24 @@ func main() {
 		os.Exit(1)
 	}
 	setupLog.Info("Chain schedule mode", "mode", scheduleMode)
+
+	for _, n := range strings.Split(triggerPullSecrets, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			triggerSchedule.ImagePullSecrets = append(triggerSchedule.ImagePullSecrets, corev1.LocalObjectReference{Name: n})
+		}
+	}
+	if triggerNodeSelector != "" {
+		if err := json.Unmarshal([]byte(triggerNodeSelector), &triggerSchedule.NodeSelector); err != nil {
+			setupLog.Error(err, "invalid --trigger-node-selector")
+			os.Exit(1)
+		}
+	}
+	if triggerTolerations != "" {
+		if err := json.Unmarshal([]byte(triggerTolerations), &triggerSchedule.Tolerations); err != nil {
+			setupLog.Error(err, "invalid --trigger-tolerations")
+			os.Exit(1)
+		}
+	}
 
 	// Register the W3C trace-context + baggage propagator unless something
 	// else already installed one, so trace context crosses NATS.
