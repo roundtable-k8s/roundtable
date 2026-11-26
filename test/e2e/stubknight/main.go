@@ -179,15 +179,11 @@ func serveProbes(ready *atomic.Bool) {
 }
 
 // createConsumer waits for the table's tasks stream (the operator creates
-// it) and binds the knight's durable consumer.
+// it) and binds the knight's durable consumer with the operator's config.
 func createConsumer(ctx context.Context, js jetstream.JetStream, cfg config) (jetstream.Consumer, error) {
-	ccfg := jetstream.ConsumerConfig{
-		Durable:        natspkg.KnightTaskConsumerName(cfg.knight),
-		FilterSubjects: cfg.subjects,
-		AckPolicy:      jetstream.AckExplicitPolicy,
-		AckWait:        time.Minute,
-		MaxAckPending:  1,
-	}
+	// The operator owns the consumer's settings (#499); the stub binds the
+	// same config so it never rewrites them.
+	ccfg := natspkg.KnightTaskConsumerConfig(cfg.knight, cfg.subjects)
 	for {
 		cons, err := js.CreateOrUpdateConsumer(ctx, cfg.tasksStream, ccfg)
 		if err == nil {
@@ -225,6 +221,14 @@ func messagesJSON(role, text string) string {
 	return string(b)
 }
 
+// crashPrefix at the start of a task text makes the stub exit without acking.
+const crashPrefix = "STUB:crash"
+
+// shouldCrash reports whether the task text asks for a deterministic crash.
+func shouldCrash(task string) bool {
+	return strings.HasPrefix(strings.TrimSpace(task), crashPrefix)
+}
+
 func (k *knight) handle(ctx context.Context, msg jetstream.Msg) {
 	var task natspkg.TaskPayload
 	if err := json.Unmarshal(msg.Data(), &task); err != nil {
@@ -254,6 +258,13 @@ func (k *knight) handle(ctx context.Context, msg jetstream.Msg) {
 			attribute.String("gen_ai.operation.name", "invoke_agent"),
 			attribute.String("gen_ai.agent.name", k.cfg.knight),
 		))
+
+	if shouldCrash(task.Task) {
+		// Die without acking, as a killed knight does: the consumer's single
+		// delivery is spent and the task ends as a dead-letter entry (#738).
+		log.Printf("task %s asks for a crash: exiting without ack", task.TaskID)
+		os.Exit(1)
+	}
 
 	model := k.cfg.model
 	if task.Model != "" {
