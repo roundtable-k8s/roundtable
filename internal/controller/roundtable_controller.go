@@ -260,21 +260,14 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 // setDeprecatedFieldsCondition reports unenforced policies on a standing
-// table: policies.costResetSchedule, a non-zero policies.maxConcurrentTasks
-// and a non-zero policies.maxKnights. It sets DeprecatedFieldsUsed=True naming
-// the fields and records one Warning event per generation. The condition is
-// removed when none is set; ephemeral tables (mission-owned) never get it.
+// table: policies.costResetSchedule. It sets DeprecatedFieldsUsed=True naming
+// the field and records one Warning event per generation. The condition is
+// removed when it is unset; ephemeral tables (mission-owned) never get it.
 func (r *RoundTableReconciler) setDeprecatedFieldsCondition(rt *aiv1alpha1.RoundTable) {
 	var used []string
 	if p := rt.Spec.Policies; p != nil && !rt.Spec.Ephemeral {
 		if p.CostResetSchedule != "" { //nolint:staticcheck // reading the deprecated field to report it
 			used = append(used, "policies.costResetSchedule (not enforced: nothing resets the cost counter, reported cost is cumulative)")
-		}
-		if p.MaxConcurrentTasks != 0 { //nolint:staticcheck // reading the deprecated field to report it
-			used = append(used, "policies.maxConcurrentTasks (not enforced: use policies.maxConcurrentPlanTasks or knight concurrency)")
-		}
-		if p.MaxKnights != 0 { //nolint:staticcheck // reading the deprecated field to report it
-			used = append(used, "policies.maxKnights (not enforced: use a ResourceQuota with count/knights.ai.roundtable.io)")
 		}
 	}
 	if len(used) == 0 {

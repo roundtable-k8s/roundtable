@@ -12207,28 +12207,6 @@ spec:
                         format: int32
                         minimum: 0
                         type: integer
-                      maxConcurrentTasks:
-                        default: 0
-                        description: |-
-                          maxConcurrentTasks is the maximum total concurrent tasks across all knights in this table.
-                          0 means unlimited.
-
-                          Deprecated: not enforced. The operator never limits concurrent tasks
-                          per table; use maxConcurrentPlanTasks or each knight's concurrency.
-                        format: int32
-                        minimum: 0
-                        type: integer
-                      maxKnights:
-                        default: 0
-                        description: |-
-                          maxKnights is the maximum number of knights allowed in this table.
-                          0 means unlimited.
-
-                          Deprecated: not enforced. To cap knights in a namespace use a
-                          ResourceQuota with count/knights.ai.roundtable.io.
-                        format: int32
-                        minimum: 0
-                        type: integer
                       maxMissions:
                         default: 5
                         description: |-
