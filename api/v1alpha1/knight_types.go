@@ -259,8 +259,7 @@ type KnightSpec struct {
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// mcpServers declares remote MCP servers the knight uses. Rendered only
-	// for claude-knight images (into MCP_SERVERS_JSON and
-	// CLAUDE_DISALLOWED_TOOLS); on any other runtime nothing is rendered and
+	// for claude-knight images (into MCP_SERVERS_JSON); on any other runtime nothing is rendered and
 	// the Degraded condition is set with reason MCPServersUnsupported.
 	// Prefer a CLI in the tools image; use MCP for services with no CLI.
 	// +listType=map
@@ -1134,15 +1133,6 @@ type KnightMCPServer struct {
 	// +optional
 	Transport string `json:"transport,omitempty"`
 
-	// toolFilter restricts the tools the knight may call.
-	//
-	// Deprecated: tool selection belongs to the MCP server or to an MCP
-	// gateway in front of it; listing a server gives the knight that server's
-	// tools. The field will be removed in a future release (excluded tools
-	// are still denied until then).
-	// +optional
-	ToolFilter *KnightMCPToolFilter `json:"toolFilter,omitempty"`
-
 	// headersFrom adds HTTP headers (typically Authorization) whose values
 	// come from a Secret key in the knight's namespace. Each becomes an env
 	// var on the knight container (MCP_<SERVER>_<HEADER>, valueFrom copied
@@ -1196,17 +1186,6 @@ type KnightSecretKeyRef struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
 	Key string `json:"key"`
-}
-
-// KnightMCPToolFilter restricts a server's tools.
-//
-// Deprecated: tool selection belongs to the MCP server or to an MCP gateway
-// in front of it. The type will be removed in a future release.
-type KnightMCPToolFilter struct {
-	// exclude lists tool names denied for this server (a deny list, because
-	// the Claude Code harness exposes a bound server whole).
-	// +optional
-	Exclude []string `json:"exclude,omitempty"`
 }
 
 // ParseEgressHosts decodes and validates the allowedHosts list. It returns

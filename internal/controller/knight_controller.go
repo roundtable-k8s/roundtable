@@ -1174,10 +1174,9 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 // setDeprecatedFieldsCondition reports deprecated spec fields. It sets
 // DeprecatedFieldsUsed=True when spec.nats.maxDeliver is above 1 (ignored:
 // tasks run at most once), or when spec.tools.apt or spec.tools.mise is
-// non-empty (use tools.nix / tools.flakes), or when any
-// spec.mcpServers[].toolFilter is set. One Warning event per field is
+// non-empty (use tools.nix / tools.flakes). One Warning event per field is
 // recorded per generation (MaxDeliverIgnored, ToolsAptDeprecated,
-// ToolsMiseDeprecated, MCPToolFilterDeprecated) and the message lists every deprecated field in use.
+// ToolsMiseDeprecated) and the message lists every deprecated field in use.
 // The condition is removed when none is set.
 func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knight) {
 	type deprecated struct{ reason, msg string }
@@ -1194,17 +1193,6 @@ func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knigh
 	if tools != nil && len(tools.Mise) > 0 { //nolint:staticcheck // reading the deprecated field to report it
 		used = append(used, deprecated{"ToolsMiseDeprecated",
 			"spec.tools.mise is deprecated and will be removed: mise tools are unpinned and downloaded at every start; use spec.tools.nix or spec.tools.flakes"})
-	}
-	var filtered []string
-	for _, s := range knight.Spec.MCPServers {
-		if s.ToolFilter != nil { //nolint:staticcheck // reading the deprecated field to report it
-			filtered = append(filtered, s.Name)
-		}
-	}
-	if len(filtered) > 0 {
-		used = append(used, deprecated{"MCPToolFilterDeprecated", fmt.Sprintf(
-			"spec.mcpServers[].toolFilter is deprecated and will be removed (set on: %s): excluded tools are still denied for now; tool selection belongs to the MCP server or a gateway in front of it",
-			strings.Join(filtered, ", "))})
 	}
 	if len(used) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)

@@ -687,11 +687,13 @@ with no CLI. `spec.mcpServers` declares remote MCP servers (`name`, `url`,
 all available to the knight; narrowing them is the server's or an MCP
 gateway's job.
 For a claude-knight image the operator renders them into `MCP_SERVERS_JSON`
-(`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`) and the
-deprecated `toolFilter.exclude` entries (see [section 8](#8-deprecated-fields))
-into `CLAUDE_DISALLOWED_TOOLS` as `mcp__<name>__<tool>`. If `spec.env` already
-sets either variable, the user's entries are kept and the operator's are added (on a server-name clash the
-user's server wins). On any other runtime nothing is rendered and the Knight
+(`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`). If `spec.env`
+already sets `MCP_SERVERS_JSON`, the user's entries are kept and the operator's
+are added (on a server-name clash the user's server wins).
+`CLAUDE_DISALLOWED_TOOLS` in `spec.env` is the user's own variable and is passed
+through untouched. `spec.mcpServers[].toolFilter` was removed in chart 0.24.0:
+delete it from Knight manifests before upgrading (a manifest that still sets it
+fails to apply), and use the MCP server's own filtering or a gateway instead. On any other runtime nothing is rendered and the Knight
 gets `Degraded=True` with reason `MCPServersUnsupported`.
 
 Under default-deny egress the operator allows each server's URL itself (an
@@ -763,5 +765,4 @@ and will be removed one release later:
 |---|---|---|
 | `spec.tools.apt` | `spec.tools.nix`, `spec.tools.flakes` | Knight containers run as non-root, so apt installs cannot succeed. |
 | `spec.tools.mise` | `spec.tools.nix`, `spec.tools.flakes` | Tools are written as `latest`, never pinned, and downloaded at every cold start. |
-| `spec.mcpServers[].toolFilter` | none (use the MCP server's own filtering or a gateway) | Round Table does not manage which tools a knight has; excluded tools are still denied until removal. |
 | `spec.nats.maxDeliver` | none | Ignored; tasks run at most once. |

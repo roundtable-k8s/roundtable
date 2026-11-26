@@ -15,8 +15,6 @@ const mcpTransportSSE = "sse"
 const (
 	// EnvMCPServersJSON is the claude-knight env var holding MCP servers.
 	EnvMCPServersJSON = "MCP_SERVERS_JSON"
-	// EnvClaudeDisallowedTools is the claude-knight comma-separated deny list.
-	EnvClaudeDisallowedTools = "CLAUDE_DISALLOWED_TOOLS"
 )
 
 // MCPHeaderVar is one spec.mcpServers[].headersFrom entry rendered as an env
@@ -45,12 +43,12 @@ func sanitizeEnvPart(s string) string {
 	return string(b)
 }
 
-// MCPServersEnv renders spec.mcpServers into the MCP_SERVERS_JSON value and
-// the CLAUDE_DISALLOWED_TOOLS entries. It returns empty values when no
+// MCPServersEnv renders spec.mcpServers into the MCP_SERVERS_JSON value. It
+// returns an empty value when no
 // servers are declared. Header values are ${VAR} placeholders.
-func MCPServersEnv(servers []aiv1alpha1.KnightMCPServer) (string, []string) {
-	js, denied, _ := renderMCP(servers, nil)
-	return js, denied
+func MCPServersEnv(servers []aiv1alpha1.KnightMCPServer) string {
+	js, _ := renderMCP(servers, nil)
+	return js
 }
 
 // UniqueMCPHeaders returns headers without entries whose name repeats an
@@ -68,22 +66,20 @@ func UniqueMCPHeaders(headers []aiv1alpha1.KnightMCPHeader) []aiv1alpha1.KnightM
 	return out
 }
 
-// renderMCP renders the MCP config JSON, the deny list and the header env
-// vars. taken holds env var names already in use on the container; a header
+// renderMCP renders the MCP config JSON and the header env vars. taken holds env var names already in use on the container; a header
 // whose base name is taken (or was assigned to an earlier header, e.g.
 // server "a-b"/header "c" and server "a"/header "b-c") gets a numeric
 // suffix (_2, _3, ...), assigned in spec order. The JSON only ever contains
 // "${NAME}" placeholders, never a header value.
-func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (string, []string, []MCPHeaderVar) {
+func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (string, []MCPHeaderVar) {
 	if len(servers) == 0 {
-		return "", nil, nil
+		return "", nil
 	}
 	used := make(map[string]bool, len(taken))
 	for n := range taken {
 		used[n] = true
 	}
 	m := make(map[string]map[string]any, len(servers))
-	var denied []string
 	var vars []MCPHeaderVar
 	for _, s := range servers {
 		typ := "http"
@@ -105,25 +101,19 @@ func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (str
 			entry["headers"] = headers
 		}
 		m[s.Name] = entry
-		if s.ToolFilter != nil { //nolint:staticcheck // deprecated field still honoured until removal
-			for _, t := range s.ToolFilter.Exclude { //nolint:staticcheck // deprecated field still honoured until removal
-				denied = append(denied, fmt.Sprintf("mcp__%s__%s", s.Name, t))
-			}
-		}
 	}
 	b, _ := json.Marshal(map[string]any{"mcpServers": m}) // maps of strings: cannot fail
-	return string(b), denied, vars
+	return string(b), vars
 }
 
 // applyMCPServersEnv adds the rendered MCP env to env for claude-knight
 // images; other runtimes get nothing. Each headersFrom entry becomes an env
 // var whose valueFrom is a secretKeyRef copied from the spec. If the user
 // already set a variable via env, the user's entries are kept and the
-// operator's are merged in (for MCP_SERVERS_JSON the user's servers win on a
-// name clash; for the deny list the operator's entries are appended). A user
-// value set via valueFrom cannot be merged: MCP_SERVERS_JSON is left as the
-// user set it, and the deny list gets the operator's entries appended through
-// $(NAME) expansion.
+// operator's are merged in (the user's servers win on a name clash). A user
+// MCP_SERVERS_JSON set via valueFrom cannot be merged and is left as the user
+// set it. CLAUDE_DISALLOWED_TOOLS is the user's own variable and is never
+// touched.
 func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string) []corev1.EnvVar {
 	if AgentRuntimeForImage(image) != AgentRuntimeClaude {
 		return env
@@ -132,7 +122,7 @@ func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string)
 	for _, e := range env {
 		taken[e.Name] = true
 	}
-	servers, denied, vars := renderMCP(k.Spec.MCPServers, taken)
+	servers, vars := renderMCP(k.Spec.MCPServers, taken)
 	if servers == "" {
 		return env
 	}
@@ -144,14 +134,10 @@ func applyMCPServersEnv(env []corev1.EnvVar, k *aiv1alpha1.Knight, image string)
 			},
 		}})
 	}
-	env = mergeEnvValue(env, EnvMCPServersJSON, servers, false, mergeMCPJSON)
-	if len(denied) > 0 {
-		env = mergeEnvValue(env, EnvClaudeDisallowedTools, strings.Join(denied, ","), true, mergeCSV)
-	}
-	return env
+	return mergeEnvValue(env, EnvMCPServersJSON, servers, mergeMCPJSON)
 }
 
-func mergeEnvValue(env []corev1.EnvVar, name, value string, refMerge bool, merge func(user, op string) string) []corev1.EnvVar {
+func mergeEnvValue(env []corev1.EnvVar, name, value string, merge func(user, op string) string) []corev1.EnvVar {
 	for i := range env {
 		if env[i].Name != name {
 			continue
@@ -160,11 +146,6 @@ func mergeEnvValue(env []corev1.EnvVar, name, value string, refMerge bool, merge
 			// The user's value comes from a Secret/ConfigMap/field and cannot
 			// be merged at build time. Never append a duplicate (the last one
 			// wins and would drop the user's value).
-			if refMerge {
-				// Kubernetes expands $(NAME) against earlier entries, so the
-				// operator's entries are appended to the user's value.
-				env = append(env, corev1.EnvVar{Name: name, Value: "$(" + name + ")," + value})
-			}
 			return env
 		}
 		if strings.TrimSpace(env[i].Value) == "" {
@@ -175,27 +156,6 @@ func mergeEnvValue(env []corev1.EnvVar, name, value string, refMerge bool, merge
 		return env
 	}
 	return append(env, corev1.EnvVar{Name: name, Value: value})
-}
-
-func mergeCSV(user, op string) string {
-	if strings.TrimSpace(user) == "" {
-		return op
-	}
-	seen := map[string]bool{}
-	var out []string
-	for t := range strings.SplitSeq(user, ",") {
-		if t = strings.TrimSpace(t); t != "" && !seen[t] {
-			seen[t] = true
-			out = append(out, t)
-		}
-	}
-	for t := range strings.SplitSeq(op, ",") {
-		if !seen[t] {
-			seen[t] = true
-			out = append(out, t)
-		}
-	}
-	return strings.Join(out, ",")
 }
 
 // mergeMCPJSON merges the operator's servers into the user's MCP_SERVERS_JSON
