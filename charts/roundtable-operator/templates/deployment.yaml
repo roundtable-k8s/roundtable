@@ -63,6 +63,18 @@ spec:
             {{- /* Scheduled Triggers: the CronJob pod runs this image's fire-trigger subcommand against the gateway. */}}
             - --trigger-image={{ .Values.image.repository }}:{{ .Values.image.tag }}
             - --trigger-image-pull-policy={{ .Values.image.pullPolicy }}
+            {{- with (.Values.triggers.imagePullSecrets | default list) }}
+            - {{ printf "--trigger-image-pull-secrets=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .Values.triggers.nodeSelector }}
+            - {{ printf "--trigger-node-selector=%s" (toJson .) | quote }}
+            {{- end }}
+            {{- with .Values.triggers.tolerations }}
+            - {{ printf "--trigger-tolerations=%s" (toJson .) | quote }}
+            {{- end }}
+            {{- with .Values.triggers.priorityClassName }}
+            - {{ printf "--trigger-priority-class-name=%s" . | quote }}
+            {{- end }}
             {{- with include "roundtable-operator.triggerGatewayURL" . }}
             - --trigger-gateway-url={{ . }}
             - --trigger-gateway-audience={{ $.Values.gateway.serviceAccountAuth.audience | default "roundtable-gateway" }}

@@ -866,6 +866,46 @@ var _ = Describe("Trigger controller", func() {
 			Expect(meta.IsStatusConditionTrue(getTrigger("upd").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
 		})
 
+		It("propagates pod placement set and then cleared to the existing CronJob", func() {
+			scheduleTrigger("place", nil)
+			reconcileTrigger("place")
+			Expect(getCronJob("trigger-place").Spec.JobTemplate.Spec.Template.Spec.Tolerations).To(BeEmpty())
+
+			saved := r.Schedule
+			DeferCleanup(func() { r.Schedule = saved })
+			r.Schedule.NodeSelector = map[string]string{"pool": "ops"}
+			r.Schedule.Tolerations = []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}}
+			r.Schedule.PriorityClassName = "high"
+			r.Schedule.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "regcred"}}
+			reconcileTrigger("place")
+			pod := getCronJob("trigger-place").Spec.JobTemplate.Spec.Template.Spec
+			Expect(pod.NodeSelector).To(Equal(map[string]string{"pool": "ops"}))
+			Expect(pod.Tolerations).To(HaveLen(1))
+			Expect(pod.PriorityClassName).To(Equal("high"))
+			Expect(pod.ImagePullSecrets).To(HaveLen(1))
+
+			// Unchanged: a further reconcile does not update the CronJob.
+			rv := getCronJob("trigger-place").ResourceVersion
+			reconcileTrigger("place")
+			Expect(getCronJob("trigger-place").ResourceVersion).To(Equal(rv))
+
+			// Cleared: the values are removed from the existing CronJob.
+			r.Schedule.NodeSelector = nil
+			r.Schedule.Tolerations = nil
+			r.Schedule.PriorityClassName = ""
+			r.Schedule.ImagePullSecrets = nil
+			reconcileTrigger("place")
+			pod = getCronJob("trigger-place").Spec.JobTemplate.Spec.Template.Spec
+			Expect(pod.NodeSelector).To(BeEmpty())
+			Expect(pod.Tolerations).To(BeEmpty())
+			Expect(pod.PriorityClassName).To(BeEmpty())
+			Expect(pod.ImagePullSecrets).To(BeEmpty())
+
+			rv = getCronJob("trigger-place").ResourceVersion
+			reconcileTrigger("place")
+			Expect(getCronJob("trigger-place").ResourceVersion).To(Equal(rv))
+		})
+
 		It("deletes the CronJob and ServiceAccount when the schedule source is removed", func() {
 			scheduleTrigger("gone", nil)
 			reconcileTrigger("gone")
