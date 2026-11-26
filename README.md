@@ -205,7 +205,7 @@ The full file (with concurrency and deadline settings) is [`examples/trigger-sch
 
 ## Architecture
 
-The operator runs a Knight, Mission, Chain and Trigger controller. They route work over NATS JetStream (tasks, results, KV) to knight pods: the runtime plus skill-filter and git-sync sidecars. The dashboard reads through the Kubernetes API. Diagrams and request flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The operator runs a Knight, Mission, Chain and Trigger controller. They route work over NATS JetStream (tasks, results, KV) to knight pods: the runtime plus skill-filter and git-sync sidecars. The dashboard reads through the Kubernetes API. JetStream topology and request flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Observability
 
