@@ -104,6 +104,17 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if mission.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(mission, missionFinalizer) {
 			log.Info("Cleaning up mission resources", "mission", mission.Name)
+			// Streams are not owned by any Kubernetes object, so GC will not remove
+			// them. Delete them here unless the Cleanup phase already did. This applies
+			// regardless of cleanupPolicy: the Mission itself is going away.
+			if !meta.IsStatusConditionTrue(mission.Status.Conditions, aiv1alpha1.ConditionCleanupComplete) &&
+				(mission.Status.NATSTasksStream != "" || mission.Status.NATSResultsStream != "") {
+				_ = r.Cleaner.DeleteNATSConsumers(ctx, mission) // best effort
+				if err := r.Cleaner.DeleteNATSStreams(ctx, mission); err != nil {
+					log.Error(err, "Failed to delete NATS streams during mission deletion, retrying")
+					return ctrl.Result{RequeueAfter: RequeueModerate}, nil
+				}
+			}
 			controllerutil.RemoveFinalizer(mission, missionFinalizer)
 			if err := r.Update(ctx, mission); err != nil {
 				return ctrl.Result{}, err
