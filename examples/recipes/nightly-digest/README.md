@@ -28,8 +28,11 @@ Knight digest (read-only, isolated)
 ## Install
 
 A RoundTable named `fleet-a` exists (see
-[`roundtable-fleet.yaml`](../../roundtable-fleet.yaml)); rename `fleet-a` and
-the `fleet-a.tasks.` subject in the manifests if yours differs. First make the
+[`roundtable-fleet.yaml`](../../roundtable-fleet.yaml)); rename `fleet-a`
+(the Knight's `ai.roundtable.io/round-table` label, the Trigger's
+`roundTableRef` and the `fleet-a.tasks.` subject) in the manifests if yours
+differs; the label must match the Trigger's `roundTableRef` or the Trigger is
+never Ready. First make the
 skill available to the knight (next section), then:
 
 ```bash

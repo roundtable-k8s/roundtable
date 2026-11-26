@@ -28,6 +28,10 @@ kind: Knight
 metadata:
   name: digest
   namespace: roundtable
+  labels:
+    # A Trigger targeting a Knight fires only if the Knight's RoundTable
+    # (this label) matches the Trigger's roundTableRef.
+    ai.roundtable.io/round-table: fleet-a
 spec:
   domain: digest
   model: sonnet

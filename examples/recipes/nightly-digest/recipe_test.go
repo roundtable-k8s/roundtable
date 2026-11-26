@@ -53,3 +53,36 @@ func TestSkillScripts(t *testing.T) {
 		t.Fatalf("unexpected output:\n%s", out)
 	}
 }
+
+func TestKnightLabelMatchesTrigger(t *testing.T) {
+	read := func(file string, docIdx int, out any) {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(bytes.Split(data, []byte("\n---\n"))[docIdx], out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var knight struct {
+		Metadata struct {
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+	}
+	var trigger struct {
+		Spec struct {
+			RoundTableRef struct {
+				Name string `json:"name"`
+			} `json:"roundTableRef"`
+		} `json:"spec"`
+	}
+	read("knight.yaml", 2, &knight)
+	read("trigger.yaml", 0, &trigger)
+	want := trigger.Spec.RoundTableRef.Name
+	if want == "" {
+		t.Fatal("trigger has no roundTableRef")
+	}
+	if got := knight.Metadata.Labels["ai.roundtable.io/round-table"]; got != want {
+		t.Errorf("knight round-table label %q, want %q", got, want)
+	}
+}
