@@ -299,6 +299,40 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		Expect(get().Status.Phase).To(Equal(aiv1alpha1.ChainPhaseFailed))
 	})
 
+	It("retry-failed keeps the cost and tokens of the failed attempts", func() {
+		create(oneStep, nil)
+		setStatus(func(s *aiv1alpha1.ChainStatus) {
+			now := metav1.Now()
+			s.Phase = aiv1alpha1.ChainPhaseFailed
+			s.RunID = "run-cost"
+			s.StartedAt, s.CompletedAt = &now, &now
+			s.CostUSD = "0.250000"
+			s.Tokens = &aiv1alpha1.TokenTotals{Input: 100, Output: 10}
+			s.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "review", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "boom", TaskID: "t1", StartedAt: &now,
+					CostUSD: "0.250000", Tokens: &aiv1alpha1.TokenTotals{Input: 100, Output: 10}},
+			}
+		})
+
+		annotate(aiv1alpha1.AnnotationChainRetryFailed, "cost-1")
+		reconcileN(1)
+
+		c := get()
+		Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhasePending))
+		Expect(c.Status.StepStatuses[0].CostUSD).To(Equal("0.250000"))
+		Expect(c.Status.StepStatuses[0].Tokens).To(Equal(&aiv1alpha1.TokenTotals{Input: 100, Output: 10}))
+		Expect(c.Status.CostUSD).To(Equal("0.250000"))
+
+		// The retried attempt adds its cost to the kept one.
+		chain := get()
+		r.recordUsage(ctx, chain, &chain.Status.StepStatuses[0], knight,
+			&natspkg.TaskResult{Cost: 0.5, Tokens: &natspkg.TokenUsage{Input: 50, Output: 5}})
+		refreshChainUsage(chain)
+		Expect(chain.Status.StepStatuses[0].CostUSD).To(Equal("0.750000"))
+		Expect(chain.Status.StepStatuses[0].Tokens).To(Equal(&aiv1alpha1.TokenTotals{Input: 150, Output: 15}))
+		Expect(chain.Status.CostUSD).To(Equal("0.750000"))
+	})
+
 	It("retry-failed on a chain with nothing to retry is a recorded no-op", func() {
 		create(oneStep, nil)
 		finishedRun(aiv1alpha1.ChainPhaseSucceeded, aiv1alpha1.ChainStepPhaseSucceeded)
