@@ -17,6 +17,7 @@ limitations under the License.
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -188,13 +189,103 @@ func TestScheduleRunResult(t *testing.T) {
 	}
 }
 
-func TestScheduleRunResultKnightTargetNotServedYet(t *testing.T) {
-	trg := runScheduleTrigger("k", func(t *aiv1alpha1.Trigger) {
+// stubBus serves task records from memory; every other Bus method is nil.
+type stubBus struct {
+	Bus
+	recs map[string]*TaskRecord
+}
+
+func (b *stubBus) GetRecord(_ context.Context, id string) (*TaskRecord, error) {
+	if r, ok := b.recs[id]; ok {
+		return r, nil
+	}
+	return nil, ErrNotFound
+}
+
+func knightScheduleTrigger(name string, firings ...aiv1alpha1.TriggerFiring) *aiv1alpha1.Trigger {
+	trg := runScheduleTrigger(name, func(t *aiv1alpha1.Trigger) {
 		t.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "operator", Task: "go"}}
 	})
+	trg.Status.RecentFirings = firings
+	return trg
+}
+
+func TestScheduleRunResultKnightTarget(t *testing.T) {
+	done := scheduleT0.Add(time.Minute)
+	trg := knightScheduleTrigger("k",
+		aiv1alpha1.TriggerFiring{Run: "task-1", Time: metav1.NewTime(scheduleT0), Key: "a"},
+		aiv1alpha1.TriggerFiring{Run: "task-expired", Time: metav1.NewTime(scheduleT0.Add(time.Hour)), Key: "b"})
 	e := newRunsEnv(t, trg)
-	if resp, _ := e.do(t, "GET", "/v1/schedules/"+testNS+"/k/runs/task-1", testToken, nil); resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want 422", resp.StatusCode)
+	e.svc.Bus = &stubBus{recs: map[string]*TaskRecord{
+		"task-1": {TaskID: "task-1", Knight: "operator", Namespace: testNS, Status: TaskSucceeded, Output: "all done",
+			Model: "opus", Verdict: "ship", CreatedAt: scheduleT0, CompletedAt: &done},
+		// Sent by something else, not by this schedule.
+		"task-foreign": {TaskID: "task-foreign", Knight: "operator", Namespace: testNS, Status: TaskSucceeded, Output: "x"},
+	}}
+	base := "/v1/schedules/" + testNS + "/k/runs"
+
+	resp, body := e.do(t, "GET", base+"/task-1", testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %v", resp.StatusCode, body)
+	}
+	task, _ := body["task"].(map[string]any)
+	if body["target"] != "knight" || body["schedule"] != "k" || task["output"] != "all done" ||
+		task["status"] != "succeeded" || task["model"] != "opus" || task["run"] != "task-1" {
+		t.Errorf("result = %v", body)
+	}
+	for _, run := range []string{"task-foreign", "task-expired", "task-gone", "Not a name"} {
+		if resp, _ := e.do(t, "GET", base+"/"+run, testToken, nil); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("run %q status = %d, want 404", run, resp.StatusCode)
+		}
+	}
+
+	resp, body = e.do(t, "GET", base, testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status %d: %v", resp.StatusCode, body)
+	}
+	for _, r := range runsOf(body) {
+		want := r["run"] == "task-1"
+		if r["resultAvailable"] != want {
+			t.Errorf("run %v resultAvailable = %v, want %v", r["run"], r["resultAvailable"], want)
+		}
+	}
+}
+
+func missionScheduleRun(trg *aiv1alpha1.Trigger, name, result string) *aiv1alpha1.Mission {
+	return &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: trg.Namespace,
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "Trigger",
+				Name: trg.Name, UID: trg.UID, Controller: new(true)}}},
+		Status: aiv1alpha1.MissionStatus{Phase: aiv1alpha1.MissionPhaseSucceeded, Result: result},
+	}
+}
+
+func TestScheduleRunResultMissionTarget(t *testing.T) {
+	missionTarget := func(t *aiv1alpha1.Trigger) {
+		t.Spec.Target = aiv1alpha1.TriggerTarget{Mission: &aiv1alpha1.TriggerMissionTarget{}}
+	}
+	trg := runScheduleTrigger("m", missionTarget)
+	other := runScheduleTrigger("other", missionTarget)
+	trg.Status.RecentFirings = []aiv1alpha1.TriggerFiring{{Run: "m-1", Time: metav1.NewTime(scheduleT0), Key: "a"}}
+	e := newRunsEnv(t, trg, other, missionScheduleRun(trg, "m-1", "the report"), missionScheduleRun(other, "other-1", "x"))
+	base := "/v1/schedules/" + testNS + "/m/runs"
+
+	resp, body := e.do(t, "GET", base+"/m-1", testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %v", resp.StatusCode, body)
+	}
+	mission, _ := body["mission"].(map[string]any)
+	if body["target"] != "mission" || mission["phase"] != "Succeeded" || mission["result"] != "the report" {
+		t.Errorf("result = %v", body)
+	}
+	for _, run := range []string{"other-1", "m-gone"} {
+		if resp, _ := e.do(t, "GET", base+"/"+run, testToken, nil); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("run %q status = %d, want 404", run, resp.StatusCode)
+		}
+	}
+	_, body = e.do(t, "GET", base, testToken, nil)
+	if runs := runsOf(body); len(runs) != 1 || runs[0]["resultAvailable"] != true {
+		t.Errorf("runs = %v, want one with resultAvailable", runs)
 	}
 }
 

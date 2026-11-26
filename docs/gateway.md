@@ -1020,12 +1020,21 @@ the skipped firings and the outcome of runs whose Chain is already deleted.
 
 ### `GET /v1/schedules/{namespace}/{name}/runs/{run}`
 
-The run's result: its `phase`, `steps` and, for a chain target, `output`, the
-run's final output (the one step no other step depends on; with several,
-read the steps). A run that does not belong to the schedule, or that was
-deleted, is a **404**. A knight target (task result) and a mission target
-(report) are not served yet and answer **422**; they are the extension points
-in `ScheduleRunResult` in `internal/gateway/schedule_runs.go`.
+The run's result, by `target`:
+
+- `chain`: the run's `phase`, `steps` and `output`, the run's final output
+  (the one step no other step depends on; with several, read the steps).
+- `knight`: `task` with the task's `status` (`pending`, `succeeded`,
+  `failed`), `output`, `error`, `model`, `verdict`, `prs` and timestamps. It
+  is readable while the gateway's task record is kept.
+- `mission`: `mission`, the Mission as `GET /v1/missions/{namespace}/{name}`
+  returns it (`phase`, `result`, chains, conditions). It is readable while
+  the Mission exists.
+
+A run that does not belong to the schedule (a knight task not among its
+firings, a Mission another Trigger created), or whose record or Mission is
+gone, is a **404**. `resultAvailable` in the run list is true for knight runs
+whose task record still exists and for Missions that still exist.
 
 ```bash
 GW=http://roundtable-operator-gateway.roundtable.svc:8080

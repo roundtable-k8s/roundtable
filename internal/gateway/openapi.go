@@ -327,7 +327,7 @@ var openAPIOperations = map[string]obj{
 	},
 	"GET /v1/schedules/{namespace}/{name}/runs/{run}": {
 		"summary": "Get the result of one run of a schedule", "tags": []any{"schedules"},
-		"description": "For a chain target, the run's steps and final output. A run that does not belong to the schedule is a 404.",
+		"description": "For a chain target, the run's steps and final output; for a knight target, the task's result (`task`), readable while its task record is kept; for a mission target, the Mission (`mission`) with its phase and result, readable while it exists. A run that does not belong to the schedule, or whose record or Mission is gone, is a 404.",
 		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name."),
 			pathParam("run", "Run from the run history.")},
 		"responses": errs(obj{"200": jsonResp("The run's result.", schemaRef("ScheduleRunResult"))},
@@ -484,9 +484,17 @@ var openAPISchemas = obj{
 		"reason":  str("Why a firing was skipped."), "durationSeconds": obj{"type": "number"},
 		"costUSD": str("The run's cost, when known."), "resultAvailable": boolean("The result can still be fetched."),
 	}),
-	"ScheduleRunResult": object([]string{"schedule", "target", "run", "chain", "namespace", "phase", "done", "createdAt"}, obj{
-		"schedule": str(""), "target": str("Kind of target that ran: chain."),
-		"run": str("Name of the run."), "chain": str(""), "namespace": str(""), "runId": str(""),
+	"ScheduleRunResult": object([]string{"schedule", "target"}, obj{
+		"schedule": str(""), "target": str("Kind of target that ran: chain, knight or mission. A chain target's record is flattened into this object; a knight target sets task, a mission target sets mission."),
+		"task": object([]string{"run", "knight", "status", "createdAt"}, obj{
+			"run": str("Task ID."), "knight": str(""), "status": str("pending, succeeded or failed."),
+			"output": str(""), "error": str(""), "model": str(""), "verdict": str(""),
+			"prs":         array(obj{"type": "object"}),
+			"createdAt":   obj{"type": "string", "format": "date-time"},
+			"completedAt": obj{"type": "string", "format": "date-time"},
+		}),
+		"mission": obj{"type": "object", "description": "The Mission, as GET /v1/missions/{namespace}/{name} returns it."},
+		"run":     str("Name of the run."), "chain": str(""), "namespace": str(""), "runId": str(""),
 		"phase": str(""), "done": boolean(""),
 		"createdAt":   obj{"type": "string", "format": "date-time"},
 		"startedAt":   obj{"type": "string", "format": "date-time"},
