@@ -60,64 +60,94 @@ func TestExamplesDecodeStrictly(t *testing.T) {
 		t.Fatal("no examples found")
 	}
 
-	sep := regexp.MustCompile(`(?m)^---\s*$`)
 	decoded := 0
 	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, doc := range sep.Split(string(data), -1) {
-			if strings.TrimSpace(doc) == "" {
-				continue
-			}
-			var meta struct {
-				APIVersion string `json:"apiVersion"`
-				Kind       string `json:"kind"`
-			}
-			if err := yaml.Unmarshal([]byte(doc), &meta); err != nil {
-				t.Errorf("%s doc %d: %v", f, i, err)
-				continue
-			}
-			if meta.APIVersion != GroupVersion.String() {
-				continue
-			}
-			var obj any
-			switch meta.Kind {
-			case "Knight":
-				obj = &Knight{}
-			case "Chain":
-				obj = &Chain{}
-			case "Mission":
-				obj = &Mission{}
-			case "RoundTable":
-				obj = &RoundTable{}
-			case "Trigger":
-				obj = &Trigger{}
-			default:
-				t.Errorf("%s doc %d: unknown kind %q", f, i, meta.Kind)
-				continue
-			}
-			if err := yaml.UnmarshalStrict([]byte(doc), obj); err != nil {
-				t.Errorf("%s doc %d (%s): %v", f, i, meta.Kind, err)
-				continue
-			}
+		for _, eo := range decodeExampleFile(t, f) {
+			decoded++
 			var natsURL string
-			switch o := obj.(type) {
+			switch o := eo.obj.(type) {
 			case *Knight:
 				natsURL = o.Spec.NATS.URL
 			case *RoundTable:
 				natsURL = o.Spec.NATS.URL
 			}
 			if natsURL != "" && !slices.Contains(acceptedExampleNATSURLs, natsURL) {
-				t.Errorf("%s doc %d (%s): spec.nats.url %q is not one of %v", f, i, meta.Kind, natsURL, acceptedExampleNATSURLs)
+				t.Errorf("%s doc %d (%s): spec.nats.url %q is not one of %v", f, eo.doc, eo.kind, natsURL, acceptedExampleNATSURLs)
 			}
-			decoded++
 		}
 	}
 	if decoded == 0 {
 		t.Fatal("no Round Table objects decoded")
 	}
+}
+
+// exampleObject is one Round Table object strictly decoded from an example file.
+type exampleObject struct {
+	file string // base name of the example file
+	doc  int    // document index within the file
+	kind string
+	name string // metadata.name
+	obj  any    // *Knight, *Chain, *Mission, *RoundTable or *Trigger
+}
+
+// decodeExampleFile strictly decodes every Round Table document in file.
+// Documents of other API groups are skipped; a document that does not decode
+// is reported on t and left out.
+func decodeExampleFile(t *testing.T, file string) []exampleObject {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sep := regexp.MustCompile(`(?m)^---\s*$`)
+	var out []exampleObject
+	for i, doc := range sep.Split(string(data), -1) {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		var meta struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+			Metadata   struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &meta); err != nil {
+			t.Errorf("%s doc %d: %v", file, i, err)
+			continue
+		}
+		if meta.APIVersion != GroupVersion.String() {
+			continue
+		}
+		var obj any
+		switch meta.Kind {
+		case "Knight":
+			obj = &Knight{}
+		case "Chain":
+			obj = &Chain{}
+		case "Mission":
+			obj = &Mission{}
+		case "RoundTable":
+			obj = &RoundTable{}
+		case "Trigger":
+			obj = &Trigger{}
+		default:
+			t.Errorf("%s doc %d: unknown kind %q", file, i, meta.Kind)
+			continue
+		}
+		if err := yaml.UnmarshalStrict([]byte(doc), obj); err != nil {
+			t.Errorf("%s doc %d (%s): %v", file, i, meta.Kind, err)
+			continue
+		}
+		out = append(out, exampleObject{
+			file: filepath.Base(file),
+			doc:  i,
+			kind: meta.Kind,
+			name: meta.Metadata.Name,
+			obj:  obj,
+		})
+	}
+	return out
 }
 
 // TestBacklogGroomingRecipe pins the backlog-grooming recipe's policy: its
