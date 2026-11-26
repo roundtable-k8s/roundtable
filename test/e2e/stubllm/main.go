@@ -41,6 +41,8 @@ const modelID = "stubllm"
 // defaultReply answers a prompt that carries no STUB tag.
 const defaultReply = "done"
 
+const finishStop = "stop"
+
 // replies is the scripted table a `STUB:<name>` tag selects from.
 var replies = map[string]string{
 	"pong":     "pong",
@@ -148,7 +150,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		Choices: []completionChoice{{
 			Index:        0,
 			Message:      chunkDelta{Role: "assistant", Content: reply},
-			FinishReason: "stop",
+			FinishReason: finishStop,
 		}},
 		Usage: u,
 	})
@@ -196,7 +198,7 @@ func streamReply(w http.ResponseWriter, req chatRequest, id string, created int6
 		}
 		emit(base([]chunkChoice{{Index: 0, Delta: chunkDelta{Content: piece}}}))
 	}
-	stop := "stop"
+	stop := finishStop
 	emit(base([]chunkChoice{{Index: 0, Delta: chunkDelta{}, FinishReason: &stop}}))
 	if req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
 		final := base([]chunkChoice{})
