@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -110,6 +111,7 @@ func (r *ChainReconciler) completeRun(ctx context.Context, chain *aiv1alpha1.Cha
 
 	// Count hard failures, soft failures, and successes
 	hardFailures := 0
+	var hardFailed []aiv1alpha1.ChainStepStatus
 	softFailures := 0
 	succeededSteps := 0
 	totalSteps := len(chain.Status.StepStatuses)
@@ -130,22 +132,24 @@ func (r *ChainReconciler) completeRun(ctx context.Context, chain *aiv1alpha1.Cha
 				softFailures++
 			} else {
 				hardFailures++
+				hardFailed = append(hardFailed, ss)
 			}
 		}
 	}
 
 	if hardFailures > 0 {
 		// At least one hard failure — chain fails
+		failMsg := failedStepsMessage(hardFailed)
 		chain.Status.Phase = aiv1alpha1.ChainPhaseFailed
 		chain.Status.RunsFailed++
 		meta.SetStatusCondition(&chain.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionChainComplete,
 			Status:             metav1.ConditionTrue,
 			Reason:             aiv1alpha1.ReasonChainFailed,
-			Message:            fmt.Sprintf("%d step(s) failed without continueOnFailure", hardFailures),
+			Message:            failMsg,
 			ObservedGeneration: chain.Generation,
 		})
-		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain failed: %d step(s) failed without continueOnFailure", hardFailures)
+		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain failed: %s", failMsg)
 		metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "failed").Inc()
 	} else if softFailures > 0 {
 		// No hard failures, but some soft failures
@@ -206,4 +210,39 @@ func hasHardFailure(chain *aiv1alpha1.Chain, specMap map[string]*aiv1alpha1.Chai
 		}
 	}
 	return false
+}
+
+const (
+	maxFailedStepsNamed = 3
+	maxStepErrorRunes   = 200
+)
+
+// failedStepsMessage names the failed steps and an excerpt of each step's
+// error: "step a: err; step b: err; and N more". With no steps it returns "".
+func failedStepsMessage(failed []aiv1alpha1.ChainStepStatus) string {
+	if len(failed) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, maxFailedStepsNamed+1)
+	for i, ss := range failed {
+		if i == maxFailedStepsNamed {
+			parts = append(parts, fmt.Sprintf("and %d more", len(failed)-maxFailedStepsNamed))
+			break
+		}
+		part := "step " + ss.Name
+		if e := truncateRunes(strings.Join(strings.Fields(ss.Error), " "), maxStepErrorRunes); e != "" {
+			part += ": " + e
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// truncateRunes cuts s to at most n runes, adding an ellipsis when it cut.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }

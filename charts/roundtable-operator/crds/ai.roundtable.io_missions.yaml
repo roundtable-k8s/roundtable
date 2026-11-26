@@ -29,6 +29,14 @@ spec:
     - jsonPath: .spec.ttlSeconds
       name: TTL
       type: integer
+    - jsonPath: .status.roundTableName
+      name: Table
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Complete")].message
+      name: Message
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

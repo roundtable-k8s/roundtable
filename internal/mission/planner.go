@@ -124,11 +124,22 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	if pr.Error != "" {
 		log.Error(fmt.Errorf("%s", pr.Error), "Planning failed, marking mission as failed")
 		mission.Status.Phase = aiv1alpha1.MissionPhaseFailed
-		mission.Status.Result = fmt.Sprintf("Planning failed: %s", pr.Error)
+		failMsg := fmt.Sprintf("Planning failed: %s", pr.Error)
+		mission.Status.Result = failMsg
+		meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
+			Type:               aiv1alpha1.ConditionMissionComplete,
+			Status:             metav1.ConditionTrue,
+			Reason:             aiv1alpha1.ReasonMissionFailed,
+			Message:            failMsg,
+			ObservedGeneration: mission.Generation,
+		})
 		mission.Status.ObservedGeneration = mission.Generation
 		planErr := pr.Error
 		err := p.Client.Status().Update(ctx, mission)
 		if err == nil {
+			if p.Recorder != nil {
+				p.Recorder.Event(mission, corev1.EventTypeWarning, "Failed", failMsg)
+			}
 			// Once: the mission is Failed from here on.
 			EmitPlanSpan(ctx, p.TracerProvider, mission, planErr)
 		}

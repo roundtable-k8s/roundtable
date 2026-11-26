@@ -572,6 +572,8 @@ type PlanningResult struct {
 // +kubebuilder:printcolumn:name="Objective",type=string,JSONPath=`.spec.objective`,priority=1
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="TTL",type=integer,JSONPath=`.spec.ttlSeconds`
+// +kubebuilder:printcolumn:name="Table",type=string,JSONPath=`.status.roundTableName`,priority=1
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Complete")].message`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Mission is the Schema for the missions API.

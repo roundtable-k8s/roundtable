@@ -321,9 +321,21 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 	for _, template := range mission.Spec.KnightTemplates {
 		if templateNames[template.Name] {
 			mission.Status.Phase = aiv1alpha1.MissionPhaseFailed
-			mission.Status.Result = fmt.Sprintf("Duplicate knight template name: %s", template.Name)
+			msg := fmt.Sprintf("Duplicate knight template name: %s", template.Name)
+			mission.Status.Result = msg
+			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
+				Type:               aiv1alpha1.ConditionMissionComplete,
+				Status:             metav1.ConditionTrue,
+				Reason:             aiv1alpha1.ReasonMissionFailed,
+				Message:            msg,
+				ObservedGeneration: mission.Generation,
+			})
 			mission.Status.ObservedGeneration = mission.Generation
-			return ctrl.Result{}, r.Status().Update(ctx, mission)
+			err := r.Status().Update(ctx, mission)
+			if err == nil {
+				r.Recorder.Event(mission, corev1.EventTypeWarning, "Failed", msg)
+			}
+			return ctrl.Result{}, err
 		}
 		templateNames[template.Name] = true
 	}
@@ -681,12 +693,13 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 			mission.Status.Phase = aiv1alpha1.MissionPhaseFailed
 			now := metav1.Now()
 			mission.Status.CompletedAt = &now
-			mission.Status.Result = "One or more mission chains failed"
+			failMsg := r.failedChainsMessage(ctx, mission)
+			mission.Status.Result = failMsg
 			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionMissionComplete,
 				Status:             metav1.ConditionTrue,
 				Reason:             aiv1alpha1.ReasonMissionChainFailed,
-				Message:            "One or more mission chains failed",
+				Message:            failMsg,
 				ObservedGeneration: mission.Generation,
 			})
 			mission.Status.ObservedGeneration = mission.Generation
@@ -911,4 +924,35 @@ func (r *MissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&aiv1alpha1.RoundTable{}).
 		Named("mission").
 		Complete(r)
+}
+
+// failedChainsMessage names the failed chains of a mission, each with its
+// Chain's Complete condition message (which names the failed steps).
+func (r *MissionReconciler) failedChainsMessage(ctx context.Context, mission *aiv1alpha1.Mission) string {
+	var failed []string
+	for _, cs := range mission.Status.ChainStatuses {
+		if cs.Phase != aiv1alpha1.ChainPhaseFailed {
+			continue
+		}
+		part := "chain " + cs.Name
+		crName := cs.ChainCRName
+		if crName == "" {
+			crName = cs.Name
+		}
+		chain := &aiv1alpha1.Chain{}
+		if err := r.Get(ctx, types.NamespacedName{Name: crName, Namespace: mission.Namespace}, chain); err == nil {
+			if c := meta.FindStatusCondition(chain.Status.Conditions, aiv1alpha1.ConditionChainComplete); c != nil && c.Message != "" {
+				part += ": " + c.Message
+			}
+		}
+		failed = append(failed, part)
+	}
+	if len(failed) == 0 {
+		return "One or more mission chains failed"
+	}
+	if len(failed) > maxFailedStepsNamed {
+		n := len(failed) - maxFailedStepsNamed
+		failed = append(failed[:maxFailedStepsNamed], fmt.Sprintf("and %d more", n))
+	}
+	return "Mission chains failed: " + strings.Join(failed, "; ")
 }
