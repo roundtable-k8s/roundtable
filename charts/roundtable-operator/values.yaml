@@ -210,7 +210,8 @@ missionDefaultNatsURL: nats://nats.database.svc.cluster.local:4222
 missionNetworkPolicy:
   enabled: true
   nats:
-    # Optional pod labels narrowing the NATS peer; empty = whole namespace.
+    # Optional pod labels narrowing the NATS peer. Maps merge, so {} keeps the
+    # default; set null to clear it (whole namespace).
     podLabels:
       app.kubernetes.io/name: nats
   dns:
@@ -658,6 +659,8 @@ prPipeline:
 # Monitors are only rendered when the monitoring.coreos.com/v1 API is served.
 metrics:
   enabled: false
+  # Operator metrics port (flag, container port, Service and NetworkPolicy).
+  port: 8080
   # Scrape interval for all monitors.
   interval: 1m
   # Extra labels added to every monitor (e.g. the Prometheus selector label).

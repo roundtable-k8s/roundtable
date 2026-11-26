@@ -53,11 +53,12 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 
 ### Metrics
 
-Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com/v1` API is served. When `metrics.enabled` is set the operator runs with `--metrics-bind-address=:8080 --metrics-secure=false` (plain HTTP, so no TLS/authz config is needed on the monitor), with a `metrics` container port and a `<release>-metrics` Service. Do not also set `--metrics-bind-address` in `extraArgs`: the flag would be passed twice, the last value wins, and the operator would bind a port other than the declared 8080. The knight PodMonitor only scrapes knight pods in the release namespace.
+Opt-in scrape config. Monitors are rendered only when the `monitoring.coreos.com/v1` API is served. When `metrics.enabled` is set the operator runs with `--metrics-bind-address=:<metrics.port> --metrics-secure=false` (plain HTTP, so no TLS/authz config is needed on the monitor), with a `metrics` container port and a `<release>-metrics` Service. Do not also set `--metrics-bind-address` in `extraArgs`: the flag would be passed twice, the last value wins, and the operator would bind a port other than the declared `metrics.port`. The knight PodMonitor only scrapes knight pods in the release namespace.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `metrics.enabled` | bool | `false` | Enable the operator metrics endpoint, port and Service; gates all monitors |
+| `metrics.port` | int | `8080` | Operator metrics port: the `--metrics-bind-address` flag, the `metrics` container port, the `<release>-metrics` Service port and the NetworkPolicy port (when `metrics.enabled`) |
 | `metrics.interval` | string | `1m` | Scrape interval for all monitors |
 | `metrics.labels` | map | `{}` | Extra labels on every monitor (for Prometheus selectors) |
 | `metrics.serviceMonitor.enabled` | bool | `false` | ServiceMonitors for the operator, the gateway (if `gateway.enabled`; port 8081 `/metrics`, served when `metrics.enabled`, unauthenticated, allowed from `networkPolicy.metricsFrom`) and, if `dashboard.enabled`, the dashboard |
@@ -116,8 +117,8 @@ The egress NetworkPolicy the operator creates for each mission's knights. The NA
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `missionNetworkPolicy.enabled` | bool | `true` | Create the policy (`MISSION_NETPOL_ENABLED`); disable on clusters without NetworkPolicy support or with their own policies |
-| `missionNetworkPolicy.nats.podLabels` | map | `{app.kubernetes.io/name: nats}` | Pod labels narrowing the NATS peer (`MISSION_NETPOL_NATS_POD_LABELS`, `k=v,k=v`); empty means the whole namespace |
+| `missionNetworkPolicy.enabled` | bool | `true` | Create the policy (`MISSION_NETPOL_ENABLED`); disable on clusters without NetworkPolicy support or with their own policies. Setting `false` does not delete existing `mission-*-isolation` policies; remove them manually |
+| `missionNetworkPolicy.nats.podLabels` | map | `{app.kubernetes.io/name: nats}` | Pod labels narrowing the NATS peer (`MISSION_NETPOL_NATS_POD_LABELS`, `k=v,k=v`); maps merge, so `{}` keeps the default; set `null` to clear it (the variable is then omitted and the peer is the whole namespace) |
 | `missionNetworkPolicy.dns.namespace` | string | `kube-system` | Namespace of cluster DNS (`MISSION_NETPOL_DNS_NAMESPACE`) |
 | `missionNetworkPolicy.dns.podLabels` | map | `{k8s-app: kube-dns}` | Pod labels of cluster DNS (`MISSION_NETPOL_DNS_POD_LABELS`) |
 
@@ -131,11 +132,11 @@ Opt-in ingress NetworkPolicies for the operator, the dashboard and knight pods. 
 | `networkPolicy.metricsFrom` | list | monitoring namespace | NetworkPolicyPeers allowed to scrape metrics: the operator's metrics port and knights' `:3000/metrics`. The dashboard also accepts these peers. Empty denies all scraping |
 | `networkPolicy.otlpFrom` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed to send OTLP (4317/4318) to the collector; only rendered when `telemetry.collector.enabled`. Empty allows no one |
 | `networkPolicy.dashboardFrom` | list | `[]` | NetworkPolicyPeers allowed to reach the dashboard's `http` port, in addition to `metricsFrom`. Empty means only `metricsFrom` |
-| `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint when enabled via `extraArgs`; ignored when `metrics.enabled` is true (the policy then allows 8080) |
+| `networkPolicy.operatorMetricsPort` | int | `8443` | Port of the operator's metrics endpoint when enabled via `extraArgs`; ignored when `metrics.enabled` is true (the policy then allows `metrics.port`) |
 
 What each policy allows:
 
-- **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and the metrics port (8080 when `metrics.enabled`, else `operatorMetricsPort`), from `metricsFrom`.
+- **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and the metrics port (`metrics.port` when `metrics.enabled`, else `operatorMetricsPort`), from `metricsFrom`.
 - **OpenTelemetry Collector** (`<release>-roundtable-operator-otel-collector`, only when `telemetry.collector.enabled`): ports 4317 and 4318, from `otlpFrom`. The collector pods use their own `app.kubernetes.io/name: roundtable-otel-collector`, so the operator policy and Deployment selector never match them.
 - **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
 - **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).

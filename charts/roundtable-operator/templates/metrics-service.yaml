@@ -12,7 +12,7 @@ spec:
     {{- include "roundtable-operator.selectorLabels" . | nindent 4 }}
   ports:
     - name: metrics
-      port: 8080
+      port: {{ .Values.metrics.port }}
       targetPort: metrics
 {{- end }}
 {{- if and .Values.metrics.enabled .Values.gateway.enabled }}

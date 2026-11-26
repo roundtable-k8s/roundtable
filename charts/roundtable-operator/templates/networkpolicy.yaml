@@ -30,7 +30,7 @@ spec:
       ports:
         - port: 8081
           protocol: TCP
-        - port: {{ if $.Values.metrics.enabled }}8080{{ else }}{{ $np.operatorMetricsPort }}{{ end }}
+        - port: {{ if $.Values.metrics.enabled }}{{ $.Values.metrics.port }}{{ else }}{{ $np.operatorMetricsPort }}{{ end }}
           protocol: TCP
   {{- end }}
 {{- if .Values.dashboard.enabled }}
