@@ -335,6 +335,10 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 		exit 1; \
 	}
 
+.PHONY: print-envtest-k8s-version
+print-envtest-k8s-version: ## Print the envtest Kubernetes version (from k8s.io/api in go.mod), for CI to pass to setup-envtest.
+	@echo $(ENVTEST_K8S_VERSION)
+
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): | $(LOCALBIN)

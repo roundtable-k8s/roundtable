@@ -44,14 +44,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Tools come from the Makefile (pinned versions, retried downloads).
       - name: Generate DeepCopy
-        run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
-          controller-gen object paths="./api/..."
+        run: make generate
 
       - name: Generate CRD Manifests
-        run: |
-          controller-gen crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+        run: make manifests
 
       - name: Vet
         run: go vet ./...
@@ -61,8 +59,8 @@ jobs:
 
       - name: Setup envtest
         run: |
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-          ENVTEST_ASSETS=$(setup-envtest use --print path)
+          make setup-envtest
+          ENVTEST_ASSETS=$(bin/setup-envtest use "$(make -s print-envtest-k8s-version)" --bin-dir bin -p path)
           echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
 
       # -race: flaky tests only surfaced in the merge queue before (#253).
@@ -122,10 +120,7 @@ jobs:
           cache: true
 
       - name: Generate code
-        run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
-          controller-gen object paths="./api/..."
-          controller-gen crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+        run: make generate manifests
 
       - uses: docker/setup-buildx-action@v3
 
