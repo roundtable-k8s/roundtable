@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -199,10 +200,35 @@ func TestDeadLetterConcurrentRetryPublishesOnce(t *testing.T) {
 	}
 }
 
+func TestDeadLettersTotalBeyondLimit(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	for i := range 137 {
+		id := fmt.Sprintf("t-%03d", i)
+		add(deadletter.Entry{TaskID: id, Knight: "reviewer", Reason: deadletter.ReasonLost}, deadletter.StateOpen)
+	}
+	add(deadletter.Entry{TaskID: "t-done", Knight: "reviewer", Reason: deadletter.ReasonLost}, deadletter.StateResolved)
+
+	resp, body := e.do(t, "GET", "/v1/dead-letters?state=open", testToken, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d %v", resp.StatusCode, body)
+	}
+	if n := len(body["deadLetters"].([]any)); n != 100 {
+		t.Fatalf("items: %d", n)
+	}
+	if body["total"] != float64(137) {
+		t.Fatalf("total: %v", body["total"])
+	}
+	_, body = e.do(t, "GET", "/v1/dead-letters?state=open&limit=5", testToken, nil)
+	if len(body["deadLetters"].([]any)) != 5 || body["total"] != float64(137) {
+		t.Fatalf("limit=5: %v", body["total"])
+	}
+}
+
 func TestDeadLetterEmptyWithoutBucket(t *testing.T) {
 	e := newEnv(t, Options{})
 	resp, body := e.do(t, "GET", "/v1/dead-letters", testToken, nil)
-	if resp.StatusCode != 200 || len(body["deadLetters"].([]any)) != 0 {
+	if resp.StatusCode != 200 || len(body["deadLetters"].([]any)) != 0 || body["total"] != float64(0) {
 		t.Fatalf("%d %v", resp.StatusCode, body)
 	}
 }

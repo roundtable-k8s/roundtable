@@ -62,6 +62,8 @@ type ListTasksOutput struct {
 // ListDeadLettersOutput is the output of the list_dead_letters tool.
 type ListDeadLettersOutput struct {
 	DeadLetters []*DeadLetterView `json:"deadLetters"`
+	// Total is the number of entries matching the filters, before the limit.
+	Total int `json:"total"`
 }
 
 // GetMissionInput is the input of the get_mission tool.
@@ -169,8 +171,8 @@ func NewMCPServer(svc *Service) *mcp.Server {
 			"Retry an open one with retry_task.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DeadLetterFilter) (*mcp.CallToolResult, ListDeadLettersOutput, error) {
-		out, err := svc.ListDeadLetters(ctx, in)
-		return nil, ListDeadLettersOutput{DeadLetters: out}, err
+		out, total, err := svc.ListDeadLetters(ctx, in)
+		return nil, ListDeadLettersOutput{DeadLetters: out, Total: total}, err
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
