@@ -280,10 +280,16 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	}
 	// Compare only what the operator sets: the API server fills in defaults
 	// that must not count as drift.
-	// DeepDerivative ignores fields empty in the desired spec, so the pod
-	// placement fields are compared explicitly: clearing one must propagate.
+	// DeepDerivative ignores fields empty in the desired spec, so the fields
+	// the operator may clear (pod placement, startingDeadlineSeconds, the
+	// firing container's pull policy) are compared explicitly: clearing one
+	// must propagate.
+	wantPod := want.Spec.JobTemplate.Spec.Template.Spec
+	gotPod := cj.Spec.JobTemplate.Spec.Template.Spec
 	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) &&
-		podPlacementEqual(want.Spec.JobTemplate.Spec.Template.Spec, cj.Spec.JobTemplate.Spec.Template.Spec) {
+		podPlacementEqual(wantPod, gotPod) &&
+		startingDeadlineEqual(want.Spec.StartingDeadlineSeconds, cj.Spec.StartingDeadlineSeconds) &&
+		pullPolicyEqual(firePullPolicy(wantPod), firePullPolicy(gotPod), firePullImage(wantPod)) {
 		return cj, nil
 	}
 	cj.Spec = want.Spec
@@ -303,6 +309,61 @@ func podPlacementEqual(a, b corev1.PodSpec) bool {
 		a.PriorityClassName == b.PriorityClassName &&
 		len(a.NodeSelector) == len(b.NodeSelector) &&
 		(len(a.NodeSelector) == 0 || equality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector))
+}
+
+// startingDeadlineEqual compares startingDeadlineSeconds exactly: nil means
+// unset on both sides, so clearing the field on the Trigger reaches the CronJob.
+func startingDeadlineEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// firePullPolicy returns the pull policy of the firing container, or "" when
+// the container is absent.
+func firePullPolicy(pod corev1.PodSpec) corev1.PullPolicy {
+	for _, c := range pod.Containers {
+		if c.Name == "fire" {
+			return c.ImagePullPolicy
+		}
+	}
+	return ""
+}
+
+// firePullImage returns the image of the firing container, or "" when absent.
+func firePullImage(pod corev1.PodSpec) string {
+	for _, c := range pod.Containers {
+		if c.Name == "fire" {
+			return c.Image
+		}
+	}
+	return ""
+}
+
+// pullPolicyEqual compares a desired and an observed pull policy. An unset
+// desired policy matches the value the API server defaults it to for image,
+// so that defaulting does not cause an update on every reconcile.
+func pullPolicyEqual(want, got corev1.PullPolicy, image string) bool {
+	if want != "" {
+		return want == got
+	}
+	return got == "" || got == defaultImagePullPolicy(image)
+}
+
+// defaultImagePullPolicy mirrors the API server's defaulting of an empty
+// container pull policy: an image whose tag is "latest" (or that has no tag)
+// is pulled Always, any other image IfNotPresent.
+func defaultImagePullPolicy(image string) corev1.PullPolicy {
+	ref := image
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	last := ref[strings.LastIndex(ref, "/")+1:]
+	if i := strings.LastIndex(last, ":"); i >= 0 && last[i+1:] != "latest" {
+		return corev1.PullIfNotPresent
+	}
+	return corev1.PullAlways
 }
 
 // deleteScheduleObjects deletes the CronJob and ServiceAccount a Trigger

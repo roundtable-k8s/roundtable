@@ -991,6 +991,36 @@ var _ = Describe("Trigger controller", func() {
 			Expect(getCronJob("trigger-place").ResourceVersion).To(Equal(rv))
 		})
 
+		It("propagates a cleared startingDeadlineSeconds and image pull policy to the existing CronJob", func() {
+			scheduleTrigger("clr", func(s *aiv1alpha1.TriggerSpec) {
+				s.Source.Schedule.StartingDeadlineSeconds = ptr.To[int64](3600)
+			})
+			saved := r.Schedule
+			DeferCleanup(func() { r.Schedule = saved })
+			r.Schedule.ImagePullPolicy = corev1.PullAlways
+			reconcileTrigger("clr")
+			cj := getCronJob("trigger-clr")
+			Expect(cj.Spec.StartingDeadlineSeconds).To(HaveValue(Equal(int64(3600))))
+			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullAlways))
+
+			// Cleared on the Trigger and in the operator config: both reach the CronJob.
+			t := getTrigger("clr")
+			t.Spec.Source.Schedule.StartingDeadlineSeconds = nil
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+			r.Schedule.ImagePullPolicy = ""
+			reconcileTrigger("clr")
+			cj = getCronJob("trigger-clr")
+			Expect(cj.Spec.StartingDeadlineSeconds).To(BeNil())
+			// The API server defaults the empty policy for the image; that
+			// defaulted value is the one the operator must not churn on.
+			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullIfNotPresent))
+
+			// Unchanged, including the server-defaulted policy: no update.
+			rv := cj.ResourceVersion
+			reconcileTrigger("clr")
+			Expect(getCronJob("trigger-clr").ResourceVersion).To(Equal(rv))
+		})
+
 		It("deletes the CronJob and ServiceAccount when the schedule source is removed", func() {
 			scheduleTrigger("gone", nil)
 			reconcileTrigger("gone")
