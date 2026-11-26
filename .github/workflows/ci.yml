@@ -179,8 +179,16 @@ jobs:
       - name: Set chart version from SHA
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          # Don't use pre-release tags — they cause semver ordering headaches with Flux
-          # Chart version stays at base (e.g., 0.3.0), image tag identifies the build
+          # Never reuse a released chart version: main builds publish as a
+          # pre-release of the Chart.yaml version (e.g. 0.25.0-dev.abc1234), and
+          # the helm job fails if that version is already tagged v<version>.
+          BASE=$(sed -n 's/^version: *//p' charts/roundtable-operator/Chart.yaml | tr -d '"')
+          git fetch --tags --quiet
+          if git rev-parse -q --verify "refs/tags/v${BASE}" >/dev/null; then
+            echo "Chart version ${BASE} is already released (tag v${BASE}); bump Chart.yaml version" >&2
+            exit 1
+          fi
+          sed -i "s/^version:.*/version: ${BASE}-dev.${SHORT_SHA}/" charts/roundtable-operator/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${{ github.sha }}\"/" charts/roundtable-operator/Chart.yaml
           cat charts/roundtable-operator/Chart.yaml
 

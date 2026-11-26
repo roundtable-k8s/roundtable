@@ -220,3 +220,11 @@ Triggers are then not Ready).
 {{- printf "http://%s-gateway.%s.svc:%v" (include "roundtable-operator.fullname" .) .Release.Namespace (.Values.gateway.service.port | default 80) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Operator image tag: image.tag when set, else the chart's appVersion, so a
+released chart installs the image built from its own tag.
+*/}}
+{{- define "roundtable-operator.imageTag" -}}
+{{- .Values.image.tag | default .Chart.AppVersion -}}
+{{- end }}

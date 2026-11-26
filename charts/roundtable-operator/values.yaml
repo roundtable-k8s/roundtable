@@ -3,7 +3,8 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/roundtable-k8s/roundtable
-  tag: latest
+  # Empty: defaults to the chart appVersion (the release tag for a released chart).
+  tag: ""
   pullPolicy: Always
 
 serviceAccount:
