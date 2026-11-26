@@ -306,8 +306,7 @@ and `metrics.podMonitor.enabled`.
 **Dashboards** (`dashboards.enabled`, #331): rendered as Grafana sidecar
 ConfigMaps or `GrafanaDashboard` CRs.
 
-- *Round Table / Fleet overview*: knights by phase, warm pool knights, tasks
-  per minute, task error rate, active tasks, NATS connected, KEDA desired vs
+- *Round Table / Fleet overview*: knights by phase, tasks per minute, task error rate, active tasks, NATS connected, KEDA desired vs
   actual replicas.
 - *Round Table / Chains and platform*: chain runs by status, p95 step
   duration, provider retries, missions by phase, dead letters open, ready
@@ -346,6 +345,37 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 When an alert names a chain or knight, use the TraceQL queries above with the
 same `table`, `chain` or `knight` to find the slow or failing span. Details and
 thresholds: [helm-values.md](helm-values.md#grafana-dashboards).
+
+## Operator and gateway metrics
+
+Every `roundtable_*` metric the operator and the invoke gateway register, with
+its type, labels and meaning. `scripts/check-metrics-doc.sh` (run by
+`make helm-check`) fails when this table and the code disagree on a name or its
+labels. The operator's metrics are in `pkg/metrics/metrics.go`; the gateway
+uses the same registry. The trigger and gateway metrics are also described
+below with their label values.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `roundtable_knights` | gauge | `table`, `phase` | Knights per table and phase |
+| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` | Time from a scaled-to-zero knight entering Waking until it is Ready |
+| `roundtable_knight_isolated` | gauge | `table`, `knight`, `reason` | 1 for the knight's current Isolated condition reason (`Isolated` when isolated) |
+| `roundtable_knight_consumer_ready` | gauge | `table`, `knight` | 1 when the knight's durable task consumer has the expected config, 0 otherwise |
+| `roundtable_tasks_dead_lettered_total` | counter | `table`, `knight`, `reason` | Tasks written to the dead-letter stream; `reason` is `lost`, `failed`, `timeout`, `usage_limited` or `refused` |
+| `roundtable_dead_letters_open` | gauge | `table`, `knight` | Dead-letter entries still open (neither resolved by a later success nor retried) |
+| `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` | Chain runs that reached a terminal phase; `status` is `succeeded`, `partially_succeeded` or `failed` |
+| `roundtable_chain_noop_runs_total` | counter | `table`, `chain` | Chain runs that completed without executing any step (all outputs restored from cache) |
+| `roundtable_chain_provider_retries_total` | counter | `table`, `chain`, `step`, `reason` | Chain step retries after a transient model provider failure; `reason` is `overloaded`, `provider_5xx`, `network` or `unknown` |
+| `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` | Duration of finished chain steps; `status` is `succeeded`, `failed` or `skipped` |
+| `roundtable_chain_step_cost_usd_total` | counter | `table`, `chain`, `step`, `knight`, `billing` | Cost in USD of finished chain step attempts |
+| `roundtable_chain_step_tokens_total` | counter | `table`, `chain`, `step`, `knight`, `type` | Tokens of finished chain step attempts; `type` is `input`, `output`, `cacheRead` or `cacheWrite` |
+| `roundtable_missions` | gauge | `table`, `phase` | Missions per table and phase |
+| `roundtable_mission_cost_usd_total` | counter | `table`, `mission`, `billing` | Cost in USD of a mission's finished step attempts |
+| `roundtable_table_cost_usd` | gauge | `table` | Cumulative cost in USD of a table, set from `RoundTable.status.totalCost` |
+| `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source`, `outcome` | Trigger events by source (`schedule`, `nats`, `webhook`, `github`) and outcome (`started`, `deduped`, `skipped`, `error`) |
+| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` | Unix time a Trigger last started a run |
+| `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
+| `roundtable_gateway_request_duration_seconds` | histogram | `route` | Invoke gateway HTTP request duration |
 
 ## Trigger and gateway metrics
 
