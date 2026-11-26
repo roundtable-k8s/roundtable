@@ -158,9 +158,13 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
+	runNowRetry := false
 	if id := trg.Annotations[aiv1alpha1.AnnotationTriggerRunNow]; id != "" {
+		// A request that cannot fire yet must not block the Ready
+		// condition and suspendedBy: keep it, carry on, and requeue.
 		if err := r.runNow(ctx, trg, id); err != nil {
-			return ctrl.Result{}, err
+			logf.FromContext(ctx).Error(err, "run-now request not fired, will retry", "request", id)
+			runNowRetry = true
 		}
 	}
 
@@ -235,8 +239,15 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if gcAfter > 0 && (res.RequeueAfter == 0 || gcAfter < res.RequeueAfter) {
 		res.RequeueAfter = gcAfter
 	}
+	if runNowRetry && (res.RequeueAfter == 0 || runNowRetryDelay < res.RequeueAfter) {
+		res.RequeueAfter = runNowRetryDelay
+	}
 	return res, nil
 }
+
+// runNowRetryDelay is how long a run-now request that could not fire waits
+// before the next attempt.
+const runNowRetryDelay = 10 * time.Second
 
 func (r *TriggerReconciler) init() {
 	r.initOnce.Do(func() {
@@ -817,6 +828,11 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	chainName := aiv1alpha1.RefName(trg.Spec.Target.ChainRef)
 	tmpl := &aiv1alpha1.Chain{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, tmpl); err != nil {
+		if manual != nil && apierrors.IsNotFound(err) {
+			// A run-now request can never fire without its Chain: record
+			// it as skipped and let the request be cleared.
+			return skip(triggerHandled, "target chain %q not found", chainName)
+		}
 		return triggerRetry, fmt.Errorf("get target chain %q: %w", chainName, err)
 	}
 	name := triggerRunName(trg, tmpl.Name, key, item)
