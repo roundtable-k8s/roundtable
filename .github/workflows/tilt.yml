@@ -1,0 +1,73 @@
+name: Tilt
+
+# Runs the Tilt inner loop (Tiltfile, docs/local-development.md) on a fresh kind
+# cluster so it cannot silently break. Only when the dev setup changes.
+on:
+  pull_request:
+    paths:
+      - Tiltfile
+      - Dockerfile.dev
+      - hack/tilt-values.yaml
+      - hack/quickstart-kind.sh
+      - examples/dev/**
+      - charts/roundtable-operator/**
+      - Makefile
+      - go.mod
+      - .github/workflows/tilt.yml
+  push:
+    branches: [main]
+    paths:
+      - Tiltfile
+      - Dockerfile.dev
+      - hack/tilt-values.yaml
+      - hack/quickstart-kind.sh
+      - examples/dev/**
+      - charts/roundtable-operator/**
+      - Makefile
+      - go.mod
+      - .github/workflows/tilt.yml
+
+permissions:
+  contents: read
+
+env:
+  KIND_VERSION: v0.27.0
+  TILT_VERSION: 0.34.2
+  HELM_VERSION: v3.17.0
+
+jobs:
+  tilt-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind and tilt
+        run: |
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+          curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin tilt
+
+      - name: tilt ci on a fresh kind cluster
+        run: make tilt-up TILT_ARGS="ci --timeout 15m"
+
+      - name: Check the result
+        run: |
+          kubectl -n roundtable wait deployment/roundtable-operator --for=condition=Available --timeout=60s
+          kubectl -n roundtable get deployment dev-knight
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A || true
+          kubectl -n roundtable describe deployment roundtable-operator || true
+          kubectl -n roundtable logs deployment/roundtable-operator --tail=200 || true
