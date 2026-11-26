@@ -42,7 +42,7 @@ local_resource(
 # --- NATS with JetStream, from the pinned nats chart (same settings as
 # hack/quickstart-kind.sh).
 load('ext://helm_resource', 'helm_resource', 'helm_repo')
-helm_repo('nats-repo', 'https://nats-io.github.io/k8s/helm/charts/', labels=['infra'])
+helm_repo('nats', 'https://nats-io.github.io/k8s/helm/charts/', resource_name='nats-repo', labels=['infra'])
 helm_resource(
     'nats',
     'nats/nats',
