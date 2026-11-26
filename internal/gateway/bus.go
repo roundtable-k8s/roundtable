@@ -216,17 +216,48 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	if st.CachedInfo().Config.Retention != jetstream.WorkQueuePolicy {
 		return nil
 	}
-	msg, err := st.GetLastMsgForSubject(ctx, subject)
+	msg, err := lastMsgWithRetry(ctx, st, subject)
 	if err != nil {
-		if errors.Is(err, jetstream.ErrMsgNotFound) {
-			return nil
-		}
 		return err
+	}
+	if msg == nil {
+		return nil
 	}
 	if err := st.DeleteMsg(ctx, msg.Sequence); err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
 		return fmt.Errorf("delete %s seq %d: %w", stream, msg.Sequence, err)
 	}
 	return nil
+}
+
+// Discard looks the result up with retries: a result can reach the gateway
+// over core NATS before JetStream has stored it in the results stream, so
+// the first lookup may find nothing even though the message is on its way.
+const (
+	discardLookupAttempts = 10
+	discardLookupWait     = 20 * time.Millisecond
+)
+
+// lastMsgWithRetry returns the last message stored on subject, or nil when
+// none shows up after discardLookupAttempts lookups. Only not-found is
+// retried; any other error, or ctx ending, is returned.
+func lastMsgWithRetry(ctx context.Context, st jetstream.Stream, subject string) (*jetstream.RawStreamMsg, error) {
+	for attempt := 1; ; attempt++ {
+		msg, err := st.GetLastMsgForSubject(ctx, subject)
+		if err == nil {
+			return msg, nil
+		}
+		if !errors.Is(err, jetstream.ErrMsgNotFound) {
+			return nil, err
+		}
+		if attempt >= discardLookupAttempts {
+			return nil, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(discardLookupWait):
+		}
+	}
 }
 
 // PutRecord implements Bus.
