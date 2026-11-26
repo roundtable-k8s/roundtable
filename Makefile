@@ -324,7 +324,7 @@ $(CONTROLLER_GEN): | $(LOCALBIN)
 .PHONY: setup-envtest
 setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.
 	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
-	@"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path || { \
+	@$(call retry,"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path) || { \
 		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION)."; \
 		exit 1; \
 	}
@@ -359,6 +359,20 @@ install-golangci-lint-from-source:
 		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
 	} || true
 
+# retry runs a command up to 3 times, 5 seconds apart, retrying only on a
+# non-zero exit and printing the attempt number. Guards against transient
+# network errors (sum.golang.org stream errors, 503s from download hosts).
+# $1 - command (shell snippet)
+define retry
+n=1; until $(1); do \
+	rc=$$?; \
+	[ $$n -lt 3 ] || { echo "Attempt $$n/3 failed (exit $$rc); giving up" >&2; exit $$rc; }; \
+	echo "Attempt $$n/3 failed (exit $$rc); retrying in 5s..." >&2; \
+	n=$$((n+1)); sleep 5; \
+	echo "Attempt $$n/3..."; \
+done
+endef
+
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
 # $2 - package url which can be installed
@@ -369,7 +383,7 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 rm -f "$(1)" ;\
-GOBIN="$(LOCALBIN)" go install $${package} ;\
+$(call retry,GOBIN="$(LOCALBIN)" go install $${package}) ;\
 mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)" ;\
 } ;\
 ln -sf "$$(realpath "$(1)-$(3)")" "$(1)"

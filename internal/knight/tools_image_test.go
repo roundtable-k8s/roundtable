@@ -18,6 +18,8 @@ package knight
 
 import (
 	"os"
+	"os/exec"
+	"path"
 	"strings"
 	"testing"
 
@@ -217,5 +219,61 @@ func TestToolsBuilderDockerfileUsesStockNixImage(t *testing.T) {
 	}
 	if !strings.Contains(string(dockerfile), "FROM "+stockNixImage+"\n") {
 		t.Errorf("Dockerfile.tools-builder must build FROM %s", stockNixImage)
+	}
+}
+
+// cmd/toolsflake is built inside the flake stage of Dockerfile.tools-builder,
+// which only copies some directories. Every package of this module that
+// toolsflake depends on must live under a copied directory, otherwise the image
+// build fails with "no required module provides package".
+func TestToolsBuilderDockerfileCopiesToolsflakeDeps(t *testing.T) {
+	dockerfile, err := os.ReadFile("../../Dockerfile.tools-builder")
+	if err != nil {
+		t.Fatalf("read Dockerfile.tools-builder: %v", err)
+	}
+	var copied []string
+	inFlake := false
+	for line := range strings.SplitSeq(string(dockerfile), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		switch strings.ToUpper(f[0]) {
+		case "FROM":
+			inFlake = len(f) >= 4 && strings.EqualFold(f[2], "AS") && f[3] == "flake"
+		case "COPY":
+			if !inFlake {
+				continue
+			}
+			for _, a := range f[1 : len(f)-1] {
+				if !strings.HasPrefix(a, "-") {
+					copied = append(copied, strings.Trim(path.Clean(a), "/"))
+				}
+			}
+		}
+	}
+
+	const module = "github.com/roundtable-k8s/roundtable"
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/toolsflake")
+	cmd.Dir = "../.."
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list -deps ./cmd/toolsflake: %v", err)
+	}
+	for imp := range strings.FieldsSeq(string(out)) {
+		if imp != module && !strings.HasPrefix(imp, module+"/") {
+			continue
+		}
+		dir := strings.TrimPrefix(strings.TrimPrefix(imp, module), "/")
+		ok := false
+		for _, c := range copied {
+			if dir == c || strings.HasPrefix(dir, c+"/") {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			t.Errorf("cmd/toolsflake depends on %s but the flake stage of Dockerfile.tools-builder does not COPY its directory (copies: %v)", imp, copied)
+		}
 	}
 }

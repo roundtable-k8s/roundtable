@@ -17,6 +17,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY api/ api/
 COPY internal/ internal/
+COPY pkg/ pkg/
 COPY cmd/toolsflake/ cmd/toolsflake/
 RUN go run ./cmd/toolsflake > /flake.nix
 
