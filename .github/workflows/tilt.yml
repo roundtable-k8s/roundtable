@@ -58,7 +58,9 @@ jobs:
             | sudo tar -xz -C /usr/local/bin tilt
 
       - name: tilt ci on a fresh kind cluster
-        run: make tilt-up TILT_ARGS="ci --timeout 15m"
+        run: |
+          set -o pipefail
+          make tilt-up TILT_ARGS="ci --timeout 15m" 2>&1 | tee tilt-ci.log
 
       - name: Check the result
         run: |
@@ -68,6 +70,8 @@ jobs:
       - name: Diagnostics
         if: failure()
         run: |
+          # Surface the failing output as annotations (readable without the raw log).
+          [ -f tilt-ci.log ] && echo "::error title=tilt ci::$(tail -n 40 tilt-ci.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')"
           kubectl get pods -A || true
           kubectl -n roundtable describe deployment roundtable-operator || true
           kubectl -n roundtable logs deployment/roundtable-operator --tail=200 || true
