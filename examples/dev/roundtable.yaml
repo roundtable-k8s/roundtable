@@ -1,0 +1,19 @@
+# Dev fleet for the Tilt inner loop (docs/local-development.md): one RoundTable
+# on the NATS that the Tiltfile installs into the roundtable namespace.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: dev
+  namespace: roundtable
+spec:
+  description: "Dev fleet on a local kind cluster"
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    subjectPrefix: dev
+    tasksStream: dev_tasks
+    resultsStream: dev_results
+    createStreams: true
+  defaults:
+    model: claude-sonnet-4-20250514
+    concurrency: 1
+    taskTimeoutSeconds: 300

@@ -1,0 +1,33 @@
+# Chart values for the Tilt inner loop (Tiltfile, docs/local-development.md).
+# Local kind only: it turns off the isolation defaults and leader election.
+image:
+  # Tilt replaces this reference with the image it just built.
+  repository: roundtable-operator-dev
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# One replica; Tilt restarts the process on a code change, so no election.
+leaderElect: false
+leaderElection:
+  enabled: false
+
+# kind has no gVisor, Cilium, KEDA or agent-sandbox.
+isolation:
+  runtimeClassName: ""
+  egress:
+    mode: "off"
+keda: "false"
+sandboxBackend: "false"
+toolsImage:
+  repository: ""
+
+missionDefaultNatsURL: nats://nats.roundtable.svc:4222
+
+dashboard:
+  enabled: true
+  vault:
+    enabled: false
+  env:
+    NATS_URL: "nats://nats.roundtable.svc:4222"
+gateway:
+  enabled: false
