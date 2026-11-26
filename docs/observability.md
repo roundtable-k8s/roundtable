@@ -362,7 +362,7 @@ below with their label values.
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `roundtable_knights` | gauge | `table`, `phase` | Knights per table and phase; knights no RoundTable counts (none selects them, and none owns them as planner) are counted under `table="none"` |
-| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` | Time from a scaled-to-zero knight entering Waking until it is Ready |
+| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` | Time from a scaled-to-zero knight entering Waking (tasks queued) until it is Ready. Buckets 1s to ~8.5m; condition timestamps have 1s resolution, so values are whole seconds |
 | `roundtable_knight_isolated` | gauge | `table`, `knight`, `reason` | 1 for the knight's current Isolated condition reason (`Isolated` when isolated) |
 | `roundtable_knight_consumer_ready` | gauge | `table`, `knight` | 1 when the knight's durable task consumer has the expected config, 0 otherwise |
 | `roundtable_tasks_dead_lettered_total` | counter | `table`, `knight`, `reason` | Tasks written to the dead-letter stream; `reason` is `lost`, `failed`, `timeout`, `usage_limited` or `refused` |
