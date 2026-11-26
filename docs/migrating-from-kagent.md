@@ -72,8 +72,50 @@ spec:
         {{ .Input }}
 ```
 
-Leave out `schedule`: kagent agents are called, not scheduled, and so are
-these Chains.
+Leave out `schedule` for agents that another system calls: those are called,
+not scheduled, and so are these Chains. An agent that kagent ran from a CronJob
+becomes a scheduled job instead, see [Scheduled jobs](#scheduled-jobs).
+
+## Scheduled jobs
+
+A job that kagent ran on a cadence (a CronJob that sent the agent a message)
+does not need a Chain or a caller. The standard migrated job
+([decision 25](decisions.md)) is a **skill with scripts** in the arsenal plus a
+**schedule that sends one task** to a persona knight naming the skill and
+script. The skill's script does the real work and the validation; the knight
+runs it. Round Table runs the schedule as an operator-managed CronJob, so the
+old wrapper CronJob and its access rules go away.
+
+Layout of the skill: `<group>/<skill>/SKILL.md` and
+`<group>/<skill>/scripts/`, mounted in the knight at
+`/skills/<group>/<skill>/scripts/`. The Trigger:
+
+```yaml
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: nightly-file-report
+  namespace: roundtable
+spec:
+  source:
+    schedule:
+      cron: "30 3 * * *"
+      timeZone: Europe/London
+      startingDeadlineSeconds: 3600
+  target:
+    knight:
+      name: tristan
+      task: |
+        Use the ops/nightly-report skill and run its run-job script
+        (/skills/ops/nightly-report/scripts/run-job) for {{ .Event.Time.Format "2006-01-02" }}.
+        Reply with the script's last output line.
+      timeoutSeconds: 1800
+  concurrency:
+    policy: Forbid
+```
+
+What happens on missed, overlapping, lost and deleted runs is in
+[Scheduled work](scheduled-work.md#when-a-run-is-missed-overlapping-lost-or-deleted).
 
 ## The caller
 

@@ -514,9 +514,9 @@ type TriggerWebhookAuth struct {
 	HMACSecretRef *corev1.SecretKeySelector `json:"hmacSecretRef,omitempty"`
 }
 
-// TriggerScheduleSource fires on a cron schedule. Catch-up follows
-// Chain.spec.schedule: a fire missed while the operator was down runs once,
-// late, within startingDeadlineSeconds.
+// TriggerScheduleSource fires on a cron schedule, run by an operator-owned
+// CronJob. Catch-up of missed times is the CronJob controller's, bounded by
+// startingDeadlineSeconds.
 type TriggerScheduleSource struct {
 	// cron is a standard five-field cron expression, e.g. "0 7 * * 1-5".
 	// +kubebuilder:validation:MinLength=1

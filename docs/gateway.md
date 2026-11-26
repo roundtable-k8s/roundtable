@@ -756,6 +756,9 @@ jq -r '.phase, .output' /tmp/run.json
 
 ## Schedules
 
+See [Scheduled work](scheduled-work.md) for the whole picture (targets, missed
+and overlapping runs, YAML first).
+
 A schedule is a [Trigger](triggers.md) with a `spec.source.schedule`. The
 gateway reads schedules, exports them as YAML, creates, replaces and deletes
 them, and suspends, resumes and runs them; Triggers with any other source

@@ -536,6 +536,9 @@ A poll that leaves the rate limit at 0 also waits for its reset.
 
 ## Schedule source
 
+For a task, Chain or Mission on a cadence end to end, including missed and
+overlapping runs, see [Scheduled work](scheduled-work.md).
+
 [`examples/trigger-schedule.yaml`](../examples/trigger-schedule.yaml) runs a
 Chain every weekday at 07:00 New York time with input computed from the
 schedule time. For a fixed input, `Chain.spec.schedule` stays the short form.
