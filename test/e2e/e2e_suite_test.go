@@ -55,8 +55,9 @@ const (
 // runs the scenarios of that tier (TIER=all runs every tier). A later tier
 // adds its own label and files without touching core.
 const (
-	tierCore  = "core"
-	tierTrace = "trace"
+	tierCore    = "core"
+	tierTrace   = "trace"
+	tierTrigger = "trigger"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -102,7 +103,7 @@ var _ = BeforeSuite(func() {
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the stub LLM image into Kind")
 	}
 
-	if tierSelected(tierTrace) {
+	if tierSelected(tierTrace) || tierSelected(tierTrigger) {
 		buildStubKnightImage()
 	}
 
