@@ -43,9 +43,9 @@ func (r *KnightReconciler) setWorkspaceReady(knight *aiv1alpha1.Knight, status m
 // can't be created: the snapshot API isn't served, or the snapshot is missing
 // or not readyToUse. restoreSize is the snapshot's status.restoreSize, if set.
 func (r *KnightReconciler) checkWorkspaceSnapshot(ctx context.Context, knight *aiv1alpha1.Knight, name string) (restoreSize *resource.Quantity, wait bool, err error) {
-	if !r.SnapshotsEnabled {
+	if !r.snapshotsAvailable(ctx) {
 		r.setWorkspaceReady(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotAPIUnavailable,
-			"the snapshot.storage.k8s.io/v1 VolumeSnapshot API is not served; install the external snapshotter and restart the operator")
+			snapshotAPIMissingMessage)
 		return nil, true, nil
 	}
 	vs := &unstructured.Unstructured{}

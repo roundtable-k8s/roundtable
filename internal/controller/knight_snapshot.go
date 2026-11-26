@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -45,7 +46,54 @@ const (
 	snapshotRequestLabel = "roundtable.io/snapshot-request"
 	// defaultSnapshotKeep is the retention when spec.workspace.snapshots.keep is unset.
 	defaultSnapshotKeep = 3
+	// snapshotProbeInterval is the minimum gap between rechecks of the
+	// VolumeSnapshot API when it was missing at startup.
+	snapshotProbeInterval = time.Minute
+	// snapshotAPIMissingMessage is the condition message while the API is
+	// not served.
+	snapshotAPIMissingMessage = "the snapshot.storage.k8s.io/v1 VolumeSnapshot API is not served; install the external snapshotter, the operator will look again in a minute"
 )
+
+// snapshotsAvailable reports whether the VolumeSnapshot API can be used. It is
+// true when it was served at startup; otherwise the API is probed again, at
+// most once per snapshotProbeInterval, and a positive answer is kept. Callers
+// invoke it only when a snapshot or restore is requested.
+func (r *KnightReconciler) snapshotsAvailable(ctx context.Context) bool {
+	if r.SnapshotsEnabled {
+		return true
+	}
+	if r.SnapshotAPIProbe == nil {
+		return false
+	}
+	r.snapProbeMu.Lock()
+	defer r.snapProbeMu.Unlock()
+	if r.snapLate {
+		return true
+	}
+	now := r.now()
+	if !r.snapLastProbe.IsZero() && now.Sub(r.snapLastProbe) < snapshotProbeInterval {
+		return false
+	}
+	r.snapLastProbe = now
+	served, err := r.SnapshotAPIProbe()
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to recheck the VolumeSnapshot API")
+		return false
+	}
+	if served {
+		logf.FromContext(ctx).Info("VolumeSnapshot API is now served")
+		r.snapLate = true
+	}
+	return served
+}
+
+// snapshotsLate reports whether the API was only found after startup, in
+// which case VolumeSnapshots are not watched and readiness must be polled.
+func (r *KnightReconciler) snapshotsLate() bool {
+	r.snapProbeMu.Lock()
+	defer r.snapProbeMu.Unlock()
+	return !r.SnapshotsEnabled && r.snapLate
+}
 
 func (r *KnightReconciler) setSnapshotCondition(knight *aiv1alpha1.Knight, status metav1.ConditionStatus, reason, msg string) {
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
@@ -66,17 +114,22 @@ func workspaceClaimName(knight *aiv1alpha1.Knight) string {
 // ai.roundtable.io/snapshot annotation holds a value not handled yet, mirrors
 // the knight's snapshots into status.workspace and prunes the oldest beyond
 // spec.workspace.snapshots.keep once the newest is ready.
-func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1alpha1.Knight) error {
+//
+// It returns how long to wait before looking again (0 for never). That is
+// snapshotProbeInterval while the API is missing and a snapshot was requested,
+// and RequeueSlow while a snapshot is not ready and the API was found after
+// startup (no VolumeSnapshot watch is running then).
+func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
 	value, requested := knight.Annotations[aiv1alpha1.AnnotationKnightSnapshot]
 
-	if !r.SnapshotsEnabled {
+	if !r.SnapshotsEnabled && !r.snapshotsLate() && !(requested && r.snapshotsAvailable(ctx)) {
 		if requested {
 			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotAPIUnavailable,
-				"the snapshot.storage.k8s.io/v1 VolumeSnapshot API is not served; install the external snapshotter and restart the operator")
-		} else {
-			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+				snapshotAPIMissingMessage)
+			return snapshotProbeInterval, nil
 		}
-		return nil
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+		return 0, nil
 	}
 	if knightpkg.EphemeralWorkspace(knight) {
 		if requested {
@@ -85,7 +138,7 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		} else {
 			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
 		}
-		return nil
+		return 0, nil
 	}
 
 	ws := knight.Status.Workspace
@@ -94,7 +147,7 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	}
 	if !requested && len(ws.Snapshots) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
-		return nil
+		return 0, nil
 	}
 
 	fail := func(err error) error {
@@ -104,17 +157,17 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 
 	snaps, err := r.listSnapshots(ctx, knight)
 	if err != nil {
-		return fail(err)
+		return 0, fail(err)
 	}
 	if requested && value != ws.LastSnapshotRequest {
 		if !snapshotServed(snaps, value) {
 			if err := r.createSnapshot(ctx, knight, value); err != nil {
-				return fail(err)
+				return 0, fail(err)
 			}
 			// The new snapshot may not be visible in the cache yet; the
 			// request label keeps the next reconcile from duplicating it.
 			if snaps, err = r.listSnapshots(ctx, knight); err != nil {
-				return fail(err)
+				return 0, fail(err)
 			}
 		}
 		ws.LastSnapshotRequest = value
@@ -126,7 +179,7 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	if n := len(snaps); n > int(keep) && snapshotReady(snaps[n-1]) {
 		for _, old := range snaps[:n-int(keep)] {
 			if err := r.Delete(ctx, old); err != nil && !apierrors.IsNotFound(err) {
-				return fail(fmt.Errorf("deleting VolumeSnapshot %s: %w", old.GetName(), err))
+				return 0, fail(fmt.Errorf("deleting VolumeSnapshot %s: %w", old.GetName(), err))
 			}
 		}
 		snaps = snaps[n-int(keep):]
@@ -142,7 +195,14 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	knight.Status.Workspace = ws
 	r.setSnapshotCondition(knight, metav1.ConditionTrue, aiv1alpha1.ReasonSnapshotsReady,
 		fmt.Sprintf("%d workspace snapshot(s)", len(ws.Snapshots)))
-	return nil
+	if r.snapshotsLate() {
+		for _, st := range ws.Snapshots {
+			if !st.ReadyToUse {
+				return RequeueSlow, nil
+			}
+		}
+	}
+	return 0, nil
 }
 
 func snapshotReady(s *unstructured.Unstructured) bool {
