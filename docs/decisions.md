@@ -1,6 +1,6 @@
 # Decision register
 
-The product decisions taken with the owner during two whiteboard sessions (2026-11-24 and 2026-11-25), numbered 1 to 31. The [principles](principles.md) say what Round Table believes; this register records the individual decisions behind them and where they led.
+The product decisions taken with the owner during two whiteboard sessions (2026-11-24 and 2026-11-25), numbered 1 to 31, and the decisions the owner has given since, numbered from 32. The [principles](principles.md) say what Round Table believes; this register records the individual decisions behind them and where they led.
 
 This is a record, not a design document. Where the owner is quoted, the words are kept as spoken.
 
@@ -8,7 +8,7 @@ This is a record, not a design document. Where the owner is quoted, the words ar
 
 - **Cite the number**: "decision 8", "decision 30". Issues and pull requests already do.
 - A later decision can replace an earlier one. When it does, both entries say so: the old one is marked **Superseded by N** and the new one says **Supersedes M**. Nothing is deleted.
-- **Status** marks each decision: **Standing** (in force, work may be open), **Done** (the work it led to is merged), **Parked**, or **Superseded**. Status was checked against the linked issues on 2026-11-25. No decision is superseded yet; decisions 25 and 30 refine or extend earlier ones.
+- **Status** marks each decision: **Standing** (in force, work may be open), **Done** (the work it led to is merged), **Parked**, or **Superseded**. Status was checked against the linked issues on 2026-11-25. No decision is superseded yet; decisions 25, 30 and 32 refine or extend earlier ones.
 - The register does not change decisions. To change one, add a new decision as described below.
 
 ## How a decision is added
@@ -65,7 +65,7 @@ Missions are the showcase but the least proven part, so one real end-to-end miss
 ## B. Interaction
 
 ### 6. The primary interface is the HTTP/MCP API, plus dashboard chat built on it
-*2026-11-24. Status: Standing. Led to #176 (phase 1, closed), ui#162. See [gateway](gateway.md).*
+*2026-11-24. Status: Standing. Led to #176 (phase 1, closed), ui#162. See [gateway](gateway.md). Refined by decision 32.*
 
 The invoke gateway is the primary interface, packaged with the operator, and dashboard chat is built on it.
 
@@ -280,11 +280,11 @@ merlin does what the external session's 30-minute check does. Purpose: less cont
 ## After the whiteboards
 
 ### 32. M6 stays parked: the API is not exposed publicly for a long while
-*2026-11-26, given by the owner as an instruction to the orchestrator. Status: Parked. Refines decision 6. Affects #234, #235, #236, #237, #238.*
+*2026-11-26, given by the owner on #238. Status: Parked. Refines decision 6. Affects #234, #235, #236, #237, #238.*
 
-Nothing that publishes the gateway outside the cluster is built now. The owner's instruction, as it reached the orchestrator: "M6 stays parked; the owner does not want the API exposed publicly for a long while."
+Nothing that publishes the gateway outside the cluster is built now. The owner's words, from [his comment on #238](https://github.com/roundtable-k8s/roundtable/issues/238#issuecomment-7198762116): "M6 stays parked. The owner does not want the API exposed publicly for a long while."
 
 - #235 (connector profile), #236 (publishing the connector), #237 (origin provenance) and the epic #238 carry the `parked` label and stay in the M6 milestone. They come back only when the owner asks for public exposure.
-- #234 (NATS users and permissions for every component) moved to M7, because it is useful without public exposure: it is judged as least-privilege work inside the cluster (decision 8), not as a step toward M6.
-- NATS credentials generated inside the cluster by the chart or the operator are not an owner secret. Credentials the owner must create or store are.
+- Before anyone builds #235, check whether Envoy AI Gateway or Cloudflare Access already provides the per-tool authorisation and rate limits (decision 30).
+- #234 (NATS users and permissions for every component) moved to M7, next to #170, because it is useful without public exposure.
 - Decision 6 stands for everything inside the cluster: the gateway is still the primary interface. Only its last bullet, exposing the API safely outside the cluster, waits.
