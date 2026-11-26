@@ -125,6 +125,14 @@ echo "Published $TOOLS_IMAGE_PUSH_REF"
 // tools image repository configured there is nowhere to build to: the knight
 // runs without its Nix tools and gets a warning event saying so.
 func (r *KnightReconciler) reconcileNixTools(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
+	if knight.Spec.Tools != nil {
+		for _, f := range knight.Spec.Tools.Flakes {
+			if err := aiv1alpha1.ValidateFlakeRefDir(f.Ref); err != nil {
+				r.Recorder.Event(knight, corev1.EventTypeWarning, "InvalidFlakeRef", err.Error())
+				return 0, fmt.Errorf("spec.tools.flakes: %w", err)
+			}
+		}
+	}
 	if !knightpkg.ToolsImageEnabled() {
 		if knightpkg.HasToolsImage(knight) {
 			r.Recorder.Event(knight, corev1.EventTypeWarning, "ToolsImageNotConfigured",

@@ -497,6 +497,11 @@ var _ = Describe("Knight tools.flakes validation (#248)", func() {
 		Entry("a short sha", "flk-short", withFlake("github:o/r/0123abc", "p")),
 		Entry("a floating git ref", "flk-gitref", withFlake("git+https://example.com/r.git?ref=main", "p")),
 		Entry("quote injection", "flk-quote", withFlake(`github:o/r/`+rev+`"; evil`, "p")),
+		Entry("a dir with parent segment", "flk-dotdot", withFlake("github:o/r/"+rev+"?dir=../x", "p")),
+		Entry("a dir that climbs out mid-path", "flk-dotdot2", withFlake("github:o/r/"+rev+"?dir=a/../../x", "p")),
+		Entry("an absolute dir", "flk-absdir", withFlake("github:o/r/"+rev+"?dir=/etc", "p")),
+		Entry("a url-encoded parent dir", "flk-encdir", withFlake("github:o/r/"+rev+"?dir=%2e%2e/x", "p")),
+		Entry("a parent dir in a git+https ref", "flk-gitdotdot", withFlake("git+https://example.com/r.git?dir=a/..&rev="+rev, "p")),
 		Entry("no packages", "flk-nopkgs", withFlake("github:o/r/"+rev)),
 		Entry("an unsafe package name", "flk-badpkg", withFlake("github:o/r/"+rev, `x"; evil`)),
 	)
@@ -509,6 +514,7 @@ var _ = Describe("Knight tools.flakes validation (#248)", func() {
 		},
 		Entry("a pinned github ref", "flk-ok-gh", "github:roundtable-k8s/roundtable/"+rev),
 		Entry("a pinned github ref with dir", "flk-ok-dir", "github:o/r/"+rev+"?dir=sub/pkg"),
+		Entry("a dir with dots in names", "flk-ok-dots", "github:o/r/"+rev+"?dir=a..b/.hidden"),
 		Entry("a pinned git+https ref", "flk-ok-git", "git+https://example.com/r.git?rev="+rev),
 		Entry("a pinned git+https ref with branch", "flk-ok-gitref", "git+https://example.com/r.git?ref=main&rev="+rev),
 	)

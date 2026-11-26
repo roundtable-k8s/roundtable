@@ -851,9 +851,10 @@ type KnightToolsFlake struct {
 	// ref is a flake reference pinned to a commit, e.g.
 	// github:roundtable-k8s/roundtable/<40-hex-rev> or
 	// git+https://host/repo.git?rev=<40-hex-rev>. Branch names and tags are
-	// rejected.
+	// rejected. A dir parameter must be relative and must not contain ".."
+	// segments.
 	// +kubebuilder:validation:MaxLength=512
-	// +kubebuilder:validation:Pattern=`^((github|gitlab|sourcehut):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}(\?dir=[A-Za-z0-9_./-]+)?|git\+(https|ssh)://[A-Za-z0-9_.@:/-]+\?([A-Za-z0-9_.=/-]+&)*rev=[0-9a-f]{40}(&[A-Za-z0-9_.=/-]+)*)$`
+	// +kubebuilder:validation:Pattern=`^((github|gitlab|sourcehut):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}(\?dir=(\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*)(/(\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*))*/?)?|git\+(https|ssh)://[A-Za-z0-9_.@:/-]+\?((\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*)([/=](\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*))*/?&)*rev=[0-9a-f]{40}(&(\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*)([/=](\.|\.{0,2}[A-Za-z0-9_-][A-Za-z0-9_.-]*|\.{3,}[A-Za-z0-9_.-]*))*/?)*)$`
 	Ref string `json:"ref"`
 
 	// packages are output names under the flake's packages.<system> (x86_64-linux).
