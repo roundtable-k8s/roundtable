@@ -21,7 +21,7 @@ Alertmanager --POST--> gateway /v1/hooks/roundtable/homelab-alerts
 
 ## Before you start
 
-Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, model credentials (no aliases, no NATS URL of its own); plus:
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, `spec.nats.url` on the `homelab-triage` Knight, model credentials (no aliases); plus:
 
 - The operator and gateway are installed with `gateway.hooks.enabled`
   (the default), and a RoundTable named `fleet-a` exists with

@@ -27,7 +27,7 @@ Knight digest (read-only, isolated)
 
 ## Before you start
 
-Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, the NATS URL and model credentials (no aliases).
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, `spec.nats.url` on the `digest` Knight and model credentials (no aliases).
 
 ## Install
 

@@ -149,7 +149,7 @@ Outside the cluster; none of it is automated here.
 
 ## Before you start
 
-Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a table (here `roundtable-dev`, see above), the NATS URL, model credentials and the `deep`/`fast` aliases defined in `roundtable.yaml`.
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a table (here `roundtable-dev`, see above), the NATS URL in `roundtable.yaml` and `spec.nats.url` on `rt-lead` and `rt-coder`, model credentials and the `deep`/`fast` aliases defined in `roundtable.yaml`.
 
 ## Install
 

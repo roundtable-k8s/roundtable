@@ -15,8 +15,11 @@ Every recipe needs these; each recipe README says in one line which apply.
   in the recipe: the Knights' `ai.roundtable.io/round-table` label, `roundTableRef`
   on Triggers and Chains, `spec.nats.subjectPrefix` and the `fleet-a.tasks.`
   subjects. Change them together.
-- **The NATS URL.** The recipes use the author's `nats://nats.database.svc:4222`;
-  replace it with yours (see
+- **The NATS URL, on the RoundTable and on every Knight.** A Knight does not
+  take the RoundTable's URL; one without `spec.nats.url` connects to the CRD
+  default, `nats://nats.database.svc:4222` (the author's server). No recipe
+  Knight sets a URL, so add `spec.nats.url` to each Knight, and replace the
+  URL in any RoundTable the recipe ships (see
   [Adapting the examples](../README.md#adapting-the-examples) for a `sed` line).
 - **Model credentials.** Create the Secret your Knights read (for example
   `llm-api-keys` with `ANTHROPIC_API_KEY`); no credentials are in a recipe.
