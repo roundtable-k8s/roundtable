@@ -342,7 +342,7 @@ func (r *TriggerReconciler) observeFireJobs(ctx context.Context, trg *aiv1alpha1
 	// Job in the namespace from the API server. IsControlledBy stays the
 	// authority on ownership below.
 	jobs := &batchv1.JobList{}
-	if err := r.Client.List(ctx, jobs, client.InNamespace(trg.Namespace),
+	if err := r.List(ctx, jobs, client.InNamespace(trg.Namespace),
 		client.MatchingLabels{aiv1alpha1.LabelTrigger: trg.Name}); err != nil {
 		return err
 	}
