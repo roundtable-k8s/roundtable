@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -36,6 +37,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
@@ -794,6 +796,50 @@ var _ = Describe("Trigger controller", func() {
 			Expect(k8sClient.Status().Update(ctx, cj)).To(Succeed())
 			reconcileTrigger("health")
 			Expect(getTrigger("health").Status.LastSuccessfulScheduledAt.Time).To(BeTemporally("==", ok.Time))
+		})
+
+		It("reads only this Trigger's labelled firing Jobs for ScheduleHealthy", func() {
+			scheduleTrigger("scoped", nil)
+			reconcileTrigger("scoped")
+			cj := getCronJob("trigger-scoped")
+			newJob := func(name string, lbls map[string]string, owned bool) {
+				j := &batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: lbls},
+					Spec:       *cj.Spec.JobTemplate.Spec.DeepCopy(),
+				}
+				// The API server defaults a Job without labels from its pod
+				// template's labels, so drop those too for an unlabelled Job.
+				if lbls == nil {
+					j.Spec.Template.Labels = nil
+				}
+				if owned {
+					j.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(cj, batchv1.SchemeGroupVersion.WithKind("CronJob"))}
+				}
+				Expect(k8sClient.Create(ctx, j)).To(Succeed())
+				now := metav1.Now()
+				j.Status.StartTime = &now
+				j.Status.Conditions = []batchv1.JobCondition{
+					{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded", LastTransitionTime: now},
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded", LastTransitionTime: now},
+				}
+				Expect(k8sClient.Status().Update(ctx, j)).To(Succeed())
+			}
+			// A failed Job of another Trigger and a failed unlabelled Job (a
+			// tools-builder style Job) in the same namespace must not count.
+			newJob("scoped-other", map[string]string{aiv1alpha1.LabelTrigger: "someone-else"}, false)
+			newJob("scoped-unlabelled", nil, false)
+			// A failed Job owned by this CronJob but missing the Trigger label
+			// is not read either: the label selector is the scope.
+			newJob("scoped-owned-unlabelled", nil, true)
+			rec := &jobListRecorder{Client: r.Client}
+			r.Client = rec
+			reconcileTrigger("scoped")
+			r.Client = rec.Client
+			Expect(rec.selectors).NotTo(BeEmpty())
+			for _, s := range rec.selectors {
+				Expect(s.String()).To(Equal(aiv1alpha1.LabelTrigger + "=scoped"))
+			}
+			Expect(meta.IsStatusConditionTrue(getTrigger("scoped").Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)).To(BeTrue())
 		})
 
 		It("emits FiringSkipped for a schedule firing skipped by Forbid", func() {
@@ -1620,3 +1666,23 @@ var _ = Describe("Trigger controller", func() {
 		})
 	})
 })
+
+// jobListRecorder wraps a client and records the label selector of every
+// JobList it is asked for.
+type jobListRecorder struct {
+	client.Client
+	selectors []labels.Selector
+}
+
+func (j *jobListRecorder) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*batchv1.JobList); ok {
+		lo := &client.ListOptions{}
+		lo.ApplyOptions(opts)
+		sel := lo.LabelSelector
+		if sel == nil {
+			sel = labels.Everything()
+		}
+		j.selectors = append(j.selectors, sel)
+	}
+	return j.Client.List(ctx, list, opts...)
+}
