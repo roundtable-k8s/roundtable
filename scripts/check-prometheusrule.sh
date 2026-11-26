@@ -44,6 +44,17 @@ grep -q 'for: 15m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$on")" || fail "
 kn="$(render --set alerts.enabled=true "${api[@]}" --set alerts.knightNotReadyMinutes=30)"
 grep -q 'for: 30m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$kn")" || fail "knightNotReadyMinutes not applied"
 grep -q 'kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}' <<<"$on" || fail "tools image build alert expr missing"
+for a in RoundtableScheduleMissed RoundtableScheduleJobFailed RoundtableTriggerFiringErrors; do
+  grep -q "alert: $a\$" <<<"$on" || fail "alert $a missing"
+done
+grep -q 'roundtable.triggers' <<<"$on" || fail "roundtable.triggers group missing"
+grep -q 'kube_cronjob_spec_suspend == 0' <<<"$on" || fail "RoundtableScheduleMissed does not skip suspended CronJobs"
+grep -q 'cronjob=~"trigger-.+"' <<<"$on" || fail "schedule alerts not limited to trigger- CronJobs"
+grep -q '< time() - 600$' <<<"$on" || fail "default scheduleMissedSeconds not 600"
+sched="$(render --set alerts.enabled=true "${api[@]}" --set alerts.scheduleMissedSeconds=1200)"
+grep -q '< time() - 1200$' <<<"$sched" || fail "scheduleMissedSeconds not applied"
+! grep -E 'sum by \(' <<<"$on" | grep -E 'roundtable_trigger_firings' | grep -qv 'table' \
+  || fail "trigger firings aggregation drops table"
 grep -q '> 0.5$' <<<"$(render --set alerts.enabled=true "${api[@]}")" || fail "default chainFailureRatio not 0.5"
 tuned="$(render --set alerts.enabled=true "${api[@]}" --set alerts.chainFailureRatio=0.2 --set alerts.deadLettersOpenMinutes=30)"
 grep -q '> 0.2$' <<<"$tuned" || fail "chainFailureRatio not applied"

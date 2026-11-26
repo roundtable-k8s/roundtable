@@ -548,6 +548,7 @@ scaling rules are scoped to the release namespace.
 | `alerts.chainFailureRatio` | number | `0.5` | `RoundtableChainRunsFailing` threshold: failed share (0-1) of `roundtable_chain_runs_total` over 1h |
 | `alerts.deadLettersOpenMinutes` | number | `15` | `RoundtableDeadLettersOpen`: minutes `roundtable_dead_letters_open` stays above 0 |
 | `alerts.knightNotReadyMinutes` | number | `15` | `KnightNotReady`: minutes a knight may stay `Pending`, `Provisioning` or `Degraded` |
+| `alerts.scheduleMissedSeconds` | number | `600` | `RoundtableScheduleMissed` threshold: seconds a scheduled Trigger's CronJob (`trigger-*`, not suspended) may stay past its next scheduled time |
 | `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
 | `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
 

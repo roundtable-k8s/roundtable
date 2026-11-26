@@ -338,6 +338,9 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `KnightConsumerNotReady` | a knight's task consumer is missing or misconfigured for 10m |
 | `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
 | `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
+| `RoundtableScheduleMissed` | a scheduled Trigger's CronJob (`trigger-*`, not suspended) is more than `alerts.scheduleMissedSeconds` past its next scheduled time (kube-state-metrics) |
+| `RoundtableScheduleJobFailed` | a scheduled Trigger's run Job failed (kube-state-metrics) |
+| `RoundtableTriggerFiringErrors` | a Trigger's firings reported `outcome="error"` in the last hour (10m) |
 | `RoundtablePodRestarting`, `RoundtablePodOOMKilled`, `RoundtablePodEvicted` | pod health |
 | `RoundtablePVCAlmostFull` | a PVC is nearly full |
 | `RoundtableKedaScalerErrors`, `RoundtableHPAScalingInactive` | scaling problems (`alerts.scaling.enabled`) |
@@ -401,8 +404,12 @@ route or fail authentication count under `unmatched`. The gateway serves
 `/metrics` without authentication on its own port (`--metrics-listen`, set to
 `:8081` when `metrics.enabled`), separate from the API port.
 
-Examples: `time() - roundtable_trigger_last_fired_timestamp_seconds > 86400`
-finds a schedule that stopped firing; `sum by (route) (rate(roundtable_gateway_requests_total{code=~"5.."}[5m]))`
+The shipped rules (`alerts.enabled`) cover schedules: `RoundtableScheduleMissed`
+and `RoundtableScheduleJobFailed` read kube-state-metrics for the Trigger
+CronJobs, and `RoundtableTriggerFiringErrors` reads the counter above. Use
+`time() - roundtable_trigger_last_fired_timestamp_seconds` for an ad-hoc check
+of a Trigger's last firing: a fixed threshold is wrong for schedules with
+different periods. Example: `sum by (route) (rate(roundtable_gateway_requests_total{code=~"5.."}[5m]))`
 finds failing gateway routes.
 
 ## Cost and token totals per run, step and mission

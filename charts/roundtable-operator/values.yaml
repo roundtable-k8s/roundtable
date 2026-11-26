@@ -680,6 +680,9 @@ alerts:
   # Minutes a knight may stay Pending, Provisioning or Degraded before
   # KnightNotReady fires.
   knightNotReadyMinutes: 15
+  # Seconds a scheduled Trigger's CronJob may stay past its next scheduled time
+  # before RoundtableScheduleMissed fires.
+  scheduleMissedSeconds: 600
   # Extra labels on every rule; `severity` here overrides the default "warning".
   labels: {}
   scaling:
