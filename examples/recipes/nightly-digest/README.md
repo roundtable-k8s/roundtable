@@ -138,6 +138,17 @@ ID with `GET /v1/tasks/<id>` on the gateway or the dashboard.) The digest
 itself is in the knight's `$DIGEST_DIR` (default `/data/digests`, on its
 persistent volume) as `<namespace>-<date>.json` and `.md`.
 
+## When it fails
+
+If the knight cannot finish (`collect` or `file` keeps failing, or `kubectl`
+is refused), it ends its answer with a last line `Outcome: failed <reason>`.
+The platform reads that line: the knight's result is `success: false` and the
+firing is recorded as failed, with the reason. Without the line a prose
+apology would count as a success. The line must be the last non-empty line of
+the answer. A failed firing shows in `status.recentFirings[].outcome` on the
+Trigger, in the `outcome` of `GET .../runs`, and on the Schedules page of the
+dashboard.
+
 ## What the knight may and may not do
 
 - May read the cluster through the `view` ClusterRole: get, list and watch on

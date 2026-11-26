@@ -22,7 +22,9 @@ spec:
         this Trigger to digest another one), for {{ .Event.Time.Format "2006-01-02" }}.
         Run scripts/collect, write the digest JSON the skill describes from
         its output, then run scripts/file on it. Your answer is the last
-        line scripts/file printed, and the digest.
+        line scripts/file printed, and the digest. If collect or file fails
+        and you cannot fix it in a few attempts, do not end with the ok line:
+        end your answer with a last line `Outcome: failed <short reason>`.
       # Counted as lost (and no longer active) without a result after 15m.
       timeoutSeconds: 900
   # A slow run is not doubled by the next fire.

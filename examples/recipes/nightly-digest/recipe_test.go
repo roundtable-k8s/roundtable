@@ -54,6 +54,25 @@ func TestSkillScripts(t *testing.T) {
 	}
 }
 
+// TestFailureOutcomeInstructions checks that the task, the skill and the
+// knight identity all tell the knight to end a failed run with the
+// `Outcome: failed` line, so the instruction cannot be dropped silently.
+func TestFailureOutcomeInstructions(t *testing.T) {
+	for file, marker := range map[string]string{
+		"trigger.yaml":                  "Outcome: failed",
+		"skill/nightly-digest/SKILL.md": "Outcome: failed",
+		"knight.yaml":                   "Outcome: failed",
+	} {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, []byte(marker)) {
+			t.Errorf("%s does not contain %q", file, marker)
+		}
+	}
+}
+
 func TestKnightLabelMatchesTrigger(t *testing.T) {
 	read := func(file string, docIdx int, out any) {
 		data, err := os.ReadFile(file)
