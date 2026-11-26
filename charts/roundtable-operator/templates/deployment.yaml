@@ -64,16 +64,16 @@ spec:
             - --trigger-image={{ .Values.image.repository }}:{{ .Values.image.tag }}
             - --trigger-image-pull-policy={{ .Values.image.pullPolicy }}
             {{- with (.Values.triggers.imagePullSecrets | default list) }}
-            - --trigger-image-pull-secrets={{ join "," . }}
+            - {{ printf "--trigger-image-pull-secrets=%s" (join "," .) | quote }}
             {{- end }}
             {{- with .Values.triggers.nodeSelector }}
-            - --trigger-node-selector={{ toJson . }}
+            - {{ printf "--trigger-node-selector=%s" (toJson .) | quote }}
             {{- end }}
             {{- with .Values.triggers.tolerations }}
-            - --trigger-tolerations={{ toJson . }}
+            - {{ printf "--trigger-tolerations=%s" (toJson .) | quote }}
             {{- end }}
             {{- with .Values.triggers.priorityClassName }}
-            - --trigger-priority-class-name={{ . }}
+            - {{ printf "--trigger-priority-class-name=%s" . | quote }}
             {{- end }}
             {{- with include "roundtable-operator.triggerGatewayURL" . }}
             - --trigger-gateway-url={{ . }}

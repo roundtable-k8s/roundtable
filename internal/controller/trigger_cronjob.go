@@ -278,7 +278,10 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	}
 	// Compare only what the operator sets: the API server fills in defaults
 	// that must not count as drift.
-	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) {
+	// DeepDerivative ignores fields empty in the desired spec, so the pod
+	// placement fields are compared explicitly: clearing one must propagate.
+	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) &&
+		podPlacementEqual(want.Spec.JobTemplate.Spec.Template.Spec, cj.Spec.JobTemplate.Spec.Template.Spec) {
 		return cj, nil
 	}
 	cj.Spec = want.Spec
@@ -288,6 +291,16 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	}
 	log.Info("Updated CronJob", "name", cj.Name, "schedule", cj.Spec.Schedule, "suspend", *cj.Spec.Suspend)
 	return cj, nil
+}
+
+// podPlacementEqual compares the operator-configured scheduling fields of two
+// firing pod specs, treating nil and empty as equal.
+func podPlacementEqual(a, b corev1.PodSpec) bool {
+	return equality.Semantic.DeepEqual(a.Tolerations, b.Tolerations) &&
+		equality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets) &&
+		a.PriorityClassName == b.PriorityClassName &&
+		len(a.NodeSelector) == len(b.NodeSelector) &&
+		(len(a.NodeSelector) == 0 || equality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector))
 }
 
 // deleteScheduleObjects deletes the CronJob and ServiceAccount a Trigger

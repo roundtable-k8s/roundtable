@@ -17,8 +17,8 @@ on="$("$HELM" template rt "$chart" \
   --set 'triggers.imagePullSecrets={a,b}' --set triggers.nodeSelector.pool=ops \
   --set 'triggers.tolerations[0].key=dedicated' --set 'triggers.tolerations[0].operator=Exists' \
   --set triggers.priorityClassName=high)"
-grep -q -- '--trigger-image-pull-secrets=a,b' <<<"$on" || fail "imagePullSecrets flag missing"
-grep -q -- '--trigger-node-selector={"pool":"ops"}' <<<"$on" || fail "nodeSelector flag missing"
-grep -q -- '--trigger-tolerations=\[{"key":"dedicated","operator":"Exists"}\]' <<<"$on" || fail "tolerations flag missing"
-grep -q -- '--trigger-priority-class-name=high' <<<"$on" || fail "priorityClassName flag missing"
+grep -qF -- '"--trigger-image-pull-secrets=a,b"' <<<"$on" || fail "imagePullSecrets flag missing"
+grep -qF -- '"--trigger-node-selector={\"pool\":\"ops\"}"' <<<"$on" || fail "nodeSelector flag missing"
+grep -qF -- '"--trigger-tolerations=[{\"key\":\"dedicated\",\"operator\":\"Exists\"}]"' <<<"$on" || fail "tolerations flag missing"
+grep -qF -- '"--trigger-priority-class-name=high"' <<<"$on" || fail "priorityClassName flag missing"
 echo "ok"

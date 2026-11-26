@@ -123,7 +123,7 @@ func main() {
 	flag.StringVar(&triggerPullPolicy, "trigger-image-pull-policy", "",
 		"Image pull policy of a scheduled Trigger's firing pod (empty = the cluster default).")
 	flag.StringVar(&triggerPullSecrets, "trigger-image-pull-secrets", "",
-		"Comma-separated names of imagePullSecrets on a scheduled Trigger's firing pod; they must exist in the Trigger's namespace.")
+		"Comma-separated imagePullSecrets names of a scheduled Trigger's firing pod; must exist in the Trigger's namespace.")
 	flag.StringVar(&triggerNodeSelector, "trigger-node-selector", "",
 		"JSON object: nodeSelector of a scheduled Trigger's firing pod.")
 	flag.StringVar(&triggerTolerations, "trigger-tolerations", "",
@@ -200,7 +200,7 @@ func main() {
 	}
 	setupLog.Info("Chain schedule mode", "mode", scheduleMode)
 
-	for _, n := range strings.Split(triggerPullSecrets, ",") {
+	for n := range strings.SplitSeq(triggerPullSecrets, ",") {
 		if n = strings.TrimSpace(n); n != "" {
 			triggerSchedule.ImagePullSecrets = append(triggerSchedule.ImagePullSecrets, corev1.LocalObjectReference{Name: n})
 		}
