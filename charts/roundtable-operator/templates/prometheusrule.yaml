@@ -133,6 +133,35 @@ spec:
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}
+    - name: roundtable.triggers
+      rules:
+        - alert: RoundtableScheduleMissed
+          annotations:
+            summary: >-
+              Scheduled Trigger CronJob {{`{{ $labels.cronjob }}`}} has not fired for more than {{ .Values.alerts.scheduleMissedSeconds }}s
+              past its next scheduled time.
+          expr: |
+            kube_cronjob_next_schedule_time{cronjob=~"trigger-.+"} < time() - {{ .Values.alerts.scheduleMissedSeconds }}
+              and on (namespace, cronjob) kube_cronjob_spec_suspend == 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableScheduleJobFailed
+          annotations:
+            summary: >-
+              A scheduled Trigger run Job {{`{{ $labels.job_name }}`}} failed.
+          expr: |
+            max by (namespace, job_name) (kube_job_failed{condition="true", job_name=~"trigger-.+"}) > 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableTriggerFiringErrors
+          annotations:
+            summary: >-
+              Trigger {{`{{ $labels.trigger }}`}} on table {{`{{ $labels.table }}`}} had {{`{{ $value }}`}} failed {{`{{ $labels.source }}`}} firings in the last hour.
+          expr: |
+            sum by (table, trigger, source) (increase(roundtable_trigger_firings_total{outcome="error"}[1h])) > 0
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
     - name: roundtable.pods
       rules:
         - alert: RoundtablePodRestarting
