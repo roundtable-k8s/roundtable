@@ -192,6 +192,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml) and chec
 	scripts/check-metrics-doc.sh
 	HELM="$(HELM)" scripts/check-isolation-env.sh
 	HELM="$(HELM)" scripts/check-minimal-values.sh
+	HELM="$(HELM)" scripts/check-quickstart-values.sh
 	HELM="$(HELM)" scripts/check-planner.sh
 
 .PHONY: lint-config

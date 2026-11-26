@@ -41,6 +41,11 @@ if $DELETE; then
 fi
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# The chart flags for this install live in one file that
+# scripts/check-quickstart-values.sh also renders.
+NATS_URL="nats://nats.$NAMESPACE.svc:4222"
+# shellcheck source=hack/quickstart-flags.sh
+. "$REPO_ROOT/hack/quickstart-flags.sh"
 CTX="kind-$CLUSTER"
 
 echo "==> kind cluster '$CLUSTER'"
@@ -72,15 +77,13 @@ fi
 echo "==> Round Table operator ($CHART ${CHART_VERSION:+$CHART_VERSION})"
 helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART" ${CHART_ARGS[@]+"${CHART_ARGS[@]}"} \
   --namespace "$NAMESPACE" --create-namespace \
-  --set-string isolation.runtimeClassName="" \
-  --set isolation.egress.mode=off \
-  --set missionDefaultNatsURL="nats://nats.$NAMESPACE.svc:4222" \
+  "${QUICKSTART_CHART_FLAGS[@]}" \
   --wait --timeout 5m
 
-echo "==> waiting for the operator and dashboard"
+echo "==> waiting for the operator, dashboard and gateway"
 kubectl --context "$CTX" -n "$NAMESPACE" wait deployment \
   --for=condition=Available --timeout=300s \
-  "$RELEASE" "$RELEASE-dashboard"
+  "$RELEASE" "$RELEASE-dashboard" "$RELEASE-gateway"
 
 cat <<DONE
 
@@ -89,6 +92,9 @@ Ready. Next (see docs/getting-started.md):
     --from-literal=ANTHROPIC_API_KEY=<your key>
   kubectl --context $CTX apply -f examples/quickstart/
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-dashboard 8080:80
+Gateway (docs/gateway.md), after a port-forward of svc/$RELEASE-gateway to 8081:
+  kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-gateway 8081:80
+  curl -H "Authorization: Bearer \$(kubectl --context $CTX -n $NAMESPACE get secret $RELEASE-gateway-token -o jsonpath='{.data.token}' | base64 -d)" http://localhost:8081/openapi.json
 
 Tear down with: hack/quickstart-kind.sh --cluster $CLUSTER --delete
 DONE

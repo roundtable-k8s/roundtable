@@ -91,8 +91,11 @@ hack/quickstart-kind.sh --delete
 
 On an existing cluster, install the chart yourself
 (`helm install roundtable-operator oci://ghcr.io/roundtable-k8s/charts/roundtable-operator -n roundtable --create-namespace`)
-and edit `nats.url` in the RoundTable and Knight manifests to your NATS server. NATS
-must have JetStream enabled. Values are in [helm-values.md](helm-values.md). Round Table
+and point every NATS URL at your NATS server: `nats.url` in the RoundTable and Knight
+manifests, plus `missionDefaultNatsURL`, `gateway.natsURL` and `dashboard.env.NATS_URL`
+in the chart (and `dashboard.vault.enabled=false` unless you provide the vault claim).
+See [Pointing Round Table at your NATS](install.md#pointing-round-table-at-your-nats).
+NATS must have JetStream enabled. Values are in [helm-values.md](helm-values.md). Round Table
 needs nothing else: see [dependencies.md](dependencies.md) for the optional add-ons and
 `values-minimal.yaml`.
 

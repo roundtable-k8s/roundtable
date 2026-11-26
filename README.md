@@ -261,6 +261,8 @@ RoundTable, a Knight and a two-step Chain from [`examples/quickstart/`](examples
 hack/quickstart-kind.sh
 ```
 
+On your own cluster, see [Pointing Round Table at your NATS](docs/install.md#pointing-round-table-at-your-nats).
+
 For an existing cluster (Kubernetes 1.28+, NATS with JetStream, a model API key),
 install the chart (it installs the CRDs, the operator and the [dashboard](#ecosystem)):
 
