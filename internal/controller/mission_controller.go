@@ -615,42 +615,27 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 	}
 
 	// Check cost budget
-	if mission.Spec.CostBudgetUSD != "" && mission.Spec.CostBudgetUSD != "0" {
-		totalCost, err := r.CostTracker.AggregateMissionCost(ctx, mission)
-		if err != nil {
-			log.Error(err, "Failed to aggregate mission cost")
-		} else {
-			// The chains' own totals count too: take the larger, so the
-			// budget and status agree with the chain numbers.
-			if chainCost, _ := missionpkg.SumChainUsage(mission); chainCost > totalCost {
-				totalCost = chainCost
-			}
-			mission.Status.TotalCost = fmt.Sprintf("%.4f", totalCost)
+	budget, err := r.CostTracker.CheckBudget(ctx, mission)
+	if err != nil {
+		log.Error(err, "Failed to aggregate mission cost")
+	} else if budget.Exceeded {
+		log.Info("Mission cost budget exceeded", "totalCost", budget.Total, "budget", budget.Budget)
 
-			// Parse budget
-			var budget float64
-			if _, err := fmt.Sscanf(mission.Spec.CostBudgetUSD, "%f", &budget); err == nil {
-				if totalCost > budget {
-					log.Info("Mission cost budget exceeded", "totalCost", totalCost, "budget", budget)
-
-					// Suspend all mission-owned chains to prevent further cost
-					if err := r.CostTracker.SuspendMissionChains(ctx, mission); err != nil {
-						log.Error(err, "Failed to suspend mission chains")
-					}
-
-					err := status.ForMission(mission).
-						Failed(fmt.Sprintf("Cost budget exceeded: $%.2f > $%.2f", totalCost, budget)).
-						Condition(aiv1alpha1.ConditionMissionComplete, aiv1alpha1.ReasonOverBudget,
-							fmt.Sprintf("Cost $%.2f exceeded budget $%.2f", totalCost, budget),
-							metav1.ConditionTrue).
-						Apply(ctx, r.Client)
-					if apierrors.IsConflict(err) {
-						return ctrl.Result{Requeue: true}, nil
-					}
-					return ctrl.Result{}, err
-				}
-			}
+		// Suspend all mission-owned chains to prevent further cost
+		if err := r.CostTracker.SuspendMissionChains(ctx, mission); err != nil {
+			log.Error(err, "Failed to suspend mission chains")
 		}
+
+		err := status.ForMission(mission).
+			Failed(fmt.Sprintf("Cost budget exceeded: $%.2f > $%.2f", budget.Total, budget.Budget)).
+			Condition(aiv1alpha1.ConditionMissionComplete, aiv1alpha1.ReasonOverBudget,
+				fmt.Sprintf("Cost $%.2f exceeded budget $%.2f", budget.Total, budget.Budget),
+				metav1.ConditionTrue).
+			Apply(ctx, r.Client)
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	// Create Chain CRs for any referenced chains that don't exist yet
@@ -662,15 +647,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 		}
 
 		// Expose the chains' cost and tokens on the mission.
-		chainCost, chainTokens := missionpkg.SumChainUsage(mission)
-		mission.Status.Tokens = chainTokens
-		if chainCost > 0 {
-			var current float64
-			_, _ = fmt.Sscanf(mission.Status.TotalCost, "%f", &current)
-			if chainCost > current {
-				mission.Status.TotalCost = fmt.Sprintf("%.4f", chainCost)
-			}
-		}
+		missionpkg.ApplyChainUsage(mission)
 
 		// FIX #2: Guard transition to terminal state - ensure all chains in status.chainStatuses
 		// have reached terminal phase before allowing mission to transition to Succeeded/Failed.
