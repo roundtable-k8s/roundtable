@@ -26,8 +26,9 @@ yq e '.. | select(path | map(tag) | all_c(. != "!!int")) | path | join(".")' "$v
   | grep -v '^$' | sort -u > "$tmp/all" || true
 [ -s "$tmp/leaves" ] || fail "no keys read from $values"
 
-# Backticked tokens in the first column of the doc's `| Key |` tables. A token
-# such as `.tag` in `gateway.image.repository` / `.tag` is relative to the
+# Backticked tokens in the first column of the doc's `| Key |` tables (only
+# tables whose header starts with `| Key |` are read; others are skipped silently).
+# A token such as `.tag` in `gateway.image.repository` / `.tag` is relative to the
 # previous token in the cell (its last path segment is replaced).
 awk '
   /^\| Key \|/ { on = 1; next }
