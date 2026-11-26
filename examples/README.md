@@ -26,6 +26,7 @@ Real-world examples of Round Table resources.
 | [`trigger-github.yaml`](trigger-github.yaml) | Trigger: start a Chain run per open issue labelled `security-review` in two repositories, then relabel it ([docs](../docs/triggers.md#github-source)) |
 | [`trigger-schedule.yaml`](trigger-schedule.yaml) | Trigger: start a Chain on a cron schedule with input computed from the schedule time ([docs](../docs/triggers.md)) |
 | [`trigger-knight-task.yaml`](trigger-knight-task.yaml) | Trigger: send one task straight to a knight, nightly and per alert, without a Chain ([docs](../docs/triggers.md#knight-target)) |
+| [Scheduled work](../docs/scheduled-work.md) | The three schedule targets (task, Chain, Mission), the one-task-naming-a-skill pattern, and what happens to missed, overlapping, lost and deleted runs |
 | [`trigger-mission.yaml`](trigger-mission.yaml) | Trigger: launch a read-only backlog-review Mission every Monday, planned by the table's planner knight ([docs](../docs/triggers.md#mission-target)) |
 | [`recipes/`](recipes/) | Copyable fleets: [`homelab-watch/`](recipes/homelab-watch/) starts a read-only triage chain from an Alertmanager webhook |
 | [`observability/`](observability/) | Try-it-out tracing: Jaeger all-in-one plus the chart's OTel collector (`values-telemetry.yaml`), see [README](observability/README.md) and [docs](../docs/helm-values.md) |
