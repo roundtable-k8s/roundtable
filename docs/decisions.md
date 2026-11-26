@@ -276,3 +276,15 @@ merlin does what the external session's 30-minute check does. Purpose: less cont
 - **May re-run failed CI jobs**: the owner adds Actions read/write to the GitHub App.
 - **Reports by dashboard chat on demand and an ntfy alert when blocked.** No daily vault note, no pinned issue.
 - **Hand-over: run both for a day** (merlin does the checks, the session watches), then the session's checks stop.
+
+## After the whiteboards
+
+### 32. M6 stays parked: the API is not exposed publicly for a long while
+*2026-11-26, given by the owner as an instruction to the orchestrator. Status: Parked. Refines decision 6. Affects #234, #235, #236, #237, #238.*
+
+Nothing that publishes the gateway outside the cluster is built now. The owner's instruction, as it reached the orchestrator: "M6 stays parked; the owner does not want the API exposed publicly for a long while."
+
+- #235 (connector profile), #236 (publishing the connector), #237 (origin provenance) and the epic #238 carry the `parked` label and stay in the M6 milestone. They come back only when the owner asks for public exposure.
+- #234 (NATS users and permissions for every component) moved to M7, because it is useful without public exposure: it is judged as least-privilege work inside the cluster (decision 8), not as a step toward M6.
+- NATS credentials generated inside the cluster by the chart or the operator are not an owner secret. Credentials the owner must create or store are.
+- Decision 6 stands for everything inside the cluster: the gateway is still the primary interface. Only its last bullet, exposing the API safely outside the cluster, waits.
