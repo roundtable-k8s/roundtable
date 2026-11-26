@@ -337,8 +337,13 @@ func (r *TriggerReconciler) deleteScheduleObjects(ctx context.Context, trg *aiv1
 // is emitted once per failed Job.
 func (r *TriggerReconciler) observeFireJobs(ctx context.Context, trg *aiv1alpha1.Trigger, cj *batchv1.CronJob) error {
 	trg.Status.LastSuccessfulScheduledAt = cj.Status.LastSuccessfulTime
+	// Only this Trigger's firing Jobs carry its LabelTrigger (set on the
+	// CronJob's JobTemplate), so list those from the cache instead of every
+	// Job in the namespace from the API server. IsControlledBy stays the
+	// authority on ownership below.
 	jobs := &batchv1.JobList{}
-	if err := r.reader().List(ctx, jobs, client.InNamespace(trg.Namespace)); err != nil {
+	if err := r.Client.List(ctx, jobs, client.InNamespace(trg.Namespace),
+		client.MatchingLabels{aiv1alpha1.LabelTrigger: trg.Name}); err != nil {
 		return err
 	}
 	var latest *batchv1.Job
