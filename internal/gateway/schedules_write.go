@@ -347,13 +347,8 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 	default:
 		return fieldErr("spec.concurrency.policy", "must be Allow, Forbid or Replace, not %q", spec.Concurrency.Policy)
 	}
-	if spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
-		switch {
-		case spec.Target.Knight != nil:
-			return fieldErr("spec.concurrency.policy", "Replace is not supported with target.knight")
-		case spec.Target.Mission != nil:
-			return fieldErr("spec.concurrency.policy", "Replace is not supported with target.mission")
-		}
+	if err := aiv1alpha1.ValidateConcurrency(spec); err != nil {
+		return fieldErr("spec.concurrency.policy", "%v", err)
 	}
 	if spec.Concurrency.MaxActive < 0 {
 		return fieldErr("spec.concurrency.maxActive", "must be at least 0")
