@@ -19,13 +19,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -37,10 +40,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
+	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
@@ -351,6 +356,48 @@ var _ = Describe("Mission Controller", func() {
 			mission := &aiv1alpha1.Mission{}
 			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
 			Expect(mission.Finalizers).To(ContainElement(missionFinalizer))
+		})
+
+		It("puts table and trace_id on its log lines", func() {
+			mission := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+			mission.Spec.RoundTableRef = aiv1alpha1.LocalRef("log-table")
+			Expect(k8sClient.Update(ctx, mission)).To(Succeed())
+
+			var mu sync.Mutex
+			var lines []string
+			sink := funcr.New(func(_, args string) {
+				mu.Lock()
+				defer mu.Unlock()
+				lines = append(lines, args)
+			}, funcr.Options{Verbosity: 2})
+			logCtx := logf.IntoContext(ctx, sink)
+
+			r := newReconciler()
+			r.TracerProvider = sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(telemetry.NewIDGenerator()))
+			for range 3 {
+				// Later cycles may error on the missing RoundTable; only the log matters.
+				_, _ = r.Reconcile(logCtx, reconcile.Request{NamespacedName: missionNN})
+			}
+			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+			traceID := mission.Status.TraceID
+			Expect(traceID).To(HaveLen(32))
+
+			// A fresh reconcile starts from the stored status, so every line it
+			// writes carries both fields.
+			mu.Lock()
+			lines = nil
+			mu.Unlock()
+			_, _ = newReconciler().Reconcile(logCtx, reconcile.Request{NamespacedName: missionNN})
+			mu.Lock()
+			defer mu.Unlock()
+			var matched int
+			for _, l := range lines {
+				if strings.Contains(l, `"trace_id"="`+traceID+`"`) && strings.Contains(l, `"table"="log-table"`) {
+					matched++
+				}
+			}
+			Expect(matched).To(BeNumerically(">", 0), "lines: %v", lines)
 		})
 
 		It("should initialize to Pending phase", func() {

@@ -18,9 +18,12 @@ package controller
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.opentelemetry.io/otel/attribute"
@@ -34,6 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -185,6 +189,40 @@ var _ = Describe("Chain run tracing", func() {
 			_ = k8sClient.Update(ctx, c)
 			_ = k8sClient.Delete(ctx, c)
 		}
+	})
+
+	It("puts the run's trace_id and table on operator log lines", func() {
+		var mu sync.Mutex
+		var lines []string
+		sink := funcr.New(func(prefix, args string) {
+			mu.Lock()
+			defer mu.Unlock()
+			lines = append(lines, args)
+		}, funcr.Options{Verbosity: 2})
+		logCtx := logf.IntoContext(ctx, sink)
+
+		start([]aiv1alpha1.ChainStep{task("a")})
+		r := &ChainReconciler{
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(1000),
+			NATS: natspkg.NewProviderWithClient(fake, logr.Discard()), TracerProvider: tp,
+		}
+		for range 3 {
+			_, err := r.Reconcile(logCtx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		traceID := get().Status.TraceID
+		Expect(traceID).To(HaveLen(32))
+
+		mu.Lock()
+		defer mu.Unlock()
+		var withTrace int
+		for _, l := range lines {
+			if strings.Contains(l, `"trace_id"="`+traceID+`"`) {
+				withTrace++
+				Expect(l).To(ContainSubstring(`"table"="` + rtName + `"`))
+			}
+		}
+		Expect(withTrace).To(BeNumerically(">", 0), "lines: %v", lines)
 	})
 
 	It("makes a two-step run one trace: a root span with a span per step", func() {

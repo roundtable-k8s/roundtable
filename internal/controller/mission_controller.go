@@ -39,6 +39,7 @@ import (
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
 	"github.com/roundtable-k8s/roundtable/internal/status"
+	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -104,6 +105,14 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// Log lines of this reconcile, including the helpers' (they read the
+	// logger from ctx), carry the mission's table and trace.
+	if table := aiv1alpha1.RefName(mission.Spec.RoundTableRef); table != "" {
+		log = log.WithValues("table", table)
+	}
+	log = log.WithValues(telemetry.LogValues(mission.Status.TraceID)...)
+	ctx = logf.IntoContext(ctx, log)
+
 	// Handle deletion
 	if mission.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(mission, missionFinalizer) {
@@ -143,6 +152,8 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		mission.Status.ExpiresAt = &expiresAt
 		r.initKnightStatuses(mission)
 		missionpkg.EnsureTrace(ctx, r.TracerProvider, mission)
+		log = log.WithValues(telemetry.LogValues(mission.Status.TraceID)...)
+		ctx = logf.IntoContext(ctx, log)
 		err := status.ForMission(mission).
 			Phase(aiv1alpha1.MissionPhasePending).
 			Apply(ctx, r.Client)
@@ -155,7 +166,12 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// A mission from before tracing existed gets its trace on first reconcile
 	// (kept by the next status write).
+	hadTraceID := mission.Status.TraceID != ""
 	missionpkg.EnsureTrace(ctx, r.TracerProvider, mission)
+	if !hadTraceID {
+		log = log.WithValues(telemetry.LogValues(mission.Status.TraceID)...)
+		ctx = logf.IntoContext(ctx, log)
+	}
 
 	// Check TTL expiration in any non-terminal phase
 	if res, handled, err := r.reconcileTTLExpiry(ctx, mission); handled {

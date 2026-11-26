@@ -40,6 +40,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/notify"
+	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -123,8 +124,9 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 
 	if table := aiv1alpha1.RefName(chain.Spec.RoundTableRef); table != "" {
 		log = log.WithValues("table", table)
-		ctx = logf.IntoContext(ctx, log)
 	}
+	log = log.WithValues(telemetry.LogValues(chain.Status.TraceID)...)
+	ctx = logf.IntoContext(ctx, log)
 
 	// Handle deletion
 	if chain.DeletionTimestamp != nil {
@@ -443,7 +445,12 @@ func (r *ChainReconciler) startOrResumeRun(ctx context.Context, chain *aiv1alpha
 
 	// The run's trace: its root span context is stored once, then every
 	// later reconcile parents its spans from it.
+	hadTraceID := chain.Status.TraceID != ""
 	r.ensureRunTrace(ctx, chain)
+	if !hadTraceID {
+		log = log.WithValues(telemetry.LogValues(chain.Status.TraceID)...)
+		ctx = logf.IntoContext(ctx, log)
+	}
 
 	// Check overall timeout
 	if chain.Status.StartedAt != nil {

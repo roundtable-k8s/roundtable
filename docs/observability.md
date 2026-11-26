@@ -66,6 +66,12 @@ kubectl get mission <name> -o jsonpath='{.status.traceID}'
 `ai.roundtable.io/round-table` label. Install-wide signals (dashboard HTTP
 metrics, reconcile errors) have no table.
 
+**Operator logs carry the trace.** Log lines the operator writes while
+reconciling a Chain or Mission run carry `trace_id` (the run's
+`status.traceID`) once the run has a trace, and `table` when it has one, so a
+log line matches its trace and the other way round. With telemetry off there is
+no trace ID and lines are unchanged.
+
 Other span attributes you will query on: `roundtable.knight`,
 `roundtable.knight.runtime`, `roundtable.chain`, `roundtable.chain.step`,
 `roundtable.chain.step.type`, `roundtable.chain.item.index`,
