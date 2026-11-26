@@ -82,7 +82,8 @@ type ScheduleRun struct {
 	// pending, running or unknown (the run is gone and its outcome was not
 	// recorded).
 	Outcome string `json:"outcome"`
-	// Reason says why a firing was skipped.
+	// Reason says why a firing was skipped, or why a started run failed or
+	// was lost.
 	Reason string `json:"reason,omitempty"`
 	// DurationSeconds is how long the run took, once finished.
 	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
@@ -216,7 +217,7 @@ func (s *Service) ListScheduleRuns(ctx context.Context, f ScheduleRunsFilter) ([
 			}
 		default:
 			// A knight-target task, or a Chain run already deleted.
-			r := &ScheduleRun{Run: f.Run, Time: f.Time.UTC(), Key: f.Key, Outcome: string(f.Outcome)}
+			r := &ScheduleRun{Run: f.Run, Time: f.Time.UTC(), Key: f.Key, Outcome: string(f.Outcome), Reason: f.Reason}
 			if r.Outcome == "" {
 				r.Outcome = scheduleOutcomeUnknown
 				if knight {

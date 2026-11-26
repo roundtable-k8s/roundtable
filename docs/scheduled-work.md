@@ -182,6 +182,8 @@ kubectl -n roundtable annotate trigger nightly-briefing ai.roundtable.io/suspend
 kubectl -n roundtable annotate trigger nightly-briefing ai.roundtable.io/suspended-     # resume
 ```
 
+A knight firing that ends `failed` or `lost` records why in `status.recentFirings[].reason`, as a Warning Event (`TaskFailed`, `TaskLost`) on the Trigger, and in the `reason` of the runs API (`GET /v1/schedules/{namespace}/{name}/runs`).
+
 Suspend the Trigger, not the CronJob: a CronJob edited by hand is reset at the
 next reconcile.
 

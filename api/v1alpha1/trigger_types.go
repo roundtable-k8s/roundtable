@@ -821,6 +821,11 @@ type TriggerFiring struct {
 	// skipReason says why the firing started nothing.
 	// +optional
 	SkipReason string `json:"skipReason,omitempty"`
+
+	// reason says why a started run ended failed or lost (knight target).
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 // TriggerStatus defines the observed state of Trigger.

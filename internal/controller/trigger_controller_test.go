@@ -1426,6 +1426,63 @@ var _ = Describe("Trigger controller", func() {
 			Expect(finishedRuns("kt-forbid", "lost")).To(Equal(1.0))
 		})
 
+		It("records why a task failed or was lost, with one Warning Event each", func() {
+			got := tasks()
+			scheduleKnightTrigger("kt-reason", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyAllow
+				s.Target.Knight.TimeoutSeconds = ptr.To[int32](3600)
+			})
+			t := getTrigger("kt-reason")
+			due := nextFive(t.CreationTimestamp.Time)
+			var sent []natspkg.TaskPayload
+			for i := range 4 {
+				at := due.Add(time.Duration(i) * 5 * time.Minute)
+				clock = at.Add(time.Second)
+				reconcileTrigger("kt-reason")
+				fireSchedule("kt-reason", at, "")
+				Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(i + 1))
+				Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-reason").Status.RecentFirings }).Should(HaveLen(i + 1))
+			}
+			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","error":"boom"}`)
+			publishResult(sent[1].TaskID, `{"taskId":"`+sent[1].TaskID+`","error":"Task refused: plan","usage_limited":true}`)
+			publishResult(sent[2].TaskID, `{"taskId":"`+sent[2].TaskID+`","output":"fine"}`)
+			// The fourth gets no result.
+			clock = due.Add(2 * time.Hour)
+			Eventually(func() bool {
+				reconcileTrigger("kt-reason")
+				return len(getTrigger("kt-reason").Status.ActiveRuns) == 0
+			}, "10s").Should(BeTrue())
+
+			byRun := map[string]aiv1alpha1.TriggerFiring{}
+			for _, f := range getTrigger("kt-reason").Status.RecentFirings {
+				byRun[f.Run] = f
+			}
+			Expect(byRun[sent[0].TaskID]).To(SatisfyAll(
+				HaveField("Outcome", aiv1alpha1.TriggerFiringFailed), HaveField("Reason", "boom")))
+			Expect(byRun[sent[1].TaskID]).To(SatisfyAll(
+				HaveField("Outcome", aiv1alpha1.TriggerFiringFailed), HaveField("Reason", "usage limit: Task refused: plan")))
+			Expect(byRun[sent[2].TaskID]).To(SatisfyAll(
+				HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded), HaveField("Reason", BeEmpty())))
+			Expect(byRun[sent[3].TaskID]).To(SatisfyAll(
+				HaveField("Outcome", aiv1alpha1.TriggerFiringLost), HaveField("Reason", "no result within 3600s")))
+
+			// Reconciling again emits nothing more.
+			reconcileTrigger("kt-reason")
+			rec := r.Recorder.(*record.FakeRecorder)
+			var failed, lost int
+			for len(rec.Events) > 0 {
+				ev := <-rec.Events
+				switch {
+				case strings.Contains(ev, "Warning TaskFailed"):
+					failed++
+				case strings.Contains(ev, "Warning TaskLost"):
+					lost++
+				}
+			}
+			Expect(failed).To(Equal(2))
+			Expect(lost).To(Equal(1))
+		})
+
 		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
 			got := tasks()
 			natsTrigger("kt-nats", prefix+".events.alerts.>", func(s *aiv1alpha1.TriggerSpec) {

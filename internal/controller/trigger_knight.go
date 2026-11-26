@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -211,6 +212,9 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	firing.Run = rec.TaskID
 	if rec.Done() {
 		firing.Outcome = taskOutcome(rec)
+		if firing.Outcome == aiv1alpha1.TriggerFiringFailed {
+			firing.Reason = taskFailureReason(rec)
+		}
 		countTriggerRunFinished(f.table, trg, string(firing.Outcome))
 	}
 	countTriggerFiring(f.table, trg, triggerOutcomeStarted)
@@ -239,6 +243,25 @@ func taskOutcome(rec *gateway.TaskRecord) aiv1alpha1.TriggerFiringOutcome {
 		return aiv1alpha1.TriggerFiringSucceeded
 	}
 	return aiv1alpha1.TriggerFiringFailed
+}
+
+// maxFiringReason is the longest TriggerFiring.Reason (the CRD's MaxLength).
+const maxFiringReason = 512
+
+// taskFailureReason says why a finished task failed: the record's error,
+// prefixed when it was a usage limit, cut to maxFiringReason bytes.
+func taskFailureReason(rec *gateway.TaskRecord) string {
+	reason := rec.Error
+	if rec.UsageLimited {
+		reason = "usage limit: " + reason
+	}
+	if len(reason) > maxFiringReason {
+		reason = reason[:maxFiringReason]
+		for len(reason) > 0 && !utf8.ValidString(reason) {
+			reason = reason[:len(reason)-1]
+		}
+	}
+	return reason
 }
 
 // collectTasks looks up the results of a knight target's active tasks
@@ -270,15 +293,21 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	for _, id := range tracked {
 		rec, err := svc.GetTask(ctx, id)
 		var outcome aiv1alpha1.TriggerFiringOutcome
+		var reason string
 		switch {
 		case errors.Is(err, gateway.ErrNotFound):
 			outcome = aiv1alpha1.TriggerFiringLost
+			reason = "task record not found"
 		case err != nil:
 			return 0, fmt.Errorf("read task %s: %w", id, err)
 		case rec.Done():
 			outcome = taskOutcome(rec)
+			if outcome == aiv1alpha1.TriggerFiringFailed {
+				reason = taskFailureReason(rec)
+			}
 		case now.Sub(rec.CreatedAt) > timeout:
 			outcome = aiv1alpha1.TriggerFiringLost
+			reason = fmt.Sprintf("no result within %ds", trg.Spec.Target.Knight.EffectiveTimeoutSeconds())
 		default:
 			active = append(active, id)
 			continue
@@ -286,6 +315,13 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 		for i := range trg.Status.RecentFirings {
 			if f := &trg.Status.RecentFirings[i]; f.Run == id && f.Outcome == "" {
 				f.Outcome = outcome
+				f.Reason = reason
+				switch outcome {
+				case aiv1alpha1.TriggerFiringFailed:
+					r.event(trg, corev1.EventTypeWarning, "TaskFailed", "Task %s failed: %s", id, reason)
+				case aiv1alpha1.TriggerFiringLost:
+					r.event(trg, corev1.EventTypeWarning, "TaskLost", "Task %s lost: %s", id, reason)
+				}
 			}
 		}
 		logf.FromContext(ctx).Info("Trigger task finished", "taskId", id, "outcome", outcome)
