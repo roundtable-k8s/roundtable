@@ -69,6 +69,11 @@ type Client interface {
 	// An existing stream is left as it is.
 	CreateStream(ctx context.Context, config StreamConfig) error
 
+	// EnsureStreamMaxAge makes the stream's MaxAge equal maxAge (0 =
+	// unlimited), updating the stream only when it differs and leaving every
+	// other setting as it is. It reports whether an update was issued.
+	EnsureStreamMaxAge(ctx context.Context, name string, maxAge time.Duration) (bool, error)
+
 	// DeleteStream deletes a JetStream stream.
 	DeleteStream(ctx context.Context, name string) error
 
@@ -356,6 +361,28 @@ func (c *JetStreamClient) CreateStream(ctx context.Context, config StreamConfig)
 
 	c.log.Info("Created JetStream stream", "name", config.Name, "retention", config.Retention)
 	return nil
+}
+
+// EnsureStreamMaxAge updates the stream's MaxAge when it differs from maxAge.
+func (c *JetStreamClient) EnsureStreamMaxAge(ctx context.Context, name string, maxAge time.Duration) (bool, error) {
+	js, err := c.jetStream()
+	if err != nil {
+		return false, err
+	}
+	stream, err := js.Stream(ctx, name)
+	if err != nil {
+		return false, fmt.Errorf("failed to get stream %s: %w", name, err)
+	}
+	cfg := stream.CachedInfo().Config
+	if cfg.MaxAge == maxAge {
+		return false, nil
+	}
+	cfg.MaxAge = maxAge
+	if _, err := js.UpdateStream(ctx, cfg); err != nil {
+		return false, fmt.Errorf("failed to update stream %s: %w", name, err)
+	}
+	c.log.Info("Updated JetStream stream max age", "name", name, "maxAge", maxAge)
+	return true, nil
 }
 
 // DeleteStream deletes a JetStream stream.

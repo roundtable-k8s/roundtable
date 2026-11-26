@@ -62,7 +62,10 @@ func (f *fakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	return 0, f.PublishJSON(subject, v)
 }
 func (f *fakeNATS) CreateStream(context.Context, natspkg.StreamConfig) error { return nil }
-func (f *fakeNATS) DeleteStream(context.Context, string) error               { return nil }
+func (f *fakeNATS) EnsureStreamMaxAge(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (f *fakeNATS) DeleteStream(context.Context, string) error { return nil }
 func (f *fakeNATS) StreamInfo(context.Context, string) (*jetstream.StreamInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }

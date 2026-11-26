@@ -864,6 +864,13 @@ tasks and results streams:
 - subjects: `<subjectPrefix>.events.>`
 - Limits retention, max age `spec.nats.eventsMaxAge` (default 168h)
 
+The results stream has no max age by default. Set `spec.nats.resultsMaxAge`
+(for example `168h`) to drop unread task results, such as those that arrive
+after their step timed out, was cancelled or lost its Chain. It must be longer
+than the longest step timeout and, where the gateway keeps task results in the
+stream, longer than the task TTL. Changing or removing it updates the existing
+stream; the tasks stream never expires.
+
 Each Trigger gets one durable pull consumer on
 it, `trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:
 `<subjectPrefix>.events.webhook.<namespace>.<name>`, github:

@@ -270,6 +270,15 @@ type RoundTableNATS struct {
 	// used when createStreams is true. Defaults to 168h (7 days).
 	// +optional
 	EventsMaxAge *metav1.Duration `json:"eventsMaxAge,omitempty"`
+
+	// resultsMaxAge bounds how long unread task results stay in the results
+	// stream, so results that arrive after their step timed out, was
+	// cancelled or lost its Chain do not accumulate. Unset keeps results
+	// until they are read. Must be longer than the longest step timeout and,
+	// where the gateway keeps task results in the stream, longer than the
+	// task TTL. Only used when createStreams is true.
+	// +optional
+	ResultsMaxAge *metav1.Duration `json:"resultsMaxAge,omitempty"`
 }
 
 // DefaultEventsMaxAge is the events stream retention when
