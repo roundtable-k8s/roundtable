@@ -125,8 +125,6 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			{"get", "pods", "-A", "-o", "wide"},
 			{"logs", "deployment/" + coreOperator, "-n", coreNamespace, "--tail=200"},
 			{"get", "knight", coreKnight, "-n", coreNamespace, "-o", "yaml"},
-			{"logs", "-l", "app.kubernetes.io/instance=" + coreKnight, "-n", coreNamespace,
-				"--all-containers", "--tail=100"},
 			{"describe", "deployment", coreKnight, "-n", coreNamespace},
 			{"logs", "-l", "app.kubernetes.io/instance=" + coreKnight, "-n", coreNamespace,
 				"--all-containers", "--tail=200"},

@@ -1,5 +1,5 @@
-# A minimal Knight for the e2e core tier. The image is never started for real
-# work: the test only needs the Deployment to become available, so it runs the
+# A minimal Knight for the e2e core tier. The knight never does real LLM work:
+# the test only needs the Deployment to become available, so it runs the
 # public pi-knight image with isolation off (kind has no gVisor). Its model is
 # routed to the stub LLM: pi-knight preflights an uncatalogued model against an
 # OpenAI-compatible endpoint (localhost:4000 by default) and reports 503 on
