@@ -253,6 +253,15 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if c := callerName(ctx); c != "" {
 		annotations[aiv1alpha1.AnnotationCaller] = c
 	}
+	// A waiting call takes its slot before it creates anything, so a busy
+	// gateway answers 429 without leaving a run behind (a replay needs one too).
+	release := func() {}
+	if wait > 0 {
+		if release, err = s.acquireSlot(); err != nil {
+			return nil, err
+		}
+	}
+	defer release()
 	run, err := chainrun.Start(ctx, s.Runs, s.Runs.Scheme(), tmpl, chainrun.StartOptions{
 		Name:        chainrun.Name(tmpl.Name, "gw", suffix),
 		Namespace:   ns,
@@ -272,17 +281,18 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	s.Log.Info("Started chain run", "chain", tmpl.Name, "run", run.Name, "namespace", ns, "inputBytes", len(input),
 		"caller", callerName(ctx))
 	if wait > 0 {
-		return s.waitRun(ctx, ns, run.Name, wait)
+		return s.pollRun(ctx, ns, run.Name, wait)
 	}
 	return runRecord(run, true), nil
 }
 
 // replayRun returns the run an earlier request with the same key started.
+// A waiting replay runs under the slot RunChain already holds.
 func (s *Service) replayRun(ctx context.Context, ns, name string, wait time.Duration) (*RunRecord, error) {
 	var rec *RunRecord
 	var err error
 	if wait > 0 {
-		rec, err = s.waitRun(ctx, ns, name, wait)
+		rec, err = s.pollRun(ctx, ns, name, wait)
 	} else {
 		var c *aiv1alpha1.Chain
 		if c, err = s.fetchRun(ctx, ns, name); err == nil {
@@ -441,14 +451,16 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 // waitRun polls the run until it is done or the wait ends, then returns its
 // latest record. Waits count against maxInFlight.
 func (s *Service) waitRun(ctx context.Context, ns, name string, wait time.Duration) (*RunRecord, error) {
-	if s.inflight != nil {
-		select {
-		case s.inflight <- struct{}{}:
-			defer func() { <-s.inflight }()
-		default:
-			return nil, ErrBusy
-		}
+	release, err := s.acquireSlot()
+	if err != nil {
+		return nil, err
 	}
+	defer release()
+	return s.pollRun(ctx, ns, name, wait)
+}
+
+// pollRun is waitRun for a caller that already holds a slot.
+func (s *Service) pollRun(ctx context.Context, ns, name string, wait time.Duration) (*RunRecord, error) {
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	if progress := progressFrom(ctx); progress != nil {

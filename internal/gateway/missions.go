@@ -250,6 +250,15 @@ func (s *Service) StartMission(ctx context.Context, req StartMissionRequest) (*M
 	if err != nil {
 		return nil, err
 	}
+	// A waiting call takes its slot before it creates anything, so a busy
+	// gateway answers 429 without leaving a Mission behind.
+	release := func() {}
+	if wait > 0 {
+		if release, err = s.acquireSlot(); err != nil {
+			return nil, err
+		}
+	}
+	defer release()
 	if c := callerName(ctx); c != "" {
 		m.Annotations = map[string]string{aiv1alpha1.AnnotationCaller: c}
 	}
@@ -259,7 +268,7 @@ func (s *Service) StartMission(ctx context.Context, req StartMissionRequest) (*M
 	s.Log.Info("Started mission", "mission", m.Name, "namespace", ns, "roundTable", req.RoundTable,
 		"metaMission", m.Spec.MetaMission, "budgetUSD", m.Spec.CostBudgetUSD, "caller", callerName(ctx))
 	if wait > 0 {
-		return s.waitMission(ctx, ns, m.Name, wait)
+		return s.pollMission(ctx, ns, m.Name, wait)
 	}
 	return s.missionView(ctx, m, true), nil
 }
@@ -482,14 +491,16 @@ func (s *Service) fetchMission(ctx context.Context, ns, name string) (*aiv1alpha
 // waitMission polls the Mission until it is done or the wait ends, then
 // returns its latest projection. Waits count against maxInFlight.
 func (s *Service) waitMission(ctx context.Context, ns, name string, wait time.Duration) (*MissionView, error) {
-	if s.inflight != nil {
-		select {
-		case s.inflight <- struct{}{}:
-			defer func() { <-s.inflight }()
-		default:
-			return nil, ErrBusy
-		}
+	release, err := s.acquireSlot()
+	if err != nil {
+		return nil, err
 	}
+	defer release()
+	return s.pollMission(ctx, ns, name, wait)
+}
+
+// pollMission is waitMission for a caller that already holds a slot.
+func (s *Service) pollMission(ctx context.Context, ns, name string, wait time.Duration) (*MissionView, error) {
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	tick := time.NewTicker(s.Opts.Missions.PollInterval)

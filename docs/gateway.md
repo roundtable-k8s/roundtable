@@ -486,7 +486,7 @@ ClusterRole if that list holds `"*"`).
 | `recruitExisting` | Optional. Lets the planner use standing knights. |
 | `knights` | Optional. Names of existing Knights taking part (at most 50). |
 | `chains` | Optional. Existing Chains to run, each with an optional `input` (max 64 KiB, at most 20 chains). Without a `planner`, at least one chain is required. |
-| `waitSeconds` | Optional. Wait this long for the mission to finish (default 0, capped at `gateway.maxTimeout`). Waits count against `maxInFlight`. |
+| `waitSeconds` | Optional. Wait this long for the mission to finish (default 0, capped at `gateway.maxTimeout`). Waits count against `maxInFlight`; a busy gateway answers 429 before it creates anything. |
 | `namespace` | Optional. As for invoke. |
 
 Anything else (`ephemeralSpec`, `secrets`, `knightTemplates`,
@@ -595,7 +595,7 @@ opted-in Chains a caller can run.
 |-------|---------|
 | `input` | Optional. The run's `spec.input`: a JSON string is used as is, any other JSON value as its (compact) JSON text. At most 256 KiB. Omitted or `null` keeps the Chain's own input. |
 | `namespace` | Optional. The Chain's namespace: the gateway's own or one of `allowedNamespaces`, else **400**. |
-| `waitSeconds` | Optional. Wait this long for the run to finish (default 0, capped at `gateway.maxTimeout`). Waits count against `maxInFlight`. |
+| `waitSeconds` | Optional. Wait this long for the run to finish (default 0, capped at `gateway.maxTimeout`). Waits count against `maxInFlight`; a busy gateway answers 429 before it creates anything. |
 
 Unknown fields are a **400**, an unknown Chain a **404**, a Chain without the
 label a **403** and a suspended Chain a **503**. The answer is the run record:

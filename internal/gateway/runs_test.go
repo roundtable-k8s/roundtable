@@ -651,3 +651,36 @@ func TestMCPCancelRun(t *testing.T) {
 		}
 	}
 }
+
+func TestRunChainBusyCreatesNothing(t *testing.T) {
+	e := newRunEnv(t, Options{MaxInFlight: 1}, true)
+	path := "/v1/chains/digest/runs"
+	e.svc.inflight <- struct{}{} // another wait holds the only slot
+
+	resp, out := e.do(t, http.MethodPost, path, testToken, map[string]any{"waitSeconds": 1})
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("waiting run: %d %v", resp.StatusCode, out)
+	}
+	if n := len(e.runs(t)); n != 0 {
+		t.Fatalf("busy call left %d runs", n)
+	}
+
+	// An asynchronous run takes no slot and still works.
+	if resp, out = e.do(t, http.MethodPost, path, testToken, map[string]any{}); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("async run: %d %v", resp.StatusCode, out)
+	}
+	<-e.svc.inflight
+
+	// A waiting replay takes one slot, not two.
+	r1, o1 := e.doKey(t, path, "k", map[string]any{})
+	if r1.StatusCode != http.StatusAccepted {
+		t.Fatalf("keyed run: %d %v", r1.StatusCode, o1)
+	}
+	r2, o2 := e.doKey(t, path, "k", map[string]any{"waitSeconds": 1})
+	if r2.StatusCode != http.StatusAccepted || r2.Header.Get("Idempotent-Replay") != "true" {
+		t.Fatalf("waiting replay: %d %v", r2.StatusCode, o2)
+	}
+	if n := len(e.svc.inflight); n != 0 {
+		t.Fatalf("slot leaked: %d held", n)
+	}
+}
