@@ -269,7 +269,7 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime. Knights run under gVisor (`runsc`) and default-deny egress by default; opting out is explicit on the Knight ([runtime isolation](docs/runtime-isolation.md), [egress allowlists](docs/egress.md))
 2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenals`; empty = the default platform arsenal)
    (an arsenal with `oci` set is instead mounted read-only as an OCI image volume at `/arsenal/<name>`, pinned by digest, with no sidecar — see `examples/knight-arsenal-oci.yaml`)
-3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash
+3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash. An arsenal may also use the flat Agent Skills layout (`<skill>/SKILL.md` at the arsenal root, no category folder): a category folder is optional, and `spec.skills: [<skill>]` links that directory as `/skills/<skill>/<skill>`
 4. A NATS JetStream consumer is configured with the knight's filter subjects
 5. The knight starts consuming tasks from the stream
 
