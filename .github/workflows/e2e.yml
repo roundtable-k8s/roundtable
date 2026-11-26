@@ -1,0 +1,72 @@
+name: E2E
+
+# Runs the core e2e tier (test/e2e, CONTRIBUTING.md) on a fresh kind cluster:
+# the chart's operator, a knight and the stub LLM, no API keys. Only when the
+# operator, the chart or the tests change.
+on:
+  pull_request:
+    paths:
+      - api/**
+      - cmd/**
+      - internal/**
+      - pkg/**
+      - charts/roundtable-operator/**
+      - test/**
+      - Dockerfile
+      - Makefile
+      - go.mod
+      - go.sum
+      - .github/workflows/e2e.yml
+  push:
+    branches: [main]
+    paths:
+      - api/**
+      - cmd/**
+      - internal/**
+      - pkg/**
+      - charts/roundtable-operator/**
+      - test/**
+      - Dockerfile
+      - Makefile
+      - go.mod
+      - go.sum
+      - .github/workflows/e2e.yml
+
+permissions:
+  contents: read
+
+env:
+  KIND_VERSION: v0.27.0
+  HELM_VERSION: v3.17.0
+
+jobs:
+  e2e-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+
+      - name: make e2e TIER=core
+        run: |
+          set -o pipefail
+          make e2e TIER=core 2>&1 | tee e2e.log
+
+      - name: Surface the failure
+        if: failure()
+        run: |
+          # The failing output as an annotation (readable without the raw log).
+          [ -f e2e.log ] && echo "::error title=make e2e::$(grep -v 'downloading' e2e.log | tail -n 150 | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')"
