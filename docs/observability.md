@@ -339,6 +339,7 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
 | `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
 | `RoundtableScheduleMissed` | a scheduled Trigger's CronJob (`trigger-*`, not suspended) is more than `alerts.scheduleMissedSeconds` past its next scheduled time (kube-state-metrics) |
+| `RoundtableScheduledRunFailed` | a scheduled knight or mission run finished `failed` or `lost` in the last hour (`roundtable_trigger_runs_finished_total`) |
 | `RoundtableScheduleJobFailed` | a scheduled Trigger's run Job failed (kube-state-metrics) |
 | `RoundtableTriggerFiringErrors` | a Trigger's firings reported `outcome="error"` in the last hour (10m) |
 | `RoundtablePodRestarting`, `RoundtablePodOOMKilled`, `RoundtablePodEvicted` | pod health |
@@ -377,6 +378,7 @@ below with their label values.
 | `roundtable_mission_cost_usd_total` | counter | `table`, `mission`, `billing` | Cost in USD of a mission's finished step attempts |
 | `roundtable_table_cost_usd` | gauge | `table` | Cumulative cost in USD of a table, set from `RoundTable.status.totalCost` |
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source`, `outcome` | Trigger events by source (`schedule`, `nats`, `webhook`, `github`) and outcome (`started`, `deduped`, `skipped`, `error`) |
+| `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` | Knight and mission Trigger runs that finished, by `outcome` (`succeeded`, `failed`, `lost`); chain targets are in `roundtable_chain_runs_total` |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` | Unix time a Trigger last started a run |
 | `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` | Invoke gateway HTTP request duration |
@@ -389,6 +391,7 @@ target chain's `roundTableRef`.
 | Metric | Type | Labels |
 |---|---|---|
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` |
+| `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` (`succeeded`, `failed`, `lost`) |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
 | `roundtable_gateway_requests_total` | counter | `table`, `route`, `code`, `caller_kind` (`serviceaccount`, `token`, `none`) |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` |

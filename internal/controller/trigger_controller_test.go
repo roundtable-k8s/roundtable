@@ -55,6 +55,11 @@ func firings(trigger, source, outcome string) float64 {
 	return testutil.ToFloat64(metrics.TriggerFiringsTotal.WithLabelValues("trg-rt", trigger, source, outcome))
 }
 
+// finishedRuns reads roundtable_trigger_runs_finished_total for a schedule trigger of the test table.
+func finishedRuns(trigger, outcome string) float64 {
+	return testutil.ToFloat64(metrics.TriggerRunsFinishedTotal.WithLabelValues("trg-rt", trigger, "schedule", outcome))
+}
+
 var _ = Describe("Trigger controller", func() {
 	const (
 		ns       = "default"
@@ -1354,9 +1359,36 @@ var _ = Describe("Trigger controller", func() {
 			Expect(st.ActiveRuns).To(BeEmpty())
 			Expect(st.RecentFirings[1].Run).To(Equal(sent[0].TaskID))
 			Expect(st.RecentFirings[1].Outcome).To(Equal(aiv1alpha1.TriggerFiringSucceeded))
+			Expect(finishedRuns("kt-cron", "succeeded")).To(Equal(1.0))
+			Expect(finishedRuns("kt-cron", "failed")).To(Equal(0.0))
+			// A second reconcile does not count the finished run again.
+			reconcileTrigger("kt-cron")
+			Expect(finishedRuns("kt-cron", "succeeded")).To(Equal(1.0))
 			rec, err = svc.GetTask(ctx, sent[0].TaskID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(rec.Output).To(Equal("all quiet"))
+		})
+
+		It("counts a task that finishes failed once", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-fail", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(10 * time.Second)
+			reconcileTrigger("kt-fail")
+			fireSchedule("kt-fail", due, "")
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-fail").Status.RecentFirings }).Should(HaveLen(1))
+			Expect(finishedRuns("kt-fail", "failed")).To(Equal(0.0))
+
+			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","error":"boom","success":false}`)
+			reconcileTrigger("kt-fail")
+			Expect(getTrigger("kt-fail").Status.RecentFirings).To(ContainElement(SatisfyAll(
+				HaveField("Run", sent[0].TaskID), HaveField("Outcome", aiv1alpha1.TriggerFiringFailed))))
+			Expect(finishedRuns("kt-fail", "failed")).To(Equal(1.0))
+			reconcileTrigger("kt-fail")
+			Expect(finishedRuns("kt-fail", "failed")).To(Equal(1.0))
+			Expect(finishedRuns("kt-fail", "succeeded")).To(Equal(0.0))
 		})
 
 		It("applies Forbid while a task is active and records a task without result as lost", func() {
@@ -1389,6 +1421,9 @@ var _ = Describe("Trigger controller", func() {
 			Expect(got()).To(HaveLen(1))
 			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
 				HaveField("Run", sent[0].TaskID), HaveField("Outcome", aiv1alpha1.TriggerFiringLost))))
+			Expect(finishedRuns("kt-forbid", "lost")).To(Equal(1.0))
+			reconcileTrigger("kt-forbid")
+			Expect(finishedRuns("kt-forbid", "lost")).To(Equal(1.0))
 		})
 
 		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
@@ -1629,6 +1664,9 @@ var _ = Describe("Trigger controller", func() {
 				HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded),
 				HaveField("Phase", aiv1alpha1.MissionPhaseSucceeded))))
 			Expect(missionsOf("mt-cron")).To(HaveLen(2))
+			Expect(finishedRuns("mt-cron", "succeeded")).To(Equal(1.0))
+			reconcileTrigger("mt-cron")
+			Expect(finishedRuns("mt-cron", "succeeded")).To(Equal(1.0))
 		})
 
 		It("rejects two target kinds and what a mission target does not support", func() {

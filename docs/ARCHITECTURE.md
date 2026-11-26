@@ -291,6 +291,7 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_tasks_dead_lettered_total` | counter | `table`, `knight`, `reason` |
 | `roundtable_dead_letters_open` | gauge | `table`, `knight` |
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` (`started`, `deduped`, `skipped`, `error`) |
+| `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` (`succeeded`, `failed`, `lost`) |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
 
 The invoke gateway serves its own metrics (`--metrics-listen`, chart: `metrics.enabled`) on a separate, unauthenticated port:
