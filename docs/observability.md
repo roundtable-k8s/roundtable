@@ -329,6 +329,8 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query.
 | `KnightLLMCostSpike` | a table's 24h LLM spend exceeds `alerts.costSpikeUSDPer24h` |
 | `RoundtableChainStepsSlow` | a chain's p95 step duration exceeds `alerts.chainStepSlowSeconds` |
 | `RoundtableDeadLettersOpen` | dead letters stay open for `alerts.deadLettersOpenMinutes` |
+| `KnightNotReady` | a knight stays `Pending`, `Provisioning` or `Degraded` for `alerts.knightNotReadyMinutes` |
+| `RoundtableToolsImageBuildFailed` | a knight's tools image build Job (`<knight>-toolsimg-<tag>`) failed; its pod rollout is held |
 | `KnightConsumerNotReady` | a knight's task consumer is missing or misconfigured for 10m |
 | `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
 | `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
