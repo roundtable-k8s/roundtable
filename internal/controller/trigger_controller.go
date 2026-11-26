@@ -439,15 +439,17 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	if err := validateGitHubSource(trg.Spec.Source.GitHub); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "source.github: %v", err)
 	}
+	if err := aiv1alpha1.ValidateConcurrency(&trg.Spec); err != nil {
+		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "%v", err)
+	}
 	switch target := trg.Spec.Target; {
 	case target.Knight != nil:
 		if _, err := parseTriggerTemplate("task", target.Knight.Task); err != nil {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "target.knight.task: %v", err)
 		}
-		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" ||
-			trg.Spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec,
-				"target.knight does not support source.github, spec.input or concurrency.policy Replace")
+				"target.knight does not support source.github or spec.input")
 		}
 		reason, msg, err := r.checkKnightTarget(ctx, trg)
 		if err != nil {
@@ -463,10 +465,9 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 		if _, err := parseTriggerTemplate("successCriteria", target.Mission.SuccessCriteria); err != nil {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "target.mission.successCriteria: %v", err)
 		}
-		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" || trg.Spec.RoundTableRef == nil ||
-			trg.Spec.Concurrency.Policy == aiv1alpha1.TriggerConcurrencyReplace {
+		if trg.Spec.Source.GitHub != nil || trg.Spec.Input != "" || trg.Spec.RoundTableRef == nil {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec,
-				"target.mission needs roundTableRef and does not support source.github, spec.input or concurrency.policy Replace")
+				"target.mission needs roundTableRef and does not support source.github or spec.input")
 		}
 		rt := &aiv1alpha1.RoundTable{}
 		if err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Spec.RoundTableRef.Name}, rt); err != nil {

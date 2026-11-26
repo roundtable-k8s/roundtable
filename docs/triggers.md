@@ -637,7 +637,7 @@ works with the gateway disabled too.
   flight.
 - `status.activeRuns` lists the task IDs without a result: they are the active
   runs `concurrency` counts. `Forbid` skips while one is in flight, `Allow`
-  caps them at `maxActive`. `Replace` is rejected: a sent task cannot be
+  caps them at `maxActive`. `Replace` is rejected (the Trigger is not Ready): a sent task cannot be
   withdrawn.
 - Dedupe: the dedupe key becomes the task's gateway `Idempotency-Key`, so a
   key that already sent a task sends nothing (also on redelivery) while the
@@ -692,7 +692,7 @@ Secret, pod or knight spec.
   its final phase and `outcome` is `succeeded`, `failed` or `lost` (expired or
   already cleaned up).
 - `status.activeRuns` lists the unfinished Missions: `Forbid` skips while one
-  exists, `Allow` caps them at `maxActive`. `Replace` is rejected.
+  exists, `Allow` caps them at `maxActive`. `Replace` is rejected (the Trigger is not Ready).
 - Dedupe: a Mission already named for the key means it fired; this holds until
   the Mission is cleaned up.
 - A firing while the RoundTable is at `policies.maxMissions` is recorded as
@@ -847,8 +847,8 @@ status:
       reason: Listening
 ```
 
-`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject or
-cron), `TargetNotFound`, `TargetWrongTable` (knight target),
+`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject, cron, or `spec.concurrency.policy: Replace` with a
+knight or mission target), `TargetNotFound`, `TargetWrongTable` (knight target),
 `RoundTableNotFound`, `ConsumerError` (for example no
 events stream: set `createStreams` or create the stream yourself),
 `CronJobError` (schedule source: no gateway URL, or a CronJob or
