@@ -5,6 +5,11 @@ metadata:
   name: model-providers
   namespace: roundtable
 spec:
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    subjectPrefix: fleet-a
+    tasksStream: fleet_a_tasks
+    resultsStream: fleet_a_results
   defaults:
     egress:
       allowedHosts:

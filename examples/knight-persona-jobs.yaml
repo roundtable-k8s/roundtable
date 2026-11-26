@@ -12,6 +12,10 @@ spec:
   domain: reader
   image: ghcr.io/roundtable-k8s/claude-knight:latest
   model: haiku
+  # A skill category is required. This persona uses none of the tools
+  # the skills carry (the built-ins are disabled in env below).
+  skills:
+    - shared
   nats:
     subjects:
       - "fleet-a.tasks.reader.>"

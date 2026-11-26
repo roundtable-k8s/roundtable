@@ -9,6 +9,8 @@ metadata:
 spec:
   domain: research
   model: sonnet
+  skills:
+    - shared
   nats:
     subjects:
       - "fleet-a.tasks.research.>"
@@ -45,6 +47,8 @@ metadata:
 spec:
   domain: infrastructure
   model: sonnet
+  skills:
+    - shared
   serviceAccountName: steward
   nats:
     subjects:
@@ -82,6 +86,8 @@ spec:
   domain: editing
   # The editor only rewrites text it is given, so the cheapest model will do.
   model: haiku
+  skills:
+    - shared
   nats:
     subjects:
       - "fleet-a.tasks.editing.>"
