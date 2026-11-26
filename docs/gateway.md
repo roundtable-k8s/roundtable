@@ -339,6 +339,12 @@ Empty output counts as a failure, as it does in the task contract.
 Returns the task record. If the task is still `pending`, the gateway first
 checks the results stream for the result and records it if found.
 
+Once the task finished, the record also carries the usage the knight
+reported, each omitted when the knight did not send it: `cost` (USD; notional
+for subscription billing), `billing`, `durationMs`, `tokens`
+(`input`, `output`, `cacheRead`, `cacheWrite`), `turns` and `toolCalls`.
+`toolCalls` is absent, not `0`, when the knight does not report tool calls.
+
 ### `GET /v1/tasks/{taskId}/events`
 
 Follows a task live as Server-Sent Events (`text/event-stream`). Connect to a
@@ -1008,7 +1014,8 @@ entry:
 | `time` | When the firing was handled |
 | `outcome` | `succeeded`, `failed`, `partiallySucceeded`, `lost`, `skipped`, `pending`, `running`, or `unknown` (the run is gone and its outcome was not recorded) |
 | `reason` | Why a firing was `skipped` (from `status.recentFirings[].skipReason`) |
-| `durationSeconds`, `costUSD` | Once the run finished, when known |
+| `durationSeconds`, `costUSD` | Once the run finished, when known. For a knight target they come from the task record the knight reported into (while it is kept) |
+| `turns`, `toolCalls` | Knight target only, while the task record is kept and the knight reported them; `toolCalls` is omitted, not 0, when not reported |
 | `run` | What to fetch the result with: the Chain run's name (a knight target: the task ID). Empty for a skipped firing |
 | `resultAvailable` | The result can still be fetched |
 | `key` | The firing's dedupe key |

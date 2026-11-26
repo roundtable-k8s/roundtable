@@ -155,6 +155,12 @@ func (k *fakeKnight) answer(js jetstream.JetStream, p natspkg.TaskPayload) {
 	case strings.Contains(p.Task, "structured"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "reviewed", Model: model, Verdict: "needs_changes",
 			PRs: []natspkg.PRRef{{Repo: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Action: "updated"}}}
+	case strings.Contains(p.Task, "usage-zero"):
+		zero := 0.0
+		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "ok", Model: model, Cost: 0.25, Billing: natspkg.BillingAPI,
+			DurationMs: 94000, Turns: 3, ToolCalls: &zero, Tokens: &natspkg.TokenUsage{Input: 10, Output: 5}}
+	case strings.Contains(p.Task, "usage-none"):
+		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "ok", Model: model, Cost: 0.25, DurationMs: 500, Turns: 2}
 	case strings.Contains(p.Task, "prose-result"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Output: "Opened #245.\nVerdict: SHIP IT", Model: model}
 	case strings.Contains(p.Task, "pi-format"):
@@ -361,6 +367,26 @@ func TestInvokeStructuredResult(t *testing.T) {
 	prs, _ = body["prs"].([]any)
 	if body["verdict"] != "ship_it" || len(prs) != 1 || prs[0].(map[string]any)["number"] != float64(245) {
 		t.Fatalf("fallback: verdict=%v prs=%v", body["verdict"], body["prs"])
+	}
+}
+
+func TestInvokeKeepsUsage(t *testing.T) {
+	e := newEnv(t, Options{})
+	_, body := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "usage-zero"})
+	tokens, _ := body["tokens"].(map[string]any)
+	if body["cost"] != 0.25 || body["billing"] != natspkg.BillingAPI || body["durationMs"] != float64(94000) ||
+		body["turns"] != float64(3) || body["toolCalls"] != float64(0) || tokens["input"] != float64(10) {
+		t.Fatalf("usage = %v", body)
+	}
+	_, body = e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "usage-none"})
+	if _, ok := body["toolCalls"]; ok || body["turns"] != float64(2) {
+		t.Fatalf("absent tool_calls must stay absent: %v", body)
+	}
+	_, body = e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "plain"})
+	for _, k := range []string{"cost", "billing", "durationMs", "tokens", "turns", "toolCalls"} {
+		if _, ok := body[k]; ok {
+			t.Errorf("%s present on a result without usage: %v", k, body)
+		}
 	}
 }
 

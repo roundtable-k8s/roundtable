@@ -464,6 +464,12 @@ func (s *Service) complete(ctx context.Context, rec *TaskRecord, data []byte) {
 	} else {
 		rec.Output = res.GetOutput()
 		rec.Model = res.Model
+		rec.Cost, rec.Billing, rec.DurationMs = res.Cost, res.Billing, res.DurationMs
+		rec.Tokens, rec.Turns = res.Tokens, int(res.Turns)
+		if res.ToolCalls != nil {
+			n := int(*res.ToolCalls)
+			rec.ToolCalls = &n
+		}
 		st := res.Structured()
 		rec.PRs, rec.Verdict = st.PRs, st.Verdict
 		switch e := res.GetError(); {
