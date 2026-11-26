@@ -823,6 +823,45 @@ var _ = Describe("Trigger controller", func() {
 			Expect(got).To(ContainSubstring(second.UTC().Format(time.RFC3339)))
 		})
 
+		It("skips a schedule firing consumed after startingDeadlineSeconds and starts one within it", func() {
+			deadline := func(s *int64) func(*aiv1alpha1.TriggerSpec) {
+				return func(spec *aiv1alpha1.TriggerSpec) {
+					spec.Source.Schedule.StartingDeadlineSeconds = s
+				}
+			}
+			hour := int64(3600)
+
+			// Consumed two hours after its slot: recorded as skipped, no run.
+			late := scheduleTrigger("late", deadline(&hour))
+			due := nextFive(late.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("late")
+			clock = due.Add(2 * time.Hour)
+			fireSchedule("late", due, "late")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("late").Status.RecentFirings }, 10*time.Second).Should(HaveLen(1))
+			Expect(getTrigger("late").Status.RecentFirings[0].SkipReason).To(Equal(
+				"missed schedule time " + due.UTC().Format(time.RFC3339) + " by more than startingDeadlineSeconds"))
+			Expect(runsOf("late")).To(BeEmpty())
+
+			// Consumed within the deadline: a run starts.
+			inTime := scheduleTrigger("intime", deadline(&hour))
+			due = nextFive(inTime.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("intime")
+			clock = due.Add(30 * time.Minute)
+			fireSchedule("intime", due, "intime")
+			Eventually(func() int { return len(runsOf("intime")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+
+			// Without the field the late firing is not skipped.
+			unset := scheduleTrigger("unset", nil)
+			due = nextFive(unset.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("unset")
+			clock = due.Add(2 * time.Hour)
+			fireSchedule("unset", due, "unset")
+			Eventually(func() int { return len(runsOf("unset")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+		})
+
 		It("updates the CronJob on a schedule change and suspend, and reads lastScheduledAt from it", func() {
 			scheduleTrigger("upd", nil)
 			reconcileTrigger("upd")
