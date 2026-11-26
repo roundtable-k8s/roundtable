@@ -202,6 +202,11 @@ func (r *ChainReconciler) collectStepResult(ctx context.Context, chain *aiv1alph
 		log.Error(err, "Failed to poll result", "step", ss.Name)
 		return
 	}
+	if result == nil {
+		// The result may have been acked off the stream by an earlier
+		// reconcile whose status write failed (#683); recover it from KV.
+		result = r.recoverStepResultFromKV(ctx, chain, ss)
+	}
 	if result != nil {
 		r.applyStepResult(ctx, nc, chain, spec, ss, result)
 	}
@@ -332,6 +337,14 @@ func (r *ChainReconciler) applyStepError(ctx context.Context, chain *aiv1alpha1.
 		ss.CompletedAt = nil
 		ss.Error = ""
 		log.Info("Retrying step", "step", ss.Name, "retry", ss.Retries, "maxRetries", retryPolicy.MaxRetries)
+		return
+	}
+	// The result is acked off the stream; keep a final failure in KV so a lost
+	// status write does not turn it into a timeout (#683). A retried failure is
+	// not stored: its entry could be mistaken for the retry's own result.
+	if spec != nil {
+		now := metav1.Now()
+		r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, "", resultErr, spec.KnightRef.Name, ss.StartedAt, &now)
 	}
 }
 
