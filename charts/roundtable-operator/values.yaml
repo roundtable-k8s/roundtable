@@ -132,6 +132,12 @@ images:
     repository: ghcr.io/roundtable-k8s/roundtable-ui
     tag: 24615ccda6af6136eb81ee07e535c00bd73095a5
 
+# Knight pod settings.
+knight:
+  # Browser sidecar image for knights that enable the browser. Empty uses the
+  # operator's built-in pinned default (never a floating tag).
+  browserImage: ""
+
 # Pod-level security context for knight pods. Set once here; the operator
 # applies it to every knight. OnRootMismatch stops kubelet from recursively
 # chowning a knight's volumes on every pod mount.

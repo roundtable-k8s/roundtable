@@ -426,6 +426,7 @@ func main() {
 		APIReader:      mgr.GetAPIReader(),
 		Recorder:       mgr.GetEventRecorderFor("knight-controller"), //nolint:staticcheck // SA1019: see note above
 		DefaultImage:   defaultImage,
+		BrowserImage:   knightpkg.BrowserImageFromEnv(),
 		KnightSecurity: knightSecurity,
 		CardsBucket:    cardsBucket,
 		SandboxEnabled: sandboxEnabled,

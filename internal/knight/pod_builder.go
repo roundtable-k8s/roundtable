@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
@@ -62,6 +63,8 @@ type PodBuilder struct {
 	envFrom    []corev1.EnvFromSource
 	telemetry  *Telemetry // nil: read from the operator environment
 	defaultImg string
+	// browserImg is the browser sidecar image; empty means DefaultBrowserImage.
+	browserImg string
 	security   PodSecurity
 	reader     client.Reader
 	// cardsBucket is the agent cards KV bucket (KNIGHT_CARDS_BUCKET).
@@ -929,11 +932,30 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 	return b
 }
 
+// DefaultBrowserImage is the browser sidecar image used when the operator is
+// not configured with KNIGHT_BROWSER_IMAGE. Pinned to a version tag so knight
+// pods are reproducible; bump deliberately.
+const DefaultBrowserImage = "docker.io/chromedp/headless-shell:133.0.6943.126"
+
+// BrowserImageFromEnv returns KNIGHT_BROWSER_IMAGE, or "" when unset.
+func BrowserImageFromEnv() string { return os.Getenv("KNIGHT_BROWSER_IMAGE") }
+
+// WithBrowserImage overrides the browser sidecar image. Empty keeps
+// DefaultBrowserImage.
+func (b *PodBuilder) WithBrowserImage(image string) *PodBuilder {
+	b.browserImg = image
+	return b
+}
+
 // WithBrowser adds a headless Chrome sidecar with agent-browser for web automation.
 func (b *PodBuilder) WithBrowser() *PodBuilder {
+	browserImage := b.browserImg
+	if browserImage == "" {
+		browserImage = DefaultBrowserImage
+	}
 	browserContainer := corev1.Container{
 		Name:  "browser",
-		Image: "docker.io/chromedp/headless-shell:latest",
+		Image: browserImage,
 		Ports: []corev1.ContainerPort{
 			{ContainerPort: 9222, Name: "cdp", Protocol: corev1.ProtocolTCP},
 		},
