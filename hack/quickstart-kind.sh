@@ -92,9 +92,11 @@ Ready. Next (see docs/getting-started.md):
     --from-literal=ANTHROPIC_API_KEY=<your key>
   kubectl --context $CTX apply -f examples/quickstart/
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-dashboard 8080:80
-Gateway (docs/gateway.md), after a port-forward of svc/$RELEASE-gateway to 8081:
+Ask the knight through the gateway (docs/gateway.md), after a port-forward of
+svc/$RELEASE-gateway to 8081 in another terminal:
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-gateway 8081:80
-  curl -H "Authorization: Bearer \$(kubectl --context $CTX -n $NAMESPACE get secret $RELEASE-gateway-token -o jsonpath='{.data.token}' | base64 -d)" http://localhost:8081/openapi.json
+  TOKEN=\$(kubectl --context $CTX -n $NAMESPACE get secret $RELEASE-gateway-token -o jsonpath='{.data.token}' | base64 -d)
+  curl -s -X POST localhost:8081/v1/knights/arthur/invoke -H "Authorization: Bearer \$TOKEN" -H 'Content-Type: application/json' -d '{"task":"In one sentence, what is a Kubernetes operator?","timeoutSeconds":120}'
 
 Tear down with: hack/quickstart-kind.sh --cluster $CLUSTER --delete
 DONE

@@ -8,8 +8,9 @@ metadata:
 spec:
   domain: general
   model: claude-sonnet-4-20250514
+  # "shared" is a skill category in the default arsenal (github.com/roundtable-k8s/arsenal).
   skills:
-    - general
+    - shared
   nats:
     url: nats://nats.roundtable.svc:4222
     stream: quickstart_tasks
