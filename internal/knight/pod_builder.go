@@ -935,6 +935,14 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 // DefaultBrowserImage is the browser sidecar image used when the operator is
 // not configured with KNIGHT_BROWSER_IMAGE. Pinned to a version tag so knight
 // pods are reproducible; bump deliberately.
+//
+// To bump: pick a current stable Chrome tag from
+// https://hub.docker.com/r/chromedp/headless-shell/tags, confirm it exists
+// (`crane digest docker.io/chromedp/headless-shell:<tag>`), update this
+// constant and the default shown in docs/helm-values.md. Nothing (e.g.
+// Renovate) tracks this constant automatically, and CI never pulls the image.
+// TODO(#673): the current tag is unverified and stale; a human must replace it
+// with a confirmed current stable tag (ideally pinned by digest).
 const DefaultBrowserImage = "docker.io/chromedp/headless-shell:133.0.6943.126"
 
 // BrowserImageFromEnv returns KNIGHT_BROWSER_IMAGE, or "" when unset.

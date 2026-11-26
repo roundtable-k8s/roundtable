@@ -176,9 +176,9 @@ networkPolicy:
 |-----|------|---------|-------------|
 | `images.piKnight.repository` | string | `ghcr.io/roundtable-k8s/pi-knight` | Default pi-knight image for all knights |
 | `images.piKnight.tag` | string | `latest` | pi-knight image tag |
-| `knight.browserImage` | string | `""` | Browser sidecar image. Empty uses the operator's pinned default (`docker.io/chromedp/headless-shell:133.0.6943.126`). Changing it changes the pod template of knights that enable the browser, so they restart once |
 | `images.dashboard.repository` | string | `ghcr.io/roundtable-k8s/roundtable-ui` | Dashboard image |
 | `images.dashboard.tag` | string | `latest` | Dashboard image tag |
+| `knight.browserImage` | string | `""` | Browser sidecar image. Empty uses the operator's pinned default (`docker.io/chromedp/headless-shell:133.0.6943.126`). Changing it changes the pod template of knights that enable the browser, so they restart once |
 
 ### Pod Security
 
