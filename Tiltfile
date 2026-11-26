@@ -61,8 +61,8 @@ helm_resource(
 # --- Operator: compile on the host, live-update the binary into the pod.
 local_resource(
     'compile',
-    'mkdir -p .tilt && CGO_ENABLED=0 GOOS=linux GOARCH=%s go build -o .tilt/manager ./cmd/main.go '
-    '&& CGO_ENABLED=0 GOOS=linux GOARCH=%s go build -o .tilt/gateway ./cmd/gateway' % (ARCH, ARCH),
+    ('mkdir -p .tilt && CGO_ENABLED=0 GOOS=linux GOARCH=%s go build -o .tilt/manager ./cmd/main.go '
+     + '&& CGO_ENABLED=0 GOOS=linux GOARCH=%s go build -o .tilt/gateway ./cmd/gateway') % (ARCH, ARCH),
     deps=['cmd', 'api', 'internal', 'pkg', 'go.mod', 'go.sum'],
     ignore=['**/*_test.go'],
     labels=['operator'],
