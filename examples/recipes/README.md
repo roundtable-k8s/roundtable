@@ -5,6 +5,24 @@ and Triggers, plus a README with how to install and test it and what the
 knights may and may not do. Each recipe is applied on top of a RoundTable (see
 [`../roundtable-fleet.yaml`](../roundtable-fleet.yaml)).
 
+## Before you start
+
+Every recipe needs these; each recipe README says in one line which apply.
+
+- **Operator installed**, with NATS (JetStream enabled) reachable: follow
+  [`docs/getting-started.md`](../../docs/getting-started.md).
+- **A RoundTable named `fleet-a`.** If yours has another name, rename `fleet-a`
+  in the recipe: the Knights' `ai.roundtable.io/round-table` label, `roundTableRef`
+  on Triggers and Chains, `spec.nats.subjectPrefix` and the `fleet-a.tasks.`
+  subjects. Change them together.
+- **The NATS URL.** The recipes use the author's `nats://nats.database.svc:4222`;
+  replace it with yours (see
+  [Adapting the examples](../README.md#adapting-the-examples) for a `sed` line).
+- **Model credentials.** Create the Secret your Knights read (for example
+  `llm-api-keys` with `ANTHROPIC_API_KEY`); no credentials are in a recipe.
+- **Model aliases.** A recipe that uses an alias such as `deep` or `fast` needs
+  it in the RoundTable's `spec.modelAliases`; otherwise use a model name.
+
 | Recipe | What it does |
 |---|---|
 | [`homelab-watch/`](homelab-watch/) | An Alertmanager webhook Trigger starts a read-only triage chain on a knight ([triggers docs](../../docs/triggers.md#webhook-source)) |

@@ -147,6 +147,10 @@ Outside the cluster; none of it is automated here.
 - **Review of what ships:** the lead's review is a model's. Keep branch
   protection and required CI as the real gate.
 
+## Before you start
+
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a table (here `roundtable-dev`, see above), the NATS URL, model credentials and the `deep`/`fast` aliases defined in `roundtable.yaml`.
+
 ## Install
 
 ```bash

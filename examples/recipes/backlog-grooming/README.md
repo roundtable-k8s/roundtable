@@ -20,6 +20,8 @@ Trigger backlog-grooming (cron, Forbid) --> Chain backlog-grooming
 
 ## Before you start
 
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, model credentials (no aliases, no NATS URL of its own); plus:
+
 - A RoundTable named `fleet-a` exists (see
   [`roundtable-fleet.yaml`](../../roundtable-fleet.yaml)). Rename `fleet-a`
   (and the `fleet-a.tasks.` subject) in the manifests if yours differs.

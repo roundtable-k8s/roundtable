@@ -25,6 +25,10 @@ Knight digest (read-only, isolated)
 | [`trigger.yaml`](trigger.yaml) | The schedule Trigger: `cron`, `timeZone`, `startingDeadlineSeconds`, `Forbid`, one task for the knight, `timeoutSeconds` |
 | [`skill/nightly-digest/`](skill/nightly-digest/) | The skill: `SKILL.md`, `scripts/collect`, `scripts/file`, `tests/run.sh` |
 
+## Before you start
+
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, the NATS URL and model credentials (no aliases).
+
 ## Install
 
 A RoundTable named `fleet-a` exists (see

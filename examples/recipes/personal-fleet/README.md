@@ -23,6 +23,8 @@ POST /v1/chains/summarize-note/runs   Chain summarize-note (on demand)
 
 ## Before you start
 
+Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, a RoundTable `fleet-a`, the NATS URL, model credentials (no aliases); plus:
+
 - The operator is installed and NATS is reachable at the URL in
   `roundtable.yaml`. If you already have a RoundTable named `fleet-a`, delete
   that document from your copy and keep the PVC. Rename `fleet-a` (and the
