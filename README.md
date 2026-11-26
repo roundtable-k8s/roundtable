@@ -29,7 +29,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Communication** | NATS JetStream — durable, replay, fan-out | In-memory function calls | HTTP/gRPC | Polling / webhooks |
 | **State** | CRDs + NATS KV (etcd-backed, declarative) | In-memory / DB | ConfigMaps / DB | Postgres |
 | **Orchestration** | Chain DAGs with templated output chaining | Code-defined graphs | YAML DAGs | Org chart delegation |
-| **Isolation** | Pod-level (NetworkPolicy, ServiceAccount) | None (shared process) | Container-level | App-level scoping |
+| **Isolation** | Pod-level plus gVisor sandbox and default-deny egress | None (shared process) | Container-level | App-level scoping |
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
@@ -37,7 +37,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 
 ## Features
 
-🗡️ **4 Custom Resources** — Knight, RoundTable, Chain, Mission — declare your entire agent fleet in YAML
+🗡️ **5 Custom Resources** — Knight, RoundTable, Chain, Mission, Trigger — declare your entire agent fleet in YAML
 
 ⚔️ **Ephemeral Missions** — spin up a purpose-built team of agents, execute an objective, tear everything down
 
@@ -186,6 +186,32 @@ Missions auto-provision ephemeral knights, create isolated NATS streams, execute
 
 **Lifecycle:** `Pending` → `Provisioning` → `Assembling` → `Briefing` → `Active` → `Succeeded/Failed` → `CleaningUp`
 
+### Trigger — Start Work from an Event
+
+A Trigger starts a Chain run, or sends one task to a knight, when something happens: a cron time, a NATS message, an authenticated webhook, or a GitHub issue or pull request matching a label query. This example runs a Chain every weekday at 07:00 New York time:
+
+```yaml
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: weekday-security-report
+  namespace: roundtable
+spec:
+  source:
+    schedule:
+      cron: "0 7 * * 1-5"
+      timeZone: America/New_York
+      startingDeadlineSeconds: 3600
+  target:
+    chainRef: {name: security-report}
+  input: |
+    Generate the security report for {{ .Event.Time.Format "Monday 2006-01-02" }}.
+  concurrency:
+    policy: Forbid
+```
+
+The full file is [`examples/trigger-schedule.yaml`](examples/trigger-schedule.yaml). Sources, dedupe keys and the status fields are in [docs/triggers.md](docs/triggers.md); the schedule behaviour is in [docs/scheduled-work.md](docs/scheduled-work.md).
+
 ---
 
 ## Architecture
@@ -284,19 +310,40 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 
 ### What Happens
 
-1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime
+1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime. Knights run under gVisor (`runsc`) and default-deny egress by default; opting out is explicit on the Knight ([runtime isolation](docs/runtime-isolation.md), [egress allowlists](docs/egress.md))
 2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenals`; empty = the default platform arsenal)
    (an arsenal with `oci` set is instead mounted read-only as an OCI image volume at `/arsenal/<name>`, pinned by digest, with no sidecar — see `examples/knight-arsenal-oci.yaml`)
 3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash
 4. A NATS JetStream consumer is configured with the knight's filter subjects
 5. The knight starts consuming tasks from the stream
 
-### Send a Task
+### Ways In
 
-```bash
-# Publish a task via NATS
-nats pub fleet-a.tasks.security.scan '{"task": "Scan example.com for open ports"}'
-```
+- **Invoke gateway** — the synchronous front door. Send a task to a knight and get the answer in the same HTTP request, or a task ID to poll if it takes longer. It also runs chains and launches missions. The gateway is in the operator's chart; see [docs/gateway.md](docs/gateway.md).
+
+  ```bash
+  curl -s -X POST "$GATEWAY/v1/knights/galahad/invoke" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"task": "Scan example.com for open ports", "timeoutSeconds": 60}'
+  ```
+
+- **Dashboard** — monitor the fleet, chain runs and missions from the browser ([roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui)).
+- **kubectl** — apply CRs and read their status, as in the examples above.
+- **NATS** — the low-level path. Publish a task straight to a knight's subject ([knight task contract](docs/knight-task-contract.md)):
+
+  ```bash
+  nats pub fleet-a.tasks.security.scan '{"task": "Scan example.com for open ports"}'
+  ```
+
+### Recipes
+
+[`examples/recipes/`](examples/recipes/) has complete fleets you can copy, each with its own README on how to install and test it:
+
+- [`homelab-watch/`](examples/recipes/homelab-watch/): an Alertmanager webhook starts a read-only triage chain
+- [`personal-fleet/`](examples/recipes/personal-fleet/): three persona knights on a shared notes volume, a scheduled briefing and an on-demand chain
+- [`dev-factory/`](examples/recipes/dev-factory/): issue to merged PR, with GitHub triggers, the PR pipeline and feedback chains
+- [`backlog-grooming/`](examples/recipes/backlog-grooming/): a scheduled lead knight that files capped `groomed` sub-issues
+- [`nightly-digest/`](examples/recipes/nightly-digest/): a scheduled read-only knight that writes a namespace digest
 
 ## Development
 
@@ -322,7 +369,10 @@ make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
 - [x] **Phase 2** — Chains (DAG workflows with output chaining)
 - [x] **Phase 3a** — Missions with existing knights
 - [x] **Phase 3b** — Ephemeral missions (dynamic knight provisioning + teardown)
-- [ ] **Phase 4** — Observability (OpenTelemetry tracing, cost tracking)
+- [x] **Phase 4** — Observability (OpenTelemetry tracing, cost tracking); the trace backend stack is still open ([docs/observability.md](docs/observability.md))
+- [x] **Triggers** — schedule, NATS, webhook and GitHub sources ([docs/triggers.md](docs/triggers.md))
+- [x] **Invoke gateway** — ask a knight, run a chain, launch a mission ([docs/gateway.md](docs/gateway.md))
+- [x] **Isolation by default** — gVisor and default-deny egress ([docs/runtime-isolation.md](docs/runtime-isolation.md), [docs/egress.md](docs/egress.md))
 - [ ] **Phase 5** — Multi-cluster federation
 
 ## Contributing
@@ -331,7 +381,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Areas where help is needed:
 - Multi-cluster support
-- OpenTelemetry integration
+- Observability backend stack ([docs/observability.md](docs/observability.md))
 - Additional knight runtime implementations
 - Dashboard improvements
 - Documentation
