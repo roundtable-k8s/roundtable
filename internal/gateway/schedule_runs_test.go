@@ -251,6 +251,35 @@ func TestScheduleRunResultKnightTarget(t *testing.T) {
 	}
 }
 
+func TestScheduleRunsKnightUsage(t *testing.T) {
+	calls := 4
+	trg := knightScheduleTrigger("u",
+		aiv1alpha1.TriggerFiring{Run: "invoke-op-1-a", Time: metav1.NewTime(scheduleT0.Add(2 * time.Hour)), Key: "a"},
+		aiv1alpha1.TriggerFiring{Run: "invoke-op-2-expired", Time: metav1.NewTime(scheduleT0.Add(time.Hour)), Key: "b"},
+		aiv1alpha1.TriggerFiring{Run: "other-task", Time: metav1.NewTime(scheduleT0), Key: "c"})
+	e := newRunsEnv(t, trg)
+	e.svc.Bus = &stubBus{recs: map[string]*TaskRecord{
+		"invoke-op-1-a": {TaskID: "invoke-op-1-a", Namespace: testNS, Status: TaskSucceeded, Output: "x",
+			DurationMs: 94000, Cost: 0.5, Turns: 6, ToolCalls: &calls},
+		"other-task": {TaskID: "other-task", Namespace: testNS, Status: TaskSucceeded, Output: "x", DurationMs: 1000, Cost: 1},
+	}}
+	_, body := e.do(t, "GET", "/v1/schedules/"+testNS+"/u/runs", testToken, nil)
+	for _, r := range runsOf(body) {
+		switch r["run"] {
+		case "invoke-op-1-a":
+			if r["durationSeconds"] != float64(94) || r["costUSD"] != "0.5" || r["turns"] != float64(6) || r["toolCalls"] != float64(4) {
+				t.Errorf("usage row = %v", r)
+			}
+		default:
+			for _, k := range []string{"durationSeconds", "costUSD", "turns", "toolCalls"} {
+				if _, ok := r[k]; ok {
+					t.Errorf("run %v has %s: %v", r["run"], k, r)
+				}
+			}
+		}
+	}
+}
+
 func missionScheduleRun(trg *aiv1alpha1.Trigger, name, result string) *aiv1alpha1.Mission {
 	return &aiv1alpha1.Mission{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: trg.Namespace,

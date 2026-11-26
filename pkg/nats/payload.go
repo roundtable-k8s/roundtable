@@ -145,8 +145,9 @@ type TaskResult struct {
 	// string so an unparseable value does not fail the whole result.
 	Timestamp string `json:"timestamp,omitempty"`
 
-	// ToolCalls is the number of tool calls the agent made (pi-knight).
-	ToolCalls float64 `json:"tool_calls,omitempty"`
+	// ToolCalls is the number of tool calls the agent made (pi-knight). A pointer so a knight that does not send it
+	// (absent) is told apart from one that made no calls (0).
+	ToolCalls *float64 `json:"tool_calls,omitempty"`
 
 	// Turns is the number of agent turns (claude-knight).
 	Turns float64 `json:"turns,omitempty"`

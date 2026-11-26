@@ -94,10 +94,20 @@ type TaskRecord struct {
 	Model string `json:"model,omitempty"`
 	// PRs and Verdict are the structured result fields (reported by the knight,
 	// else recovered from the prose output).
-	PRs         []natspkg.PRRef `json:"prs,omitempty"`
-	Verdict     string          `json:"verdict,omitempty"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+	PRs     []natspkg.PRRef `json:"prs,omitempty"`
+	Verdict string          `json:"verdict,omitempty"`
+	// Cost (USD, notional for subscription billing; see Billing), Billing,
+	// DurationMs, Tokens, Turns and ToolCalls are the usage the knight
+	// reported. Each is omitted when the knight did not send it; ToolCalls is
+	// a pointer so an absent count is not a zero count.
+	Cost        float64             `json:"cost,omitempty"`
+	Billing     string              `json:"billing,omitempty"`
+	DurationMs  float64             `json:"durationMs,omitempty"`
+	Tokens      *natspkg.TokenUsage `json:"tokens,omitempty"`
+	Turns       int                 `json:"turns,omitempty"`
+	ToolCalls   *int                `json:"toolCalls,omitempty"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	CompletedAt *time.Time          `json:"completedAt,omitempty"`
 	// Replayed marks a record returned for a repeated Idempotency-Key (the
 	// Idempotent-Replay response header). Not serialized.
 	Replayed bool `json:"-"`

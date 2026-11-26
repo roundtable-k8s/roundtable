@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +88,10 @@ type ScheduleRun struct {
 	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
 	// CostUSD is the run's cost, when known.
 	CostUSD string `json:"costUSD,omitempty"`
+	// Turns and ToolCalls are the agent turns and tool calls a knight-target
+	// run made, while its task record is kept and the knight reported them.
+	Turns     int  `json:"turns,omitempty"`
+	ToolCalls *int `json:"toolCalls,omitempty"`
 	// ResultAvailable is true while the run's result can still be fetched.
 	ResultAvailable bool `json:"resultAvailable"`
 }
@@ -231,6 +236,7 @@ func (s *Service) ListScheduleRuns(ctx context.Context, f ScheduleRunsFilter) ([
 		out = out[:limit]
 	}
 	s.markResultsAvailable(ctx, trg, out)
+	s.fillKnightUsage(ctx, trg, out)
 	return out, nil
 }
 
@@ -257,6 +263,32 @@ func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trig
 				r.ResultAvailable = true
 			}
 		}
+	}
+}
+
+// fillKnightUsage sets the duration, cost, turns and tool calls on the
+// knight-target runs from their task records. A record that is gone or
+// unreadable leaves the run as it was.
+func (s *Service) fillKnightUsage(ctx context.Context, trg *aiv1alpha1.Trigger, runs []*ScheduleRun) {
+	if trg.Spec.Target.Knight == nil || s.Bus == nil {
+		return
+	}
+	for _, r := range runs {
+		if !strings.HasPrefix(r.Run, TaskIDPrefix) || r.DurationSeconds != nil || r.CostUSD != "" {
+			continue
+		}
+		rec, err := s.Bus.GetRecord(ctx, r.Run)
+		if err != nil || rec == nil || !rec.Done() {
+			continue
+		}
+		if rec.DurationMs > 0 {
+			d := rec.DurationMs / 1000
+			r.DurationSeconds = &d
+		}
+		if rec.Cost > 0 {
+			r.CostUSD = strconv.FormatFloat(rec.Cost, 'f', -1, 64)
+		}
+		r.Turns, r.ToolCalls = rec.Turns, rec.ToolCalls
 	}
 }
 
