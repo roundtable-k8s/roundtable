@@ -963,6 +963,11 @@ spec:
                       - Expired
                       - CleaningUp
                       type: string
+                    reason:
+                      description: reason says why a started run ended failed or lost
+                        (knight target).
+                      maxLength: 512
+                      type: string
                     run:
                       description: |-
                         run is the Chain the firing started, or the task ID of the task it

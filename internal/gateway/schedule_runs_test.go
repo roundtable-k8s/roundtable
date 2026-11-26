@@ -105,6 +105,24 @@ func runsOf(body map[string]any) []map[string]any {
 	return out
 }
 
+func TestScheduleRunsKnightFiringReason(t *testing.T) {
+	trg := runScheduleTrigger("digest-daily", func(t *aiv1alpha1.Trigger) {
+		t.Status.RecentFirings = []aiv1alpha1.TriggerFiring{
+			{Time: metav1.NewTime(scheduleT0), Key: "k", Run: "invoke-x-1",
+				Outcome: aiv1alpha1.TriggerFiringFailed, Reason: "boom"},
+		}
+	})
+	e := newRunsEnv(t, trg)
+	resp, body := e.do(t, "GET", "/v1/schedules/"+testNS+"/digest-daily/runs", testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %v", resp.StatusCode, body)
+	}
+	runs := runsOf(body)
+	if len(runs) != 1 || runs[0]["outcome"] != "failed" || runs[0]["reason"] != "boom" {
+		t.Errorf("runs = %v", runs)
+	}
+}
+
 func TestScheduleRunsHistory(t *testing.T) {
 	trg := runScheduleTrigger("digest-daily", func(t *aiv1alpha1.Trigger) {
 		t.Status.RecentFirings = []aiv1alpha1.TriggerFiring{
