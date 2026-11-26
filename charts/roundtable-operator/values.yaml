@@ -91,6 +91,16 @@ mission:
   # bucket whose TTL differs. Copy results out (nats kv get) before they expire.
   resultsTTL: 720h
 
+# Chains.
+chains:
+  # How Chain.spec.schedule runs. inprocess: the operator's in-process cron
+  # runs the Chain object itself (the default). trigger: the operator creates
+  # a schedule Trigger <chain>-schedule owned by the Chain; its CronJob starts
+  # a copy of the Chain per fire, like any Trigger with target.chainRef (needs
+  # triggers.gatewayURL or the chart's gateway). Switching either way does not
+  # fire a schedule twice. See docs/triggers.md.
+  scheduleMode: inprocess
+
 # Additional args to pass to the manager
 extraArgs: []
 

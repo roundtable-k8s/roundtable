@@ -78,8 +78,11 @@ type ChainReconciler struct {
 	ProviderMaxRetries int
 	// TracerProvider makes the chain run spans; nil uses the global one.
 	TracerProvider trace.TracerProvider
-	cron           *cron.Cron
-	mu             sync.Mutex
+	// ScheduleMode selects how spec.schedule runs: the in-process cron
+	// (empty or inprocess) or an owned schedule Trigger (trigger).
+	ScheduleMode ChainScheduleMode
+	cron         *cron.Cron
+	mu           sync.Mutex
 	// cronEntries maps chain namespace/name to cron entry ID
 	cronEntries map[string]cron.EntryID
 	// cronSpecs maps chain namespace/name to the effective cron spec (with
@@ -101,6 +104,7 @@ func (r *ChainReconciler) natsClient() (natspkg.Client, error) {
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=knights,verbs=get;list;watch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=missions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=ai.roundtable.io,resources=roundtables,verbs=get;list;watch
+// +kubebuilder:rbac:groups=ai.roundtable.io,resources=triggers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
@@ -125,6 +129,11 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 	// Handle deletion
 	if chain.DeletionTimestamp != nil {
 		r.removeCronEntry(req.NamespacedName)
+		// Garbage collection removes the owned schedule Trigger too; deleting
+		// it here stops its CronJob without waiting for that.
+		if err := r.deleteScheduleTrigger(ctx, chain); err != nil {
+			return ctrl.Result{}, err
+		}
 		chain.Finalizers = util.RemoveString(chain.Finalizers, chainFinalizer)
 		if err := r.Update(ctx, chain); err != nil {
 			return ctrl.Result{}, err
@@ -177,8 +186,21 @@ func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 		ObservedGeneration: chain.Generation,
 	})
 
-	// Handle schedule, catching up a missed fire (e.g. operator downtime)
-	if r.reconcileSchedule(ctx, chain) {
+	// Handle schedule. In trigger mode an owned Trigger runs it (its CronJob
+	// catches up missed fires); in-process mode drops any such Trigger so a
+	// mode switch never fires a schedule twice.
+	if r.triggerMode() {
+		changed, err := r.reconcileScheduleTrigger(ctx, chain)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if changed {
+			return r.updateStatus(ctx, chain, 0)
+		}
+	} else if err := r.deleteScheduleTrigger(ctx, chain); err != nil {
+		return ctrl.Result{}, err
+	} else if r.reconcileSchedule(ctx, chain) {
+		// Catch up a missed fire (e.g. operator downtime).
 		log.Info("Missed scheduled run detected, triggering catch-up")
 		r.triggerChain(ctx, req.NamespacedName)
 		return ctrl.Result{Requeue: true}, nil
@@ -468,6 +490,7 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Chain{}).
+		Owns(&aiv1alpha1.Trigger{}).
 		Named("chain").
 		Complete(r)
 }

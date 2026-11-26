@@ -112,6 +112,10 @@ func main() {
 	var triggerTaskTTL, scheduleResultRetention time.Duration
 	var triggerSchedule controller.TriggerScheduleConfig
 	var triggerPullPolicy string
+	var chainScheduleMode string
+	flag.StringVar(&chainScheduleMode, "chain-schedule-mode", string(controller.ChainScheduleModeInProcess),
+		"How Chain.spec.schedule runs: inprocess (the operator's cron runs the Chain itself) or trigger "+
+			"(an owned schedule Trigger <chain>-schedule and its CronJob start a copy of the Chain per fire).")
 	flag.StringVar(&triggerSchedule.Image, "trigger-image", os.Getenv("OPERATOR_IMAGE"),
 		"Image of the pod a scheduled Trigger's CronJob runs (the operator's own image; it runs "+
 			"`/manager fire-trigger`). Empty leaves scheduled Triggers not Ready.")
@@ -179,6 +183,13 @@ func main() {
 	triggerSchedule.ImagePullPolicy = corev1.PullPolicy(triggerPullPolicy)
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	scheduleMode, err := controller.ParseChainScheduleMode(chainScheduleMode)
+	if err != nil {
+		setupLog.Error(err, "Invalid --chain-schedule-mode")
+		os.Exit(1)
+	}
+	setupLog.Info("Chain schedule mode", "mode", scheduleMode)
 
 	// Register the W3C trace-context + baggage propagator unless something
 	// else already installed one, so trace context crosses NATS.
@@ -458,6 +469,7 @@ func main() {
 
 		DefaultKnightImage: defaultImage,
 		ProviderMaxRetries: providerMaxRetries,
+		ScheduleMode:       scheduleMode,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Chain")
 		os.Exit(1)

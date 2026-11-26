@@ -44,6 +44,7 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 | `resources.limits.cpu` | string | `200m` | CPU limit |
 | `resources.limits.memory` | string | `128Mi` | Memory limit |
 | `mission.resultsTTL` | duration | `720h` | How long retained mission results (`spec.retainResults`) are kept in the `mission-results` NATS KV bucket (Go duration; 720h = 30 days). An existing bucket with a different TTL is updated |
+| `chains.scheduleMode` | string | `inprocess` | How `Chain.spec.schedule` runs (`--chain-schedule-mode`): `inprocess` (the operator's cron runs the Chain itself) or `trigger` (an owned schedule Trigger `<chain>-schedule` and its CronJob start a copy of the Chain per fire; needs the gateway, see `triggers.gatewayURL`). See [triggers.md](triggers.md#chain-schedules) |
 | `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1beta1` Sandbox is served), `true`, or `false`. Supports agent-sandbox v1.0.0 or later (developed against v1.0.12) |
 | `keda` | string | `auto` | KEDA autoscaling for knights with `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`: `auto` (enable only if `keda.sh/v1alpha1` ScaledObject is served), `true`, or `false` |
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |

@@ -597,8 +597,68 @@ with the Trigger, so a CronJob edited by hand is reset at the next reconcile.
 `status.lastScheduledAt` is the CronJob's `status.lastScheduleTime`;
 `status.nextScheduledAt` is computed for display only.
 
-`Chain.spec.schedule` still uses the operator's in-process scheduler until its
-own follow-up moves it onto this mechanism.
+`Chain.spec.schedule` runs on this mechanism only when the operator is started
+in `trigger` mode; see [Chain schedules](#chain-schedules).
+
+## Chain schedules
+
+How `Chain.spec.schedule` runs is an operator setting:
+`--chain-schedule-mode` (chart value `chains.scheduleMode`).
+
+| Mode | What fires | What runs | Where the status is |
+|------|------------|-----------|---------------------|
+| `inprocess` (default) | the operator's in-process cron | the Chain object itself (phase, step statuses and run counters on the Chain) | the Chain |
+| `trigger` | the CronJob of a schedule Trigger `<chain>-schedule` | a copy of the Chain per firing, named by the Trigger (`<chain>-<trigger>-<hash>`), like any Trigger with `target.chainRef` | the copy; the Trigger's `status.recentFirings` |
+
+In `trigger` mode the chain controller creates and owns (controller owner
+reference) the Trigger `<chain>-schedule`, labelled
+`app.kubernetes.io/managed-by: roundtable-operator`:
+
+- `source.schedule` from `spec.schedule`, `spec.timeZone` and
+  `spec.startingDeadlineSeconds`;
+- `target.chainRef` = the Chain, `roundTableRef` = the Chain's;
+- `spec.suspend` = the Chain's `spec.suspend`;
+- `concurrency.policy: Forbid` (a fire while the previous copy still runs is
+  skipped, as the in-process scheduler does);
+- no `spec.input`, so each copy gets the Chain's `spec.input` verbatim (it is
+  never rendered as a Trigger template, so a literal `{{` stays literal).
+
+The Trigger is updated when those fields change (a hand edit is reset) and
+deleted when `spec.schedule` is cleared or the Chain is deleted; its CronJob,
+ServiceAccount and run copies go with it. The Trigger's
+`status.lastScheduledAt` and `status.nextScheduledAt` are copied to the
+Chain's status fields of the same names, so `kubectl get chains` still shows
+the next fire. A missed fire is caught up by the CronJob
+(`startingDeadlineSeconds`), not by the operator. The schedules API lists the
+Trigger as `managedBy: other` and refuses `PUT` and `DELETE` on it (409):
+change the Chain instead. Suspend, resume and run-now work as for any
+schedule.
+
+If a Trigger named `<chain>-schedule` already exists and is not controlled by
+the Chain, the chain controller leaves it alone, does not run the schedule,
+and records a `ScheduleTriggerConflict` Warning event on the Chain. Rename or
+delete that Trigger.
+
+Switching modes never fires a schedule twice: in `trigger` mode the Chain has
+no in-process cron entry, and in `inprocess` mode the chain controller deletes
+the Trigger it owns before scheduling in process. The last fire time carries
+over in `status.lastScheduledAt`, so the in-process catch-up does not re-run a
+fire the CronJob already made.
+
+Migrating to `trigger` mode:
+
+1. Make sure scheduled Triggers work: the gateway is enabled (or
+   `triggers.gatewayURL` is set) and the namespaces of scheduled Chains can
+   reach it (`gateway.networkPolicy.from`) and are allowed by
+   `gateway.serviceAccountAuth.allowedNamespaces`.
+2. Check that nothing reads run results from the scheduled Chain object
+   itself (its phase, step outputs or `runsSucceeded`): in `trigger` mode
+   those are on the copies (`kubectl get chains -l ai.roundtable.io/trigger=<chain>-schedule`).
+3. Set `chains.scheduleMode: trigger` and upgrade. Each scheduled Chain gets
+   its Trigger and CronJob at the next reconcile:
+   `kubectl get triggers,cronjobs -l app.kubernetes.io/managed-by=roundtable-operator`.
+4. To go back, set `chains.scheduleMode: inprocess`; the owned Triggers are
+   deleted and the in-process cron takes over.
 
 ## Knight target
 
