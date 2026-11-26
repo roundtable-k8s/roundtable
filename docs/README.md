@@ -7,6 +7,7 @@ usually needs them. The [README](../README.md) gives the overview.
 
 - [Getting started](getting-started.md): from nothing to a two-step Chain on a local kind cluster in about ten minutes.
 - [Install](install.md): install the Helm chart on an existing cluster, with Flux or plain Helm.
+- [Troubleshooting](troubleshooting.md): first-install problems, keyed on the conditions, reasons and events the operator sets.
 - [Dependencies](dependencies.md): Kubernetes and NATS with JetStream are required; every other add-on is optional.
 
 ## Run a fleet

@@ -195,6 +195,8 @@ chart does not create that PVC. Either create it or set
 `dashboard.vault.enabled=false`, or the dashboard pod stays Pending. The kind
 quickstart (`hack/quickstart-kind.sh`) sets all of the above.
 
+If a knight is not Ready after installing, see [troubleshooting](troubleshooting.md).
+
 ## 3. Upgrading and CRDs
 
 Helm installs the CRDs in the chart's `crds/` directory on first install. Helm
