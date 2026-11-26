@@ -918,3 +918,20 @@ events stream: set `createStreams` or create the stream yourself),
 ServiceAccount of that name not owned by the Trigger). A github
 source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
 and `lastPolledAt`.
+
+### Schedule health
+
+`kubectl get trigger` shows Schedule (cron) and Next for a schedule source;
+`-o wide` adds Time Zone and Last Scheduled. Besides `lastScheduledAt` and
+`nextScheduledAt`, a schedule source has:
+
+- `status.lastSuccessfulScheduledAt`: the CronJob's `status.lastSuccessfulTime`.
+- Condition `ScheduleHealthy`: `False` with reason `FireJobFailing` and the
+  failed Job's name in the message while the most recent Job of the CronJob
+  failed (gateway unreachable, 403 for the ServiceAccount, image pull error);
+  `True` otherwise. It does not change `Ready`.
+
+Events: a Warning `FireJobFailed` once per failed Job, and a Normal
+`FiringSkipped` (reason and schedule time) when a schedule firing is skipped,
+for example by `concurrency: Forbid`. A retried slot (dedupe) emits none.
+The operator needs `get;list;watch` on `jobs` (batch) for this.

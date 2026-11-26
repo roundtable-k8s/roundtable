@@ -838,6 +838,11 @@ type TriggerStatus struct {
 	// +optional
 	LastScheduledAt *metav1.Time `json:"lastScheduledAt,omitempty"`
 
+	// lastSuccessfulScheduledAt is when the CronJob's firing Job last
+	// succeeded (its status.lastSuccessfulTime; schedule source).
+	// +optional
+	LastSuccessfulScheduledAt *metav1.Time `json:"lastSuccessfulScheduledAt,omitempty"`
+
 	// nextScheduledAt is the next schedule time, computed for display
 	// (schedule source; the CronJob decides when it fires).
 	// +optional
@@ -873,7 +878,8 @@ type TriggerStatus struct {
 	LastPolledAt *metav1.Time `json:"lastPolledAt,omitempty"`
 
 	// conditions: Ready is True while the Trigger is listening; GitHubReady
-	// (github source) is True while polling works.
+	// (github source) is True while polling works; ScheduleHealthy (schedule
+	// source) is False while the CronJob's most recent firing Job failed.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -883,6 +889,10 @@ type TriggerStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=trg,categories=roundtable
+// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.source.schedule.cron`
+// +kubebuilder:printcolumn:name="Next",type=date,JSONPath=`.status.nextScheduledAt`
+// +kubebuilder:printcolumn:name="Time Zone",type=string,JSONPath=`.spec.source.schedule.timeZone`,priority=1
+// +kubebuilder:printcolumn:name="Last Scheduled",type=date,JSONPath=`.status.lastScheduledAt`,priority=1
 // +kubebuilder:printcolumn:name="Chain",type=string,JSONPath=`.spec.target.chainRef.name`
 // +kubebuilder:printcolumn:name="Knight",type=string,JSONPath=`.spec.target.knight.name`
 // +kubebuilder:printcolumn:name="Mission",type=string,JSONPath=`.spec.target.mission.objective`,priority=1

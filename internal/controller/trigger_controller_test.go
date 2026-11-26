@@ -734,6 +734,95 @@ var _ = Describe("Trigger controller", func() {
 			Expect(getCronJob("trigger-cron").ResourceVersion).To(Equal(rv))
 		})
 
+		It("sets ScheduleHealthy False for a failed firing Job and clears it on a later success", func() {
+			scheduleTrigger("health", nil)
+			reconcileTrigger("health")
+			cj := getCronJob("trigger-health")
+			Expect(meta.IsStatusConditionTrue(getTrigger("health").Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)).To(BeTrue())
+
+			newJob := func(name string) *batchv1.Job {
+				j := &batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name, Namespace: ns,
+						OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(cj, batchv1.SchemeGroupVersion.WithKind("CronJob"))},
+					},
+					Spec: *cj.Spec.JobTemplate.Spec.DeepCopy(),
+				}
+				Expect(k8sClient.Create(ctx, j)).To(Succeed())
+				return j
+			}
+			failJob := func(j *batchv1.Job) {
+				now := metav1.Now()
+				j.Status.StartTime = &now
+				j.Status.Conditions = []batchv1.JobCondition{
+					{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded", LastTransitionTime: now},
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded", Message: "Job has reached the specified backoff limit", LastTransitionTime: now},
+				}
+				Expect(k8sClient.Status().Update(ctx, j)).To(Succeed())
+			}
+			j1 := newJob("trigger-health-1")
+			failJob(j1)
+			reconcileTrigger("health")
+			cond := meta.FindStatusCondition(getTrigger("health").Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerFireJobFailing))
+			Expect(cond.Message).To(ContainSubstring("trigger-health-1"))
+			// Ready is unchanged.
+			Expect(meta.IsStatusConditionTrue(getTrigger("health").Status.Conditions, aiv1alpha1.ConditionTriggerReady)).To(BeTrue())
+
+			// One Warning event per failed Job, however often it is reconciled.
+			reconcileTrigger("health")
+			rec := r.Recorder.(*record.FakeRecorder)
+			var failed int
+			for len(rec.Events) > 0 {
+				if strings.Contains(<-rec.Events, "FireJobFailed") {
+					failed++
+				}
+			}
+			Expect(failed).To(Equal(1))
+
+			// A later Job that did not fail clears it.
+			time.Sleep(1100 * time.Millisecond) // creationTimestamp has second resolution
+			newJob("trigger-health-2")
+			reconcileTrigger("health")
+			Expect(meta.IsStatusConditionTrue(getTrigger("health").Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)).To(BeTrue())
+
+			// The CronJob's last successful time is mirrored.
+			ok := metav1.NewTime(clock.Add(-time.Minute).Truncate(time.Second))
+			cj = getCronJob("trigger-health")
+			cj.Status.LastSuccessfulTime = &ok
+			Expect(k8sClient.Status().Update(ctx, cj)).To(Succeed())
+			reconcileTrigger("health")
+			Expect(getTrigger("health").Status.LastSuccessfulScheduledAt.Time).To(BeTemporally("==", ok.Time))
+		})
+
+		It("emits FiringSkipped for a schedule firing skipped by Forbid", func() {
+			t := scheduleTrigger("skipev", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("skipev")
+			fireSchedule("skipev", due, "")
+			Eventually(func() int { return len(runsOf("skipev")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+
+			second := due.Add(5 * time.Minute)
+			fireSchedule("skipev", second, "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("skipev").Status.RecentFirings }, 10*time.Second).Should(HaveLen(2))
+			rec := r.Recorder.(*record.FakeRecorder)
+			var got string
+			Eventually(func() string {
+				for len(rec.Events) > 0 {
+					if e := <-rec.Events; strings.Contains(e, "FiringSkipped") {
+						got = e
+					}
+				}
+				return got
+			}, 10*time.Second, 100*time.Millisecond).ShouldNot(BeEmpty())
+			Expect(got).To(ContainSubstring("concurrency Forbid"))
+			Expect(got).To(ContainSubstring(second.UTC().Format(time.RFC3339)))
+		})
+
 		It("updates the CronJob on a schedule change and suspend, and reads lastScheduledAt from it", func() {
 			scheduleTrigger("upd", nil)
 			reconcileTrigger("upd")

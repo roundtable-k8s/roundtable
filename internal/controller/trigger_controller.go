@@ -41,8 +41,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
@@ -125,6 +127,7 @@ type TriggerReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile keeps a Trigger's consumer or schedule in line with its spec.
@@ -217,6 +220,14 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	latest.Status.Consumer = trg.Status.Consumer
 	latest.Status.NextScheduledAt = trg.Status.NextScheduledAt
 	latest.Status.LastScheduledAt = trg.Status.LastScheduledAt
+	latest.Status.LastSuccessfulScheduledAt = trg.Status.LastSuccessfulScheduledAt
+	if latest.Spec.Source.Schedule == nil {
+		meta.RemoveStatusCondition(&latest.Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)
+		latest.Status.LastSuccessfulScheduledAt = nil
+	} else if c := meta.FindStatusCondition(trg.Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy); c != nil {
+		c.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, *c)
+	}
 	latest.Status.ObservedGeneration = latest.Generation
 	latest.Status.SuspendedBy = trg.SuspendedBy()
 	cond.ObservedGeneration = latest.Generation
@@ -354,6 +365,9 @@ func (r *TriggerReconciler) suspend(ctx context.Context, trg *aiv1alpha1.Trigger
 				return metav1.Condition{}, err
 			default:
 				trg.Status.LastScheduledAt = cj.Status.LastScheduleTime
+				if err := r.observeFireJobs(ctx, trg, cj); err != nil {
+					return metav1.Condition{}, err
+				}
 				msg += "; CronJob " + cj.Name + " is suspended"
 			}
 		}
@@ -632,6 +646,9 @@ func (r *TriggerReconciler) reconcileSchedule(ctx context.Context, trg *aiv1alph
 		return ctrl.Result{}, metav1.Condition{}, err
 	}
 	trg.Status.LastScheduledAt = cj.Status.LastScheduleTime
+	if err := r.observeFireJobs(ctx, trg, cj); err != nil {
+		return ctrl.Result{}, metav1.Condition{}, err
+	}
 
 	res, cond, err := r.reconcileNATS(ctx, trg, notReady)
 	if err != nil || cond.Status != metav1.ConditionTrue {
@@ -818,6 +835,11 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		}
 		if outcome == triggerTerm {
 			r.event(trg, corev1.EventTypeWarning, "EventRejected", "%s", firing.SkipReason)
+		}
+		if trg.Spec.Source.Schedule != nil && outcome == triggerHandled && metricOutcome == "" && manual == nil {
+			// A retried slot (dedupe) is not reported: only a skipped one.
+			r.event(trg, corev1.EventTypeNormal, "FiringSkipped", "%s (schedule time %s)",
+				firing.SkipReason, ev.Time.UTC().Format(time.RFC3339))
 		}
 		return outcome, nil
 	}
@@ -1250,6 +1272,15 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&aiv1alpha1.Mission{}).
 		// A CronJob's status.lastScheduleTime is the Trigger's lastScheduledAt.
 		Owns(&batchv1.CronJob{}).
+		// The CronJob's firing Jobs carry the Trigger's label; a failed one
+		// turns ScheduleHealthy False.
+		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			name := obj.GetLabels()[aiv1alpha1.LabelTrigger]
+			if name == "" || obj.GetLabels()["app.kubernetes.io/managed-by"] != triggerManagedBy {
+				return nil
+			}
+			return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
+		})).
 		Named("trigger").
 		Complete(r)
 }

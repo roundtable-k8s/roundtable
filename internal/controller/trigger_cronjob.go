@@ -22,11 +22,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -302,5 +304,53 @@ func (r *TriggerReconciler) deleteScheduleObjects(ctx context.Context, trg *aiv1
 		}
 		logf.FromContext(ctx).Info("Deleted "+kind+" of removed schedule source", "name", obj.GetName())
 	}
+	return nil
+}
+
+// observeFireJobs records the schedule's health on trg.Status: the CronJob's
+// last successful time and the ScheduleHealthy condition, which is False
+// while the CronJob's most recent Job failed. A Warning event FireJobFailed
+// is emitted once per failed Job.
+func (r *TriggerReconciler) observeFireJobs(ctx context.Context, trg *aiv1alpha1.Trigger, cj *batchv1.CronJob) error {
+	trg.Status.LastSuccessfulScheduledAt = cj.Status.LastSuccessfulTime
+	jobs := &batchv1.JobList{}
+	if err := r.reader().List(ctx, jobs, client.InNamespace(trg.Namespace)); err != nil {
+		return err
+	}
+	var latest *batchv1.Job
+	for i := range jobs.Items {
+		j := &jobs.Items[i]
+		if !metav1.IsControlledBy(j, cj) {
+			continue
+		}
+		if latest == nil || latest.CreationTimestamp.Before(&j.CreationTimestamp) ||
+			(latest.CreationTimestamp.Equal(&j.CreationTimestamp) && latest.Name < j.Name) {
+			latest = j
+		}
+	}
+	cond := metav1.Condition{
+		Type: aiv1alpha1.ConditionTriggerScheduleHealthy, Status: metav1.ConditionTrue,
+		Reason: aiv1alpha1.ReasonTriggerFireJobsHealthy, Message: "the CronJob's latest firing Job did not fail",
+	}
+	if latest != nil {
+		for _, c := range latest.Status.Conditions {
+			if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+				cond.Status = metav1.ConditionFalse
+				cond.Reason = aiv1alpha1.ReasonTriggerFireJobFailing
+				cond.Message = fmt.Sprintf("Job %s failed: %s", latest.Name, c.Reason)
+				if c.Message != "" {
+					cond.Message += ": " + c.Message
+				}
+				break
+			}
+		}
+	}
+	if cond.Status == metav1.ConditionFalse {
+		prev := meta.FindStatusCondition(trg.Status.Conditions, cond.Type)
+		if prev == nil || prev.Status != metav1.ConditionFalse || !strings.HasPrefix(prev.Message, "Job "+latest.Name+" failed") {
+			r.event(trg, corev1.EventTypeWarning, "FireJobFailed", "%s", cond.Message)
+		}
+	}
+	meta.SetStatusCondition(&trg.Status.Conditions, cond)
 	return nil
 }
