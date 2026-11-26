@@ -3,7 +3,9 @@ name: roundtable-operator
 description: Knights of the Round Table — A Kubernetes Operator for Multi-Agent AI Orchestration
 type: application
 version: 0.25.0
-appVersion: "1.0.0"
+# Placeholder for installs straight from this directory: the CI and Release workflows
+# overwrite appVersion (commit SHA on main, vX.Y.Z on tags). Keep it a tag that exists.
+appVersion: "latest"
 keywords:
   - ai
   - agents

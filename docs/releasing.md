@@ -1,7 +1,7 @@
 # Cutting a release
 
 1. **Check main is green.** Tag only a commit whose CI run (build, lint, tests, helm-check) passed.
-2. **Confirm `Chart.yaml` `version`** is the version you are releasing and has no `v` tag yet. The `helm` job on main fails when `v<version>` already exists, so a released chart version is never overwritten.
+2. **Confirm `Chart.yaml` `version`** only needs to have no `v` tag yet: the git tag you push in step 3 sets the released version. The `helm` job on main fails when `v<version>` already exists, so a released chart version is never overwritten.
 3. **Tag and push:** `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
 
 ## What the Release workflow publishes
