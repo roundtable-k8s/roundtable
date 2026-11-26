@@ -25,7 +25,7 @@ and an OTLP SaaS endpoint.
 | Component | `service.name` | What it emits |
 |---|---|---|
 | Operator | `roundtable-operator` | Chain and Mission root spans, step/item/iteration spans, NATS publish spans |
-| Invoke gateway | `roundtable-gateway` | Root span for a single "ask a knight" call |
+| Invoke gateway | `roundtable-gateway` | A server span per request (`<METHOD> <route template>`, skipping `/healthz`); the root span of an "ask a knight" call unless the caller sent a `traceparent` |
 | Dashboard API | `roundtable-ui` | Its own HTTP spans; links to traces via `telemetry.traceUrlTemplate` |
 | pi-knight / claude-knight | `pi-knight` / `claude-knight` | `invoke_agent`, `chat` and `execute_tool` spans (pi-knight#43, claude-knight#2) |
 
@@ -34,7 +34,7 @@ root span once, stores it on the resource as `status.traceContext` (W3C trace
 context) and `status.traceID`, and parents later spans from it. Tasks travel to
 knights over NATS with `traceparent`/`tracestate` headers (#155), so the
 knight's spans join the same trace. A single "ask a knight" call through the
-gateway is its own trace. A `retry-failed` resume starts a new trace.
+gateway is its own trace (or continues the caller's, when the request carries a `traceparent`); the gateway's server span is the parent of the knight's `invoke_agent` span, and the task record's `traceId` names the trace. A `retry-failed` resume starts a new trace.
 
 ```
 chain <chain>                          (operator, root)

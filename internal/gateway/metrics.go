@@ -20,10 +20,16 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
@@ -38,6 +44,25 @@ const (
 	// healthRoute is not logged: probes would drown the request log.
 	healthRoute = "GET /healthz"
 )
+
+// tracerName is the instrumentation scope of the gateway's server spans.
+const tracerName = "github.com/roundtable-k8s/roundtable/internal/gateway"
+
+// traceIDFrom returns the trace ID of the span in ctx, "" when there is none.
+func traceIDFrom(ctx context.Context) string {
+	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+
+// routeTemplate drops the method from a ServeMux pattern ("GET /v1/x" -> "/v1/x").
+func routeTemplate(pattern string) string {
+	if _, path, ok := strings.Cut(pattern, " "); ok {
+		return path
+	}
+	return pattern
+}
 
 type requestInfoKey struct{}
 
@@ -102,6 +127,17 @@ func instrument(next http.Handler, log logr.Logger) http.Handler {
 		ri := &requestInfo{}
 		r = r.WithContext(context.WithValue(r.Context(), requestInfoKey{}, ri))
 		rec := &statusRecorder{ResponseWriter: w}
+
+		// Server span: a child of an incoming traceparent, in the request
+		// context so the handlers' NATS publishes carry it to the knight.
+		// Health probes get none. With no provider installed it is a no-op.
+		traced := r.Method != http.MethodGet || r.URL.Path != "/healthz"
+		var span trace.Span
+		if traced {
+			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			ctx, span = otel.Tracer(tracerName).Start(ctx, r.Method, trace.WithSpanKind(trace.SpanKindServer))
+			r = r.WithContext(ctx)
+		}
 		next.ServeHTTP(rec, r)
 
 		// The routing muxes set r.Pattern on this request: the innermost
@@ -124,11 +160,34 @@ func instrument(next http.Handler, log logr.Logger) http.Handler {
 			kind, caller = c.Kind, c.String()
 		}
 		elapsed := time.Since(start)
+		traceID := ""
+		if traced {
+			span.SetName(r.Method + " " + routeTemplate(route))
+			attrs := []attribute.KeyValue{
+				attribute.String("http.request.method", r.Method),
+				attribute.Int("http.response.status_code", code),
+			}
+			if table != noTable {
+				attrs = append(attrs, attribute.String("roundtable.table", table))
+			}
+			span.SetAttributes(attrs...)
+			if code >= http.StatusInternalServerError {
+				span.SetStatus(codes.Error, http.StatusText(code))
+			}
+			if span.IsRecording() {
+				traceID = span.SpanContext().TraceID().String()
+			}
+			span.End()
+		}
 		metrics.GatewayRequestsTotal.WithLabelValues(route, strconv.Itoa(code), table, kind).Inc()
 		metrics.GatewayRequestDurationSeconds.WithLabelValues(route).Observe(elapsed.Seconds())
 		if route != healthRoute {
-			log.Info("Request", "method", r.Method, "route", route, "code", code, "durationMs", elapsed.Milliseconds(),
-				"caller", caller, "callerKind", kind, "table", table)
+			kv := []any{"method", r.Method, "route", route, "code", code, "durationMs", elapsed.Milliseconds(),
+				"caller", caller, "callerKind", kind, "table", table}
+			if traceID != "" {
+				kv = append(kv, "trace_id", traceID)
+			}
+			log.Info("Request", kv...)
 		}
 	})
 }

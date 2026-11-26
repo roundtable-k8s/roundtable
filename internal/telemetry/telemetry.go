@@ -41,6 +41,12 @@ func Endpoint() string {
 // leaves the global no-op provider in place and returns a no-op shutdown.
 // The returned shutdown flushes and stops the exporter.
 func Setup(ctx context.Context, version string) (func(context.Context) error, error) {
+	return SetupService(ctx, DefaultServiceName, version)
+}
+
+// SetupService is Setup for a component other than the operator: serviceName
+// is the service.name used when OTEL_SERVICE_NAME is not set (which still wins).
+func SetupService(ctx context.Context, serviceName, version string) (func(context.Context) error, error) {
 	noop := func(context.Context) error { return nil }
 	if !Enabled() {
 		return noop, nil
@@ -55,7 +61,7 @@ func Setup(ctx context.Context, version string) (func(context.Context) error, er
 	// OTEL_RESOURCE_ATTRIBUTES on top.
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			attribute.String("service.name", DefaultServiceName),
+			attribute.String("service.name", serviceName),
 			attribute.String("service.version", version),
 		),
 		resource.WithFromEnv(),
