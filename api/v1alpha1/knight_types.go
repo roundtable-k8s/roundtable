@@ -1061,6 +1061,7 @@ type KnightStatus struct {
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.readyReplicas`,priority=1
 // +kubebuilder:printcolumn:name="Isolated",type=string,JSONPath=`.status.conditions[?(@.type=="Isolated")].status`
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.tasksCompleted`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].reason`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Knight is the Schema for the knights API.

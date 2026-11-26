@@ -41,6 +41,10 @@ spec:
     - jsonPath: .status.tasksCompleted
       name: Tasks
       type: integer
+    - jsonPath: .status.conditions[?(@.type=="Available")].reason
+      name: Reason
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
