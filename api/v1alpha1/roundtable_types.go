@@ -428,16 +428,6 @@ type RoundTableDefaults struct {
 
 // RoundTablePolicies defines fleet-level operational policies.
 type RoundTablePolicies struct {
-	// maxConcurrentTasks is the maximum total concurrent tasks across all knights in this table.
-	// 0 means unlimited.
-	//
-	// Deprecated: not enforced. The operator never limits concurrent tasks
-	// per table; use maxConcurrentPlanTasks or each knight's concurrency.
-	// +kubebuilder:default=0
-	// +kubebuilder:validation:Minimum=0
-	// +optional
-	MaxConcurrentTasks int32 `json:"maxConcurrentTasks,omitempty"`
-
 	// maxConcurrentPlanTasks caps how many tasks the table's plan-backed
 	// knights (see Knight spec.planBacked) can run at once, so parallel
 	// sessions sharing one Claude plan token don't exhaust its rate limit.
@@ -463,16 +453,6 @@ type RoundTablePolicies struct {
 	// reported in status is cumulative.
 	// +optional
 	CostResetSchedule string `json:"costResetSchedule,omitempty"`
-
-	// maxKnights is the maximum number of knights allowed in this table.
-	// 0 means unlimited.
-	//
-	// Deprecated: not enforced. To cap knights in a namespace use a
-	// ResourceQuota with count/knights.ai.roundtable.io.
-	// +kubebuilder:default=0
-	// +kubebuilder:validation:Minimum=0
-	// +optional
-	MaxKnights int32 `json:"maxKnights,omitempty"`
 
 	// maxMissions is the maximum number of concurrent active missions
 	// (Provisioning, Planning, Assembling, Briefing or Active). Missions over

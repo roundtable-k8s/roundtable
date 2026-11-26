@@ -182,8 +182,7 @@ const (
 
 	// ConditionRoundTableDeprecatedFieldsUsed is True when a standing
 	// (non-ephemeral) RoundTable sets a deprecated, unenforced policy
-	// (policies.costResetSchedule, or a non-zero policies.maxConcurrentTasks
-	// or policies.maxKnights). The condition is absent otherwise.
+	// (policies.costResetSchedule). The condition is absent otherwise.
 	ConditionRoundTableDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
 
 	// ReasonRoundTableDeprecatedFieldsUsed is the reason for
