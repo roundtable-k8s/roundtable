@@ -111,6 +111,8 @@ task ID in `taskId` (`status` is `succeeded`, or `failed` with an `error`):
 A `202` means the knight is still running when the wait ended. Poll the task with the
 same token: `curl -s -H "Authorization: Bearer $TOKEN" localhost:8081/v1/tasks/<taskId>`.
 
+If something is not Ready or the Chain does nothing, see [troubleshooting](troubleshooting.md).
+
 ## Clean up
 
 ```bash

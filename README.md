@@ -241,7 +241,7 @@ RoundTable, a Knight and a two-step Chain from [`examples/quickstart/`](examples
 hack/quickstart-kind.sh
 ```
 
-On your own cluster, follow [Installing Round Table](docs/install.md): [install NATS](docs/install.md#install-nats), [choose your isolation](docs/install.md#choose-your-isolation) and [create your first knight](docs/install.md#your-first-knight). [Pointing Round Table at your NATS](docs/install.md#pointing-round-table-at-your-nats) covers the NATS URLs.
+On your own cluster, follow [Installing Round Table](docs/install.md): [install NATS](docs/install.md#install-nats), [choose your isolation](docs/install.md#choose-your-isolation) and [create your first knight](docs/install.md#your-first-knight). [Pointing Round Table at your NATS](docs/install.md#pointing-round-table-at-your-nats) covers the NATS URLs. If a knight is not Ready or a chain does nothing, see [troubleshooting](docs/troubleshooting.md).
 
 For an existing cluster (Kubernetes 1.28+, NATS with JetStream, a model API key),
 install the chart (it installs the CRDs, the operator and the [dashboard](#ecosystem)):
