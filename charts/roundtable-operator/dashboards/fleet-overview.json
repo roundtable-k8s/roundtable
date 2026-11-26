@@ -32,7 +32,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(roundtable_knights, namespace)",
+          "query": "label_values(roundtable_knight_tasks_total, namespace)",
           "refId": "namespace"
         },
         "refresh": 2,
@@ -52,7 +52,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(roundtable_knights{namespace=~\"$namespace\"}, table)",
+          "query": "label_values(roundtable_knight_tasks_total{namespace=~\"$namespace\"}, table)",
           "refId": "table"
         },
         "refresh": 2,
@@ -91,7 +91,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (phase) (roundtable_knights{namespace=~\"$namespace\", table=~\"$table\"})",
+          "expr": "sum by (phase) (roundtable_knights{table=~\"$table\"})",
           "legendFormat": "{{phase}}"
         }
       ],
