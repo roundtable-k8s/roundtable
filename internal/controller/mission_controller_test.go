@@ -19,8 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -33,12 +36,45 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
 )
+
+// streamRecorder is a NATS client fake that records DeleteStream calls. Only
+// the methods the mission deletion path uses are implemented; the embedded
+// interface is nil, so any other method panics.
+type streamRecorder struct {
+	natspkg.Client
+
+	mu        sync.Mutex
+	deleted   []string
+	streamErr func(name string) error
+}
+
+func (s *streamRecorder) IsConnected() bool { return true }
+
+func (s *streamRecorder) DeleteConsumer(context.Context, string, string) error { return nil }
+
+func (s *streamRecorder) DeleteStream(_ context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, name)
+	if s.streamErr != nil {
+		return s.streamErr(name)
+	}
+	return nil
+}
+
+func (s *streamRecorder) deletedStreams() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deleted...)
+}
 
 var _ = Describe("Mission Controller", func() {
 	const (
@@ -893,6 +929,123 @@ var _ = Describe("Mission Controller", func() {
 			condition := meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
+		})
+	})
+
+	Context("When the mission is deleted before its cleanup phase ran", func() {
+		var (
+			rec     *streamRecorder
+			deleter *MissionReconciler
+		)
+
+		// startDeletion gives the mission the controller's finalizer, sets the
+		// given stream names and conditions in status, then deletes it.
+		startDeletion := func(tasks, results string, conds ...metav1.Condition) {
+			m := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
+			controllerutil.AddFinalizer(m, missionFinalizer)
+			Expect(k8sClient.Update(ctx, m)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
+			m.Status.NATSTasksStream = tasks
+			m.Status.NATSResultsStream = results
+			for _, c := range conds {
+				meta.SetStatusCondition(&m.Status.Conditions, c)
+			}
+			Expect(k8sClient.Status().Update(ctx, m)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, m)).To(Succeed())
+		}
+
+		// missionGone reports whether the mission has been removed from the API.
+		missionGone := func() bool {
+			err := k8sClient.Get(ctx, missionNN, &aiv1alpha1.Mission{})
+			return errors.IsNotFound(err)
+		}
+
+		BeforeEach(func() {
+			rec = &streamRecorder{}
+			createMission(aiv1alpha1.MissionSpec{
+				Objective: "Test deletion cleanup",
+				Knights: []aiv1alpha1.MissionKnight{
+					{Name: knightName, Role: "tester"},
+				},
+				TTLSeconds:     3600,
+				TimeoutSeconds: 1800,
+			})
+			deleter = newReconciler()
+			deleter.Cleaner = &missionpkg.Cleaner{
+				Client: k8sClient,
+				NATS:   natspkg.NewProviderWithClient(rec, logr.Discard()),
+			}
+		})
+
+		AfterEach(func() {
+			// A test that leaves the finalizer behind must not block the next BeforeEach.
+			m := &aiv1alpha1.Mission{}
+			if err := k8sClient.Get(ctx, missionNN, m); err == nil {
+				controllerutil.RemoveFinalizer(m, missionFinalizer)
+				_ = k8sClient.Update(ctx, m)
+			}
+			deleteMission()
+		})
+
+		It("deletes both NATS streams and then removes the finalizer", func() {
+			startDeletion("rt_msn_tasks", "rt_msn_results")
+
+			result, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+			Expect(rec.deletedStreams()).To(ConsistOf("rt_msn_tasks", "rt_msn_results"))
+			Expect(missionGone()).To(BeTrue())
+		})
+
+		It("does not delete streams again when cleanup already completed", func() {
+			startDeletion("rt_msn_tasks", "rt_msn_results", metav1.Condition{
+				Type:    aiv1alpha1.ConditionCleanupComplete,
+				Status:  metav1.ConditionTrue,
+				Reason:  aiv1alpha1.ReasonCleanupComplete,
+				Message: "done",
+			})
+
+			_, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.deletedStreams()).To(BeEmpty())
+			Expect(missionGone()).To(BeTrue())
+		})
+
+		It("treats an already-missing stream as deleted", func() {
+			rec.streamErr = func(name string) error {
+				return fmt.Errorf("stream %s: %w", name, jetstream.ErrStreamNotFound)
+			}
+			startDeletion("rt_msn_tasks", "rt_msn_results")
+
+			_, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(missionGone()).To(BeTrue())
+		})
+
+		It("keeps the finalizer and requeues when a stream delete fails", func() {
+			rec.streamErr = func(string) error { return fmt.Errorf("nats unavailable") }
+			startDeletion("rt_msn_tasks", "rt_msn_results")
+
+			result, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(RequeueModerate))
+
+			m := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(m, missionFinalizer)).To(BeTrue())
+		})
+
+		It("completes immediately when the mission never created streams", func() {
+			startDeletion("", "")
+
+			_, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.deletedStreams()).To(BeEmpty())
+			Expect(missionGone()).To(BeTrue())
 		})
 	})
 

@@ -3,9 +3,11 @@ package mission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -111,7 +113,8 @@ func (c *Cleaner) DeleteNATSConsumers(ctx context.Context, mission *aiv1alpha1.M
 	return nil
 }
 
-// DeleteNATSStreams deletes the mission's task and result streams.
+// DeleteNATSStreams deletes the mission's task and result streams. A stream
+// that does not exist (already deleted) is not an error.
 func (c *Cleaner) DeleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	natsCli, err := c.natsClient()
 	if err != nil {
@@ -120,14 +123,14 @@ func (c *Cleaner) DeleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mis
 
 	// Delete tasks stream
 	if mission.Status.NATSTasksStream != "" {
-		if err := natsCli.DeleteStream(ctx, mission.Status.NATSTasksStream); err != nil {
+		if err := natsCli.DeleteStream(ctx, mission.Status.NATSTasksStream); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 			return fmt.Errorf("failed to delete tasks stream: %w", err)
 		}
 	}
 
 	// Delete results stream
 	if mission.Status.NATSResultsStream != "" {
-		if err := natsCli.DeleteStream(ctx, mission.Status.NATSResultsStream); err != nil {
+		if err := natsCli.DeleteStream(ctx, mission.Status.NATSResultsStream); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 			return fmt.Errorf("failed to delete results stream: %w", err)
 		}
 	}
