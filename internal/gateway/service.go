@@ -171,6 +171,21 @@ func (s *Service) ListKnights(ctx context.Context, namespace string) ([]KnightIn
 	return out, nil
 }
 
+// acquireSlot takes one maxInFlight slot without blocking and returns the func
+// that gives it back, or ErrBusy when none is free. With no limit configured
+// it takes nothing.
+func (s *Service) acquireSlot() (release func(), err error) {
+	if s.inflight == nil {
+		return func() {}, nil
+	}
+	select {
+	case s.inflight <- struct{}{}:
+		return func() { <-s.inflight }, nil
+	default:
+		return nil, ErrBusy
+	}
+}
+
 // Invoke publishes a task to a knight and waits for its result up to the
 // requested timeout. It always returns the task record; the record's status
 // says whether the result arrived (Done) or the caller should poll GetTask.
@@ -223,14 +238,11 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		return nil, fmt.Errorf("%w: invalid model for knight %q: %v", ErrInvalid, knightName, err)
 	}
 
-	if s.inflight != nil {
-		select {
-		case s.inflight <- struct{}{}:
-			defer func() { <-s.inflight }()
-		default:
-			return nil, ErrBusy
-		}
+	release, err := s.acquireSlot()
+	if err != nil {
+		return nil, err
 	}
+	defer release()
 
 	runID := req.RunID
 	if runID == "" {

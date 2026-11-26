@@ -629,3 +629,35 @@ func TestMCPMissions(t *testing.T) {
 		t.Fatalf("list_missions: %v %+v %v", err, res, sc)
 	}
 }
+
+func TestStartMissionBusyCreatesNothing(t *testing.T) {
+	e := newMissionEnv(t, Options{MaxInFlight: 1}, true)
+	e.svc.inflight <- struct{}{} // another wait holds the only slot
+	body := validMission()
+	body["planner"] = map[string]any{}
+
+	body["waitSeconds"] = 1
+	resp, out := e.do(t, http.MethodPost, "/v1/missions", testToken, body)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("waiting start: %d %v", resp.StatusCode, out)
+	}
+	if n := len(e.missions(t)); n != 0 {
+		t.Fatalf("busy call left %d missions", n)
+	}
+
+	// An asynchronous start takes no slot and still works.
+	delete(body, "waitSeconds")
+	if resp, out = e.do(t, http.MethodPost, "/v1/missions", testToken, body); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("async start: %d %v", resp.StatusCode, out)
+	}
+
+	// With the slot free, a waiting start takes exactly one and gives it back.
+	<-e.svc.inflight
+	body["waitSeconds"] = 1
+	if resp, out = e.do(t, http.MethodPost, "/v1/missions", testToken, body); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("waiting start: %d %v", resp.StatusCode, out)
+	}
+	if n := len(e.svc.inflight); n != 0 {
+		t.Fatalf("slot leaked: %d held", n)
+	}
+}
