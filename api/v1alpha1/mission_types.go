@@ -381,7 +381,7 @@ type KnightSpecOverrides struct {
 	// +optional
 	Skills []string `json:"skills,omitempty"`
 
-	// tools overrides the knight's tool configuration (nix packages, apt, mise).
+	// tools overrides the knight's tool configuration (nix packages and flakes).
 	// +optional
 	Tools *KnightTools `json:"tools,omitempty"`
 

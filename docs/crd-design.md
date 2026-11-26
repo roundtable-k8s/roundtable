@@ -763,6 +763,11 @@ and will be removed one release later:
 
 | Field | Replacement | Why |
 |---|---|---|
-| `spec.tools.apt` | `spec.tools.nix`, `spec.tools.flakes` | Knight containers run as non-root, so apt installs cannot succeed. |
-| `spec.tools.mise` | `spec.tools.nix`, `spec.tools.flakes` | Tools are written as `latest`, never pinned, and downloaded at every cold start. |
 | `spec.nats.maxDeliver` | none | Ignored; tasks run at most once. |
+
+### Removed in 0.25.0
+
+`spec.tools.apt` and `spec.tools.mise` were removed in chart 0.25.0 (breaking).
+The operator no longer writes the `mise.toml` and `apt.txt` ConfigMap keys. Move
+any tools to `spec.tools.nix` or `spec.tools.flakes` before upgrading: with the
+CRD field gone, a manifest that still sets either one fails to apply.

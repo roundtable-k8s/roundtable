@@ -124,6 +124,8 @@ var _ = Describe("Knight Controller", func() {
 			}, cm)).To(Succeed())
 
 			Expect(cm.Data["KNIGHT_SKILLS"]).To(Equal("security,shared"))
+			Expect(cm.Data).NotTo(HaveKey("mise.toml"))
+			Expect(cm.Data).NotTo(HaveKey("apt.txt"))
 			Expect(cm.Labels["roundtable.io/domain"]).To(Equal("security"))
 		})
 
@@ -495,45 +497,6 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
 		for _, e := range drain(rec) {
 			Expect(e).NotTo(ContainSubstring("MaxDeliverIgnored"))
-		}
-	})
-	It("reports spec.tools.apt", func() {
-		got, rec := runTools("tools-apt", 0, aiv1alpha1.KnightTools{Apt: []string{"nmap"}}) //nolint:staticcheck // exercising the deprecated field
-		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
-		Expect(c).NotTo(BeNil())
-		Expect(c.Status).To(Equal(metav1.ConditionTrue))
-		Expect(c.Message).To(ContainSubstring("spec.tools.apt"))
-		Expect(c.Message).NotTo(ContainSubstring("spec.tools.mise"))
-		Expect(countEvents(rec, "ToolsAptDeprecated")).To(Equal(1))
-	})
-
-	It("reports spec.tools.mise", func() {
-		got, rec := runTools("tools-mise", 0, aiv1alpha1.KnightTools{Mise: []string{"jq"}}) //nolint:staticcheck // exercising the deprecated field
-		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
-		Expect(c).NotTo(BeNil())
-		Expect(c.Status).To(Equal(metav1.ConditionTrue))
-		Expect(c.Message).To(ContainSubstring("spec.tools.mise"))
-		Expect(countEvents(rec, "ToolsMiseDeprecated")).To(Equal(1))
-	})
-
-	It("lists every deprecated field in use", func() {
-		got, rec := runTools("tools-all", 3, aiv1alpha1.KnightTools{ //nolint:staticcheck // exercising the deprecated fields
-			Apt: []string{"nmap"}, Mise: []string{"jq"},
-		})
-		c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
-		Expect(c).NotTo(BeNil())
-		Expect(c.Message).To(ContainSubstring("spec.nats.maxDeliver"))
-		Expect(c.Message).To(ContainSubstring("spec.tools.apt"))
-		Expect(c.Message).To(ContainSubstring("spec.tools.mise"))
-		events := drainEvents(rec)
-		for _, reason := range []string{"MaxDeliverIgnored", "ToolsAptDeprecated", "ToolsMiseDeprecated"} {
-			n := 0
-			for _, e := range events {
-				if strings.Contains(e, reason) {
-					n++
-				}
-			}
-			Expect(n).To(Equal(1), reason)
 		}
 	})
 

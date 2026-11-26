@@ -56,7 +56,7 @@ func cardTestKnight() *aiv1alpha1.Knight {
 			Domain: "security",
 			Model:  "spec-model",
 			Skills: []string{"security", "general"},
-			Tools:  &aiv1alpha1.KnightTools{Nix: []string{"nmap", "whois"}, Apt: []string{"curl"}},
+			Tools:  &aiv1alpha1.KnightTools{Nix: []string{"nmap", "whois"}},
 			NATS:   aiv1alpha1.KnightNATS{Subjects: []string{"fleet-a.tasks.security.>"}},
 		},
 		Status: aiv1alpha1.KnightStatus{Phase: aiv1alpha1.KnightPhaseReady, ReadyReplicas: 1, Model: "status-model"},

@@ -652,13 +652,9 @@ func (r *KnightReconciler) reconcileConfigMap(ctx context.Context, knight *aiv1a
 			cm.Data = make(map[string]string)
 		}
 
-		// Generate mise.toml for tool provisioning
-		cm.Data["mise.toml"] = knightpkg.GenerateMiseToml(knight)
-
-		// Generate apt.txt for system packages
-		if knight.Spec.Tools != nil && len(knight.Spec.Tools.Apt) > 0 { //nolint:staticcheck // still generated for one more release
-			cm.Data["apt.txt"] = strings.Join(knight.Spec.Tools.Apt, "\n") //nolint:staticcheck // still generated for one more release
-		}
+		// mise.toml and apt.txt were removed with spec.tools.apt/mise.
+		delete(cm.Data, "mise.toml")
+		delete(cm.Data, "apt.txt")
 
 		// Skill categories for the skill-filter sidecar
 		cm.Data["KNIGHT_SKILLS"] = strings.Join(knight.Spec.Skills, ",")
@@ -1173,10 +1169,8 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 
 // setDeprecatedFieldsCondition reports deprecated spec fields. It sets
 // DeprecatedFieldsUsed=True when spec.nats.maxDeliver is above 1 (ignored:
-// tasks run at most once), or when spec.tools.apt or spec.tools.mise is
-// non-empty (use tools.nix / tools.flakes). One Warning event per field is
-// recorded per generation (MaxDeliverIgnored, ToolsAptDeprecated,
-// ToolsMiseDeprecated) and the message lists every deprecated field in use.
+// tasks run at most once). One Warning event (MaxDeliverIgnored) is recorded
+// per generation and the message lists every deprecated field in use.
 // The condition is removed when none is set.
 func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knight) {
 	type deprecated struct{ reason, msg string }
@@ -1184,15 +1178,6 @@ func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knigh
 	if md := knight.Spec.NATS.MaxDeliver; md > 1 { //nolint:staticcheck // reading the deprecated field to report it
 		used = append(used, deprecated{"MaxDeliverIgnored", fmt.Sprintf(
 			"spec.nats.maxDeliver=%d is deprecated and ignored: knights always run a task at most once; lost and failed tasks go to the dead-letter stream and are retried by hand", md)})
-	}
-	tools := knight.Spec.Tools
-	if tools != nil && len(tools.Apt) > 0 { //nolint:staticcheck // reading the deprecated field to report it
-		used = append(used, deprecated{"ToolsAptDeprecated",
-			"spec.tools.apt is deprecated and will be removed: knight containers run as non-root, so apt installs cannot succeed; use spec.tools.nix or spec.tools.flakes"})
-	}
-	if tools != nil && len(tools.Mise) > 0 { //nolint:staticcheck // reading the deprecated field to report it
-		used = append(used, deprecated{"ToolsMiseDeprecated",
-			"spec.tools.mise is deprecated and will be removed: mise tools are unpinned and downloaded at every start; use spec.tools.nix or spec.tools.flakes"})
 	}
 	if len(used) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)
