@@ -899,6 +899,14 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		}
 	}
 
+	// A schedule firing consumed after startingDeadlineSeconds is stale (the
+	// operator was down, or the Trigger was not Ready): it is skipped, so a
+	// backlog does not start a burst of runs. ev.Time is the schedule time.
+	if src := trg.Spec.Source.Schedule; src != nil && manual == nil && src.StartingDeadlineSeconds != nil &&
+		now.Sub(ev.Time) > time.Duration(*src.StartingDeadlineSeconds)*time.Second {
+		return skip(triggerHandled, "missed schedule time %s by more than startingDeadlineSeconds", ev.Time.UTC().Format(time.RFC3339))
+	}
+
 	if trg.Spec.Target.Mission != nil {
 		return r.fireMission(ctx, missionFiring{
 			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
