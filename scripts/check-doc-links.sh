@@ -37,5 +37,17 @@ for p in examples/*.yaml examples/*/; do
   fi
 done
 
+# Every docs/*.md page must be linked from docs/README.md, the index.
+index=docs/README.md
+for p in docs/*.md; do
+  name=$(basename "$p")
+  [ "$name" = README.md ] && continue
+  esc=${name//./\\.}
+  if ! grep -qE -- "\]\(${esc}(#[^)]*)?\)" "$index"; then
+    echo "unlisted doc: $p is not linked from $index"
+    fail=1
+  fi
+done
+
 [ "$fail" -eq 0 ] && echo "doc links OK"
 exit "$fail"
