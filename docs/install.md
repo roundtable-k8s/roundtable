@@ -189,6 +189,9 @@ author's cluster (`nats.database.svc`), so on any other cluster set all of them:
 | Chart value | `gateway.natsURL` | the gateway's `--nats-url` |
 | Chart value | `dashboard.env.NATS_URL` | the dashboard's `NATS_URL` |
 
+To connect with a NATS credentials file, give the operator and the gateway
+`--nats-creds <path>` or `NATS_CREDS_FILE` (the flag wins; empty means none).
+
 ```bash
 helm install roundtable-operator oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
   -n roundtable --create-namespace \

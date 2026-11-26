@@ -45,6 +45,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
 	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
 // gatewayServiceName is the service.name used when OTEL_SERVICE_NAME is unset.
@@ -72,6 +73,21 @@ func splitList(v string) []string {
 	return out
 }
 
+// gatewayNATSOptions are the gateway's NATS connection options; creds is nil
+// when no credentials file is configured.
+func gatewayNATSOptions(creds nats.Option) []nats.Option {
+	opts := []nats.Option{
+		nats.Name("roundtable-gateway"),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(2 * time.Second),
+	}
+	if creds != nil {
+		opts = append(opts, creds)
+	}
+	return opts
+}
+
 func main() {
 	var (
 		listen, metricsListen, natsURL, tokenFile, namespace, allowed, bucket, defaultImage, apiVersion string
@@ -79,7 +95,7 @@ func main() {
 		maxInFlight, maxStreams                                                                         int
 		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
 		schedulesEnabled, scheduleRunsEnabled, snapshotsEnabled                                         bool
-		saAudience, saNamespaces                                                                        string
+		saAudience, saNamespaces, natsCreds                                                             string
 		maxBudgetUSD, hookRate, saReviewRate                                                            float64
 		maxMissionTTL, maxMissionTimeout, hookBurst, saReviewBurst                                      int
 		hookMaxBody                                                                                     int64
@@ -88,6 +104,8 @@ func main() {
 	flag.StringVar(&metricsListen, "metrics-listen", "",
 		"Address of the unauthenticated Prometheus /metrics endpoint (e.g. :8081). Empty disables it.")
 	flag.StringVar(&natsURL, "nats-url", envOr("NATS_URL", "nats://nats.database.svc:4222"), "NATS server URL.")
+	flag.StringVar(&natsCreds, "nats-creds", envOr(natspkg.CredsEnv, ""),
+		"Path of a NATS credentials file (.creds). Defaults to $NATS_CREDS_FILE; empty means no credentials.")
 	flag.StringVar(&tokenFile, "token-file", "/var/run/secrets/roundtable/gateway/token",
 		"File holding the accepted bearer token(s), one per line.")
 	flag.StringVar(&namespace, "namespace", envOr("POD_NAMESPACE", "default"), "Default namespace for knights.")
@@ -199,11 +217,12 @@ func main() {
 		}
 	}
 
-	nc, err := nats.Connect(natsURL,
-		nats.Name("roundtable-gateway"),
-		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(-1),
-		nats.ReconnectWait(2*time.Second))
+	natsCredsOpt, err := natspkg.CredsOption(natsCreds)
+	if err != nil {
+		log.Error(err, "Unable to use the NATS credentials file")
+		os.Exit(1)
+	}
+	nc, err := nats.Connect(natsURL, gatewayNATSOptions(natsCredsOpt)...)
 	if err != nil {
 		log.Error(err, "Unable to connect to NATS", "url", natsURL)
 		os.Exit(1)
