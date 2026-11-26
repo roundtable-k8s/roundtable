@@ -538,6 +538,14 @@ local wall-clock time across daylight-saving changes. An invalid zone sets the
 `ChainValid` condition to false with reason `InvalidSchedule`. The next fire time
 is reported in `status.nextScheduledAt` and shown by `kubectl get chains`.
 
+By default (`--chain-schedule-mode=inprocess`, chart `chains.scheduleMode`)
+the operator's in-process cron runs the Chain object itself at each fire. With
+`trigger` the chain controller instead owns a schedule Trigger
+`<chain>-schedule` whose CronJob starts a copy of the Chain per fire (named by
+the Trigger); the Chain's `lastScheduledAt` and `nextScheduledAt` are copied
+from the Trigger. See [triggers.md](triggers.md#chain-schedules) for both
+modes and how to migrate.
+
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain

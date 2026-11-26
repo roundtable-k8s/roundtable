@@ -248,6 +248,12 @@ func refuseGitManaged(trg *aiv1alpha1.Trigger) error {
 	if ScheduleManagedBy(trg) == ManagedByGit {
 		return &GitManagedError{Namespace: trg.Namespace, Name: trg.Name, Owner: gitOwner(trg)}
 	}
+	if owner := metav1.GetControllerOf(trg); owner != nil && owner.Kind == "Chain" {
+		// The chain controller renders it from Chain.spec.schedule and would
+		// undo any change made here.
+		return &ConflictError{State: "chain", Reason: fmt.Sprintf(
+			"schedule %s/%s is run for Chain %s: change the Chain's spec.schedule instead", trg.Namespace, trg.Name, owner.Name)}
+	}
 	return nil
 }
 

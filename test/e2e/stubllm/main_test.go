@@ -109,7 +109,7 @@ func TestChatCompletionScriptedReply(t *testing.T) {
 			if c.Message.Role != "assistant" || c.Message.Content != tt.want {
 				t.Errorf("message = %+v, want assistant %q", c.Message, tt.want)
 			}
-			if c.FinishReason != "stop" {
+			if c.FinishReason != finishStop {
 				t.Errorf("finish_reason = %q, want stop", c.FinishReason)
 			}
 			if got.Usage.PromptTokens < 1 || got.Usage.CompletionTokens < 1 {
@@ -216,7 +216,7 @@ func TestChatCompletionStreamingWithUsage(t *testing.T) {
 		text.WriteString(ch.Delta.Content)
 		if ch.FinishReason != nil {
 			finishes++
-			if *ch.FinishReason != "stop" {
+			if *ch.FinishReason != finishStop {
 				t.Errorf("finish_reason = %q, want stop", *ch.FinishReason)
 			}
 		}

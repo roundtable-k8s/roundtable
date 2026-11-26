@@ -504,6 +504,31 @@ func TestGitManagedScheduleIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestChainOwnedScheduleIsReadOnly(t *testing.T) {
+	trg := writeTestTrigger("digest-schedule", map[string]string{labelManagedBy: "roundtable-operator"}, nil)
+	isController := true
+	trg.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "Chain", Name: "digest", UID: "u1", Controller: &isController,
+	}}
+	e := newScheduleWriteEnv(t, true, nil, trg)
+	path := "/v1/schedules/" + testNS + "/digest-schedule"
+	resp, out := e.do(t, http.MethodPut, path, testToken,
+		map[string]any{"spec": scheduleSpec("0 9 * * *", "", "report")})
+	if resp.StatusCode != http.StatusConflict || out["state"] != "chain" {
+		t.Fatalf("PUT: status %d: %v", resp.StatusCode, out)
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "Chain digest") {
+		t.Errorf("PUT message %q does not name the Chain", msg)
+	}
+	resp, out = e.do(t, http.MethodDelete, path, testToken, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("DELETE: status %d: %v", resp.StatusCode, out)
+	}
+	if got := e.trigger(t, "digest-schedule"); got.Spec.Source.Schedule.Cron != "0 7 * * *" {
+		t.Errorf("Chain-owned Trigger changed: %+v", got.Spec)
+	}
+}
+
 func TestManagedBy(t *testing.T) {
 	cases := []struct {
 		labels, annotations map[string]string
