@@ -27,6 +27,17 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// acceptedExampleNATSURLs is the set of spec.nats.url values an example may
+// use: the quickstart's in-cluster NATS (namespace roundtable) and the
+// namespace "database" of the author's cluster used by the other examples.
+// The two disagree on purpose until the owner picks one (see
+// examples/README.md, "Adapting the examples"). A new author-specific value
+// must not slip in: extend this set only deliberately.
+var acceptedExampleNATSURLs = []string{
+	"nats://nats.roundtable.svc:4222",
+	"nats://nats.database.svc:4222",
+}
+
 // TestExamplesDecodeStrictly decodes every Round Table object in examples/
 // into the API types, rejecting unknown fields, so the examples can't drift
 // from the CRDs (the API server would silently prune a stale field).
@@ -90,6 +101,16 @@ func TestExamplesDecodeStrictly(t *testing.T) {
 			if err := yaml.UnmarshalStrict([]byte(doc), obj); err != nil {
 				t.Errorf("%s doc %d (%s): %v", f, i, meta.Kind, err)
 				continue
+			}
+			var natsURL string
+			switch o := obj.(type) {
+			case *Knight:
+				natsURL = o.Spec.NATS.URL
+			case *RoundTable:
+				natsURL = o.Spec.NATS.URL
+			}
+			if natsURL != "" && !slices.Contains(acceptedExampleNATSURLs, natsURL) {
+				t.Errorf("%s doc %d (%s): spec.nats.url %q is not one of %v", f, i, meta.Kind, natsURL, acceptedExampleNATSURLs)
 			}
 			decoded++
 		}

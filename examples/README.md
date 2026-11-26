@@ -70,26 +70,36 @@ kubectl annotate chain daily-briefing -n roundtable \
   ai.roundtable.io/run="$(date +%s)" --overwrite
 ```
 
-## Quick Start
+## Adapting the examples
+
+The examples come from one author's cluster. Before applying one, change what
+is theirs:
+
+| What | Where | Change to |
+|------|-------|-----------|
+| NATS URL | `spec.nats.url` on RoundTables and Knights | Your NATS server. Examples use `nats://nats.database.svc:4222` (the author's namespace `database`); [`quickstart/`](quickstart/), [`dev/`](dev/) and [`egress/model-providers.yaml`](egress/model-providers.yaml) use `nats://nats.roundtable.svc:4222`, where the [quickstart](../docs/getting-started.md) installs NATS. These are the only two URLs a test accepts in examples. **A Knight does not inherit the RoundTable's URL**: one without `spec.nats.url` connects to the CRD default, `nats://nats.database.svc:4222`, so add `spec.nats.url` to every Knight (the `sed` below does not add it) |
+| Namespace | `metadata.namespace`, `roundTableRef`, egress `allowedServices` | The namespace you installed into (`roundtable` in the quickstart) |
+| Subject prefix and stream names | `spec.nats.subjectPrefix`, `stream`, `resultsStream` on the RoundTable and on every Knight (a knight does not inherit them) | Your table's values (`fleet-a` and its streams in most examples); change them together |
+| Model or alias | `spec.model`, step `model` | A model your key can use. `deep`, `fast` and similar aliases resolve only if the RoundTable defines `spec.modelAliases` |
+| Secrets | `llm-api-keys` and token Secrets (`secretKeyRef`, `headersFrom`) | Create them in your namespace, or point at yours; none are in the examples |
+| `storageClassName` | PVCs, where present | A class that exists in your cluster (RWX where the example says so) |
+
+To rewrite the NATS URLs that are written out in the files you copied (works
+with GNU and BSD sed; run it in the copied directory, it recurses):
 
 ```bash
-# 1. Install the operator
-helm install roundtable oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
-  --namespace roundtable --create-namespace
-
-# 2. Create a fleet
-kubectl apply -f roundtable-fleet.yaml
-
-# 3. Deploy a knight
-kubectl apply -f knight-basic.yaml
-
-# 4. Watch it come online
-kubectl get knights -n roundtable -w
-
-# 5. Run a chain
-kubectl apply -f chain-sequential.yaml
-
-# 6. Launch a mission
-kubectl apply -f mission-ephemeral.yaml
-kubectl get missions -n roundtable -w
+find . -name '*.yaml' -exec sed -i.bak 's#nats://nats\.\(database\|roundtable\)\.svc:4222#nats://YOUR-NATS.YOUR-NS.svc:4222#g' {} + \
+  && find . -name '*.yaml.bak' -delete
 ```
+
+It only changes URLs that are present. A Knight that sets no `spec.nats.url`
+still uses the CRD default (the author's server), so add
+`nats: {url: nats://YOUR-NATS.YOUR-NS.svc:4222}` to each such Knight by hand.
+
+## Getting started
+
+To install the operator and NATS and run a first Chain, follow
+[`docs/getting-started.md`](../docs/getting-started.md), which applies
+[`quickstart/`](quickstart/). Then try the files above, adapted as described in
+[Adapting the examples](#adapting-the-examples), or copy a fleet from
+[`recipes/`](recipes/).
