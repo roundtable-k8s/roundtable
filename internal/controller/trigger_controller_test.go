@@ -828,6 +828,20 @@ var _ = Describe("Trigger controller", func() {
 			Expect(runsOf("runnow")).To(HaveLen(1))
 		})
 
+		It("records a skipped firing and clears a run-now request for a missing Chain", func() {
+			t := scheduleTrigger("runnow-nochain", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.ChainRef = &corev1.LocalObjectReference{Name: "no-such-chain"}
+			})
+			clock = t.CreationTimestamp.Add(time.Second)
+			annotate("runnow-nochain", map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-x"})
+			reconcileTrigger("runnow-nochain")
+			t = getTrigger("runnow-nochain")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].SkipReason).To(ContainSubstring("no-such-chain"))
+			Expect(meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).NotTo(BeNil())
+		})
+
 		It("applies the concurrency policy to a run-now firing", func() {
 			scheduleTrigger("runnowforbid", func(s *aiv1alpha1.TriggerSpec) {
 				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
@@ -1096,6 +1110,23 @@ var _ = Describe("Trigger controller", func() {
 			rec, err := svc.GetTask(ctx, sent[0].TaskID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(rec.Caller).To(Equal("roundtable/ui"))
+		})
+
+		It("records a skipped firing and clears a run-now request for a missing knight", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-runnow-missing", func(s *aiv1alpha1.TriggerSpec) { s.Target.Knight.Name = "nobody" })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-m"}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("kt-runnow-missing")
+			t = getTrigger("kt-runnow-missing")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].SkipReason).To(ContainSubstring("nobody"))
+			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(got()).To(BeEmpty())
 		})
 
 		It("reports a missing knight or one at another table and sends nothing", func() {

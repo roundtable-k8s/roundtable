@@ -153,6 +153,11 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	if reason, msg, err := r.checkKnightTarget(ctx, trg); err != nil {
 		return triggerRetry, err
 	} else if reason != "" {
+		if f.manual != nil {
+			// A run-now request does not wait for the target: record it
+			// as skipped and let the request be cleared.
+			return f.skip(triggerHandled, "%s", msg)
+		}
 		// Reconcile reports it in the Ready condition; the event waits.
 		return triggerRetry, errors.New(msg)
 	}
