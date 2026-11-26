@@ -179,7 +179,9 @@ networkPolicy:
 | `images.piKnight.tag` | string | `latest` | pi-knight image tag |
 | `images.dashboard.repository` | string | `ghcr.io/roundtable-k8s/roundtable-ui` | Dashboard image |
 | `images.dashboard.tag` | string | `latest` | Dashboard image tag |
-| `knight.browserImage` | string | `""` | Browser sidecar image. Empty uses the operator's pinned default (`docker.io/chromedp/headless-shell:133.0.6943.126`). Changing it changes the pod template of knights that enable the browser, so they restart once |
+| `knight.browserImage` | string | `""` | Browser sidecar image. Empty uses the operator's pinned default (`docker.io/chromedp/headless-shell:159.0.8154.13@sha256:381353d3530ab9d579d2fe8b9c0f4519c995617f5a71daf6bb649e2d12005bd9`). Changing it changes the pod template of knights that enable the browser, so they restart once |
+
+**Looking up a newer browser image.** The default is pinned as `tag@sha256:digest` (Chrome 159.0.8154.13, published 2026-11-23). To move to a newer one, pick a tag from <https://hub.docker.com/r/chromedp/headless-shell/tags> and resolve its digest with `crane digest docker.io/chromedp/headless-shell:<tag>` (or `docker buildx imagetools inspect`). Then either set `knight.browserImage` to `docker.io/chromedp/headless-shell:<tag>@<digest>`, or update `DefaultBrowserImage` in `internal/knight/pod_builder.go` and the default quoted above. Nothing tracks this automatically and CI never pulls the image.
 
 ### Pod Security
 

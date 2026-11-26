@@ -939,11 +939,13 @@ func (b *PodBuilder) WithGitSync() *PodBuilder {
 // To bump: pick a current stable Chrome tag from
 // https://hub.docker.com/r/chromedp/headless-shell/tags, confirm it exists
 // (`crane digest docker.io/chromedp/headless-shell:<tag>`), update this
-// constant and the default shown in docs/helm-values.md. Nothing (e.g.
+// constant (as `<tag>@<digest>`) and the default shown in docs/helm-values.md. Nothing (e.g.
 // Renovate) tracks this constant automatically, and CI never pulls the image.
-// TODO(#673): the current tag is unverified and stale; a human must replace it
-// with a confirmed current stable tag (ideally pinned by digest).
-const DefaultBrowserImage = "docker.io/chromedp/headless-shell:133.0.6943.126"
+// The current value is tag 159.0.8154.13 (published 2026-11-23, the 'stable'
+// tag at the time) pinned by digest, verified 2026-11-26. Keep the
+// `tag@sha256:digest` form so the tag stays readable and the digest is what
+// the kubelet resolves.
+const DefaultBrowserImage = "docker.io/chromedp/headless-shell:159.0.8154.13@sha256:381353d3530ab9d579d2fe8b9c0f4519c995617f5a71daf6bb649e2d12005bd9"
 
 // BrowserImageFromEnv returns KNIGHT_BROWSER_IMAGE, or "" when unset.
 func BrowserImageFromEnv() string { return os.Getenv("KNIGHT_BROWSER_IMAGE") }
