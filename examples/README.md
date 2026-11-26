@@ -12,6 +12,10 @@ Real-world examples of Round Table resources.
 | [`knight-scheduling.yaml`](knight-scheduling.yaml) | A coder knight pinned to large nodes with `nodeSelector` and a toleration |
 | [`knight-mcp-headers.yaml`](knight-mcp-headers.yaml) | A claude-knight using a remote MCP server with an `Authorization` header from a Secret (`spec.mcpServers[].headersFrom`, [docs](../docs/crd-design.md#7-knight-specmcpservers-claude-knight-only)) |
 | [`knight-persona-jobs.yaml`](knight-persona-jobs.yaml) | A tool-less persona Knight and two job Chains on it, run through the gateway ([migrating from kagent](../docs/migrating-from-kagent.md)) |
+| [`knight-arsenal-oci.yaml`](knight-arsenal-oci.yaml) | A knight whose skills come from an OCI arsenal artifact |
+| [`knight-fork-from-snapshot.yaml`](knight-fork-from-snapshot.yaml) | A knight whose workspace is forked from a snapshot ([docs](../docs/workspace-snapshots.md)) |
+| [`knight-templates/`](knight-templates/) | RoundTable `knightTemplates` and a Mission that uses them, see [README](knight-templates/README.md) |
+| [`flux/`](flux/) | Install the operator with Flux: Namespace, OCIRepository and HelmRelease |
 | [`roundtable-fleet.yaml`](roundtable-fleet.yaml) | Full fleet config with a sandbox mission-knight template, policies, and NATS streams |
 | [`chain-sequential.yaml`](chain-sequential.yaml) | Multi-step chain with output templating between steps |
 | [`chain-model-override.yaml`](chain-model-override.yaml) | Per-step model override with RoundTable `modelAliases` |
@@ -29,7 +33,7 @@ Real-world examples of Round Table resources.
 | [`trigger-knight-task.yaml`](trigger-knight-task.yaml) | Trigger: send one task straight to a knight, nightly and per alert, without a Chain ([docs](../docs/triggers.md#knight-target)) |
 | [Scheduled work](../docs/scheduled-work.md) | The three schedule targets (task, Chain, Mission), the one-task-naming-a-skill pattern, and what happens to missed, overlapping, lost and deleted runs |
 | [`trigger-mission.yaml`](trigger-mission.yaml) | Trigger: launch a read-only backlog-review Mission every Monday, planned by the table's planner knight ([docs](../docs/triggers.md#mission-target)) |
-| [`recipes/`](recipes/) | Copyable fleets: [`homelab-watch/`](recipes/homelab-watch/) starts a read-only triage chain from an Alertmanager webhook; [`nightly-digest/`](recipes/nightly-digest/) sends a scheduled one-task digest to a knight through a skill with scripts |
+| [`recipes/`](recipes/) | Copyable fleets, see [README](recipes/README.md): [`homelab-watch/`](recipes/homelab-watch/) starts a read-only triage chain from an Alertmanager webhook; [`nightly-digest/`](recipes/nightly-digest/) sends a scheduled one-task digest to a knight through a skill with scripts; [`backlog-grooming/`](recipes/backlog-grooming/), [`dev-factory/`](recipes/dev-factory/) and [`personal-fleet/`](recipes/personal-fleet/) |
 | [`observability/`](observability/) | Try-it-out tracing: Jaeger all-in-one plus the chart's OTel collector (`values-telemetry.yaml`), see [README](observability/README.md) and [docs](../docs/helm-values.md) |
 | [`chain-pr-feedback.yaml`](chain-pr-feedback.yaml) | PR pipeline feedback: the operator feeds a red CI run or merge-queue rejection to the PR's author knight (`resumeRunId` resumes its session), then the lead re-queues, or escalates. Rendered from the chart's `prPipeline.feedback` values ([docs](../docs/pr-feedback.md)) |
 | [`egress/`](egress/) | Starter egress allowlists (GitHub read, package docs, model providers, research, feeds); see [docs](../docs/egress.md) |
