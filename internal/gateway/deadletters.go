@@ -87,11 +87,12 @@ type RetryResult struct {
 	Knight  string `json:"knight"`
 }
 
-// ListDeadLetters returns dead-letter entries, newest first.
-func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*DeadLetterView, error) {
+// ListDeadLetters returns dead-letter entries, newest first, capped at the
+// limit, and the number of entries matching the filters before the cap.
+func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*DeadLetterView, int, error) {
 	recs, err := s.Bus.DeadLetterRecords(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, 0, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > maxDeadLetterListLimit {
@@ -103,6 +104,7 @@ func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*D
 			(f.State != "" && string(r.State) != f.State)
 	})
 	slices.SortFunc(recs, func(a, b DeadLetterRecord) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	total := len(recs)
 	if len(recs) > limit {
 		recs = recs[:limit]
 	}
@@ -110,13 +112,13 @@ func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*D
 	for _, r := range recs {
 		e, err := s.Bus.DeadLetterEntry(ctx, r.Subject)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+			return nil, 0, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		v := deadLetterView(r, e)
 		v.Task = nil // the list stays small; GET one for the payload
 		out = append(out, v)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // GetDeadLetter returns one entry including its original task payload.
@@ -305,12 +307,12 @@ func (s *Service) handleListDeadLetters(w http.ResponseWriter, r *http.Request) 
 	if limit != nil {
 		f.Limit = *limit
 	}
-	out, err := s.ListDeadLetters(r.Context(), f)
+	out, total, err := s.ListDeadLetters(r.Context(), f)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deadLetters": out})
+	writeJSON(w, http.StatusOK, map[string]any{"deadLetters": out, "total": total})
 }
 
 func (s *Service) handleGetDeadLetter(w http.ResponseWriter, r *http.Request) {

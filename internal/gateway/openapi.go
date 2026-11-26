@@ -157,6 +157,14 @@ func listOp(summary, tag, key, item string, params ...obj) obj {
 	}
 }
 
+// withListTotal adds the matching-entries count to a list operation's 200 response.
+func withListTotal(op obj) obj {
+	schema := op["responses"].(obj)["200"].(obj)["content"].(obj)["application/json"].(obj)["schema"].(obj)
+	schema["properties"].(obj)["total"] = integer("Number of entries matching the filters, counted before the limit.")
+	schema["required"] = append(schema["required"].([]string), "total")
+	return op
+}
+
 // DefaultAPIVersion is the version reported when none is configured.
 const DefaultAPIVersion = "dev"
 
@@ -213,11 +221,11 @@ var openAPIOperations = map[string]obj{
 		"responses": errs(obj{"200": eventStreamResp, "204": obj{"description": "The client already has the result."}},
 			"401", "404", "429", "503"),
 	},
-	"GET /v1/dead-letters": listOp("List dead-lettered tasks", "dead-letters", "deadLetters", "DeadLetter",
+	"GET /v1/dead-letters": withListTotal(listOp("List dead-lettered tasks", "dead-letters", "deadLetters", "DeadLetter",
 		queryParam("knight", "Only dead letters of this knight."),
 		queryParam("reason", "lost, failed, timeout, usage_limited or refused."),
 		queryParam("state", "open, retried or resolved."),
-		queryInteger("limit", "Maximum number of entries (default and max 100).")),
+		queryInteger("limit", "Maximum number of entries (default and max 100)."))),
 	"GET /v1/dead-letters/{taskId}": {
 		"summary": "Get a dead letter", "tags": []any{"dead-letters"},
 		"parameters": []any{pathParam("taskId", "Task ID."),
