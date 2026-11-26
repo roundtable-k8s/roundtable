@@ -1,0 +1,30 @@
+# Schedule Trigger: every night one task goes to the digest knight, naming the
+# skill and the script to run. Collecting, validating and filing live in the
+# skill's scripts, not in the Trigger. Needs knight.yaml.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: nightly-digest
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    schedule:
+      cron: "0 2 * * *"
+      timeZone: UTC
+      # A fire missed while the operator was down runs late only within 1h.
+      startingDeadlineSeconds: 3600
+  target:
+    knight:
+      name: digest
+      task: |
+        Use the nightly-digest skill for namespace "default" (change it in
+        this Trigger to digest another one), for {{ .Event.Time.Format "2006-01-02" }}.
+        Run scripts/collect, write the digest JSON the skill describes from
+        its output, then run scripts/file on it. Your answer is the last
+        line scripts/file printed, and the digest.
+      # Counted as lost (and no longer active) without a result after 15m.
+      timeoutSeconds: 900
+  # A slow run is not doubled by the next fire.
+  concurrency:
+    policy: Forbid

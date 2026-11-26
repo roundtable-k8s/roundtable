@@ -82,6 +82,13 @@ type TriggerScheduleConfig struct {
 	Image string
 	// ImagePullPolicy of the firing pod ("" = the cluster default).
 	ImagePullPolicy corev1.PullPolicy
+	// ImagePullSecrets of the firing pod; they must exist in the Trigger's
+	// namespace.
+	ImagePullSecrets []corev1.LocalObjectReference
+	// NodeSelector, Tolerations and PriorityClassName place the firing pod.
+	NodeSelector      map[string]string
+	Tolerations       []corev1.Toleration
+	PriorityClassName string
 	// GatewayURL is the gateway base URL the firing pod calls.
 	GatewayURL string
 	// Audience is the gateway's ServiceAccount token audience.
@@ -139,6 +146,10 @@ func desiredTriggerCronJob(trg *aiv1alpha1.Trigger, src *aiv1alpha1.TriggerSched
 		ServiceAccountName:           TriggerServiceAccountName(trg.Name),
 		AutomountServiceAccountToken: new(false),
 		RestartPolicy:                corev1.RestartPolicyNever,
+		ImagePullSecrets:             cfg.ImagePullSecrets,
+		NodeSelector:                 cfg.NodeSelector,
+		Tolerations:                  cfg.Tolerations,
+		PriorityClassName:            cfg.PriorityClassName,
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot:   new(true),
 			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
@@ -269,7 +280,10 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	}
 	// Compare only what the operator sets: the API server fills in defaults
 	// that must not count as drift.
-	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) {
+	// DeepDerivative ignores fields empty in the desired spec, so the pod
+	// placement fields are compared explicitly: clearing one must propagate.
+	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) &&
+		podPlacementEqual(want.Spec.JobTemplate.Spec.Template.Spec, cj.Spec.JobTemplate.Spec.Template.Spec) {
 		return cj, nil
 	}
 	cj.Spec = want.Spec
@@ -279,6 +293,16 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	}
 	log.Info("Updated CronJob", "name", cj.Name, "schedule", cj.Spec.Schedule, "suspend", *cj.Spec.Suspend)
 	return cj, nil
+}
+
+// podPlacementEqual compares the operator-configured scheduling fields of two
+// firing pod specs, treating nil and empty as equal.
+func podPlacementEqual(a, b corev1.PodSpec) bool {
+	return equality.Semantic.DeepEqual(a.Tolerations, b.Tolerations) &&
+		equality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets) &&
+		a.PriorityClassName == b.PriorityClassName &&
+		len(a.NodeSelector) == len(b.NodeSelector) &&
+		(len(a.NodeSelector) == 0 || equality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector))
 }
 
 // deleteScheduleObjects deletes the CronJob and ServiceAccount a Trigger

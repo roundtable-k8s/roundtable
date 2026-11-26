@@ -101,3 +101,51 @@ func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alp
 
 	return totalCost, nil
 }
+
+// BudgetStatus is the result of a cost-budget check.
+type BudgetStatus struct {
+	Total    float64
+	Budget   float64
+	Exceeded bool
+}
+
+// CheckBudget aggregates the mission's cost (the larger of the knights' total
+// and the chains' own total), records it in Status.TotalCost and reports
+// whether it exceeds Spec.CostBudgetUSD. A mission with no budget ("" or "0")
+// is not touched; an unparseable budget is never exceeded.
+func (c *CostTracker) CheckBudget(ctx context.Context, mission *aiv1alpha1.Mission) (BudgetStatus, error) {
+	if mission.Spec.CostBudgetUSD == "" || mission.Spec.CostBudgetUSD == "0" {
+		return BudgetStatus{}, nil
+	}
+
+	total, err := c.AggregateMissionCost(ctx, mission)
+	if err != nil {
+		return BudgetStatus{}, err
+	}
+	// The chains' own totals count too: take the larger, so the budget and
+	// status agree with the chain numbers.
+	if chainCost, _ := SumChainUsage(mission); chainCost > total {
+		total = chainCost
+	}
+	mission.Status.TotalCost = fmt.Sprintf("%.4f", total)
+
+	var budget float64
+	if _, err := fmt.Sscanf(mission.Spec.CostBudgetUSD, "%f", &budget); err != nil {
+		return BudgetStatus{Total: total}, nil
+	}
+	return BudgetStatus{Total: total, Budget: budget, Exceeded: total > budget}, nil
+}
+
+// ApplyChainUsage exposes the chains' tokens and cost on the mission status.
+// Status.TotalCost is only raised, never lowered.
+func ApplyChainUsage(mission *aiv1alpha1.Mission) {
+	chainCost, chainTokens := SumChainUsage(mission)
+	mission.Status.Tokens = chainTokens
+	if chainCost > 0 {
+		var current float64
+		_, _ = fmt.Sscanf(mission.Status.TotalCost, "%f", &current)
+		if chainCost > current {
+			mission.Status.TotalCost = fmt.Sprintf("%.4f", chainCost)
+		}
+	}
+}

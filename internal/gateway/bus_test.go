@@ -30,6 +30,51 @@ import (
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
+// A result that reaches JetStream just after Discard starts must still be
+// removed: Discard retries its lookup instead of giving up on the first miss.
+func TestNATSBusDiscardRemovesLateResult(t *testing.T) {
+	ctx := context.Background()
+	ns := runNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := js.CreateStream(ctx, jetstream.StreamConfig{Name: "wq_late", Subjects: []string{"t.late.>"}, Retention: jetstream.WorkQueuePolicy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus, err := NewNATSBus(ctx, nc, "bus_late_test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := js.Publish(ctx, "t.late.res", []byte("result"))
+		published <- err
+	}()
+	if err := bus.Discard(ctx, "wq_late", "t.late.res"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-published; err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := st.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State.Msgs != 0 {
+		t.Fatalf("late result not discarded: stream holds %d messages", info.State.Msgs)
+	}
+}
+
 func TestNATSBusRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	ns := runNATS(t)

@@ -22,8 +22,11 @@ spec:
           annotations:
             summary: >-
               Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} failed {{`{{ $value }}`}} tasks in the last hour.
+            description: >-
+              Counts status "error" (includes timeouts) and "publish_failed", the failure statuses the knight runtimes emit;
+              "lost" has its own alert.
           expr: |
-            sum by (namespace, table, knight) (increase(roundtable_knight_tasks_total{status=~"error|timeout"}[1h])) > {{ .Values.alerts.taskFailuresPerHour }}
+            sum by (namespace, table, knight) (increase(roundtable_knight_tasks_total{status=~"error|publish_failed"}[1h])) > {{ .Values.alerts.taskFailuresPerHour }}
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}

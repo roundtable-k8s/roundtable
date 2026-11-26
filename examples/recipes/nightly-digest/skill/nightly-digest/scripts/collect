@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# collect <namespace> [hours]
+# Read-only: prints one JSON object describing what changed in the namespace.
+set -euo pipefail
+
+usage() { echo "usage: collect <namespace> [hours]" >&2; exit 2; }
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
+ns=$1
+hours=${2:-24}
+[[ $ns =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || { echo "collect: invalid namespace: $ns" >&2; exit 2; }
+[[ $hours =~ ^[0-9]+$ ]] || { echo "collect: hours must be a number: $hours" >&2; exit 2; }
+
+since=$(date -u -d "-${hours} hours" +%Y-%m-%dT%H:%M:%SZ)
+
+workloads=$(kubectl get deployments,statefulsets,daemonsets -n "$ns" -o json)
+pods=$(kubectl get pods -n "$ns" -o json)
+events=$(kubectl get events -n "$ns" --field-selector type=Warning -o json)
+
+jq -n --arg ns "$ns" --arg since "$since" \
+  --argjson workloads "$workloads" --argjson pods "$pods" --argjson events "$events" '
+{
+  namespace: $ns,
+  since: $since,
+  workloads: [$workloads.items[] | {
+    kind, name: .metadata.name, created: .metadata.creationTimestamp,
+    readyReplicas: (.status.readyReplicas // .status.numberReady // 0),
+    replicas: (.spec.replicas // .status.desiredNumberScheduled // 0)}],
+  unhealthyPods: [$pods.items[]
+    | {name: .metadata.name, phase: .status.phase,
+       restarts: ([.status.containerStatuses[]?.restartCount] | add // 0),
+       ready: ([.status.containerStatuses[]?.ready] | all)}
+    | select(.restarts > 0 or (.ready | not) or (.phase != "Running" and .phase != "Succeeded"))],
+  warnings: [$events.items[]
+    | select((.lastTimestamp // .eventTime // .metadata.creationTimestamp) >= $since)
+    | {object: (.involvedObject.kind + "/" + .involvedObject.name),
+       reason, message, count: (.count // 1),
+       last: (.lastTimestamp // .eventTime // .metadata.creationTimestamp)}]
+}'

@@ -11,3 +11,4 @@ knights may and may not do. Each recipe is applied on top of a RoundTable (see
 | [`personal-fleet/`](personal-fleet/) | Three persona knights (research, infrastructure, editor) on a shared notes volume, a scheduled `morning-briefing` Chain and an on-demand chain run through the gateway |
 | [`dev-factory/`](dev-factory/) | Issue to merged PR: GitHub Triggers for pickup and PR feedback, the PR pipeline and feedback Chains, post-run checks as chain steps, a lead knight and a coder |
 | [`backlog-grooming/`](backlog-grooming/) | A schedule Trigger starts a lead knight that reads a repository's open epics and files `groomed` sub-issues, capped per run, never `rt:ready` and never touching `needs-human` |
+| [`nightly-digest/`](nightly-digest/) | A schedule Trigger sends one task to a read-only persona knight naming a skill; the skill's `collect` and `file` scripts gather, validate and write a namespace digest, with no chain |
