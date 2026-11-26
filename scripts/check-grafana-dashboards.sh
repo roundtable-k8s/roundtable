@@ -41,12 +41,26 @@ roundtable_chain_runs_total roundtable_chain_step_duration_seconds_bucket roundt
 roundtable_dead_letters_open roundtable_knight_consumer_ready roundtable_trigger_firings_total roundtable_trigger_runs_finished_total roundtable_trigger_last_fired_timestamp_seconds roundtable_gateway_requests_total roundtable_gateway_request_duration_seconds_bucket roundtable_tasks_dead_lettered_total roundtable_knight_isolated roundtable_knight_wake_seconds_bucket roundtable_mission_cost_usd_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas keda_scaler_metrics_value'
 
+# True when any panel or target datasource uid is a literal rather than
+# ${datasource} or another template variable ($var, ${var}, [[var]]).
+bad_ds() {
+  jq -e '[.. | objects | select(has("datasource")) | .datasource
+          | if type == "object" then .uid else . end
+          | select(type == "string" and test("^(\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|\\[\\[[A-Za-z_][A-Za-z0-9_]*\\]\\])$") | not)]
+         | length > 0' "$1" >/dev/null
+}
+
+# Negative test: a literal datasource uid on one panel must be caught.
+neg="$(mktemp)"; trap 'rm -f "$neg"' EXIT
+jq '.panels[0].targets[0].datasource.uid = "abc123"' "$chart/dashboards/fleet-overview.json" >"$neg"
+bad_ds "$neg" || fail "negative test: literal datasource uid not detected"
+
 for f in "$chart"/dashboards/*.json; do
   jq empty "$f" || fail "$f is not valid JSON"
   jq -e '[.templating.list[].name] | contains(["datasource","namespace","table"])' "$f" >/dev/null ||
     fail "$f lacks datasource/namespace/table variables"
   jq -e '.templating.list[] | select(.name=="table") | .multi' "$f" >/dev/null || fail "$f: table must be multi-select"
-  grep -q '"uid": "[a-z]' "$f" && ! grep -q '"uid": "\${datasource}"' "$f" && fail "$f hard-codes a datasource"
+  bad_ds "$f" && fail "$f hard-codes a datasource"
   while IFS= read -r expr; do
     for m in $(grep -oE '\b(roundtable|kube|keda)_[a-z_]+' <<<"$expr"); do
       grep -qw "$m" <<<"$known" || fail "$f: unknown metric $m in: $expr"
