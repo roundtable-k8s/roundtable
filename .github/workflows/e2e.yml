@@ -61,4 +61,12 @@ jobs:
           chmod +x kind && sudo mv kind /usr/local/bin/kind
 
       - name: make e2e TIER=core
-        run: make e2e TIER=core
+        run: |
+          set -o pipefail
+          make e2e TIER=core 2>&1 | tee e2e.log
+
+      - name: Surface the failure
+        if: failure()
+        run: |
+          # The failing output as an annotation (readable without the raw log).
+          [ -f e2e.log ] && echo "::error title=make e2e::$(grep -v 'downloading' e2e.log | tail -n 60 | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')"
