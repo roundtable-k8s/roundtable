@@ -550,6 +550,9 @@ scaling rules are scoped to the release namespace.
 | `alerts.knightNotReadyMinutes` | number | `15` | `KnightNotReady`: minutes a knight may stay `Pending`, `Provisioning` or `Degraded` |
 | `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
 | `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
+| `alerts.queueBacklog.enabled` | bool | `false` | Render `RoundtableQueueBacklog` in the `roundtable.scaling` group (needs `alerts.scaling.enabled`); covers only knights with a KEDA ScaledObject |
+| `alerts.queueBacklog.pending` | number | `10` | `RoundtableQueueBacklog` threshold: pending tasks (`keda_scaler_metrics_value`, nats-jetstream scaler) per knight |
+| `alerts.queueBacklog.forMinutes` | number | `15` | Minutes the backlog must stay above `pending` |
 
 Groups: `roundtable.knights` (task failures, NATS disconnected, metrics absent,
 lost tasks, cost spike, slow chain steps), `roundtable.pods` (restarts,

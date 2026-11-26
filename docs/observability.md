@@ -307,7 +307,7 @@ and `metrics.podMonitor.enabled`.
 ConfigMaps or `GrafanaDashboard` CRs.
 
 - *Round Table / Fleet overview*: knights by phase, tasks per minute, task error rate, active tasks, NATS connected, KEDA desired vs
-  actual replicas.
+  actual replicas, queue depth by knight (pending tasks from KEDA's `keda_scaler_metrics_value` for the `nats-jetstream` scaler; needs KEDA's metrics scraped and covers only knights with a ScaledObject, i.e. `maxReplicas > 1` or scale-to-zero).
 - *Round Table / Chains and platform*: chain runs by status, p95 step
   duration, provider retries, missions by phase, dead letters open, ready
   knight consumers, isolation state and wake latency.
@@ -341,6 +341,7 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `RoundtablePodRestarting`, `RoundtablePodOOMKilled`, `RoundtablePodEvicted` | pod health |
 | `RoundtablePVCAlmostFull` | a PVC is nearly full |
 | `RoundtableKedaScalerErrors`, `RoundtableHPAScalingInactive` | scaling problems (`alerts.scaling.enabled`) |
+| `RoundtableQueueBacklog` | a knight's pending tasks stay above `alerts.queueBacklog.pending` for `alerts.queueBacklog.forMinutes` (opt-in: `alerts.queueBacklog.enabled`) |
 
 When an alert names a chain or knight, use the TraceQL queries above with the
 same `table`, `chain` or `knight` to find the slow or failing span. Details and

@@ -275,6 +275,39 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Queue depth by knight",
+      "description": "Pending tasks (JetStream consumer lag) per knight, from KEDA's keda_scaler_metrics_value for the nats-jetstream scaler. Needs KEDA's metrics scraped. Only knights with a ScaledObject (maxReplicas > 1 or scale-to-zero) appear; others have no series. Pending counts tasks not yet delivered to a pod; tasks a pod is already running are ack-pending and not included. Not filtered by table (ScaledObjects carry no table label).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (scaledObject) (keda_scaler_metrics_value{exported_namespace=~\"$namespace\", metric=~\"s[0-9]+-nats-jetstream-.*\"})",
+          "legendFormat": "{{scaledObject}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     }
   ]
 }
