@@ -28,6 +28,6 @@ spec:
     reason: e2e core round trip on kind (no gVisor, stub LLM)
   workspace:
     mode: ephemeral
-    size: 64Mi
+    size: 1Gi
   concurrency: 1
   taskTimeoutSeconds: 120

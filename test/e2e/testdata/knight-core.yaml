@@ -22,6 +22,6 @@ spec:
     reason: e2e core tier on kind (no gVisor, no LLM)
   workspace:
     mode: ephemeral
-    size: 64Mi
+    size: 1Gi
   concurrency: 1
   taskTimeoutSeconds: 60
