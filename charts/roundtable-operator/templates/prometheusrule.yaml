@@ -94,6 +94,25 @@ spec:
           for: 10m
           labels:
             {{- toYaml $labels | nindent 12 }}
+        - alert: KnightNotReady
+          annotations:
+            summary: >-
+              {{`{{ $value }}`}} knights on table {{`{{ $labels.table }}`}} have been {{`{{ $labels.phase }}`}} for over {{ .Values.alerts.knightNotReadyMinutes }}m;
+              the rollout is stuck or the knight will not become Ready.
+          expr: |
+            sum by (table, phase) (roundtable_knights{phase=~"Pending|Provisioning|Degraded"}) > 0
+          for: {{ .Values.alerts.knightNotReadyMinutes }}m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableToolsImageBuildFailed
+          annotations:
+            summary: >-
+              Tools image build Job {{`{{ $labels.job_name }}`}} in namespace {{`{{ $labels.namespace }}`}} failed;
+              the knight's pod rollout is held until the image builds.
+          expr: |
+            max by (namespace, job_name) (kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}) > 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
         - alert: KnightNotIsolated
           annotations:
             summary: >-
