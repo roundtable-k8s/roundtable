@@ -2,7 +2,7 @@
 
 **Kubernetes-Native Multi-Agent AI Orchestration**
 
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/roundtable-k8s/roundtable/actions/workflows/ci.yml/badge.svg)](https://github.com/roundtable-k8s/roundtable/actions)
 
@@ -33,7 +33,7 @@ Most multi-agent systems are either app-layer task managers or single-agent wrap
 | **Ephemerality** | Missions auto-provision and teardown teams | Manual | Manual | N/A |
 | **GitOps** | Native (CRDs + Flux/ArgoCD) | N/A | Partial | N/A |
 
-**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything · don't rebuild the wheel. See [docs/principles.md](docs/principles.md), the [decision register](docs/decisions.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). More in [docs/](docs/): [memory](docs/memory.md), [workspace snapshots](docs/workspace-snapshots.md), [runtime backends](docs/design/runtime-backends-adr.md), [scheduled work](docs/scheduled-work.md), [migrating from kagent](docs/migrating-from-kagent.md), [cutting a release](docs/releasing.md).
+**Principles:** agents are infrastructure · specialists, not generalists · messages, not calls · any model, chosen by cost · humans set goals, agents do the rest · isolated by default · reproducible capabilities · you can watch everything · don't rebuild the wheel. See [docs/principles.md](docs/principles.md), the [decision register](docs/decisions.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). More in [docs/](docs/) ([index](docs/README.md)): [memory](docs/memory.md), [workspace snapshots](docs/workspace-snapshots.md), [runtime backends](docs/design/runtime-backends-adr.md), [scheduled work](docs/scheduled-work.md), [migrating from kagent](docs/migrating-from-kagent.md), [cutting a release](docs/releasing.md).
 
 ## Features
 

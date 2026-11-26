@@ -135,6 +135,8 @@ picked up. The overall chain `timeout` still counts from the start of the run.
 ## What's Next?
 
 - [Example Manifests](../examples/) — Real-world Knight, Chain, Mission examples
+- [Recipes](../examples/recipes/) — Complete fleets to copy: incident triage, personal fleet, dev factory, backlog grooming, nightly digest
+- [Documentation index](README.md) — every page, grouped by what you want to do
 - [Helm Values Reference](helm-values.md) — Full configuration options
 - [Architecture Overview](ARCHITECTURE.md) — How it all works under the hood
 - [CRD Design](crd-design.md) — Complete CRD field documentation
