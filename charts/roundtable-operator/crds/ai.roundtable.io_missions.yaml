@@ -2514,16 +2514,6 @@ spec:
                           description: tools defines additional system packages and
                             tools the knight needs.
                           properties:
-                            apt:
-                              description: |-
-                                apt is a list of apt packages to install.
-
-                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                                non-root user, so apt installs cannot succeed. The field will be removed
-                                in a future release.
-                              items:
-                                type: string
-                              type: array
                             flakes:
                               description: |-
                                 flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -2562,16 +2552,6 @@ spec:
                               maxItems: 16
                               type: array
                               x-kubernetes-list-type: atomic
-                            mise:
-                              description: |-
-                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                                are downloaded at every cold start. The field will be removed in a
-                                future release.
-                              items:
-                                type: string
-                              type: array
                             nix:
                               description: |-
                                 nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -3078,18 +3058,8 @@ spec:
                           type: array
                         tools:
                           description: tools overrides the knight's tool configuration
-                            (nix packages, apt, mise).
+                            (nix packages and flakes).
                           properties:
-                            apt:
-                              description: |-
-                                apt is a list of apt packages to install.
-
-                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                                non-root user, so apt installs cannot succeed. The field will be removed
-                                in a future release.
-                              items:
-                                type: string
-                              type: array
                             flakes:
                               description: |-
                                 flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -3128,16 +3098,6 @@ spec:
                               maxItems: 16
                               type: array
                               x-kubernetes-list-type: atomic
-                            mise:
-                              description: |-
-                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                                are downloaded at every cold start. The field will be removed in a
-                                future release.
-                              items:
-                                type: string
-                              type: array
                             nix:
                               description: |-
                                 nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -5126,16 +5086,6 @@ spec:
                           description: tools defines additional system packages and
                             tools the knight needs.
                           properties:
-                            apt:
-                              description: |-
-                                apt is a list of apt packages to install.
-
-                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                                non-root user, so apt installs cannot succeed. The field will be removed
-                                in a future release.
-                              items:
-                                type: string
-                              type: array
                             flakes:
                               description: |-
                                 flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -5174,16 +5124,6 @@ spec:
                               maxItems: 16
                               type: array
                               x-kubernetes-list-type: atomic
-                            mise:
-                              description: |-
-                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                                are downloaded at every cold start. The field will be removed in a
-                                future release.
-                              items:
-                                type: string
-                              type: array
                             nix:
                               description: |-
                                 nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -7448,16 +7388,6 @@ spec:
                           description: tools defines additional system packages and
                             tools the knight needs.
                           properties:
-                            apt:
-                              description: |-
-                                apt is a list of apt packages to install.
-
-                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                                non-root user, so apt installs cannot succeed. The field will be removed
-                                in a future release.
-                              items:
-                                type: string
-                              type: array
                             flakes:
                               description: |-
                                 flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -7496,16 +7426,6 @@ spec:
                               maxItems: 16
                               type: array
                               x-kubernetes-list-type: atomic
-                            mise:
-                              description: |-
-                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                                are downloaded at every cold start. The field will be removed in a
-                                future release.
-                              items:
-                                type: string
-                              type: array
                             nix:
                               description: |-
                                 nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -8012,18 +7932,8 @@ spec:
                           type: array
                         tools:
                           description: tools overrides the knight's tool configuration
-                            (nix packages, apt, mise).
+                            (nix packages and flakes).
                           properties:
-                            apt:
-                              description: |-
-                                apt is a list of apt packages to install.
-
-                                Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                                non-root user, so apt installs cannot succeed. The field will be removed
-                                in a future release.
-                              items:
-                                type: string
-                              type: array
                             flakes:
                               description: |-
                                 flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -8062,16 +7972,6 @@ spec:
                               maxItems: 16
                               type: array
                               x-kubernetes-list-type: atomic
-                            mise:
-                              description: |-
-                                mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                                Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                                are downloaded at every cold start. The field will be removed in a
-                                future release.
-                              items:
-                                type: string
-                              type: array
                             nix:
                               description: |-
                                 nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").
@@ -10135,16 +10035,6 @@ spec:
                         description: tools defines additional system packages and
                           tools the knight needs.
                         properties:
-                          apt:
-                            description: |-
-                              apt is a list of apt packages to install.
-
-                              Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-                              non-root user, so apt installs cannot succeed. The field will be removed
-                              in a future release.
-                            items:
-                              type: string
-                            type: array
                           flakes:
                             description: |-
                               flakes adds packages from Nix flakes outside nixpkgs to the same tools
@@ -10183,16 +10073,6 @@ spec:
                             maxItems: 16
                             type: array
                             x-kubernetes-list-type: atomic
-                          mise:
-                            description: |-
-                              mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-
-                              Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-                              are downloaded at every cold start. The field will be removed in a
-                              future release.
-                            items:
-                              type: string
-                            type: array
                           nix:
                             description: |-
                               nix is a list of nixpkgs packages (e.g., "nmap", "whois", "dnsutils").

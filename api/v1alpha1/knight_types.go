@@ -827,22 +827,6 @@ type KnightTools struct {
 	// +listType=atomic
 	// +optional
 	Flakes []KnightToolsFlake `json:"flakes,omitempty"`
-
-	// apt is a list of apt packages to install.
-	//
-	// Deprecated: use tools.nix or tools.flakes. Knight containers run as a
-	// non-root user, so apt installs cannot succeed. The field will be removed
-	// in a future release.
-	// +optional
-	Apt []string `json:"apt,omitempty"`
-
-	// mise is a list of tools to install via mise (e.g., "shodan", "kubectl").
-	//
-	// Deprecated: use tools.nix or tools.flakes. mise tools are not pinned and
-	// are downloaded at every cold start. The field will be removed in a
-	// future release.
-	// +optional
-	Mise []string `json:"mise,omitempty"`
 }
 
 // KnightToolsFlake selects packages from one Nix flake for the tools image.

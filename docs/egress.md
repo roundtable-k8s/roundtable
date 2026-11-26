@@ -249,10 +249,8 @@ when the pod starts, so the knight needs no package hosts in `allowedHosts`.
 Changing the tool set builds a new image; the builder Job pushes it to the
 registry, which is not part of the knight's allowlist.
 
-`tools.apt` and `tools.mise` are deprecated (see
-[CRD design](crd-design.md#deprecated-fields)); move them to `tools.nix` or
-`tools.flakes`. When enabling isolation on an existing knight, check its `tools`
-first; see `examples/tristan.yaml`.
+When enabling isolation on an existing knight, check its `tools` first; see
+`examples/tristan.yaml`.
 
 ## Rules the allowlist cannot express
 
