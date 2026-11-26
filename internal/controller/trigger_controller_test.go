@@ -469,6 +469,99 @@ var _ = Describe("Trigger controller", func() {
 			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "outside"))).To(BeFalse())
 		})
 
+		It("starts a run for a message with no key after the events stream is recreated", func() {
+			t := natsTrigger("recreate", prefix+".events.recreate", nil)
+			publish(prefix+".events.recreate", "", `{"service":"api"}`)
+			Eventually(func() int { return len(runsOf("recreate")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			first := runsOf("recreate")[0]
+
+			// Recreating the stream restarts its sequence at 1 and removes the
+			// consumer; the next reconcile recreates both and the loop.
+			Expect(js.DeleteStream(ctx, stream)).To(Succeed())
+			Eventually(func() bool {
+				r.consumers.mu.Lock()
+				defer r.consumers.mu.Unlock()
+				for _, l := range r.consumers.loops {
+					select {
+					case <-l.done:
+						return true
+					default:
+					}
+				}
+				return false
+			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
+			rt := &aiv1alpha1.RoundTable{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+			Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
+			reconcileTrigger("recreate")
+			Expect(consumerExists(t.Status.Consumer)).To(BeTrue())
+
+			publish(prefix+".events.recreate", "", `{"service":"api"}`)
+			Eventually(func() int { return len(runsOf("recreate")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(2))
+			for _, run := range runsOf("recreate") {
+				if run.Name != first.Name {
+					Expect(run.Annotations[aiv1alpha1.AnnotationTriggerKey]).To(HaveSuffix("/1"))
+				}
+			}
+		})
+
+		It("treats a run under the former seq-<n> key as a duplicate", func() {
+			natsTrigger("legacy", prefix+".events.legacy", nil)
+			tmpl := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: tmplName}, tmpl)).To(Succeed())
+			old := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{Name: chainrun.TriggerRunName(tmplName, "legacy", "seq-1"), Namespace: ns,
+					Labels: map[string]string{aiv1alpha1.LabelTrigger: "legacy"}},
+				Spec: tmpl.Spec,
+			}
+			old.Spec.Schedule = ""
+			Expect(k8sClient.Create(ctx, old)).To(Succeed())
+
+			publish(prefix+".events.legacy", "", `{"service":"api"}`)
+			Eventually(func(g Gomega) {
+				f := getTrigger("legacy").Status.RecentFirings
+				g.Expect(f).To(HaveLen(1))
+				g.Expect(f[0].SkipReason).To(ContainSubstring("legacy key seq-1"))
+			}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+			Expect(runsOf("legacy")).To(HaveLen(1))
+		})
+
+		It("runs a message whose former seq-<n> run is older than the stream", func() {
+			natsTrigger("oldlegacy", prefix+".events.oldlegacy", nil)
+			tmpl := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: tmplName}, tmpl)).To(Succeed())
+			old := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{Name: chainrun.TriggerRunName(tmplName, "oldlegacy", "seq-1"), Namespace: ns,
+					Labels: map[string]string{aiv1alpha1.LabelTrigger: "oldlegacy"}},
+				Spec: tmpl.Spec,
+			}
+			old.Spec.Schedule = ""
+			Expect(k8sClient.Create(ctx, old)).To(Succeed())
+			// The stream is recreated after that run: wait out the
+			// one-second resolution of creationTimestamp.
+			time.Sleep(2 * time.Second)
+			Expect(js.DeleteStream(ctx, stream)).To(Succeed())
+			rt := &aiv1alpha1.RoundTable{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+			Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
+			Eventually(func() bool {
+				r.consumers.mu.Lock()
+				defer r.consumers.mu.Unlock()
+				for _, l := range r.consumers.loops {
+					select {
+					case <-l.done:
+						return true
+					default:
+					}
+				}
+				return false
+			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
+			reconcileTrigger("oldlegacy")
+
+			publish(prefix+".events.oldlegacy", "", `{"service":"api"}`)
+			Eventually(func() int { return len(runsOf("oldlegacy")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(2))
+		})
+
 		It("restarts its message loop after the consumer is deleted", func() {
 			t := natsTrigger("revive", prefix+".events.revive", nil)
 			Expect(reconcileTrigger("revive").RequeueAfter).To(Equal(RequeueVerySlow))
@@ -828,6 +921,20 @@ var _ = Describe("Trigger controller", func() {
 			Expect(runsOf("runnow")).To(HaveLen(1))
 		})
 
+		It("records a skipped firing and clears a run-now request for a missing Chain", func() {
+			t := scheduleTrigger("runnow-nochain", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.ChainRef = &corev1.LocalObjectReference{Name: "no-such-chain"}
+			})
+			clock = t.CreationTimestamp.Add(time.Second)
+			annotate("runnow-nochain", map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-x"})
+			reconcileTrigger("runnow-nochain")
+			t = getTrigger("runnow-nochain")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].SkipReason).To(ContainSubstring("no-such-chain"))
+			Expect(meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).NotTo(BeNil())
+		})
+
 		It("applies the concurrency policy to a run-now firing", func() {
 			scheduleTrigger("runnowforbid", func(s *aiv1alpha1.TriggerSpec) {
 				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
@@ -1096,6 +1203,23 @@ var _ = Describe("Trigger controller", func() {
 			rec, err := svc.GetTask(ctx, sent[0].TaskID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(rec.Caller).To(Equal("roundtable/ui"))
+		})
+
+		It("records a skipped firing and clears a run-now request for a missing knight", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-runnow-missing", func(s *aiv1alpha1.TriggerSpec) { s.Target.Knight.Name = "nobody" })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-m"}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+			reconcileTrigger("kt-runnow-missing")
+			t = getTrigger("kt-runnow-missing")
+			Expect(t.Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+			Expect(t.Status.RecentFirings).To(HaveLen(1))
+			Expect(t.Status.RecentFirings[0].SkipReason).To(ContainSubstring("nobody"))
+			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(got()).To(BeEmpty())
 		})
 
 		It("reports a missing knight or one at another table and sends nothing", func() {

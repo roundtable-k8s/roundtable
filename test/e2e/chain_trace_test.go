@@ -41,7 +41,6 @@ const (
 	traceRelease     = "rt-e2e"
 	traceCollector   = "rt-e2e-otel-collector" // fullnameOverride + "-otel-collector"
 	traceValues      = "test/e2e/testdata/otel-values.yaml"
-	traceNATS        = "test/e2e/testdata/nats.yaml"
 	traceManifests   = "test/e2e/testdata/chain-trace.yaml"
 	traceTable       = "e2e-table"
 	traceKnight      = "stub"
@@ -72,17 +71,10 @@ var contentAttrs = []string{
 // redactSecrets, or the collector's redaction processor.
 var redactionMarkers = []string{"[REDACTED]", "****"}
 
-var _ = Describe("Chain trace", Ordered, func() {
+var _ = Describe("Chain trace", Ordered, Label(tierTrace), func() {
 	BeforeAll(func() {
-		By("deploying NATS with JetStream")
-		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", traceNATS))
-		Expect(err).NotTo(HaveOccurred())
-		_, err = utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/nats",
-			"-n", "database", "--timeout=3m"))
-		Expect(err).NotTo(HaveOccurred())
-
 		By("installing the chart with telemetry and the collector (file exporter)")
-		_, err = utils.Run(exec.Command("helm", "upgrade", "--install", traceRelease, "charts/roundtable-operator",
+		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", traceRelease, "charts/roundtable-operator",
 			"-n", traceNamespace, "--create-namespace", "-f", traceValues, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred())
 
@@ -108,7 +100,6 @@ var _ = Describe("Chain trace", Ordered, func() {
 			"-n", traceNamespace, "--ignore-not-found", "--timeout=2m"))
 		_, _ = utils.Run(exec.Command("helm", "uninstall", traceRelease, "-n", traceNamespace, "--wait"))
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", traceNamespace, "--ignore-not-found", "--wait=false"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", traceNATS, "--ignore-not-found", "--wait=false"))
 	})
 
 	AfterEach(func() {

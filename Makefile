@@ -117,10 +117,27 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
 
+# TIER selects the e2e scenarios (Ginkgo labels in test/e2e): core (default),
+# trace, or all. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
+TIER ?= core
+
+.PHONY: e2e
+e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests of TIER (default core) on a Kind cluster with NATS and the Helm chart, then delete the cluster.
+	@status=0; \
+	TIER=$(TIER) KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v || status=$$?; \
+	$(MAKE) cleanup-test-e2e; \
+	exit $$status
+
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+test-e2e: e2e ## Alias for e2e.
+
+# Image of the e2e stub LLM (test/e2e/stubllm): an OpenAI-compatible server with
+# scripted replies. The binary is built into bin/ on the host, then packaged.
+.PHONY: stubllm-image
+stubllm-image: ## Build the e2e stub LLM image as stubllm:e2e.
+	mkdir -p bin/stubllm-image
+	CGO_ENABLED=0 go build -o bin/stubllm-image/stubllm ./test/e2e/stubllm
+	$(CONTAINER_TOOL) build -t stubllm:e2e -f test/e2e/stubllm/Dockerfile bin/stubllm-image
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests

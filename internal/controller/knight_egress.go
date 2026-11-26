@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -84,7 +86,7 @@ func knightPodSelectorLabels(k *aiv1alpha1.Knight) map[string]string {
 var kubeAPIFallbackPorts = []int32{443, 6443}
 
 // EgressAllowlist is the input to the egress policy renderers. Every policy
-// allows the baseline: DNS, NATS, the Kubernetes API, BaseHosts (on 443) and
+// allows the baseline: DNS, NATS, the Kubernetes API, the telemetry collector (when configured), BaseHosts (on 443) and
 // GitHosts (on their ports). AllowedHosts are allowed on top, each on its own
 // ports or, without any, on AllowedPorts, and each of Services on its own ports.
 type EgressAllowlist struct {
@@ -97,6 +99,9 @@ type EgressAllowlist struct {
 	// Services are the allowed in-cluster Services that exist and have a pod
 	// selector, resolved by resolveEgressServices.
 	Services []EgressServicePeer
+	// OTLPEndpoint is the telemetry collector URL the knight exports to
+	// (empty: telemetry is off, so no collector peer is allowed).
+	OTLPEndpoint string
 }
 
 // EgressServicePeer is an allowed in-cluster Service resolved to its pods.
@@ -303,6 +308,7 @@ func RenderCiliumEgressPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mis
 		},
 	}
 	egress = append(egress, ciliumNATSRules(k.Spec.NATS.URL, s)...)
+	egress = append(egress, ciliumOTLPRules(allow.OTLPEndpoint)...)
 	egress = append(egress, map[string]any{"toEntities": []any{"kube-apiserver"}})
 	baseline := allow.baselineHostsByPort()
 	for _, p := range slices.Sorted(maps.Keys(baseline)) {
@@ -392,6 +398,89 @@ func ciliumNATSRules(rawURL string, s missionpkg.NetPolSettings) []any {
 	return rules
 }
 
+// tcpPorts returns TCP NetworkPolicyPorts for ports.
+func tcpPorts(ports []int32) []networkingv1.NetworkPolicyPort {
+	out := make([]networkingv1.NetworkPolicyPort, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, networkingv1.NetworkPolicyPort{
+			Protocol: ptr.To(corev1.ProtocolTCP),
+			Port:     new(intstr.FromInt32(p)),
+		})
+	}
+	return out
+}
+
+// otlpPeer is the telemetry collector a knight exports to.
+type otlpPeer struct {
+	host string
+	// namespace is set when inCluster: the host is <svc>.<ns>.svc[.cluster.local].
+	namespace string
+	inCluster bool
+	ports     []int32
+}
+
+// OTLP default ports: gRPC and HTTP. Without a port in the endpoint the
+// protocol (and so the port) is the exporter's choice, so both are allowed.
+var otlpDefaultPorts = []int32{4317, 4318}
+
+// parseOTLPPeer derives the collector peer from an OTLP endpoint URL, the
+// same way the NATS peer is derived. It returns nil for an empty or
+// unparseable endpoint.
+func parseOTLPPeer(endpoint string) *otlpPeer {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return nil
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "http://" + endpoint
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	p := &otlpPeer{host: strings.ToLower(strings.TrimSuffix(u.Hostname(), ".")), ports: otlpDefaultPorts}
+	if n, err := strconv.Atoi(u.Port()); err == nil && n > 0 && n < 65536 {
+		p.ports = []int32{int32(n)} //nolint:gosec // validated range
+	}
+	p.namespace, _, p.inCluster = missionpkg.NATSNamespaceAndPort(endpoint)
+	return p
+}
+
+// ciliumOTLPRules allows the telemetry collector: its namespace when it is a
+// cluster service, a CIDR for an IP literal, otherwise its FQDN. No endpoint,
+// no rule.
+func ciliumOTLPRules(endpoint string) []any {
+	p := parseOTLPPeer(endpoint)
+	if p == nil {
+		return nil
+	}
+	switch {
+	case p.inCluster:
+		return []any{map[string]any{
+			"toEndpoints": []any{map[string]any{"matchLabels": stringMap(ciliumPeerLabels(p.namespace, nil))}},
+			"toPorts":     []any{map[string]any{"ports": ciliumTCPPorts(p.ports)}},
+		}}
+	case net.ParseIP(p.host) != nil:
+		bits := "/32"
+		if strings.Contains(p.host, ":") {
+			bits = "/128"
+		}
+		return []any{map[string]any{
+			"toCIDR":  []any{p.host + bits},
+			"toPorts": []any{map[string]any{"ports": ciliumTCPPorts(p.ports)}},
+		}}
+	}
+	return []any{ciliumFQDNRule([]string{p.host}, p.ports)}
+}
+
+func ciliumTCPPorts(ports []int32) []any {
+	out := make([]any, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, map[string]any{"port": strconv.Itoa(int(p)), "protocol": "TCP"})
+	}
+	return out
+}
+
 // RenderEgressNetworkPolicy renders the fallback NetworkPolicy used when the
 // CiliumNetworkPolicy API isn't served. It can't express hostnames or the
 // API server, so it allows DNS, NATS and, to any destination, the Kubernetes
@@ -411,19 +500,23 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 		seen[key] = true
 		rules = append(rules, rule)
 	}
+	otlp := parseOTLPPeer(allow.OTLPEndpoint)
+	if otlp != nil && otlp.inCluster {
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To:    []networkingv1.NetworkPolicyPeer{missionpkg.NATSPeer(otlp.namespace, nil)},
+			Ports: tcpPorts(otlp.ports),
+		})
+	}
 	allowed := slices.Clone(kubeAPIFallbackPorts)
+	if otlp != nil && !otlp.inCluster {
+		// The fallback can't match hostnames: allow the port to any destination.
+		allowed = append(allowed, otlp.ports...)
+	}
 	allowed = slices.AppendSeq(allowed, maps.Keys(allow.baselineHostsByPort()))
 	allowed = append(allowed, allow.allHostPorts()...)
 	slices.Sort(allowed)
 	allowed = slices.Compact(allowed)
-	ports := make([]networkingv1.NetworkPolicyPort, 0, len(allowed))
-	for _, p := range allowed {
-		ports = append(ports, networkingv1.NetworkPolicyPort{
-			Protocol: ptr.To(corev1.ProtocolTCP),
-			Port:     new(intstr.FromInt32(p)),
-		})
-	}
-	rules = append(rules, networkingv1.NetworkPolicyEgressRule{Ports: ports})
+	rules = append(rules, networkingv1.NetworkPolicyEgressRule{Ports: tcpPorts(allowed)})
 	for _, svc := range allow.Services {
 		rules = append(rules, serviceEgressRule(svc))
 	}
@@ -521,6 +614,7 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	// An EgressAllowlist holds decoded hosts, so the raw entries are parsed here.
 	hosts, dropped := aiv1alpha1.ParseEgressHosts(k.Spec.Egress.AllowedHosts)
 	allow.AllowedHosts = hosts
+	allow.OTLPEndpoint = knightpkg.ResolveTelemetry(ctx, r.Client, k).Endpoint
 	// Destinations of the knight's MCP servers are allowed on top; an invalid
 	// URL is reported like an invalid host, with the rest still rendered.
 	derived, mcpErrs := deriveMCPEgress(k)

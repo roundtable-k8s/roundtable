@@ -20,10 +20,11 @@ result from `<prefix>.results.<taskId>`. Knights need no changes.
     Secrets, Jobs, cluster-wide). The gateway is the only network-facing,
     caller-driven component, so it runs under its own ServiceAccount with
     read-only `get`/`list` on Knights, RoundTables and Chains. The only
-    objects it writes are Missions, run copies of opted-in Chains and the
-    suspend and run-now annotations of schedule Triggers, and only in the
-    namespaces callers may target (see [Missions](#missions),
-    [Chain runs](#chain-runs) and [Schedules](#schedules)). For [webhooks](#webhooks) it can `get`
+    objects it writes are Missions, run copies of opted-in Chains and
+    schedule Triggers (created, replaced and deleted, and their suspend and
+    run-now annotations), and only in the namespaces callers may target (see
+    [Missions](#missions), [Chain runs](#chain-runs) and
+    [Schedules](#schedules)). For [webhooks](#webhooks) it can `get`
     Triggers and `get` (not list) Secrets in those namespaces, and uses only
     Secrets labelled `ai.roundtable.io/webhook-secret: "true"`. The same
     Trigger access serves [schedule firings](#firing-a-schedule-trigger).
@@ -756,12 +757,14 @@ jq -r '.phase, .output' /tmp/run.json
 ## Schedules
 
 A schedule is a [Trigger](triggers.md) with a `spec.source.schedule`. The
-gateway reads schedules and exports them as YAML; Triggers with any other
-source (NATS, webhook, GitHub) are not schedules and are a **404** on these
-routes. Served when `gateway.schedules.enabled` is true (the default), which
-grants `get`, `list`, `watch` and `patch` on Triggers in the gateway's namespace and
-`allowedNamespaces` (a ClusterRole if `allowedNamespaces` holds `"*"`). The
-POST actions below patch annotations only, never the spec.
+gateway reads schedules, exports them as YAML, creates, replaces and deletes
+them, and suspends, resumes and runs them; Triggers with any other source
+(NATS, webhook, GitHub) are not schedules and are a **404** on these routes.
+Served when `gateway.schedules.enabled` is true (the default), which grants
+`get`, `list`, `watch`, `create`, `update`, `patch` and `delete` on Triggers in
+the gateway's namespace and `allowedNamespaces` (a ClusterRole if
+`allowedNamespaces` holds `"*"`). The suspend, resume and run POSTs patch
+annotations only, never the spec.
 
 ### `managedBy`
 
@@ -770,7 +773,7 @@ through the API:
 
 | `managedBy` | When |
 |---|---|
-| `git` | The Trigger carries a Flux or Helm ownership label or annotation: `kustomize.toolkit.fluxcd.io/name`, `helm.toolkit.fluxcd.io/name` or `app.kubernetes.io/managed-by: Helm`. Git is the source of truth: change it there. |
+| `git` | The Trigger carries a Flux or Helm ownership label or annotation: `kustomize.toolkit.fluxcd.io/name`, `helm.toolkit.fluxcd.io/name` or `app.kubernetes.io/managed-by: Helm`. Git is the source of truth: change it there; `PUT` and `DELETE` through the gateway are refused with 409. |
 | `api` | The Trigger is labelled `app.kubernetes.io/managed-by: roundtable-gateway` (created through the gateway). |
 | `other` | Anything else, for example applied with `kubectl`. |
 
@@ -821,6 +824,100 @@ Git: no `status`, `managedFields`, `resourceVersion`, `uid`, `generation`,
 
 ```sh
 curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/manifest" > morning-digest.yaml
+```
+
+Git is the source of truth for what Flux applies: an edit through the API
+would be reverted on the next reconcile, so the gateway refuses it instead.
+The 409 body says where to change it, naming the Flux Kustomization or
+HelmRelease (or Helm release) when its labels say which:
+
+```json
+{"error": "conflict: schedule roundtable/morning-digest is managed by Git: change it in Git (applied by Flux Kustomization flux-system/apps), not through the gateway",
+ "managedBy": "git"}
+```
+
+### Request body
+
+`POST` and `PUT` take a Trigger's name and spec. Unknown fields (labels,
+annotations, status) are rejected.
+
+| Field | Notes |
+|---|---|
+| `name` | Required on `POST` (DNS name, at most 63 characters). On `PUT`, optional and must match the path. |
+| `namespace` | `POST`: defaults to the gateway's namespace; must be allowed. `PUT`: optional and must match the path. |
+| `spec` | A [`TriggerSpec`](triggers.md): `source.schedule` (`cron`, `timeZone`, `startingDeadlineSeconds`), exactly one of `target.chainRef`, `target.knight` or `target.mission`, `input`, `dedupeKey`, `concurrency`, `suspend`, `roundTableRef`, `ttlSecondsAfterFinished`. |
+
+The gateway checks the CRD's rules before writing: exactly a schedule source
+(`spec.source`), a five-field cron the trigger controller can parse
+(`spec.source.schedule.cron`, no `TZ=` prefix), an IANA time zone other than
+`Local` (`spec.source.schedule.timeZone`), an existing target Chain
+(`spec.target.chainRef.name`), Knight (`spec.target.knight.name`) or valid
+Mission templates (`spec.target.mission.objective`), the RoundTable when one
+is named (`spec.roundTableRef.name`), and the concurrency and TTL bounds. A failure is
+a 400 whose `field` names the offending field; so are validation errors the
+API server returns (OpenAPI or CEL rules):
+
+```json
+{"error": "invalid request: spec.source.schedule.cron: \"every day\" is not a valid cron expression: ...",
+ "field": "spec.source.schedule.cron"}
+```
+
+### `POST /v1/schedules`
+
+Creates the Trigger, labelled `app.kubernetes.io/managed-by:
+roundtable-gateway` and annotated `ai.roundtable.io/caller` with the caller
+(the token's name from the token file, or `<namespace>/<serviceaccount>` for
+ServiceAccount callers; see [Auth](#auth)). A schedule may
+target a Chain (`target.chainRef`), a Knight (`target.knight`) or a Mission
+(`target.mission`); the gateway applies the trigger controller's rules to each.
+A knight target's Knight must exist (and sit at `roundTableRef` when one is
+set). A mission target needs `roundTableRef`, and its `objective` and
+`successCriteria` must parse as templates. Neither accepts `spec.input` or
+`concurrency.policy: Replace`. Returns 201 with a `Location`, or 409
+if a Trigger of that name exists.
+
+```json
+{"name": "morning-digest", "namespace": "roundtable", "managedBy": "api", "caller": "jobs/runner",
+ "createdAt": "2026-11-25T07:00:00Z", "spec": {"source": {"schedule": {"cron": "0 7 * * 1-5", "timeZone": "Europe/Berlin"}}, "...": "..."}}
+```
+
+### `PUT /v1/schedules/{namespace}/{name}`
+
+Replaces the spec of an existing schedule (labels, other annotations and
+status are kept; the caller annotation is updated). 404 if there is no such
+schedule, 409 if it is Git-managed or changed concurrently (read it and
+retry).
+
+### `DELETE /v1/schedules/{namespace}/{name}`
+
+Deletes the schedule; runs it already started are left to their own TTL.
+404 if there is no such schedule, 409 if it is Git-managed.
+
+### Example: a weekday digest
+
+```bash
+GW=http://roundtable-roundtable-operator-gateway.roundtable.svc
+AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
+
+curl -s -H "$AUTH" -H 'Content-Type: application/json' "$GW/v1/schedules" -d '{
+  "name": "morning-digest",
+  "spec": {
+    "source": {"schedule": {"cron": "0 7 * * 1-5", "timeZone": "Europe/Berlin"}},
+    "target": {"chainRef": {"name": "daily-digest"}},
+    "input": "Digest for {{ .Event.Time.Format \"2006-01-02\" }}",
+    "concurrency": {"policy": "Forbid"}
+  }
+}'
+
+# Move it to 06:30, then remove it.
+curl -s -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
+  "$GW/v1/schedules/roundtable/morning-digest" -d '{
+  "spec": {
+    "source": {"schedule": {"cron": "30 6 * * 1-5", "timeZone": "Europe/Berlin"}},
+    "target": {"chainRef": {"name": "daily-digest"}}
+  }
+}'
+curl -s -X DELETE -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest"
 ```
 
 ### `POST /v1/schedules/{namespace}/{name}/suspend`

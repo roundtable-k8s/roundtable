@@ -36,10 +36,14 @@ grep -q 'namespace="rtns"' <<<"$on" || fail "release namespace not used in pod r
 ! grep -E 'sum by \(' <<<"$on" | grep -E 'roundtable_(knight|chain)' | grep -qv 'table' \
   || fail "an aggregation over knight/chain metrics drops table"
 
-for a in RoundtableDeadLettersOpen KnightConsumerNotReady KnightNotIsolated RoundtableChainRunsFailing; do
+for a in RoundtableDeadLettersOpen KnightConsumerNotReady KnightNotIsolated RoundtableChainRunsFailing KnightNotReady RoundtableToolsImageBuildFailed; do
   grep -q "alert: $a\$" <<<"$on" || fail "alert $a missing"
 done
 grep -q 'roundtable.platform' <<<"$on" || fail "roundtable.platform group missing"
+grep -q 'for: 15m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$on")" || fail "default knightNotReadyMinutes not 15m"
+kn="$(render --set alerts.enabled=true "${api[@]}" --set alerts.knightNotReadyMinutes=30)"
+grep -q 'for: 30m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$kn")" || fail "knightNotReadyMinutes not applied"
+grep -q 'kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}' <<<"$on" || fail "tools image build alert expr missing"
 grep -q '> 0.5$' <<<"$(render --set alerts.enabled=true "${api[@]}")" || fail "default chainFailureRatio not 0.5"
 tuned="$(render --set alerts.enabled=true "${api[@]}" --set alerts.chainFailureRatio=0.2 --set alerts.deadLettersOpenMinutes=30)"
 grep -q '> 0.2$' <<<"$tuned" || fail "chainFailureRatio not applied"

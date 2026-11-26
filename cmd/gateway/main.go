@@ -104,7 +104,7 @@ func main() {
 		"Serve the chain-run endpoints (needs RBAC to create, read and delete Chains).")
 	flag.DurationVar(&runTTL, "run-ttl", 24*time.Hour, "How long a finished chain run started by the gateway is kept.")
 	flag.BoolVar(&schedulesEnabled, "schedules", true,
-		"Serve the schedule endpoints (needs RBAC to get, list, watch and patch Triggers).")
+		"Serve the schedule endpoints (needs RBAC to get, list, watch, create, update, patch and delete Triggers).")
 	flag.BoolVar(&scheduleRunsEnabled, "schedule-runs", true,
 		"Serve a schedule's run history and results, GET /v1/schedules/{namespace}/{name}/runs "+
 			"(needs RBAC to get Triggers, get and list Chains).")
