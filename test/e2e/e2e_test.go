@@ -57,6 +57,14 @@ const (
 	natsLocalPort = "14222"
 )
 
+// natsForward, natsConn and natsJS are the port-forward to NATS and the
+// JetStream handle the core scenarios publish and read results with.
+var (
+	natsForward *exec.Cmd
+	natsConn    *nats.Conn
+	natsJS      jetstream.JetStream
+)
+
 var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 	BeforeAll(func() {
 		SetDefaultEventuallyTimeout(3 * time.Minute)
@@ -66,9 +74,38 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", coreRelease, "charts/roundtable-operator",
 			"-n", coreNamespace, "--create-namespace", "-f", coreValues, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the operator chart")
+
+		// The knights' streams must exist before their pods start, or the
+		// runtime cannot bind its consumer and never turns Ready.
+		By("port-forwarding NATS and creating the core streams")
+		natsForward = exec.Command("kubectl", "port-forward", "-n", natsNamespace, "svc/nats", natsLocalPort+":4222")
+		Expect(natsForward.Start()).To(Succeed())
+		Eventually(func() error {
+			var cerr error
+			natsConn, cerr = nats.Connect("nats://127.0.0.1:" + natsLocalPort)
+			return cerr
+		}, time.Minute, time.Second).Should(Succeed())
+		natsJS, err = jetstream.New(natsConn)
+		Expect(err).NotTo(HaveOccurred())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		for name, subjects := range map[string][]string{
+			roundtripTasks:   {"core.tasks.>"},
+			roundtripResults: {"core.results.>"},
+		} {
+			_, err = natsJS.CreateOrUpdateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: subjects})
+			Expect(err).NotTo(HaveOccurred(), "stream %s", name)
+		}
 	})
 
 	AfterAll(func() {
+		if natsConn != nil {
+			natsConn.Close()
+		}
+		if natsForward != nil && natsForward.Process != nil {
+			_ = natsForward.Process.Kill()
+			_ = natsForward.Wait()
+		}
 		// Delete the Knight while the operator still runs its finalizers.
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", coreKnightYAML,
 			"--ignore-not-found", "--timeout=2m"))
@@ -150,32 +187,8 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			"-n", coreNamespace, "--timeout=3m"))
 		Expect(err).NotTo(HaveOccurred())
 
-		By("port-forwarding NATS")
-		pf := exec.Command("kubectl", "port-forward", "-n", natsNamespace, "svc/nats", natsLocalPort+":4222")
-		Expect(pf.Start()).To(Succeed())
-		DeferCleanup(func() {
-			_ = pf.Process.Kill()
-			_ = pf.Wait()
-		})
-		var nc *nats.Conn
-		Eventually(func() error {
-			var cerr error
-			nc, cerr = nats.Connect("nats://127.0.0.1:" + natsLocalPort)
-			return cerr
-		}, time.Minute, time.Second).Should(Succeed())
-		DeferCleanup(nc.Close)
-		js, err := jetstream.New(nc)
-		Expect(err).NotTo(HaveOccurred())
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		for name, subjects := range map[string][]string{
-			roundtripTasks:   {"core.tasks.>"},
-			roundtripResults: {"core.results.>"},
-		} {
-			_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: subjects})
-			Expect(err).NotTo(HaveOccurred(), "stream %s", name)
-		}
 
 		By("creating the Knight that routes its model to the stub LLM")
 		_, err = utils.Run(exec.Command("kubectl", "apply", "-f", roundtripYAML))
@@ -191,11 +204,11 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		taskID := fmt.Sprintf("e2e-core-%d", time.Now().UnixNano())
 		payload, err := json.Marshal(natspkg.TaskPayload{TaskID: taskID, Task: "STUB:greeting"})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = js.Publish(ctx, "core.tasks.rt."+roundtripKnight, payload)
+		_, err = natsJS.Publish(ctx, "core.tasks.rt."+roundtripKnight, payload)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("waiting for the result on the results stream")
-		cons, err := js.OrderedConsumer(ctx, roundtripResults, jetstream.OrderedConsumerConfig{
+		cons, err := natsJS.OrderedConsumer(ctx, roundtripResults, jetstream.OrderedConsumerConfig{
 			FilterSubjects: []string{"core.results." + taskID},
 		})
 		Expect(err).NotTo(HaveOccurred())
