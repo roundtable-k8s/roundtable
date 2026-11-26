@@ -39,6 +39,15 @@ spec:
           for: 10m
           labels:
             {{- toYaml $labels | nindent 12 }}
+        - alert: KnightNatsFlapping
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.knight }}`}} on table {{`{{ $labels.table }}`}} reconnected to NATS {{`{{ $value }}`}} times in 30m;
+              the connection drops and returns faster than KnightNatsDisconnected (10m) can see.
+          expr: |
+            sum by (namespace, table, knight) (increase(roundtable_knight_nats_reconnects_total[30m])) > {{ .Values.alerts.natsReconnectsPer30m }}
+          labels:
+            {{- toYaml $labels | nindent 12 }}
         - alert: KnightMetricsAbsent
           annotations:
             summary: >-
@@ -136,6 +145,16 @@ spec:
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableGatewayErrors
+          annotations:
+            summary: >-
+              Gateway route {{`{{ $labels.route }}`}} on table {{`{{ $labels.table }}`}}: {{`{{ $value | humanizePercentage }}`}} of requests in 15m were 5xx,
+              above {{ .Values.alerts.gatewayErrorRatio }}.
+          expr: |
+            sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code=~"5.."}[15m])) / sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) > {{ .Values.alerts.gatewayErrorRatio }} and on (namespace, table, route) sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) >= 20
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
     - name: roundtable.triggers
       rules:
         - alert: RoundtableScheduleMissed
@@ -210,6 +229,18 @@ spec:
               / kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}"}
             ) > 0.85
           for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+    - name: roundtable.operator
+      rules:
+        - alert: RoundtableReconcileErrors
+          annotations:
+            summary: >-
+              Controller {{`{{ $labels.controller }}`}} has been failing reconciles at {{`{{ $value | humanize }}`}} per second for 15m;
+              check the operator log for the failing resource.
+          expr: |
+            sum by (controller) (rate(controller_runtime_reconcile_errors_total[10m])) > 0
+          for: 15m
           labels:
             {{- toYaml $labels | nindent 12 }}
     {{- if .Values.alerts.scaling.enabled }}

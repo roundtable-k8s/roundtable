@@ -583,6 +583,8 @@ scaling rules are scoped to the release namespace.
 | `alerts.deadLettersOpenMinutes` | number | `15` | `RoundtableDeadLettersOpen`: minutes `roundtable_dead_letters_open` stays above 0 |
 | `alerts.knightNotReadyMinutes` | number | `15` | `KnightNotReady`: minutes a knight may stay `Pending`, `Provisioning` or `Degraded` |
 | `alerts.scheduleMissedSeconds` | number | `600` | `RoundtableScheduleMissed` threshold: seconds a scheduled Trigger's CronJob (`trigger-*`, not suspended) may stay past its next scheduled time |
+| `alerts.gatewayErrorRatio` | number | `0.05` | `RoundtableGatewayErrors` threshold: 5xx share (0-1) of a gateway route's `roundtable_gateway_requests_total` over 15m; routes with fewer than 20 requests are ignored |
+| `alerts.natsReconnectsPer30m` | number | `3` | `KnightNatsFlapping` threshold: knight NATS reconnects (`roundtable_knight_nats_reconnects_total`) over 30m, per knight |
 | `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
 | `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
 | `alerts.queueBacklog.enabled` | bool | `false` | Render `RoundtableQueueBacklog` in the `roundtable.scaling` group (needs `alerts.scaling.enabled`); covers only knights with a KEDA ScaledObject |

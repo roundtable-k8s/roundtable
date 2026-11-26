@@ -328,6 +328,7 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 |---|---|
 | `KnightTaskFailures` | a knight fails more than `alerts.taskFailuresPerHour` tasks in an hour |
 | `KnightNatsDisconnected` | a knight lost its NATS connection |
+| `KnightNatsFlapping` | a knight reconnected to NATS more than `alerts.natsReconnectsPer30m` times in 30m |
 | `KnightMetricsAbsent` | no knight metrics are scraped |
 | `KnightTaskLost` | tasks were delivered to a knight that stopped before finishing |
 | `KnightLLMCostSpike` | a table's 24h LLM spend exceeds `alerts.costSpikeUSDPer24h` |
@@ -338,6 +339,8 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `KnightConsumerNotReady` | a knight's task consumer is missing or misconfigured for 10m |
 | `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
 | `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
+| `RoundtableGatewayErrors` | a gateway route's 5xx share over 15m exceeds `alerts.gatewayErrorRatio` (routes with fewer than 20 requests are ignored) |
+| `RoundtableReconcileErrors` | an operator controller's `controller_runtime_reconcile_errors_total` rate stays above 0 for 15m |
 | `RoundtableScheduleMissed` | a scheduled Trigger's CronJob (`trigger-*`, not suspended) is more than `alerts.scheduleMissedSeconds` past its next scheduled time (kube-state-metrics) |
 | `RoundtableScheduledRunFailed` | a scheduled knight or mission run finished `failed` or `lost` in the last hour (`roundtable_trigger_runs_finished_total`) |
 | `RoundtableScheduleJobFailed` | a scheduled Trigger's run Job failed (kube-state-metrics) |
