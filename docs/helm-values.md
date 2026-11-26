@@ -45,6 +45,8 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 | `resources.limits.memory` | string | `128Mi` | Memory limit |
 | `mission.resultsTTL` | duration | `720h` | How long retained mission results (`spec.retainResults`) are kept in the `mission-results` NATS KV bucket (Go duration; 720h = 30 days). An existing bucket with a different TTL is updated |
 | `chains.scheduleMode` | string | `inprocess` | How `Chain.spec.schedule` runs (`--chain-schedule-mode`): `inprocess` (the operator's cron runs the Chain itself) or `trigger` (an owned schedule Trigger `<chain>-schedule` and its CronJob start a copy of the Chain per fire; needs the gateway, see `triggers.gatewayURL`). See [triggers.md](triggers.md#chain-schedules) |
+| `providerOverload.maxRetries` | int | `4` | Retries of a chain step whose task fails with HTTP 529/503/502/500 or "overloaded", after a 1m, 2m, 4m, 8m... backoff. After 2 retries the step moves to `prPipeline.fallbackCoder` when set. `0` disables the retry |
+| `notify.allowedURLPrefixes` | list | `[]` | URL prefixes a Chain's `notify.url` may POST to (the SSRF guard, since anyone who can create a Chain controls the URL). An empty list rejects every notification |
 | `sandboxBackend` | string | `auto` | agent-sandbox runtime backend: `auto` (enable only if `agents.x-k8s.io/v1beta1` Sandbox is served), `true`, or `false`. Supports agent-sandbox v1.0.0 or later (developed against v1.0.12) |
 | `keda` | string | `auto` | KEDA autoscaling for knights with `maxReplicas > 1` or `lifecycle.suspendPolicy: auto`: `auto` (enable only if `keda.sh/v1alpha1` ScaledObject is served), `true`, or `false` |
 | `natsMonitoringEndpoint` | string | `""` | NATS HTTP monitoring endpoint (`host:port`) for KEDA's JetStream scaler; empty derives `<spec.nats.url host>:8222` per knight |
@@ -176,10 +178,18 @@ networkPolicy:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `images.piKnight.repository` | string | `ghcr.io/roundtable-k8s/pi-knight` | Default pi-knight image for all knights |
-| `images.piKnight.tag` | string | `latest` | pi-knight image tag |
+| `images.piKnight.tag` | string | pinned by the chart; bumped on release | pi-knight image tag |
 | `images.dashboard.repository` | string | `ghcr.io/roundtable-k8s/roundtable-ui` | Dashboard image |
-| `images.dashboard.tag` | string | `latest` | Dashboard image tag |
+| `images.dashboard.tag` | string | pinned by the chart; bumped on release | Dashboard image tag |
+| `nixpkgs.ref` | string | pinned by the chart; bumped on release | Pinned nixpkgs commit for knight tools images. Changing it changes every tools image tag, so every knight's tools are rebuilt |
+| `toolsImage.repository` | string | `""` | Repository knights (the nodes) pull tools images from, e.g. `registry.example.com/knight-tools`. Empty disables tools images |
+| `toolsImage.pushRepository` | string | `""` | Repository the build Job pushes to when it reaches the registry by a different address than the nodes (e.g. an in-cluster Service). Defaults to `toolsImage.repository` |
+| `toolsImage.pushInsecure` | bool | `false` | Push over plain HTTP (in-cluster Service without TLS) |
+| `toolsImage.builderImage` | string | `""` | Image the build Job runs. Empty uses the prebuilt builder CI publishes for the operator's built-in pins (`ghcr.io/roundtable-k8s/tools-builder`), or digest-pinned `nixos/nix` when `nixpkgs.ref` or `toolsImage.nix2containerRev` is overridden (slow: it compiles the nix2container tooling on every build) |
+| `toolsImage.nix2containerRev` | string | `""` | nix2container commit the generated flake pins; empty uses the operator's built-in pin. Changing it changes every tools image tag |
 | `knight.browserImage` | string | `""` | Browser sidecar image. Empty uses the operator's pinned default (`docker.io/chromedp/headless-shell:159.0.8154.13@sha256:381353d3530ab9d579d2fe8b9c0f4519c995617f5a71daf6bb649e2d12005bd9`). Changing it changes the pod template of knights that enable the browser, so they restart once |
+| `knightSecurity.runAsUser` / `.runAsGroup` / `.fsGroup` | int | `1000` | Pod-level security context applied to every knight pod |
+| `knightSecurity.fsGroupChangePolicy` | string | `OnRootMismatch` | Stops the kubelet from recursively chowning a knight's volumes on every pod mount |
 
 **Looking up a newer browser image.** The default is pinned as `tag@sha256:digest` (Chrome 159.0.8154.13, published 2026-11-23). To move to a newer one, pick a tag from <https://hub.docker.com/r/chromedp/headless-shell/tags> and resolve its digest with `crane digest docker.io/chromedp/headless-shell:<tag>` (or `docker buildx imagetools inspect`). Then either set `knight.browserImage` to `docker.io/chromedp/headless-shell:<tag>@<digest>`, or update `DefaultBrowserImage` in `internal/knight/pod_builder.go` and the default quoted above. Nothing tracks this automatically and CI never pulls the image.
 
@@ -198,13 +208,20 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 | `dashboard.nodeSelector` | map | `{}` | Dashboard pod `nodeSelector` (replaces the global value when set) |
 | `dashboard.affinity` | object | `{}` | Dashboard pod `affinity` (replaces the global value when set) |
 | `dashboard.tolerations` | list | `[]` | Dashboard pod `tolerations` (replaces the global value when set) |
+| `dashboard.resources.requests.cpu` / `.memory` | string | `50m` / `64Mi` | Dashboard CPU and memory requests |
+| `dashboard.resources.limits.memory` | string | `128Mi` | Dashboard memory limit (no CPU limit) |
 | `dashboard.ingress.enabled` | bool | `false` | Enable ingress for dashboard |
 | `dashboard.ingress.className` | string | `""` | Ingress class name |
 | `dashboard.ingress.host` | string | `""` | Dashboard hostname |
+| `dashboard.ingress.annotations` | map | `{}` | Ingress annotations |
 | `dashboard.env.NATS_URL` | string | `nats://nats.database.svc:4222` | NATS server URL |
 | `dashboard.env.NAMESPACE` | string | `roundtable` | Namespace to watch |
+| `dashboard.env.FLEET_PREFIX` | string | `fleet-a` | NATS subject prefix of the fleet the dashboard shows |
+| `dashboard.env.FLEET_STREAM` | string | `fleet_a_results` | JetStream results stream the dashboard reads |
 | `dashboard.vault.enabled` | bool | `true` | Mount shared Obsidian vault |
 | `dashboard.vault.claimName` | string | `roundtable-vault` | Vault PVC name |
+| `dashboard.gateway.tokenSecret` / `.tokenKey` | string | `""` | Secret and key of the token the dashboard sends to the gateway; empty = the gateway's own token Secret and key |
+| `dashboard.gateway.serviceAccountToken` | bool | `false` | Send a projected ServiceAccount token (audience `gateway.serviceAccountAuth.audience`) instead of the static token Secret; requires `gateway.serviceAccountAuth.enabled`, and `tokenSecret`/`tokenKey` are then ignored |
 
 ### Invoke gateway
 
@@ -222,13 +239,14 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.enabled` | bool | `true` | Deploy the invoke gateway |
 | `gateway.replicas` | int | `1` | Gateway replicas (stateless; task records live in NATS KV) |
 | `gateway.nodeSelector` / `.affinity` / `.tolerations` | map / object / list | `{}` / `{}` / `[]` | Gateway pod scheduling; each replaces the global value when set |
-| `gateway.image.repository` / `.tag` | string | `""` | Image; defaults to the operator image (`/gateway` binary) |
+| `gateway.image.repository` / `.tag` | string | `""` | Image repository and tag; defaults to the operator image (`/gateway` binary) |
 | `gateway.natsURL` | string | `nats://nats.database.svc:4222` | NATS server URL |
 | `gateway.namespace` | string | `""` | Default namespace for knights (empty = release namespace) |
 | `gateway.allowedNamespaces` | list | `[]` | Extra namespaces callers may target (`"*"` = any) |
 | `gateway.defaultTimeout` | duration | `60s` | Wait when the caller passes no `timeoutSeconds` |
-| `gateway.maxTimeout` | duration | `10m` | Upper bound on a caller's wait |
+| `gateway.maxTimeout` | duration | `30m` | Upper bound on a caller's wait |
 | `gateway.maxInFlight` | int | `64` | Concurrently waiting invocations per replica (429 beyond) |
+| `gateway.maxStreams` | int | `64` | Concurrently open event streams (`GET .../events`) per replica (429 beyond); `0` = unlimited |
 | `gateway.taskBucket` | string | `roundtable_gateway_tasks` | NATS KV bucket for task records (also of Triggers with a knight target) |
 | `gateway.taskTTL` | duration | `168h` | How long task records are kept |
 | `gateway.scheduleRuns.enabled` | bool | `true` | Serve a schedule's run history and results (`GET /v1/schedules/{namespace}/{name}/runs`, `.../runs/{run}`) and let the gateway `get` Triggers ([gateway.md](gateway.md#schedule-run-history)) |
@@ -252,6 +270,8 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.hooks.enabled` | bool | `true` | Serve `POST /v1/hooks/{namespace}/{trigger}` for webhook Triggers; grants `get` on Triggers and `get` on Secrets in the gateway's namespaces (only Secrets labelled `ai.roundtable.io/webhook-secret: "true"` are used) ([gateway.md](gateway.md#webhooks)) |
 | `gateway.hooks.maxBodyBytes` | int | `1048576` | Largest webhook body (413 beyond) |
 | `gateway.hooks.rate` / `.burst` | number / int | `2` / `20` | Per-Trigger rate limit: deliveries per second and at once (429 beyond) |
+| `gateway.runs.enabled` | bool | `true` | Let callers run a copy of a Chain with their input; grants the gateway `create`/`delete` on Chains in its namespace and `gateway.allowedNamespaces` (a ClusterRole if that holds `"*"`) |
+| `gateway.runTTL` | duration | `24h` | How long a finished run copy is kept before the gateway deletes it |
 
 ### Scheduled Triggers
 
@@ -285,6 +305,13 @@ codingKnightDefaults:
 These match the chart's `values.yaml` defaults. The default applies as a whole
 block: if a knight sets its own `resources` (or `workspace`), that block is used
 as written and no fields are merged in from the default.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `knights` | map | `{}` | Chart-managed Knights, keyed by name (see the commented examples in `values.yaml`) |
+| `codingKnightDefaults.resources.requests` | map | `{cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi}` | Requests for knights with `coder: true` that set no `resources` |
+| `codingKnightDefaults.resources.limits` | map | `{cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}` | Limits for those knights |
+| `codingKnightDefaults.workspace.size` | string | `20Gi` | Workspace volume size for those knights that set no `workspace` |
 
 Set `knights.<name>.runtimeClassName` (and `planner.runtimeClassName`; both
 default to empty, meaning not set on the Knight) to run a knight under a
@@ -383,9 +410,8 @@ is rendered only with `planner.enabled: true`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `planner.enabled` | bool | `false` | Deploy the old install-wide planner knight (no table, `<natsPrefix>.tasks.operator.>`). Deprecated: missions fall back to it only when their table has no planner |
+| `planner.enabled` | bool | `false` | Deploy the old install-wide planner knight (no table, `fleet-a.tasks.operator.>`; the prefix can be overridden with `planner.natsPrefix`, which `values.yaml` does not set). Deprecated: missions fall back to it only when their table has no planner |
 | `planner.domain` | string | `operator` | Install-wide planner domain (table planners use `planner`) |
-| `planner.natsPrefix` | string | `fleet-a` | Install-wide planner subject prefix |
 | `planner.model` | string | `claude-sonnet-4-20250514` | Planner model; default for table planners |
 | `planner.skills` | list | `[operator, shared]` | Planner skills; default for table planners |
 | `planner.prompt` | object | `{}` | Prompt overrides (`identity`, `instructions`, `configMapRef`) for table planners |
@@ -398,8 +424,7 @@ is rendered only with `planner.enabled: true`.
 | `planner.topologySpreadConstraints` | list | `[]` | Install-wide planner knight `spec.topologySpreadConstraints` |
 | `planner.priorityClassName` | string | `""` | Install-wide planner knight `spec.priorityClassName` |
 | `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Default for table planners |
-| `planner.github.tokenSecretRef.name` | string | unset | Secret holding a GitHub token for the install-wide planner, mounted at `/var/run/secrets/roundtable/github/token` (`GITHUB_TOKEN_FILE`). Table planners use their table's `spec.github` |
-| `planner.github.tokenSecretRef.key` | string | required | Key within that Secret (`corev1.SecretKeySelector`; `optional` is honoured too) |
+| `planner.github` | object | `{}` | Install-wide planner GitHub token: `tokenSecretRef.name` (Secret holding the token, mounted at `/var/run/secrets/roundtable/github/token`, `GITHUB_TOKEN_FILE`; unset by default) and `tokenSecretRef.key` (required; key within that Secret, a `corev1.SecretKeySelector` so `optional` is honoured too). Table planners use their table's `spec.github` instead. See [GitHub token file](#github-token-file) |
 
 #### Upgrade note: table planners (#566)
 
@@ -572,11 +597,3 @@ stuck run needs a started-runs or in-flight metric (follow-up).
 
 `scripts/check-prometheusrule.sh` (part of `make helm-check`) renders the rules
 and runs `promtool check rules` on them.
-
-## Operator metrics
-
-The operator exposes Prometheus metrics on its metrics endpoint, including:
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `roundtable_knight_wake_seconds` | histogram | `table`, `knight`, `namespace` | Wake latency of scaled-to-zero knights: time from entering `Waking` (tasks queued) until the knight is `Ready`. Buckets 1s to ~8.5m. Condition timestamps have 1s resolution, so values are whole seconds. |
