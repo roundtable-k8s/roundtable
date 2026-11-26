@@ -185,3 +185,37 @@ func TestCollectStepResult_NormalPathUnchanged(t *testing.T) {
 		t.Fatalf("phase=%s output=%q", ss.Phase, ss.Output)
 	}
 }
+
+// A recovered result keeps the PRs and verdict the knight reported, in the
+// step status path and in the KV entry applyStepSuccess rewrites.
+func TestCollectStepResult_RecoveryPreservesPRsAndVerdict(t *testing.T) {
+	ctx := context.Background()
+	r, fake, chain, run := newResultsFixture()
+	persisted := chain.DeepCopy()
+
+	// Output text deliberately parses to a different verdict than the reported one.
+	fake.queue(natspkg.TaskResult{
+		TaskID:  "task-1",
+		Output:  "Verdict: needs_changes (quoted from the PR)",
+		Verdict: natspkg.VerdictShipIt,
+		PRs:     []natspkg.PRRef{{Repo: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", Action: "opened"}},
+	})
+	r.collectStepResult(ctx, chain, run, &chain.Status.StepStatuses[0])
+
+	next := persisted
+	r.collectStepResult(ctx, next, newChainRun(run.nc, next), &next.Status.StepStatuses[0])
+	if got := next.Status.StepStatuses[0]; got.Phase != aiv1alpha1.ChainStepPhaseSucceeded {
+		t.Fatalf("phase %s", got.Phase)
+	}
+
+	var kv kvRecord
+	if err := json.Unmarshal(fake.kv["c.build"], &kv); err != nil {
+		t.Fatal(err)
+	}
+	if kv.Verdict != natspkg.VerdictShipIt {
+		t.Fatalf("KV verdict = %q, want %q", kv.Verdict, natspkg.VerdictShipIt)
+	}
+	if len(kv.PRs) != 1 || kv.PRs[0].Number != 7 {
+		t.Fatalf("KV PRs = %+v", kv.PRs)
+	}
+}

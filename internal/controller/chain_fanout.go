@@ -260,20 +260,21 @@ type kvRecord struct {
 	RunID   string          `json:"runId"`
 	PRs     []natspkg.PRRef `json:"prs"`
 	Verdict string          `json:"verdict"`
+
+	StoredAtRaw string `json:"storedAt"`
 }
 
 // kvEntry reads a stored entry of the current run from the chain-outputs bucket.
 func (r *ChainReconciler) kvEntry(ctx context.Context, key string) (kvRecord, bool) {
-	var v kvRecord
 	natsCli, err := r.natsClient()
 	if err != nil {
-		return v, false
+		return kvRecord{}, false
 	}
-	data, err := natsCli.KVGet(ctx, "chain-outputs", key)
-	if err != nil {
-		return v, false
+	e, err := readStepKV(ctx, natsCli, key)
+	if err != nil || e.RunID == "" { // caller checks the run
+		return kvRecord{}, false
 	}
-	return v, json.Unmarshal(data, &v) == nil && v.RunID != "" // caller checks the run
+	return e.kvRecord, true
 }
 
 // kvOutput reads a stored output of the current run from the chain-outputs bucket.

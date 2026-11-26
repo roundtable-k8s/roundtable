@@ -167,9 +167,7 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 
 // stepKVEntry is the decoded value of a chain-outputs KV entry.
 type stepKVEntry struct {
-	Output   string
-	Error    string
-	RunID    string
+	kvRecord
 	StoredAt time.Time // zero when absent or unparseable
 }
 
@@ -179,16 +177,12 @@ func readStepKV(ctx context.Context, natsCli natspkg.Client, key string) (*stepK
 	if err != nil {
 		return nil, err
 	}
-	var kvValue map[string]any
-	if err := json.Unmarshal(data, &kvValue); err != nil {
+	e := &stepKVEntry{}
+	if err := json.Unmarshal(data, &e.kvRecord); err != nil {
 		return nil, fmt.Errorf("unmarshal KV value: %w", err)
 	}
-	e := &stepKVEntry{}
-	e.Output, _ = kvValue["output"].(string)
-	e.Error, _ = kvValue["error"].(string)
-	e.RunID, _ = kvValue["runId"].(string)
-	if at, _ := kvValue["storedAt"].(string); at != "" {
-		if t, perr := time.Parse(time.RFC3339, at); perr == nil {
+	if e.StoredAtRaw != "" {
+		if t, perr := time.Parse(time.RFC3339, e.StoredAtRaw); perr == nil {
 			e.StoredAt = t
 		}
 	}
@@ -226,7 +220,9 @@ func (r *ChainReconciler) recoverStepResultFromKV(ctx context.Context, chain *ai
 		return nil
 	}
 	log.Info("Recovered step result from KV (result already acked, status write was lost)", "step", ss.Name)
-	return &natspkg.TaskResult{TaskID: ss.TaskID, Output: entry.Output, Error: entry.Error}
+	// Carry the knight's reported PRs and verdict: applyStepSuccess rewrites the
+	// KV entry from this result, and must not replace them with parsed values.
+	return &natspkg.TaskResult{TaskID: ss.TaskID, Output: entry.Output, Error: entry.Error, PRs: entry.PRs, Verdict: entry.Verdict}
 }
 
 // restoreStepOutputsFromKV attempts to restore step outputs from NATS KV.
