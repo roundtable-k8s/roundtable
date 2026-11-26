@@ -1,3 +1,19 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package chainrun
 
 import (
@@ -96,6 +112,18 @@ func TestName(t *testing.T) {
 	}
 	if got := Name("base"); got != "base" {
 		t.Fatal(got)
+	}
+}
+
+func TestNameOverlongLastPart(t *testing.T) {
+	for _, n := range []int{252, 253, 300} {
+		got := Name("base", "mid", strings.Repeat("a", n))
+		if len(got) > 253 || got == "" || strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
+			t.Fatalf("last part %d: invalid name %q (len %d)", n, got, len(got))
+		}
+		if want := strings.Repeat("a", min(n, 252)); !strings.HasSuffix(got, want) {
+			t.Fatalf("last part %d: tail not kept", n)
+		}
 	}
 }
 

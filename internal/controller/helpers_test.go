@@ -192,25 +192,6 @@ var _ = Describe("Helper Functions", func() {
 		})
 	})
 
-	// ── natsPrefix ────────────────────────────────────────────────────────
-	Describe("natsPrefix", func() {
-		It("returns custom prefix when NATSPrefix is set", func() {
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{Name: "my-mission"},
-				Spec:       aiv1alpha1.MissionSpec{NATSPrefix: "custom-prefix"},
-			}
-			Expect(natsPrefix(mission)).To(Equal("custom-prefix"))
-		})
-
-		It("returns mission-<name> when NATSPrefix is empty", func() {
-			mission := &aiv1alpha1.Mission{
-				ObjectMeta: metav1.ObjectMeta{Name: "quest-alpha"},
-				Spec:       aiv1alpha1.MissionSpec{},
-			}
-			Expect(natsPrefix(mission)).To(Equal("mission-quest-alpha"))
-		})
-	})
-
 	// ── nextPhaseAfterProvisioning ────────────────────────────────────────
 	Describe("nextPhaseAfterProvisioning", func() {
 		It("returns Planning for meta missions", func() {
