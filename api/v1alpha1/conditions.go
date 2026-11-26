@@ -525,6 +525,18 @@ const (
 	// or image for it, or an object of that name belongs to something else.
 	ReasonTriggerCronJobError = "CronJobError"
 
+	// ConditionTriggerScheduleHealthy (schedule source) is False while the
+	// most recent Job of the Trigger's CronJob failed. It does not change Ready.
+	ConditionTriggerScheduleHealthy = "ScheduleHealthy"
+
+	// ReasonTriggerFireJobFailing indicates the CronJob's most recent firing
+	// Job failed (the message names it).
+	ReasonTriggerFireJobFailing = "FireJobFailing"
+
+	// ReasonTriggerFireJobsHealthy indicates the CronJob's most recent firing
+	// Job did not fail.
+	ReasonTriggerFireJobsHealthy = "FiringHealthy"
+
 	// ConditionTriggerGitHubReady is True while a github-source Trigger's
 	// token resolves and its last poll succeeded.
 	ConditionTriggerGitHubReady = "GitHubReady"

@@ -19,6 +19,20 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.source.schedule.cron
+      name: Schedule
+      type: string
+    - jsonPath: .status.nextScheduledAt
+      name: Next
+      type: date
+    - jsonPath: .spec.source.schedule.timeZone
+      name: Time Zone
+      priority: 1
+      type: string
+    - jsonPath: .status.lastScheduledAt
+      name: Last Scheduled
+      priority: 1
+      type: date
     - jsonPath: .spec.target.chainRef.name
       name: Chain
       type: string
@@ -818,7 +832,8 @@ spec:
               conditions:
                 description: |-
                   conditions: Ready is True while the Trigger is listening; GitHubReady
-                  (github source) is True while polling works.
+                  (github source) is True while polling works; ScheduleHealthy (schedule
+                  source) is False while the CronJob's most recent firing Job failed.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -895,6 +910,12 @@ spec:
                 description: |-
                   lastScheduledAt is the schedule time the CronJob last ran a job for
                   (its status.lastScheduleTime; schedule source).
+                format: date-time
+                type: string
+              lastSuccessfulScheduledAt:
+                description: |-
+                  lastSuccessfulScheduledAt is when the CronJob's firing Job last
+                  succeeded (its status.lastSuccessfulTime; schedule source).
                 format: date-time
                 type: string
               nextScheduledAt:

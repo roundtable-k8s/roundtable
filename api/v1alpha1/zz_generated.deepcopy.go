@@ -2877,6 +2877,10 @@ func (in *TriggerStatus) DeepCopyInto(out *TriggerStatus) {
 		in, out := &in.LastScheduledAt, &out.LastScheduledAt
 		*out = (*in).DeepCopy()
 	}
+	if in.LastSuccessfulScheduledAt != nil {
+		in, out := &in.LastSuccessfulScheduledAt, &out.LastSuccessfulScheduledAt
+		*out = (*in).DeepCopy()
+	}
 	if in.NextScheduledAt != nil {
 		in, out := &in.NextScheduledAt, &out.NextScheduledAt
 		*out = (*in).DeepCopy()
