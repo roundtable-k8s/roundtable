@@ -315,8 +315,13 @@ ConfigMaps or `GrafanaDashboard` CRs.
 - *Round Table / Cost and tokens*: 24h spend, spend rate per model and per
   knight, spend per table, tokens per model and per knight, cost per job
   (chain, step, knight) and cost per mission.
+- *Round Table / Triggers and gateway*: trigger firings per minute by outcome,
+  time since each Trigger last fired, trigger error and skipped share, gateway
+  requests by route and code, gateway p95 latency and 5xx rate, dead letters
+  by reason and open count.
 
-Every dashboard has a `table` variable applied to every `roundtable_*` query.
+Every dashboard has a `table` variable applied to every `roundtable_*` query
+(the gateway p95 latency panel excepted: its histogram has no `table` label).
 
 **Alerts** (`alerts.enabled`, #332): a `PrometheusRule` with
 
