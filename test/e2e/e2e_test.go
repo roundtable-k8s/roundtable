@@ -126,6 +126,8 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			{"logs", "deployment/" + coreOperator, "-n", coreNamespace, "--tail=200"},
 			{"get", "knight", coreKnight, "-n", coreNamespace, "-o", "yaml"},
 			{"describe", "deployment", coreKnight, "-n", coreNamespace},
+			{"logs", "-l", "app.kubernetes.io/instance=" + coreKnight, "-n", coreNamespace,
+				"--all-containers", "--tail=200"},
 			{"get", "knight", roundtripKnight, "-n", coreNamespace, "-o", "yaml"},
 			{"logs", "-l", "app.kubernetes.io/instance=" + roundtripKnight, "-n", coreNamespace,
 				"--all-containers", "--tail=200"},
@@ -167,7 +169,18 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 	})
 
 	It("gives a minimal Knight a Deployment with an available replica", func() {
-		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", coreKnightYAML))
+		// pi-knight preflights a model it cannot find in its catalog against an
+		// OpenAI-compatible endpoint and stays unready (503) until that answers,
+		// so the minimal Knight's model is routed to the stub LLM too.
+		By("deploying the stub LLM")
+		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", stubLLMYAML))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/stubllm",
+			"-n", coreNamespace, "--timeout=3m"))
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating the minimal Knight")
+		_, err = utils.Run(exec.Command("kubectl", "apply", "-f", coreKnightYAML))
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
 			out, err := utils.Run(exec.Command("kubectl", "get", "deployment", coreKnight,
@@ -180,18 +193,11 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 	// The round trip (#353): a task published on NATS reaches a pi-knight, which
 	// calls the stub LLM, and the result lands on the results stream.
 	It("round-trips a task through a knight and the stub LLM", func() {
-		By("deploying the stub LLM")
-		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", stubLLMYAML))
-		Expect(err).NotTo(HaveOccurred())
-		_, err = utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/stubllm",
-			"-n", coreNamespace, "--timeout=3m"))
-		Expect(err).NotTo(HaveOccurred())
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
 		By("creating the Knight that routes its model to the stub LLM")
-		_, err = utils.Run(exec.Command("kubectl", "apply", "-f", roundtripYAML))
+		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", roundtripYAML))
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
 			out, err := utils.Run(exec.Command("kubectl", "get", "knight", roundtripKnight,
