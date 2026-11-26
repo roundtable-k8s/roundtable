@@ -526,6 +526,42 @@ var _ = Describe("Trigger controller", func() {
 			Expect(runsOf("legacy")).To(HaveLen(1))
 		})
 
+		It("runs a message whose former seq-<n> run is older than the stream", func() {
+			natsTrigger("oldlegacy", prefix+".events.oldlegacy", nil)
+			tmpl := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: tmplName}, tmpl)).To(Succeed())
+			old := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{Name: chainrun.TriggerRunName(tmplName, "oldlegacy", "seq-1"), Namespace: ns,
+					Labels: map[string]string{aiv1alpha1.LabelTrigger: "oldlegacy"}},
+				Spec: tmpl.Spec,
+			}
+			old.Spec.Schedule = ""
+			Expect(k8sClient.Create(ctx, old)).To(Succeed())
+			// The stream is recreated after that run: wait out the
+			// one-second resolution of creationTimestamp.
+			time.Sleep(2 * time.Second)
+			Expect(js.DeleteStream(ctx, stream)).To(Succeed())
+			rt := &aiv1alpha1.RoundTable{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+			Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
+			Eventually(func() bool {
+				r.consumers.mu.Lock()
+				defer r.consumers.mu.Unlock()
+				for _, l := range r.consumers.loops {
+					select {
+					case <-l.done:
+						return true
+					default:
+					}
+				}
+				return false
+			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
+			reconcileTrigger("oldlegacy")
+
+			publish(prefix+".events.oldlegacy", "", `{"service":"api"}`)
+			Eventually(func() int { return len(runsOf("oldlegacy")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(2))
+		})
+
 		It("restarts its message loop after the consumer is deleted", func() {
 			t := natsTrigger("revive", prefix+".events.revive", nil)
 			Expect(reconcileTrigger("revive").RequeueAfter).To(Equal(RequeueVerySlow))

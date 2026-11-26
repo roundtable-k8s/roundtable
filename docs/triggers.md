@@ -811,7 +811,8 @@ dedupe key is its `Roundtable-Event-Key` header, else `Nats-Msg-Id`, else
 recreated events stream, whose sequence restarts at 1, from matching the runs
 of the old one. A message delivered before an upgrade under the former
 `seq-<n>` key still counts as a duplicate when a chain or mission run exists
-under that key. A new consumer
+under that key and was created after the stream (a knight target is not
+checked: it dedupes through the gateway). A new consumer
 starts at new messages (not the stream's backlog). From then on, events
 published while the operator is down fire when it comes back.
 

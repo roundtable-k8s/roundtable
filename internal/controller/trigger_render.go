@@ -44,6 +44,8 @@ type TriggerEvent struct {
 	// legacyKey is the pre-stream-creation default key ("seq-<n>") of a
 	// message whose default key is the stream position; not a template field.
 	legacyKey string
+	// streamCreated is the events stream's creation time, set with legacyKey.
+	streamCreated time.Time
 }
 
 // triggerTemplateData is the root object of a Trigger's templates.

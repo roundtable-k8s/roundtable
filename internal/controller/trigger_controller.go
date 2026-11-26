@@ -652,7 +652,7 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 			ev.Time = md.Timestamp
 			if key == "" {
 				var err error
-				if key, err = r.streamSeqKey(ctx, md); err != nil {
+				if key, ev.streamCreated, err = r.streamSeqKey(ctx, md); err != nil {
 					log.Error(err, "Failed to build the default dedupe key, will retry")
 					_ = msg.NakWithDelay(triggerNakDelay)
 					return
@@ -690,20 +690,21 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 // the stream's creation time and the message's sequence. A recreated stream
 // restarts its sequence at 1, so the sequence alone would match runs from
 // before the reset.
-func (r *TriggerReconciler) streamSeqKey(ctx context.Context, md *jetstream.MsgMetadata) (string, error) {
+func (r *TriggerReconciler) streamSeqKey(ctx context.Context, md *jetstream.MsgMetadata) (string, time.Time, error) {
 	nc, err := r.natsConn()
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	s, err := js.Stream(ctx, md.Stream)
 	if err != nil {
-		return "", fmt.Errorf("stream %s: %w", md.Stream, err)
+		return "", time.Time{}, fmt.Errorf("stream %s: %w", md.Stream, err)
 	}
-	return streamSeqKeyOf(s.CachedInfo().Created, md.Sequence.Stream), nil
+	created := s.CachedInfo().Created
+	return streamSeqKeyOf(created, md.Sequence.Stream), created, nil
 }
 
 func streamSeqKeyOf(created time.Time, seq uint64) string {
@@ -712,9 +713,11 @@ func streamSeqKeyOf(created time.Time, seq uint64) string {
 
 // legacyKeyFired reports whether a run already exists under the pre-stream-
 // creation default key ("seq-<n>"), so a message delivered but not acked
-// before an upgrade is not run twice. A knight target has no run object to
+// before an upgrade is not run twice. Only a run created at or after the
+// stream counts: an older one belongs to the stream's previous incarnation
+// (the sequence restarted), so the new message must run. A knight target has no run object to
 // look up and is not checked.
-func (r *TriggerReconciler) legacyKeyFired(ctx context.Context, trg *aiv1alpha1.Trigger, key string) (string, error) {
+func (r *TriggerReconciler) legacyKeyFired(ctx context.Context, trg *aiv1alpha1.Trigger, key string, streamCreated time.Time) (string, error) {
 	var obj client.Object
 	var name string
 	switch {
@@ -728,6 +731,10 @@ func (r *TriggerReconciler) legacyKeyFired(ctx context.Context, trg *aiv1alpha1.
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: name}, obj)
 	switch {
 	case err == nil:
+		// creationTimestamp has one-second resolution.
+		if obj.GetCreationTimestamp().Time.Before(streamCreated.Truncate(time.Second)) {
+			return "", nil
+		}
 		return name, nil
 	case apierrors.IsNotFound(err):
 		return "", nil
@@ -848,7 +855,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	firing.Key = truncate(key, 253)
 
 	if ev.legacyKey != "" && key == defaultKey && manual == nil {
-		run, err := r.legacyKeyFired(ctx, trg, ev.legacyKey)
+		run, err := r.legacyKeyFired(ctx, trg, ev.legacyKey, ev.streamCreated)
 		if err != nil {
 			return triggerRetry, err
 		}
