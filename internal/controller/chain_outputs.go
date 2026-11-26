@@ -165,6 +165,70 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 	}
 }
 
+// stepKVEntry is the decoded value of a chain-outputs KV entry.
+type stepKVEntry struct {
+	Output   string
+	Error    string
+	RunID    string
+	StoredAt time.Time // zero when absent or unparseable
+}
+
+// readStepKV reads and decodes the chain-outputs entry at key.
+func readStepKV(ctx context.Context, natsCli natspkg.Client, key string) (*stepKVEntry, error) {
+	data, err := natsCli.KVGet(ctx, "chain-outputs", key)
+	if err != nil {
+		return nil, err
+	}
+	var kvValue map[string]any
+	if err := json.Unmarshal(data, &kvValue); err != nil {
+		return nil, fmt.Errorf("unmarshal KV value: %w", err)
+	}
+	e := &stepKVEntry{}
+	e.Output, _ = kvValue["output"].(string)
+	e.Error, _ = kvValue["error"].(string)
+	e.RunID, _ = kvValue["runId"].(string)
+	if at, _ := kvValue["storedAt"].(string); at != "" {
+		if t, perr := time.Parse(time.RFC3339, at); perr == nil {
+			e.StoredAt = t
+		}
+	}
+	return e, nil
+}
+
+// recoverStepResultFromKV returns the result of a Running step whose result
+// message was already acked off the results stream but whose status write was
+// lost (conflict or API error), as stored in the chain-outputs KV by
+// storeStepOutputToKV. It returns nil unless the entry belongs to the current
+// run, was stored at or after the step started, and holds a real output or an
+// error: stale entries must never complete a step.
+func (r *ChainReconciler) recoverStepResultFromKV(ctx context.Context, chain *aiv1alpha1.Chain, ss *aiv1alpha1.ChainStepStatus) *natspkg.TaskResult {
+	log := logf.FromContext(ctx)
+	if ss.StartedAt == nil || chain.Status.RunID == "" {
+		return nil
+	}
+	natsCli, err := r.natsClient()
+	if err != nil {
+		return nil
+	}
+	entry, err := readStepKV(ctx, natsCli, chain.Name+"."+ss.Name)
+	if err != nil {
+		return nil
+	}
+	if entry.RunID != chain.Status.RunID || entry.StoredAt.IsZero() {
+		return nil
+	}
+	// storedAt has one-second resolution; the step's StartedAt is truncated
+	// the same way by the API server.
+	if entry.StoredAt.Before(ss.StartedAt.Truncate(time.Second)) {
+		return nil
+	}
+	if entry.Error == "" && isEmptyStepOutput(entry.Output) {
+		return nil
+	}
+	log.Info("Recovered step result from KV (result already acked, status write was lost)", "step", ss.Name)
+	return &natspkg.TaskResult{TaskID: ss.TaskID, Output: entry.Output, Error: entry.Error}
+}
+
 // restoreStepOutputsFromKV attempts to restore step outputs from NATS KV.
 // Returns the number of steps successfully restored.
 func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *aiv1alpha1.Chain) int {
@@ -184,20 +248,12 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		}
 
 		key := chain.Name + "." + ss.Name
-		data, err := natsCli.KVGet(ctx, "chain-outputs", key)
+		entry, err := readStepKV(ctx, natsCli, key)
 		if err != nil {
-			log.V(1).Info("No stored output found for step", "step", ss.Name, "key", key)
+			log.V(1).Info("No stored output found for step", "step", ss.Name, "key", key, "error", err.Error())
 			continue
 		}
-
-		var kvValue map[string]any
-		if err := json.Unmarshal(data, &kvValue); err != nil {
-			log.Error(err, "Failed to unmarshal KV value", "step", ss.Name)
-			continue
-		}
-
-		output, _ := kvValue["output"].(string)
-		errStr, _ := kvValue["error"].(string)
+		output, errStr := entry.Output, entry.Error
 
 		// A stored entry with no usable output is poison left by a run that
 		// produced nothing — leave the step Pending so it re-executes, and
@@ -213,7 +269,7 @@ func (r *ChainReconciler) restoreStepOutputsFromKV(ctx context.Context, chain *a
 		// Only outputs produced by the current run may be restored — entries
 		// from earlier runs (or pre-run-identity entries with no runId) would
 		// silently stand in for work this run never did.
-		storedRunID, _ := kvValue["runId"].(string)
+		storedRunID := entry.RunID
 		if storedRunID == "" || storedRunID != chain.Status.RunID {
 			log.V(1).Info("Skipping stored output from a different run", "step", ss.Name, "storedRunId", storedRunID)
 			continue
