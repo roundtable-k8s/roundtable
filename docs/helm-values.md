@@ -25,7 +25,7 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 |-----|------|---------|-------------|
 | `replicaCount` | int | `1` | Operator replicas (leader election handles HA) |
 | `image.repository` | string | `ghcr.io/roundtable-k8s/roundtable` | Operator image |
-| `image.tag` | string | `latest` | Operator image tag |
+| `image.tag` | string | `""` | Operator image tag; empty uses the chart `appVersion` |
 | `image.pullPolicy` | string | `Always` | Image pull policy |
 | `nodeSelector` / `affinity` / `tolerations` | map / object / list | `{}` / `{}` / `[]` | Scheduling for the operator, gateway, dashboard and collector pods. `gateway.*`, `dashboard.*` and `telemetry.collector.*` take their own and, when non-empty, replace the global value |
 | `priorityClassName` | string | `""` | `priorityClassName` of the operator, gateway, dashboard and collector pods |

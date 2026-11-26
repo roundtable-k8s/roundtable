@@ -297,7 +297,7 @@ spec:
       {{- end }}
       containers:
         - name: gateway
-          image: "{{ $gw.image.repository | default .Values.image.repository }}:{{ $gw.image.tag | default .Values.image.tag }}"
+          image: "{{ $gw.image.repository | default .Values.image.repository }}:{{ $gw.image.tag | default (include "roundtable-operator.imageTag" .) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/gateway"]
           args:

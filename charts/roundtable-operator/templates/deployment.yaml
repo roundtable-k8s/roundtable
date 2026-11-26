@@ -42,7 +42,7 @@ spec:
       {{- end }}
       containers:
         - name: manager
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ include "roundtable-operator.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             {{- if $leaderElect }}
@@ -61,7 +61,7 @@ spec:
             - --trigger-task-ttl={{ .Values.gateway.taskTTL | default "168h" }}
             - --schedule-result-retention={{ (.Values.gateway.scheduleRuns | default dict).resultRetention | default "720h" }}
             {{- /* Scheduled Triggers: the CronJob pod runs this image's fire-trigger subcommand against the gateway. */}}
-            - --trigger-image={{ .Values.image.repository }}:{{ .Values.image.tag }}
+            - --trigger-image={{ .Values.image.repository }}:{{ include "roundtable-operator.imageTag" . }}
             - --trigger-image-pull-policy={{ .Values.image.pullPolicy }}
             {{- with (.Values.triggers.imagePullSecrets | default list) }}
             - {{ printf "--trigger-image-pull-secrets=%s" (join "," .) | quote }}

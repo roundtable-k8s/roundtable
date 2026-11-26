@@ -63,10 +63,25 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Update chart version and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           sed -i "s/^version:.*/version: ${VERSION}/" charts/roundtable-operator/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"v${VERSION}\"/" charts/roundtable-operator/Chart.yaml
+
+          # Pin the knight and dashboard images to the current main SHAs of their
+          # repos, so the released chart installs a fixed, reproducible set.
+          OWNER=${{ github.repository_owner }}
+          KNIGHTS_SHA=$(gh api "repos/${OWNER}/knights/commits/main" --jq .sha)
+          UI_SHA=$(gh api "repos/${OWNER}/roundtable-ui/commits/main" --jq .sha)
+          for sha in "$KNIGHTS_SHA" "$UI_SHA"; do
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "bad SHA: $sha" >&2; exit 1; }
+          done
+          sed -i "/^  piKnight:/,/^  dashboard:/ s/^    tag:.*/    tag: ${KNIGHTS_SHA}/" charts/roundtable-operator/values.yaml
+          sed -i "/^  dashboard:/,/^[a-z]/ s/^    tag:.*/    tag: ${UI_SHA}/" charts/roundtable-operator/values.yaml
+          grep -q "tag: ${KNIGHTS_SHA}" charts/roundtable-operator/values.yaml
+          grep -q "tag: ${UI_SHA}" charts/roundtable-operator/values.yaml
 
           # Copy CRDs into chart
           for f in config/crd/bases/ai.roundtable.io_*.yaml; do
