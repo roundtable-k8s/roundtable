@@ -32,6 +32,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,7 +43,11 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
+	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 )
+
+// gatewayServiceName is the service.name used when OTEL_SERVICE_NAME is unset.
+const gatewayServiceName = "roundtable-gateway"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -129,6 +135,23 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	log := ctrl.Log.WithName("gateway")
+
+	// W3C trace context + baggage, unless something already installed one, so
+	// an incoming traceparent is honoured and trace context crosses NATS.
+	if len(otel.GetTextMapPropagator().Fields()) == 0 {
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{}, propagation.Baggage{}))
+	}
+	shutdownTelemetry, err := telemetry.SetupService(context.Background(), gatewayServiceName, apiVersion)
+	if err != nil {
+		log.Error(err, "Failed to set up OpenTelemetry; continuing without tracing")
+		shutdownTelemetry = func(context.Context) error { return nil }
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(ctx)
+	}()
 
 	auth, err := gateway.NewTokenAuth(tokenFile, time.Minute)
 	if err != nil {

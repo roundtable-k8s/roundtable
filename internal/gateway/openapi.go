@@ -377,6 +377,7 @@ var openAPISchemas = obj{
 		"output":         str("The knight's answer, once finished."),
 		"error":          str("The knight's error (status failed)."),
 		"usageLimited":   boolean("The failure is a plan-quota refusal: back off rather than retry."),
+		"traceId":        str("Trace ID of the gateway's span for the call; the knight's invoke_agent span is in the same trace. Omitted when tracing is off."),
 		"requestedModel": str("Resolved per-task model override."),
 		"model":          str("Model the knight reports having used."),
 		"cost":           obj{"type": "number", "description": "Cost in USD the knight reported (notional for subscription billing); omitted when not reported."},

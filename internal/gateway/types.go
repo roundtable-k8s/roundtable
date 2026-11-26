@@ -77,6 +77,9 @@ type TaskRecord struct {
 	Namespace  string     `json:"namespace"`
 	RoundTable string     `json:"roundTable,omitempty"`
 	Status     TaskStatus `json:"status"`
+	// TraceID is the trace the task belongs to (the gateway's server span for
+	// the invoke call); omitted when tracing is not active.
+	TraceID string `json:"traceId,omitempty"`
 	// Caller is who asked for the task: "<namespace>/<name>" for a
 	// ServiceAccount, the token's name for a static token.
 	Caller string `json:"caller,omitempty"`
