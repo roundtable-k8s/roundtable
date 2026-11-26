@@ -58,6 +58,32 @@ Pass `--version` to pin the chart. Omit it to get the latest release. Chart
 values can be set with `--set` or `-f values.yaml`; see
 [Helm values](helm-values.md).
 
+## Pointing Round Table at your NATS
+
+A NATS URL lives in five places. The chart and CRD defaults name a NATS of the
+author's cluster (`nats.database.svc`), so on any other cluster set all of them:
+
+| Where | Field | What it configures |
+|-------|-------|--------------------|
+| RoundTable manifest | `spec.nats.url` | the table's subjects and streams |
+| Knight manifest | `spec.nats.url` | the knight pod's NATS connection |
+| Chart value | `missionDefaultNatsURL` | NATS URL given to Mission knights |
+| Chart value | `gateway.natsURL` | the gateway's `--nats-url` |
+| Chart value | `dashboard.env.NATS_URL` | the dashboard's `NATS_URL` |
+
+```bash
+helm install roundtable-operator oci://ghcr.io/roundtable-k8s/charts/roundtable-operator \
+  -n roundtable --create-namespace \
+  --set-string missionDefaultNatsURL=nats://nats.example.svc:4222 \
+  --set-string gateway.natsURL=nats://nats.example.svc:4222 \
+  --set-string dashboard.env.NATS_URL=nats://nats.example.svc:4222
+```
+
+The dashboard also mounts a vault claim (`roundtable-vault`) by default, and the
+chart does not create that PVC. Either create it or set
+`dashboard.vault.enabled=false`, or the dashboard pod stays Pending. The kind
+quickstart (`hack/quickstart-kind.sh`) sets all of the above.
+
 ## 3. Upgrading and CRDs
 
 Helm installs the CRDs in the chart's `crds/` directory on first install. Helm
