@@ -200,12 +200,11 @@ type advisory struct {
 }
 
 // result is a knight result as published on <prefix>.results.<taskId>.
+// Refused shadows TaskResult.Refused as raw JSON: pi-knight sends a refusal
+// code string, other runtimes may send true.
 type result struct {
 	natspkg.TaskResult
-	Knight  string          `json:"knight,omitempty"`
-	Lost    bool            `json:"lost,omitempty"`
 	Refused json.RawMessage `json:"refused,omitempty"`
-	Task    json.RawMessage `json:"task,omitempty"`
 }
 
 // succeeded reports whether r is a success. A result with neither success nor
@@ -224,13 +223,20 @@ func (r *result) refused() bool {
 	return v != "" && v != "null" && v != "false" && v != `""`
 }
 
+// refusedQuota reports whether refused is the "quota" code (a plan quota
+// window is used up), which is classified like usage_limited.
+func (r *result) refusedQuota() bool {
+	var code string
+	return json.Unmarshal(r.Refused, &code) == nil && code == natspkg.RefusedQuota
+}
+
 // reason classifies a failed result.
 func (r *result) reason() Reason {
 	errText := strings.ToLower(r.GetError())
 	switch {
 	case r.Lost:
 		return ReasonLost
-	case r.UsageLimited:
+	case r.UsageLimited || r.refusedQuota():
 		return ReasonUsageLimited
 	case r.refused():
 		return ReasonRefused

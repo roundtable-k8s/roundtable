@@ -1,0 +1,17 @@
+{
+  "task_id": "t-1",
+  "knight": "galahad",
+  "success": false,
+  "result": "Task refused: Claude plan five_hour limit reached (resets 2026-11-24T15:00:00.000Z)",
+  "error": "Task refused: Claude plan five_hour limit reached (resets 2026-11-24T15:00:00.000Z)",
+  "duration_ms": 5000,
+  "cost": 0,
+  "tokens": {
+    "input": 0,
+    "output": 0
+  },
+  "model": "claude-opus-5-5",
+  "refused": "quota",
+  "usage_limited": true,
+  "timestamp": "2026-11-24T10:00:05.000Z"
+}

@@ -104,4 +104,9 @@ meaning bumps `v`.
 
 ## JSON schema
 
-`task-activity-events.schema.json` (for TypeScript knights and the UI).
+The schema is defined in the knights core,
+[`packages/core/contract/task-activity-events.schema.json`](https://github.com/roundtable-k8s/knights/blob/main/packages/core/contract/task-activity-events.schema.json),
+and vendored here at
+[`pkg/nats/contract/schema/task-activity-events.schema.json`](../../pkg/nats/contract/schema/task-activity-events.schema.json)
+(see [knight-task-contract.md](../knight-task-contract.md#source-of-truth)).
+`task-activity-events.schema.json` in this directory only points there.

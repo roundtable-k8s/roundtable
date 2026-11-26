@@ -43,6 +43,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
+	"github.com/roundtable-k8s/roundtable/pkg/nats/contract/contracttest"
 )
 
 const (
@@ -86,6 +87,10 @@ func startFakeKnight(t *testing.T, url string) *fakeKnight {
 	}
 	cc, err := cons.Consume(func(m jetstream.Msg) {
 		_ = m.Ack()
+		// Every gateway invoke must publish a task a knight accepts.
+		if err := contracttest.ValidateTask(m.Data()); err != nil {
+			t.Errorf("fake knight: task breaks the knight task contract: %v\n%s", err, m.Data())
+		}
 		var p natspkg.TaskPayload
 		if err := json.Unmarshal(m.Data(), &p); err != nil {
 			t.Errorf("fake knight: bad payload: %v", err)
@@ -140,6 +145,11 @@ func (k *fakeKnight) answer(js jetstream.JetStream, p natspkg.TaskPayload) {
 	switch {
 	case strings.Contains(p.Task, "fail"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Error: "boom", Model: model}
+	case strings.Contains(p.Task, "refused-quota"):
+		res = natspkg.TaskResult{TaskID2: p.TaskID, Result: "Task refused: plan limit", Error: "Task refused: plan limit",
+			Refused: natspkg.RefusedQuota, Model: model}
+	case strings.Contains(p.Task, "refused-credits"):
+		res = natspkg.TaskResult{TaskID2: p.TaskID, Result: "402", Error: "402", Refused: natspkg.RefusedCredits, Model: model}
 	case strings.Contains(p.Task, "quota"):
 		res = natspkg.TaskResult{TaskID: p.TaskID, Error: "usage limit reached", UsageLimited: true, Model: model}
 	case strings.Contains(p.Task, "structured"):
@@ -456,6 +466,16 @@ func TestKnightUsageLimited(t *testing.T) {
 	_, plain := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "please fail"})
 	if _, ok := plain["usageLimited"]; ok {
 		t.Fatalf("plain failure has usageLimited: %v", plain)
+	}
+	// refused: "quota" (#431) is a plan-quota refusal like usage_limited.
+	_, quota := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "refused-quota"})
+	if quota["status"] != string(TaskFailed) || quota["usageLimited"] != true {
+		t.Fatalf("refused quota: %v", quota)
+	}
+	// refused: "credits" stays a plain failure.
+	_, credits := e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "refused-credits"})
+	if _, ok := credits["usageLimited"]; ok || credits["status"] != string(TaskFailed) {
+		t.Fatalf("refused credits: %v", credits)
 	}
 }
 

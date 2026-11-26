@@ -1,0 +1,16 @@
+{
+  "task_id": "t-1",
+  "knight": "galahad",
+  "success": false,
+  "result": "Task failed: 402 This request requires more credits, or fewer max_tokens",
+  "error": "402 This request requires more credits, or fewer max_tokens",
+  "duration_ms": 5000,
+  "cost": 0,
+  "tokens": {
+    "input": 0,
+    "output": 0
+  },
+  "model": "openrouter/anthropic/claude-sonnet-4.5",
+  "refused": "credits",
+  "timestamp": "2026-11-24T10:00:05.000Z"
+}

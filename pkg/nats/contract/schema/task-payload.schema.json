@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roundtable.io/schemas/knight-task.v1.json",
+  "title": "TaskPayload",
+  "description": "A task on `<prefix>.tasks.<domain>.<knight>`. Dispatchers differ in shape (the operator's camelCase TaskPayload, snake_case knight `nats_request` payloads), so both spellings are accepted. A message that is not a JSON object is plain task text and is not checked against this schema.",
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "description": "Unique task ID (operator TaskPayload). The result is published to `<prefix>.results.<taskId>`."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Unique task ID, snake_case spelling (knight `nats_request` payloads). Falls back to the last subject token when neither spelling is set."
+    },
+    "task": {
+      "type": "string",
+      "description": "The rendered prompt."
+    },
+    "description": {
+      "type": "string",
+      "description": "Legacy alias for `task`.",
+      "deprecated": true
+    },
+    "message": {
+      "type": "string",
+      "description": "Legacy alias for `task`.",
+      "deprecated": true
+    },
+    "chainName": {
+      "type": "string",
+      "description": "Chain name; set for chain steps and mission briefings."
+    },
+    "chain_name": {
+      "type": "string",
+      "description": "snake_case alias for `chainName`."
+    },
+    "chain": {
+      "type": "string",
+      "description": "Short alias for `chainName`."
+    },
+    "stepName": {
+      "type": "string",
+      "description": "Chain step name; set for chain steps and mission briefings."
+    },
+    "step_name": {
+      "type": "string",
+      "description": "snake_case alias for `stepName`."
+    },
+    "step": {
+      "type": "string",
+      "description": "Short alias for `stepName`."
+    },
+    "runId": {
+      "type": "string",
+      "description": "Chain run ID, or for gateway tasks the conversation ID. Knights key agent sessions on it so context never bleeds between runs. Empty means no run identity."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "snake_case alias for `runId`."
+    },
+    "model": {
+      "type": "string",
+      "description": "Per-task model override, already resolved from RoundTable aliases and checked against the knight's runtime. Applies to this task only; empty means the knight's configured model."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based attempt number, set by a manual retry. Absent means attempt 1."
+    },
+    "retryOf": {
+      "type": "string",
+      "description": "The task ID this task retries (manual retry)."
+    },
+    "previousFailure": {
+      "type": "string",
+      "description": "Why the earlier attempt failed or was lost (manual retry; up to 2 KB, longer values are cut)."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Task domain the dispatcher routed on."
+    },
+    "from": {
+      "type": "string",
+      "description": "Knight that sent the task; a knight skips tasks it sent itself."
+    },
+    "dispatched_by": {
+      "type": "string",
+      "description": "Who dispatched the task (knight `nats_request` payloads)."
+    },
+    "dispatchedBy": {
+      "type": "string",
+      "description": "camelCase alias for `dispatched_by`."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "When the task was published (RFC 3339). Used for queue time; an unparseable value is ignored."
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "timeout_ms": {
+          "type": "number",
+          "description": "Per-task timeout in ms. Zero or negative means unset (the knight default applies)."
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "camelCase alias for `timeout_ms`."
+        }
+      },
+      "description": "Dispatcher metadata."
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Legacy location of `from`."
+        }
+      },
+      "description": "Legacy envelope."
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "task"
+      ]
+    },
+    {
+      "required": [
+        "description"
+      ]
+    },
+    {
+      "required": [
+        "message"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roundtable.io/schemas/knight-task-result.v1.json",
+  "title": "TaskResult",
+  "description": "What a knight publishes to `<prefix>.results.<taskId>`. Optional fields are only present when set, so the payload stays additive; consumers ignore fields they do not know.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "knight",
+    "success",
+    "result",
+    "duration_ms",
+    "cost",
+    "tokens",
+    "model",
+    "timestamp"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Echo of the task ID."
+    },
+    "knight": {
+      "type": "string",
+      "description": "The knight that ran the task."
+    },
+    "success": {
+      "type": "boolean",
+      "description": "False when the task produced no deliverable; `error` then says why."
+    },
+    "result": {
+      "type": "string",
+      "description": "Task output, or the failure message when `success` is false."
+    },
+    "result_truncated": {
+      "type": "boolean",
+      "description": "The `result` text was cut to fit the NATS payload limit (RESULT_MAX_BYTES): the head and the tail are kept with a `[... N bytes omitted ...]` line between them. Absent when the text is whole."
+    },
+    "error": {
+      "type": "string",
+      "description": "Set when `success` is false."
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Wall-clock run time in ms."
+    },
+    "cost": {
+      "type": "number",
+      "minimum": 0,
+      "description": "USD. claude-knight in subscription mode reports the API-equivalent cost, not billed."
+    },
+    "tokens": {
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ],
+      "properties": {
+        "input": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Input tokens."
+        },
+        "output": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Output tokens."
+        },
+        "cacheRead": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cached input tokens read."
+        },
+        "cacheWrite": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cached input tokens written."
+        }
+      }
+    },
+    "model": {
+      "type": "string",
+      "description": "The model actually used, whether or not the task carried an override."
+    },
+    "tool_calls": {
+      "type": "number",
+      "minimum": 0,
+      "description": "pi-knight: tool calls the agent made."
+    },
+    "turns": {
+      "type": "number",
+      "minimum": 0,
+      "description": "claude-knight: agent turns."
+    },
+    "runtime": {
+      "type": "string",
+      "description": "claude-knight: `claude-knight`."
+    },
+    "billing": {
+      "enum": [
+        "subscription",
+        "api",
+        "local"
+      ],
+      "description": "How the run is billed. claude-knight: `subscription` or `api`. pi-knight: `local` for an operator-supplied model endpoint (cost 0)."
+    },
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "`owner/repo`."
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "url": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "opened",
+              "updated"
+            ]
+          }
+        },
+        "description": "A pull request the task opened or updated."
+      },
+      "description": "Pull requests the task opened or updated (omitted when none)."
+    },
+    "verdict": {
+      "enum": [
+        "ship_it",
+        "needs_changes"
+      ],
+      "description": "Review verdict from a final `Verdict:` line (omitted when none)."
+    },
+    "refused": {
+      "enum": [
+        "credits",
+        "quota"
+      ],
+      "description": "Machine-readable refusal: the task did not run for affordability. `credits`: the provider is out of credits (e.g. OpenRouter 402), which does not reset on its own, so escalate. `quota`: a plan quota window is used up (claude-knight subscription), which resets later, so defer and re-run."
+    },
+    "transient": {
+      "type": "boolean",
+      "description": "The task failed because the model provider was briefly unavailable, after the runtime's own retries. Safe to retry later. Never set for a task that failed on its own terms or was refused."
+    },
+    "transientReason": {
+      "enum": [
+        "overloaded",
+        "provider_5xx",
+        "network"
+      ],
+      "description": "Why a transient failure happened. `overloaded`: the provider answered HTTP 529. `provider_5xx`: it answered 500, 502, 503 or 504. `network`: a connection reset or timeout to the provider."
+    },
+    "usage_limited": {
+      "type": "boolean",
+      "deprecated": true,
+      "description": "Deprecated: use `refused: \"quota\"`. claude-knight still sends it alongside `refused` until the operator reads `refused` (roundtable-k8s/roundtable#431)."
+    },
+    "lost": {
+      "type": "boolean",
+      "description": "The task was delivered to a knight that stopped before finishing it (max_deliver=1); it was not re-run."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Echo of the task's attempt number (set only on a manual retry)."
+    },
+    "retry_of": {
+      "type": "string",
+      "description": "Echo of the task's `retryOf` (set only on a manual retry)."
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "task"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string",
+          "description": "The task text, capped at 64 KB."
+        },
+        "runId": {
+          "type": "string"
+        },
+        "chainName": {
+          "type": "string"
+        },
+        "stepName": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "The original task, on failure results only (`success: false`, including `lost`), so the operator can dead-letter and retry it."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the result was published."
+    }
+  }
+}

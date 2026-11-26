@@ -439,8 +439,10 @@ func TestResultClassification(t *testing.T) {
 		want Reason
 	}{
 		{result{TaskResult: natspkg.TaskResult{Success: &f, Error: "boom"}}, ReasonFailed},
-		{result{TaskResult: natspkg.TaskResult{Success: &f}, Lost: true}, ReasonLost},
+		{result{TaskResult: natspkg.TaskResult{Success: &f, Lost: true}}, ReasonLost},
 		{result{TaskResult: natspkg.TaskResult{Success: &f, UsageLimited: true}}, ReasonUsageLimited},
+		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"quota"`)}, ReasonUsageLimited},
+		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"credits"`)}, ReasonRefused},
 		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"policy"`)}, ReasonRefused},
 		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`false`)}, ReasonFailed},
 		{result{TaskResult: natspkg.TaskResult{Success: &f, Error: "Task timed out after 120s"}}, ReasonTimeout},
