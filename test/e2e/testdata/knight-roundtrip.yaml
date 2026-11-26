@@ -1,0 +1,33 @@
+# A pi-knight for the e2e core round trip: its model is routed to the stub LLM
+# (OPENAI_BASE_URL), so a task completes with no real provider. The API key is
+# a placeholder the stub ignores. Its own subject (core.tasks.rt.>) keeps the
+# minimal core-knight from seeing the task.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: rt-knight
+  namespace: roundtable-core
+spec:
+  domain: rt
+  model: stubllm/e2e
+  skills: [e2e]
+  env:
+    - name: OPENAI_BASE_URL
+      value: http://stubllm.roundtable-core.svc:8080/v1
+    - name: OPENAI_API_KEY
+      value: stub-placeholder-not-a-key
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: core_tasks
+    resultsStream: core_results
+    subjects:
+      - "core.tasks.rt.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e core round trip on kind (no gVisor, stub LLM)
+  workspace:
+    mode: ephemeral
+    size: 64Mi
+  concurrency: 1
+  taskTimeoutSeconds: 120

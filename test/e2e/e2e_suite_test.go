@@ -38,6 +38,9 @@ const (
 	// Chain trace case runs its steps on.
 	stubKnightImage = "example.com/roundtable-e2e-stub-knight:v0.0.1"
 
+	// stubLLMImage is the stub LLM (test/e2e/stubllm), built by `make stubllm-image`.
+	stubLLMImage = "stubllm:e2e"
+
 	// NATS is installed once for the whole suite, by every tier, at the
 	// operator's default URL (nats://nats.database.svc:4222).
 	natsNamespace = "database"
@@ -90,6 +93,14 @@ var _ = BeforeSuite(func() {
 	By("loading the manager image on Kind")
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
+
+	if tierSelected(tierCore) {
+		By("building and loading the stub LLM image")
+		_, err = utils.Run(exec.Command("make", "stubllm-image"))
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the stub LLM image")
+		err = utils.LoadImageToKindClusterWithName(stubLLMImage)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the stub LLM image into Kind")
+	}
 
 	if tierSelected(tierTrace) {
 		buildStubKnightImage()

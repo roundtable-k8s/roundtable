@@ -19,14 +19,19 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 	"github.com/roundtable-k8s/roundtable/test/utils"
 )
 
@@ -39,6 +44,17 @@ const (
 	coreValues     = "test/e2e/testdata/core-values.yaml"
 	coreKnight     = "core-knight"
 	coreKnightYAML = "test/e2e/testdata/knight-core.yaml"
+
+	// The round trip: a task on NATS, a knight, the stub LLM, a result.
+	stubLLMYAML      = "test/e2e/testdata/stubllm.yaml"
+	roundtripKnight  = "rt-knight"
+	roundtripYAML    = "test/e2e/testdata/knight-roundtrip.yaml"
+	roundtripTasks   = "core_tasks"
+	roundtripResults = "core_results"
+	// STUB:greeting makes the stub LLM reply with stubGreeting.
+	stubGreeting = "Hello from the stub LLM."
+	// natsLocalPort is where the in-cluster NATS is port-forwarded to.
+	natsLocalPort = "14222"
 )
 
 var _ = Describe("Core install", Ordered, Label(tierCore), func() {
@@ -56,6 +72,9 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		// Delete the Knight while the operator still runs its finalizers.
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", coreKnightYAML,
 			"--ignore-not-found", "--timeout=2m"))
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", roundtripYAML,
+			"--ignore-not-found", "--timeout=2m"))
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "-f", stubLLMYAML, "--ignore-not-found"))
 		_, _ = utils.Run(exec.Command("helm", "uninstall", coreRelease, "-n", coreNamespace, "--wait"))
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", coreNamespace,
 			"--ignore-not-found", "--wait=false"))
@@ -70,6 +89,10 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			{"logs", "deployment/" + coreOperator, "-n", coreNamespace, "--tail=200"},
 			{"get", "knight", coreKnight, "-n", coreNamespace, "-o", "yaml"},
 			{"describe", "deployment", coreKnight, "-n", coreNamespace},
+			{"get", "knight", roundtripKnight, "-n", coreNamespace, "-o", "yaml"},
+			{"logs", "-l", "app.kubernetes.io/instance=" + roundtripKnight, "-n", coreNamespace,
+				"--all-containers", "--tail=200"},
+			{"logs", "deployment/stubllm", "-n", coreNamespace, "--tail=200"},
 			{"get", "events", "-A", "--sort-by=.lastTimestamp"},
 		} {
 			out, err := utils.Run(exec.Command("kubectl", args...))
@@ -115,5 +138,76 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(out).To(Equal("1"))
 		}, 5*time.Minute).Should(Succeed())
+	})
+
+	// The round trip (#353): a task published on NATS reaches a pi-knight, which
+	// calls the stub LLM, and the result lands on the results stream.
+	It("round-trips a task through a knight and the stub LLM", func() {
+		By("deploying the stub LLM")
+		_, err := utils.Run(exec.Command("kubectl", "apply", "-f", stubLLMYAML))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/stubllm",
+			"-n", coreNamespace, "--timeout=3m"))
+		Expect(err).NotTo(HaveOccurred())
+
+		By("port-forwarding NATS")
+		pf := exec.Command("kubectl", "port-forward", "-n", natsNamespace, "svc/nats", natsLocalPort+":4222")
+		Expect(pf.Start()).To(Succeed())
+		DeferCleanup(func() {
+			_ = pf.Process.Kill()
+			_ = pf.Wait()
+		})
+		var nc *nats.Conn
+		Eventually(func() error {
+			var cerr error
+			nc, cerr = nats.Connect("nats://127.0.0.1:" + natsLocalPort)
+			return cerr
+		}, time.Minute, time.Second).Should(Succeed())
+		DeferCleanup(nc.Close)
+		js, err := jetstream.New(nc)
+		Expect(err).NotTo(HaveOccurred())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		for name, subjects := range map[string][]string{
+			roundtripTasks:   {"core.tasks.>"},
+			roundtripResults: {"core.results.>"},
+		} {
+			_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: subjects})
+			Expect(err).NotTo(HaveOccurred(), "stream %s", name)
+		}
+
+		By("creating the Knight that routes its model to the stub LLM")
+		_, err = utils.Run(exec.Command("kubectl", "apply", "-f", roundtripYAML))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			out, err := utils.Run(exec.Command("kubectl", "get", "knight", roundtripKnight,
+				"-n", coreNamespace, "-o", "jsonpath={.status.phase}"))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal("Ready"))
+		}, 5*time.Minute).Should(Succeed())
+
+		By("publishing a STUB:greeting task")
+		taskID := fmt.Sprintf("e2e-core-%d", time.Now().UnixNano())
+		payload, err := json.Marshal(natspkg.TaskPayload{TaskID: taskID, Task: "STUB:greeting"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = js.Publish(ctx, "core.tasks.rt."+roundtripKnight, payload)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("waiting for the result on the results stream")
+		cons, err := js.OrderedConsumer(ctx, roundtripResults, jetstream.OrderedConsumerConfig{
+			FilterSubjects: []string{"core.results." + taskID},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var result natspkg.TaskResult
+		Eventually(func(g Gomega) {
+			msg, err := cons.Next(jetstream.FetchMaxWait(5 * time.Second))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(json.Unmarshal(msg.Data(), &result)).To(Succeed())
+		}, 3*time.Minute, time.Second).Should(Succeed())
+
+		Expect(result.GetTaskID()).To(Equal(taskID))
+		Expect(result.GetError()).To(BeEmpty(), "task failed")
+		Expect(result.GetOutput()).To(ContainSubstring(stubGreeting))
 	})
 })
