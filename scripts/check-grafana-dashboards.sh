@@ -39,7 +39,7 @@ roundtable_knight_llm_cost_usd_total roundtable_knight_llm_tokens_total
 roundtable_chain_step_cost_usd_total roundtable_chain_step_tokens_total
 roundtable_chain_runs_total roundtable_chain_step_duration_seconds_bucket roundtable_chain_provider_retries_total roundtable_missions
 roundtable_dead_letters_open roundtable_knight_consumer_ready roundtable_trigger_firings_total roundtable_trigger_last_fired_timestamp_seconds roundtable_gateway_requests_total roundtable_gateway_request_duration_seconds_bucket roundtable_tasks_dead_lettered_total roundtable_knight_isolated roundtable_knight_wake_seconds_bucket roundtable_mission_cost_usd_total
-kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas'
+kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas keda_scaler_metrics_value'
 
 for f in "$chart"/dashboards/*.json; do
   jq empty "$f" || fail "$f is not valid JSON"
@@ -52,7 +52,7 @@ for f in "$chart"/dashboards/*.json; do
       grep -qw "$m" <<<"$known" || fail "$f: unknown metric $m in: $expr"
     done
     case "$expr" in
-      *kube_horizontalpodautoscaler*) ;;
+      *kube_horizontalpodautoscaler*|*keda_scaler_metrics_value*) ;;
       # The gateway duration histogram carries no table label (only route).
       *roundtable_gateway_request_duration_seconds_bucket*) ;;
       *'table=~"$table"'*) ;;

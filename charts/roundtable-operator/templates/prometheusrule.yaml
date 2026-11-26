@@ -223,5 +223,16 @@ spec:
           for: 15m
           labels:
             {{- toYaml $labels | nindent 12 }}
+        {{- if .Values.alerts.queueBacklog.enabled }}
+        - alert: RoundtableQueueBacklog
+          annotations:
+            summary: >-
+              Knight {{`{{ $labels.scaledObject }}`}} has {{`{{ $value }}`}} pending tasks (KEDA nats-jetstream lag).
+          expr: |
+            sum by (exported_namespace, scaledObject) (keda_scaler_metrics_value{exported_namespace="{{ $ns }}", metric=~"s[0-9]+-nats-jetstream-.*"}) > {{ .Values.alerts.queueBacklog.pending }}
+          for: {{ .Values.alerts.queueBacklog.forMinutes }}m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+        {{- end }}
     {{- end }}
 {{- end }}

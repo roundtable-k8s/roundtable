@@ -65,6 +65,13 @@ grep -q 'for: 30m' <<<"$tuned" || fail "deadLettersOpenMinutes not applied"
 off="$(render --set alerts.enabled=true --set alerts.scaling.enabled=false "${api[@]}")"
 ! grep -q 'roundtable.scaling' <<<"$off" || fail "alerts.scaling.enabled=false still renders scaling group"
 
+! grep -q 'RoundtableQueueBacklog' <<<"$on" || fail "RoundtableQueueBacklog rendered by default"
+qb="$(render --set alerts.enabled=true "${api[@]}" --set alerts.queueBacklog.enabled=true --set alerts.queueBacklog.pending=25 --set alerts.queueBacklog.forMinutes=7)"
+grep -q 'alert: RoundtableQueueBacklog$' <<<"$qb" || fail "RoundtableQueueBacklog missing when enabled"
+grep -q '> 25$' <<<"$qb" || fail "queueBacklog.pending not applied"
+grep -q 'for: 7m' <<<"$(grep -A12 'alert: RoundtableQueueBacklog$' <<<"$qb")" || fail "queueBacklog.forMinutes not applied"
+on="$qb"
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 if ! command -v "$PROMTOOL" >/dev/null 2>&1; then
