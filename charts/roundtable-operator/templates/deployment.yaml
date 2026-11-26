@@ -71,7 +71,7 @@ spec:
             - --nats-monitoring-endpoint={{ . }}
             {{- end }}
             {{- if .Values.metrics.enabled }}
-            - --metrics-bind-address=:8080
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
             - --metrics-secure=false
             {{- end }}
             {{- range .Values.extraArgs }}
@@ -80,7 +80,7 @@ spec:
           {{- if .Values.metrics.enabled }}
           ports:
             - name: metrics
-              containerPort: 8080
+              containerPort: {{ .Values.metrics.port }}
           {{- end }}
           env:
             {{- include "roundtable-operator.telemetryEnv" (dict "root" . "service" "roundtable-operator") | nindent 12 }}

@@ -43,7 +43,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `table` | string | Optional (additive, stays `v: 1`). `ROUNDTABLE_TABLE`; `none` when the knight has no table. |
 | `pod` | string | `POD_NAME`. |
 | `node` | string | `NODE_NAME`; omitted if unset. |
-| `taskId` | string | Task id (`roundtable.task_id`). |
+| `taskId` | string | Task id (`roundtable.task.id`). |
 | `runId` | string | Optional; chain/mission run id from the task. |
 | `chainName`, `stepName` | string | Optional; from the task when it comes from a Chain. |
 | `model` | string | Optional; resolved model. |

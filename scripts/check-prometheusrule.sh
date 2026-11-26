@@ -31,6 +31,8 @@ grep -q 'severity: critical' <<<"$on" || fail "alerts.labels severity override n
 ! grep -q 'severity: warning' <<<"$on" || fail "default severity not overridden"
 grep -q 'team: ops' <<<"$on" || fail "alerts.labels not applied"
 grep -q 'namespace="rtns"' <<<"$on" || fail "release namespace not used in pod rules"
+grep -q 'status=~"error|publish_failed"' <<<"$on" || fail "failure alert does not match emitted statuses"
+! grep -q 'error|timeout' <<<"$on" || fail "failure alert still matches the never-emitted timeout status"
 ! grep -qE '(pi|claude)_knight' <<<"$on" || fail "old runtime metric names in rules"
 # Every knight aggregation keeps table.
 ! grep -E 'sum by \(' <<<"$on" | grep -E 'roundtable_(knight|chain)' | grep -qv 'table' \
