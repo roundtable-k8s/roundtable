@@ -58,6 +58,112 @@ Pass `--version` to pin the chart. Omit it to get the latest release. Chart
 values can be set with `--set` or `-f values.yaml`; see
 [Helm values](helm-values.md).
 
+This is the install for a normal cluster. Do the next three steps in order:
+install NATS, choose the isolation flags for your cluster, then install the
+chart with them and create your first knight.
+
+## Install NATS
+
+Round Table does not bundle NATS (see [dependencies.md](dependencies.md)). Install
+the nats-io chart with JetStream on and a file store on a PVC, in the same
+namespace as Round Table:
+
+```bash
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+helm upgrade --install nats nats/nats \
+  --version 2.12.3 \
+  --namespace roundtable --create-namespace \
+  --set config.jetstream.enabled=true \
+  --set config.jetstream.fileStore.pvc.enabled=true \
+  --set config.jetstream.fileStore.pvc.size=10Gi \
+  --set natsBox.enabled=false \
+  --wait
+```
+
+- `config.jetstream.enabled=true` turns JetStream on. Round Table needs it.
+- `config.jetstream.fileStore.pvc.enabled=true` keeps the stream data on a PVC, so
+  a NATS pod restart keeps the tasks. `hack/quickstart-kind.sh` turns this off for
+  kind only; do not copy that to a real cluster.
+- `config.jetstream.fileStore.pvc.size` sizes the claim for your streams. Set it
+  for your workload; `10Gi` is only a starting point.
+- `natsBox.enabled=false` skips the optional debug pod.
+
+With the release named `nats` in the `roundtable` namespace, the Service URL is
+`nats://nats.roundtable.svc:4222`. That is the URL the quickstart manifests use.
+The chart's `nats.database.svc` default is the author's cluster, not yours, so
+always set the URL explicitly (see [Pointing Round Table at your NATS](#pointing-round-table-at-your-nats)).
+
+## Choose your isolation
+
+By default each knight runs under the `gvisor` RuntimeClass and its egress is
+default-deny. A cluster without gVisor parks every knight with `Isolated=False`,
+reason `RuntimeClassNotFound`, so pick one of these paths and set its flags on the
+`helm install` in step 2.
+
+**(a) gVisor is installed.** Name its RuntimeClass `gvisor` and change nothing.
+The default values already do this.
+
+**(b) gVisor is not installed, and you accept that.** Turn the RuntimeClass default
+off:
+
+```bash
+--set-string isolation.runtimeClassName=""
+```
+
+Knights then report `Isolated=False`, reason `IsolationDisabled`.
+
+**(c) No CNI that enforces NetworkPolicy.** Turn the egress default off:
+
+```bash
+--set isolation.egress.mode=off
+```
+
+A cluster with neither gVisor nor an enforcing CNI needs both (b) and (c). Read
+[runtime isolation](runtime-isolation.md) for what each choice gives up and
+[egress](egress.md) for how the egress allowlist is enforced. Hostname rules need
+Cilium; the plain `NetworkPolicy` fallback cannot enforce them.
+
+Check the result with:
+
+```bash
+kubectl -n roundtable get knights
+```
+
+The `ISOLATED` column shows the `Isolated` condition. It is `True` only with a
+RuntimeClass and a Cilium hostname policy. Otherwise it is `False`, and the
+condition's reason tells you why: `IsolationDisabled` for (b) and (c),
+`FQDNPolicyUnavailable` for gVisor without Cilium.
+
+## Your first knight
+
+Create the Secret that holds your model API key. The quickstart Knight loads it
+through `spec.envFrom`:
+
+```bash
+kubectl -n roundtable create secret generic llm-api-keys \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Apply the RoundTable and the Knight from [`examples/quickstart/`](../examples/quickstart/).
+Their NATS URL is `nats://nats.roundtable.svc:4222`, which matches the NATS install
+above. If your NATS is elsewhere, replace that URL (`nats.url` in each manifest) when
+you apply them, for example from the repo root:
+
+```bash
+sed 's#nats://nats.roundtable.svc:4222#nats://YOUR-NATS-HOST:4222#' \
+  examples/quickstart/roundtable.yaml | kubectl apply -f -
+sed 's#nats://nats.roundtable.svc:4222#nats://YOUR-NATS-HOST:4222#' \
+  examples/quickstart/knight.yaml | kubectl apply -f -
+```
+
+Wait until the Knight is ready:
+
+```bash
+kubectl -n roundtable get knights -w   # wait for READY true, then Ctrl-C
+```
+
+Then send one task through the gateway; see [gateway.md](gateway.md).
+
 ## Pointing Round Table at your NATS
 
 A NATS URL lives in five places. The chart and CRD defaults name a NATS of the
