@@ -1,0 +1,41 @@
+# Chart values for the Tempo trial (trial_tempo_test.go): the same as
+# otel-values.yaml plus an OTLP exporter to the trial Tempo in the traces
+# pipeline. As in the Chain trace test: telemetry on, the chart collector
+# on with a file exporter, captureContent left at its default (true). The
+# file exporter writes OTLP JSON lines to the collector's stdout (its root
+# filesystem is read-only), so the test reads spans with kubectl logs.
+fullnameOverride: rt-e2e
+image:
+  repository: example.com/roundtable-operator
+  tag: v0.0.1
+  pullPolicy: IfNotPresent
+leaderElect: false
+# kind has no gVisor; the test knights also opt out per knight.
+isolation:
+  runtimeClassName: ""
+  egress:
+    mode: "off"
+missionNetworkPolicy:
+  enabled: false
+dashboard:
+  enabled: false
+gateway:
+  enabled: false
+planner:
+  enabled: false
+telemetry:
+  enabled: true
+  collector:
+    enabled: true
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.roundtable-e2e.svc:4317
+        tls:
+          insecure: true
+      file:
+        path: /dev/stdout
+        flush_interval: 1s
+    pipelines:
+      traces: [file, otlp/tempo]
+      metrics: []
+      logs: []

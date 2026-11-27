@@ -69,6 +69,8 @@ const (
 	tierSchedule = "schedule"
 	tierGitHub   = "github"
 	tierWebhook  = "webhook"
+	// tierTrial: live trials of observability backends (docs/design/observability-standard.md).
+	tierTrial = "trial"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -129,7 +131,7 @@ var _ = BeforeSuite(func() {
 	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) ||
 		tierSelected(tierGateway) || tierSelected(tierChain) || tierSelected(tierSchedule) ||
 		tierSelected(tierGitHub) ||
-		tierSelected(tierWebhook) {
+		tierSelected(tierWebhook) || tierSelected(tierTrial) {
 		buildStubKnightImage()
 	}
 

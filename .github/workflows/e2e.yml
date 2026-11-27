@@ -32,6 +32,9 @@ on:
       - go.sum
       - .github/workflows/e2e.yml
 
+  # The Tempo trial (#768): only when its own files change, or by hand.
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -47,6 +50,7 @@ concurrency:
 
 jobs:
   e2e-core:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -76,3 +80,71 @@ jobs:
         run: |
           # The failing output as an annotation (readable without the raw log).
           [ -f e2e.log ] && echo "::error title=make e2e::$(grep -v 'downloading' e2e.log | tail -n 150 | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')"
+
+  # Live trial of Grafana Tempo (docs/design/observability-standard.md). Not a
+  # required check; runs on a PR only when the trial's own files change, and
+  # when started by hand. Other PRs get a skipped job, not a green one.
+  trial-changes:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.changed.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Did the trial's files change?
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run=false
+          if [ "$EVENT" = workflow_dispatch ]; then
+            run=true
+          elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(test/e2e/trial_tempo_test\.go|test/e2e/testdata/(tempo|otel-trial-values)\.yaml|\.github/workflows/e2e\.yml)$'; then
+            run=true
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  e2e-trial:
+    needs: trial-changes
+    if: needs.trial-changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+
+      - name: make e2e TIER=trial
+        run: |
+          set -o pipefail
+          make e2e TIER=trial 2>&1 | tee e2e.log
+
+      - name: Publish the measurements
+        if: always()
+        run: |
+          line=$(grep -h 'TRIAL_NOTICE: ' e2e.log 2>/dev/null | tail -n 1 | sed 's/^.*TRIAL_NOTICE: //' | cut -c1-500)
+          [ -n "$line" ] && echo "::notice title=Tempo trial::$line"
+          exit 0
+
+      - name: Surface the failure
+        if: failure()
+        run: |
+          [ -f e2e.log ] && echo "::error title=make e2e TIER=trial::$(grep -v 'downloading' e2e.log | tail -n 150 | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')"
