@@ -155,15 +155,8 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	// requested: something asks for snapshots, so unavailability is reported.
 	requested := annotated || scheduled
 
-	if !r.SnapshotsEnabled && !r.snapshotsLate() && (!requested || !r.snapshotsAvailable(ctx)) {
-		if requested {
-			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotAPIUnavailable,
-				snapshotAPIMissingMessage)
-			return snapshotProbeInterval, nil
-		}
-		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
-		return 0, nil
-	}
+	// An ephemeral workspace can never be snapshotted, so decide that before
+	// the API is probed: no probe and no requeue for it.
 	if knightpkg.EphemeralWorkspace(knight) {
 		if requested {
 			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonWorkspaceNotPersistent,
@@ -171,6 +164,16 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		} else {
 			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
 		}
+		return 0, nil
+	}
+
+	if !r.SnapshotsEnabled && !r.snapshotsLate() && (!requested || !r.snapshotsAvailable(ctx)) {
+		if requested {
+			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotAPIUnavailable,
+				snapshotAPIMissingMessage)
+			return snapshotProbeInterval, nil
+		}
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
 		return 0, nil
 	}
 
