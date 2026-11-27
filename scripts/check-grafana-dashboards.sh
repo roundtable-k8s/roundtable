@@ -42,6 +42,11 @@ roundtable_build_info roundtable_dead_letters_open roundtable_knight_consumer_re
 roundtable_knight_task_duration_seconds_bucket roundtable_knight_tool_calls_total roundtable_knight_tool_call_duration_seconds_bucket roundtable_knight_tool_calls_blocked_total roundtable_knight_nats_reconnects_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas keda_scaler_metrics_value'
 
+# exprs <file>: every PromQL expression, including those of panels nested in
+# rows and skipping panels without targets. The main loop and the negative test
+# both use this walk.
+exprs() { jq -r '.. | objects | select(has("targets")) | .targets[]?.expr // empty' "$1"; }
+
 # True when any panel or target datasource uid is a literal rather than
 # ${datasource} or another template variable ($var, ${var}, [[var]]).
 bad_ds() {
@@ -58,9 +63,9 @@ bad_ds "$neg" || fail "negative test: literal datasource uid not detected"
 
 # A text panel without targets and a row with nested panels must not break the
 # expression walk, and a nested panel's expression must still be seen.
-jq '.panels += [{"type":"text","title":"t"},{"type":"row","title":"r","panels":[{"type":"timeseries","targets":[{"expr":"NESTED_EXPR"}]}]}]' \
+jq '.panels += [{"type":"text","title":"t"},{"type":"row","title":"r","panels":[{"type":"timeseries","targets":[{"expr":"NESTED_EXPR{table=~\"$table\"}"}]}]}]' \
   "$chart/dashboards/fleet-overview.json" >"$neg"
-[ "$(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr // empty' "$neg" | grep -c NESTED_EXPR)" = 1 ] ||
+[ "$(exprs "$neg" | grep -c NESTED_EXPR)" = 1 ] ||
   fail "negative test: nested row panel expression not found"
 
 for f in "$chart"/dashboards/*.json; do
@@ -72,7 +77,7 @@ for f in "$chart"/dashboards/*.json; do
   # Every defined variable must be referenced by at least one panel expression.
   for v in $(jq -r '.templating.list[].name' "$f"); do
     [ "$v" = datasource ] && continue
-    jq -e --arg v "$v" '[.. | objects | select(has("targets")) | .targets[]?.expr // empty | select(contains("$" + $v))] | length > 0' "$f" >/dev/null ||
+    exprs "$f" | grep -F "\$$v" >/dev/null ||
       fail "$f: variable \$$v is not used by any panel"
   done
   while IFS= read -r expr; do
@@ -88,6 +93,6 @@ for f in "$chart"/dashboards/*.json; do
       *'table=~"$table"'*) ;;
       *) fail "$f: expression does not filter on \$table: $expr" ;;
     esac
-  done < <(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr // empty' "$f")
+  done < <(exprs "$f")
 done
 echo OK
