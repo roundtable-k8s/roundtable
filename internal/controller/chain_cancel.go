@@ -127,5 +127,5 @@ func (r *ChainReconciler) cancelRun(ctx context.Context, chain *aiv1alpha1.Chain
 	})
 	r.Recorder.Eventf(chain, corev1.EventTypeWarning, "RunCancelled", "Run cancelled (%d step(s) unfinished): %s", cancelled, msg)
 	logf.FromContext(ctx).Info("Chain run cancelled", "runId", chain.Status.RunID, "steps", cancelled, "reason", reason)
-	metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "failed").Inc()
+	r.recordRunOutcome(ctx, chain, "failed")
 }

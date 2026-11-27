@@ -203,6 +203,12 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 	// conflicting write leaves them for the next reconcile.
 	prevRunSpans := chainRunSpans(chain, time.Now())
 	baseRV := chain.ResourceVersion
+	// Run counters follow the same rule: counted only once the terminal
+	// status is persisted, so a conflict cannot count a run twice.
+	ctx, runMetrics := withPendingRunMetrics(ctx)
+	defer func() {
+		runMetrics.flushIfPersisted(ctx, r, chain, baseRV)
+	}()
 	defer func() {
 		if chain.ResourceVersion != baseRV {
 			r.emitRunSpans(ctx, chain, prevRunSpans)

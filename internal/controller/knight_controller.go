@@ -250,6 +250,7 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 				log.Error(err, "Failed to delete agent cards")
 			}
 			deleteIsolatedMetric(knight)
+			deleteKnightWakeMetric(knight)
 			// Merge patch, like the add path: never rewrites other fields.
 			base := knight.DeepCopy()
 			controllerutil.RemoveFinalizer(knight, knightFinalizer)

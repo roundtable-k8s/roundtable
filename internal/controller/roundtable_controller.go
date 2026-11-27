@@ -108,6 +108,7 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 				r.DeadLetters.Stop(req.String())
 			}
 			r.cleanupDeletedTableCards(ctx, req.Name)
+			deleteTableMetrics(req.Name)
 			r.skillsMu.Lock()
 			delete(r.skillsQueriedAt, req.Namespace+"/"+req.Name)
 			r.skillsMu.Unlock()
@@ -689,6 +690,16 @@ func missionTable(m *aiv1alpha1.Mission) string {
 		return name
 	}
 	return m.Status.RoundTableName
+}
+
+// deleteTableMetrics drops every table-scoped series of a deleted RoundTable:
+// the knight and mission gauges and the cost gauge. (There is no warm-pool
+// vector in pkg/metrics.)
+func deleteTableMetrics(table string) {
+	l := prometheus.Labels{"table": table}
+	rtmetrics.Knights.DeletePartialMatch(l)
+	rtmetrics.Missions.DeletePartialMatch(l)
+	rtmetrics.TableCostUSD.DeletePartialMatch(l)
 }
 
 // updateMetrics recomputes the table-scoped gauges (knights and missions per
