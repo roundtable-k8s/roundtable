@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Read item URLs on stdin (one per line); print only those not yet in
+# $KNIGHT_MEMORY_DIR/seen.txt, then record them there. Running it twice on the
+# same input prints the items once.
+set -euo pipefail
+
+dir=${KNIGHT_MEMORY_DIR:-}
+if [ -z "$dir" ]; then
+  echo "seen: KNIGHT_MEMORY_DIR is not set (spec.memory missing?)" >&2
+  exit 1
+fi
+mkdir -p "$dir"
+file=$dir/seen.txt
+touch "$file"
+
+tmp=$(mktemp "$dir/.seen.XXXXXX")
+trap 'rm -f "$tmp" "$tmp.new"' EXIT
+
+# New URLs: non-empty, trimmed, first occurrence only, not already seen.
+awk -v known="$file" 'FILENAME == known { seen[$0]=1; next }
+     { sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") }
+     $0 != "" && !($0 in seen) { seen[$0]=1; print }' "$file" - >"$tmp.new"
+
+cat "$file" "$tmp.new" >"$tmp"
+mv "$tmp" "$file" # atomic: same directory, so same filesystem
+cat "$tmp.new"
