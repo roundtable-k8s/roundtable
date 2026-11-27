@@ -96,9 +96,10 @@ type ActivityEvent struct {
 	Type      ActivityType `json:"type"`
 	Timestamp string       `json:"ts"` // RFC 3339, UTC, millisecond precision
 	Knight    string       `json:"knight"`
-	Table     string       `json:"table,omitempty"` // the knight's RoundTable
-	Pod       string       `json:"pod"`             // POD_NAME
-	Node      string       `json:"node,omitempty"`  // NODE_NAME
+	Table     string       `json:"table,omitempty"`   // the knight's RoundTable
+	TraceID   string       `json:"traceId,omitempty"` // W3C trace id (32 hex) of the task's trace
+	Pod       string       `json:"pod"`               // POD_NAME
+	Node      string       `json:"node,omitempty"`    // NODE_NAME
 	TaskID    string       `json:"taskId"`
 	RunID     string       `json:"runId,omitempty"`
 	Chain     string       `json:"chainName,omitempty"`
@@ -117,10 +118,11 @@ type ActivityEvent struct {
 	QueuedForMs *int64 `json:"queuedFor,omitempty"` // publish -> pickup, ms, when known
 
 	// task.heartbeat and task.finished
-	Turns        *int     `json:"turns,omitempty"`
-	InputTokens  *int64   `json:"inputTokens,omitempty"`
-	OutputTokens *int64   `json:"outputTokens,omitempty"`
-	CostUSD      *float64 `json:"costUsd,omitempty"`
+	Turns            *int     `json:"turns,omitempty"`
+	InputTokens      *int64   `json:"inputTokens,omitempty"`
+	OutputTokens     *int64   `json:"outputTokens,omitempty"`
+	CacheWriteTokens *int64   `json:"cacheWriteTokens,omitempty"`
+	CostUSD          *float64 `json:"costUsd,omitempty"`
 	// CurrentTool is the tool in flight at heartbeat time, if any.
 	CurrentTool string `json:"currentTool,omitempty"`
 

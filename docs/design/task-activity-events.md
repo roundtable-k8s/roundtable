@@ -41,6 +41,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `ts` | string | RFC 3339 UTC with milliseconds. |
 | `knight` | string | `KNIGHT_NAME`. |
 | `table` | string | Optional (additive, stays `v: 1`). `ROUNDTABLE_TABLE`; `none` when the knight has no table. |
+| `traceId` | string | Optional. W3C trace id (32 lowercase hex) of the task's trace; the same on every event of a task. Omitted when there is no trace context. |
 | `pod` | string | `POD_NAME`. |
 | `node` | string | `NODE_NAME`; omitted if unset. |
 | `taskId` | string | Task id (`roundtable.task.id`). |
@@ -58,11 +59,11 @@ Names follow the attribute names in [telemetry conventions](telemetry-convention
 | `type` | Extra fields |
 |---|---|
 | `task.started` | `slot` (concurrency slot, 0-based), `concurrency`, `queuedFor` (ms from publish to pickup, when known) |
-| `task.heartbeat` | `turns`, `inputTokens`, `outputTokens`, `costUsd` (so far), `currentTool` (if any). Sent with each `working()` call. |
+| `task.heartbeat` | `turns`, `inputTokens`, `outputTokens`, `cacheWriteTokens` (optional, only when prompt-cache tokens were written), `costUsd` (so far), `currentTool` (if any). Sent with each `working()` call. |
 | `tool.started` | `tool`, `toolCallId`, `argsSummary` |
 | `tool.finished` | `tool`, `toolCallId`, `durationMs`, `isError`, `outputPreview` |
 | `assistant.message` | `preview` |
-| `task.finished` | `success`, `errorClass` (on failure), `durationMs`, `costUsd`, `turns`, `inputTokens`, `outputTokens` |
+| `task.finished` | `success`, `errorClass` (on failure), `durationMs`, `costUsd`, `turns`, `inputTokens`, `outputTokens`, `cacheWriteTokens` (optional) |
 
 `errorClass` values: `timeout`, `cancelled`, `model_error`, `tool_error`,
 `internal`, `other`.

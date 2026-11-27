@@ -1,0 +1,11 @@
+{
+  "durable_name": "galahad-consumer",
+  "filter_subjects": [
+    "roundtable.tasks.dev.galahad",
+    "roundtable.tasks.plan.galahad"
+  ],
+  "ack_policy": "explicit",
+  "deliver_policy": "all",
+  "max_deliver": 1,
+  "ack_wait": 30000000000
+}
