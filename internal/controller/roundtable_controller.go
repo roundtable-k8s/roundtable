@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -100,6 +101,9 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				r.DeadLetters.Stop(req.String())
 			}
 			r.cleanupDeletedTableCards(ctx, req.Name)
+			r.skillsMu.Lock()
+			delete(r.skillsQueriedAt, req.Namespace+"/"+req.Name)
+			r.skillsMu.Unlock()
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -600,7 +604,8 @@ func (r *RoundTableReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.RoundTable{}).
 		// A Knight change updates its card within seconds (#393).
-		Watches(&aiv1alpha1.Knight{}, handler.EnqueueRequestsFromMapFunc(r.knightTables)).
+		Watches(&aiv1alpha1.Knight{}, handler.EnqueueRequestsFromMapFunc(r.knightTables),
+			builder.WithPredicates(knightChangedForTable())).
 		Named("roundtable").
 		Complete(r)
 }
