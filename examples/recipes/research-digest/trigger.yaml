@@ -1,0 +1,33 @@
+# Schedule Trigger: every Monday one task goes to the digest-reader knight.
+# Needs knight.yaml.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: research-digest
+  namespace: roundtable
+spec:
+  roundTableRef: {name: fleet-a}
+  source:
+    schedule:
+      cron: "0 7 * * 1"
+      timeZone: UTC
+      # A fire missed while the operator was down runs late only within 6h.
+      startingDeadlineSeconds: 21600
+  target:
+    knight:
+      name: digest-reader
+      task: |
+        Use the research-digest skill for {{ .Event.Time.Format "2006-01-02" }}.
+        Read these sources (replace them with yours, and keep the knight's
+        egress hosts in step): https://hnrss.org/frontpage,
+        https://feeds.arstechnica.com/arstechnica/index and
+        https://www.theregister.com/headlines.atom. Pipe the item URLs
+        through scripts/seen, write the digest of the new items only, save it
+        to $KNIGHT_MEMORY_DIR/digests/<date>.md, and answer with the digest.
+        If you cannot fetch any source or cannot save the digest, end your
+        answer with a last line `Outcome: failed <short reason>`.
+      # Counted as lost (and no longer active) without a result after 15m.
+      timeoutSeconds: 900
+  # A slow run is not doubled by the next fire.
+  concurrency:
+    policy: Forbid
