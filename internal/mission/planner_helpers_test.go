@@ -203,3 +203,12 @@ func TestValidChainPhase(t *testing.T) {
 		}
 	}
 }
+
+// The e2e stub knight (test/e2e/stubknight) recognises planning tasks by the
+// preamble; the prompt the operator builds must open with the same text.
+func TestPlanningPromptOpensWithPreamble(t *testing.T) {
+	prompt := existingChainsPlanner(t, nil).buildPlanningPrompt(t.Context(), existingChainsMission())
+	if !strings.HasPrefix(prompt, PlanningPromptPreamble+" ") {
+		t.Errorf("planning prompt does not open with %q: %.120q", PlanningPromptPreamble, prompt)
+	}
+}

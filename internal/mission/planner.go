@@ -598,11 +598,17 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 	return taskID, nil
 }
 
+// PlanningPromptPreamble opens every planning prompt. The e2e stub knight
+// (test/e2e/stubknight) matches it to recognise planning tasks, and its test
+// guards that copy against this value.
+const PlanningPromptPreamble = "You are a mission planner for the Round Table AI agent orchestration system."
+
 // buildPlanningPrompt constructs the planning prompt for the planner knight.
 func (p *Planner) buildPlanningPrompt(ctx context.Context, mission *aiv1alpha1.Mission) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are a mission planner for the Round Table AI agent orchestration system. ")
+	sb.WriteString(PlanningPromptPreamble)
+	sb.WriteString(" ")
 	sb.WriteString("Your task is to generate a detailed execution plan for the following mission.\n\n")
 
 	sb.WriteString("**Mission Objective:**\n")

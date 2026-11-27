@@ -338,3 +338,33 @@ func TestAggregateMissionCostEmptyNameAndMixedSteps(t *testing.T) {
 		})
 	}
 }
+
+// A step whose knightCosts cover it except for a 1e-6 rounding remainder must
+// not charge that remainder to the step's knight: it would add a phantom
+// "0.0000" breakdown line for a knight that did not run.
+func TestAggregateMissionCostIgnoresRoundingRemainder(t *testing.T) {
+	chain := &aiv1alpha1.Chain{
+		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "ns"},
+		Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{
+			{Knight: "ghost", CostUSD: "0.500001", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "a", CostUSD: "0.5"}}},
+		}},
+	}
+	ct := &CostTracker{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(chain).Build()}
+	m := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "ns"},
+		Spec:       aiv1alpha1.MissionSpec{Knights: []aiv1alpha1.MissionKnight{{Name: "a"}}},
+		Status: aiv1alpha1.MissionStatus{ChainStatuses: []aiv1alpha1.MissionChainStatus{
+			{Name: "x", ChainCRName: "c1"},
+		}},
+	}
+	total, err := ct.AggregateMissionCost(t.Context(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(total-0.5) > 1e-9 {
+		t.Errorf("total = %v, want 0.5 (rounding remainder not charged)", total)
+	}
+	if len(m.Status.CostBreakdown) != 1 || m.Status.CostBreakdown[0].Name != "a" || m.Status.CostBreakdown[0].CostUSD != "0.5000" {
+		t.Errorf("breakdown = %+v, want only a at 0.5000", m.Status.CostBreakdown)
+	}
+}
