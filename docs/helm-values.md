@@ -36,7 +36,7 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 | `podDisruptionBudget.maxUnavailable` | int/string | `""` | `maxUnavailable` |
 | `leaderElect` | bool | `true` | Enable leader election for HA |
 | `leaderElection.enabled` | bool | `true` | Set `false` to turn leader election off. Requires `replicaCount: 1` (the chart fails otherwise) and switches the Deployment to `Recreate`, because a rolling update would otherwise run a second operator concurrently with the old one. Trade-off: updates have a short gap with no operator running |
-| `leaderElection.leaseDuration` | duration | `60s` | How long a non-leader waits before taking over an unrenewed lease |
+| `leaderElection.leaseDuration` | duration | `60s` | How long a non-leader waits before taking over an unrenewed lease. A normal stop (rollout, node drain, SIGTERM) releases the lease so the new pod takes over at once; a crash or kill still waits the full `leaseDuration` |
 | `leaderElection.renewDeadline` | duration | `40s` | How long the leader retries renewing before giving up and restarting. Must be less than `leaseDuration` and greater than 1.2 × `retryPeriod`; invalid values fail operator start-up. A slow API for less than this does not restart the operator |
 | `leaderElection.retryPeriod` | duration | `5s` | Retry interval for acquiring/renewing the lease |
 | `resources.requests.cpu` | string | `50m` | CPU request |

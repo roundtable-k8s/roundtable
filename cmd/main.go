@@ -375,30 +375,8 @@ func main() {
 		}
 	}
 
-	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme: scheme,
-		// Secrets are read uncached (no cluster-wide Secret informer).
-		Client:                 controller.ManagerClientOptions(),
-		Metrics:                metricsServerOptions,
-		WebhookServer:          webhookServer,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "dcc66784.roundtable.io",
-		LeaseDuration:          &leTimings.LeaseDuration,
-		RenewDeadline:          &leTimings.RenewDeadline,
-		RetryPeriod:            &leTimings.RetryPeriod,
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
-	})
+	mgr, err := ctrl.NewManager(restConfig, managerOptions(scheme, metricsServerOptions, webhookServer,
+		probeAddr, enableLeaderElection, leTimings))
 	if err != nil {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
@@ -436,7 +414,6 @@ func main() {
 	// Dead-letter watchers (#396), started per RoundTable by its controller.
 	// Deferred after the provider so they stop before the connection closes.
 	deadLetters := deadletter.NewManager(ctrl.Log.WithName("dead-letter"))
-	defer deadLetters.StopAll()
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
 	cardsBucket := natspkg.CardsBucketFromEnv()
@@ -601,6 +578,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Log once when this pod wins the lease (the channel never closes without
+	// leader election, where the manager is the leader from the start).
+	go func() {
+		<-mgr.Elected()
+		setupLog.Info("Acquired the leader lease; controllers starting",
+			"leaseDuration", leTimings.LeaseDuration.String(),
+			"identity", os.Getenv("HOSTNAME"))
+	}()
+
 	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		if isLeaderElectionLost(err) {
@@ -615,10 +601,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The lease is released when mgr.Start returns (ReleaseOnCancel), so
+	// everything below must finish well inside terminationGracePeriodSeconds
+	// (10s): one shared 5s budget for the dead-letter watchers and telemetry.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if err := deadLetters.StopAllContext(shutdownCtx); err != nil {
+		setupLog.Error(err, "Dead-letter watchers did not stop in time")
+	}
 	if err := shutdownTelemetry(shutdownCtx); err != nil {
 		setupLog.Error(err, "Failed to flush OpenTelemetry spans")
+	}
+}
+
+// shutdownTimeout bounds all work after the manager stops (watcher stop,
+// telemetry flush), so the process exits inside the pod's termination grace
+// period after the lease has been released.
+const shutdownTimeout = 5 * time.Second
+
+// managerOptions builds the manager options. LeaderElectionReleaseOnCancel is
+// on: after mgr.Start returns, main only does work bounded by shutdownTimeout
+// (stopping the dead-letter watchers, flushing telemetry, closing NATS), which
+// is shorter than terminationGracePeriodSeconds, so releasing the lease cannot
+// let a second leader run alongside leftover work. A new pod can then take over
+// at once instead of waiting leaseDuration; a crash still waits it out.
+func managerOptions(s *runtime.Scheme, metrics metricsserver.Options, webhooks webhook.Server,
+	probeAddr string, leaderElect bool, t leaderElectionTimings) ctrl.Options {
+	return ctrl.Options{
+		Scheme: s,
+		// Secrets are read uncached (no cluster-wide Secret informer).
+		Client:                        controller.ManagerClientOptions(),
+		Metrics:                       metrics,
+		WebhookServer:                 webhooks,
+		HealthProbeBindAddress:        probeAddr,
+		LeaderElection:                leaderElect,
+		LeaderElectionID:              "dcc66784.roundtable.io",
+		LeaderElectionReleaseOnCancel: true,
+		LeaseDuration:                 &t.LeaseDuration,
+		RenewDeadline:                 &t.RenewDeadline,
+		RetryPeriod:                   &t.RetryPeriod,
 	}
 }
 

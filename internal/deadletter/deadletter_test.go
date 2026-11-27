@@ -507,3 +507,10 @@ func TestLostTaskDeletedOnceKnightReportedLost(t *testing.T) {
 		t.Fatalf("entries = %d, want 1", n)
 	}
 }
+
+func TestStopAllContextNoWatchers(t *testing.T) {
+	m := NewManager(logr.Discard())
+	if err := m.StopAllContext(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
