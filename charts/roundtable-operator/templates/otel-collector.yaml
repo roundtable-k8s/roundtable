@@ -82,7 +82,7 @@ spec:
         {{- include "roundtable-operator.collectorSelectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
-      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $c) }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $c "selector" (include "roundtable-operator.collectorSelectorLabels" . | fromYaml)) }}
       {{- . | nindent 6 }}
       {{- end }}
       securityContext:

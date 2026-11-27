@@ -108,6 +108,7 @@ telemetry:
     nodeSelector: {}
     affinity: {}
     tolerations: []
+    topologySpreadConstraints: []
     image:
       repository: otel/opentelemetry-collector-contrib
       tag: "0.120.0"

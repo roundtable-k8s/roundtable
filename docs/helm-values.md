@@ -28,10 +28,16 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 | `image.tag` | string | `""` | Operator image tag; empty uses the chart `appVersion` |
 | `image.pullPolicy` | string | `Always` | Image pull policy |
 | `nodeSelector` / `affinity` / `tolerations` | map / object / list | `{}` / `{}` / `[]` | Scheduling for the operator, gateway, dashboard and collector pods. `gateway.*`, `dashboard.*` and `telemetry.collector.*` take their own and, when non-empty, replace the global value |
+| `topologySpreadConstraints` | list | `[]` | `topologySpreadConstraints` of the operator, gateway, dashboard and collector pods. `gateway.*`, `dashboard.*` and `telemetry.collector.*` take their own and, when non-empty, replace the global value. A constraint without `labelSelector` gets the component's pod selector labels; set `labelSelector` to spread by other labels |
+| `gateway.topologySpreadConstraints` / `dashboard.topologySpreadConstraints` / `telemetry.collector.topologySpreadConstraints` | list | `[]` | Per-component spread constraints replacing the global `topologySpreadConstraints` when non-empty |
+| `probes.enabled` | bool | `true` | Liveness and readiness probes on the operator `manager` container (`/healthz`, `/readyz`). Neither depends on holding the leader lease. Set `false` if `extraArgs` moves the health probe address and you do not want probes |
+| `probes.port` | int | `8081` | Health probe port (`--health-probe-bind-address`); change it together with an `extraArgs` override of that flag |
+| `probes.liveness.initialDelaySeconds` / `probes.liveness.periodSeconds` | int | `15` / `20` | Liveness probe timing |
+| `probes.readiness.initialDelaySeconds` / `probes.readiness.periodSeconds` | int | `5` / `10` | Readiness probe timing |
 | `priorityClassName` | string | `""` | `priorityClassName` of the operator, gateway, dashboard and collector pods |
 | `imagePullSecrets` | list | `[]` | Pull secrets (`[{name: regcred}]`) for the operator, gateway, dashboard and collector pods |
 | `podAnnotations` / `podLabels` | map | `{}` | Extra annotations/labels on the operator, gateway and dashboard pods |
-| `podDisruptionBudget.enabled` | bool | `false` | PodDisruptionBudget for the gateway and dashboard, each only when its `replicas` is above 1. The operator has none |
+| `podDisruptionBudget.enabled` | bool | `false` | PodDisruptionBudget for the operator (when `replicaCount` is above 1), gateway and dashboard (each when its `replicas` is above 1) |
 | `podDisruptionBudget.minAvailable` | int/string | `1` | `minAvailable` (ignored when `maxUnavailable` is set) |
 | `podDisruptionBudget.maxUnavailable` | int/string | `""` | `maxUnavailable` |
 | `leaderElect` | bool | `true` | Enable leader election for HA |
