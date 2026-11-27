@@ -41,7 +41,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 
 	// Register custom Prometheus metrics
-	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -246,6 +246,8 @@ func main() {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 	}
+
+	metrics.SetBuildInfo("operator", version)
 
 	shutdownTelemetry, err := telemetry.Setup(context.Background(), version)
 	if err != nil {
@@ -718,13 +720,13 @@ const leaderElectionID = "dcc66784.roundtable.io"
 // is shorter than terminationGracePeriodSeconds, so releasing the lease cannot
 // let a second leader run alongside leftover work. A new pod can then take over
 // at once instead of waiting leaseDuration; a crash still waits it out.
-func managerOptions(s *runtime.Scheme, metrics metricsserver.Options, webhooks webhook.Server,
+func managerOptions(s *runtime.Scheme, metricsOpts metricsserver.Options, webhooks webhook.Server,
 	probeAddr string, leaderElect bool, t leaderElectionTimings) ctrl.Options {
 	return ctrl.Options{
 		Scheme: s,
 		// Secrets are read uncached (no cluster-wide Secret informer).
 		Client:                        controller.ManagerClientOptions(),
-		Metrics:                       metrics,
+		Metrics:                       metricsOpts,
 		WebhookServer:                 webhooks,
 		HealthProbeBindAddress:        probeAddr,
 		LeaderElection:                leaderElect,

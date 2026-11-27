@@ -132,3 +132,26 @@ roundtable_gateway_requests_total{caller_kind="serviceaccount",code="200",route=
 		t.Error(err)
 	}
 }
+
+func TestSetBuildInfoReplacesPerComponent(t *testing.T) {
+	BuildInfo.Reset()
+	SetBuildInfo("operator", "v1")
+	SetBuildInfo("gateway", "v1")
+	if n := testutil.CollectAndCount(BuildInfo); n != 2 {
+		t.Fatalf("want 2 series, got %d", n)
+	}
+	SetBuildInfo("operator", "v2")
+	if n := testutil.CollectAndCount(BuildInfo); n != 2 {
+		t.Fatalf("want 2 series after replace, got %d", n)
+	}
+	if v := testutil.ToFloat64(BuildInfo.WithLabelValues("operator", "v2")); v != 1 {
+		t.Fatalf("operator v2 = %v, want 1", v)
+	}
+	if v := testutil.ToFloat64(BuildInfo.WithLabelValues("gateway", "v1")); v != 1 {
+		t.Fatalf("gateway v1 = %v, want 1", v)
+	}
+	// WithLabelValues above must not have resurrected the old series.
+	if n := testutil.CollectAndCount(BuildInfo); n != 2 {
+		t.Fatalf("want 2 series, got %d", n)
+	}
+}

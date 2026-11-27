@@ -38,7 +38,7 @@ roundtable_knight_tasks_total roundtable_knight_active_tasks roundtable_knight_n
 roundtable_knight_llm_cost_usd_total roundtable_knight_llm_tokens_total
 roundtable_chain_step_cost_usd_total roundtable_chain_step_tokens_total
 roundtable_chain_runs_total roundtable_chain_step_duration_seconds_bucket roundtable_chain_provider_retries_total roundtable_missions
-roundtable_dead_letters_open roundtable_knight_consumer_ready roundtable_trigger_firings_total roundtable_trigger_runs_finished_total roundtable_trigger_last_fired_timestamp_seconds roundtable_gateway_requests_total roundtable_gateway_request_duration_seconds_bucket roundtable_tasks_dead_lettered_total roundtable_knight_isolated roundtable_knight_wake_seconds_bucket roundtable_mission_cost_usd_total
+roundtable_build_info roundtable_dead_letters_open roundtable_knight_consumer_ready roundtable_trigger_firings_total roundtable_trigger_runs_finished_total roundtable_trigger_last_fired_timestamp_seconds roundtable_gateway_requests_total roundtable_gateway_request_duration_seconds_bucket roundtable_tasks_dead_lettered_total roundtable_knight_isolated roundtable_knight_wake_seconds_bucket roundtable_mission_cost_usd_total
 roundtable_knight_task_duration_seconds_bucket roundtable_knight_tool_calls_total roundtable_knight_tool_call_duration_seconds_bucket roundtable_knight_tool_calls_blocked_total roundtable_knight_nats_reconnects_total
 kube_horizontalpodautoscaler_status_desired_replicas kube_horizontalpodautoscaler_status_current_replicas keda_scaler_metrics_value'
 
@@ -70,6 +70,8 @@ for f in "$chart"/dashboards/*.json; do
       *kube_horizontalpodautoscaler*|*keda_scaler_metrics_value*) ;;
       # The gateway duration histogram carries no table label (only route).
       *roundtable_gateway_request_duration_seconds_bucket*) ;;
+      # Build info is per component, not per table.
+      *roundtable_build_info*) ;;
       *'table=~"$table"'*) ;;
       *) fail "$f: expression does not filter on \$table: $expr" ;;
     esac
