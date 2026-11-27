@@ -31,7 +31,9 @@ import (
 
 func TestPlanningPromptListsKnightsByEitherTableLabel(t *testing.T) {
 	s := runtime.NewScheme()
-	_ = aiv1alpha1.AddToScheme(s)
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
 	mk := func(name string, labels map[string]string) *aiv1alpha1.Knight {
 		return &aiv1alpha1.Knight{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: labels},

@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
@@ -83,19 +84,12 @@ func createKnight(k *aiv1alpha1.Knight) types.NamespacedName {
 	Expect(k8sClient.Create(ctx, k)).To(Succeed())
 	key := types.NamespacedName{Name: k.Name, Namespace: k.Namespace}
 	DeferCleanup(func() {
-		Expect(client404(k8sClient.Delete(ctx, k))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, k))).To(Succeed())
 		Eventually(func() bool {
 			return apierrors.IsNotFound(k8sClient.Get(ctx, key, &aiv1alpha1.Knight{}))
 		}, timeout, interval).Should(BeTrue())
 	})
 	return key
-}
-
-func client404(err error) error {
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
 }
 
 var _ = Describe("Sandbox knights against the agent-sandbox v1beta1 CRDs", func() {
