@@ -185,6 +185,81 @@ subjects:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if $knightSnapshots.enabled }}
+{{- /*
+The snapshots Role above lets the gateway patch whole Knights. This policy
+narrows that patch to the snapshot request: an UPDATE of a Knight by the
+gateway ServiceAccount is denied unless spec, labels, finalizers, owner
+references and every annotation other than ai.roundtable.io/snapshot and
+ai.roundtable.io/snapshot-caller are unchanged. Status is a subresource the
+gateway has no RBAC on. ValidatingAdmissionPolicy is GA (enabled by default)
+since Kubernetes 1.30; without it the chart refuses to render rather than grant
+the broad patch unguarded.
+*/}}
+{{- if not (or (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy") (semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version)) }}
+{{- fail "gateway.knightSnapshots.enabled=true needs admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (Kubernetes 1.30+) to limit the gateway's Knight patch to the snapshot annotation; upgrade the cluster or set gateway.knightSnapshots.enabled=false" }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}-snapshots
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["ai.roundtable.io"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["knights"]
+    {{- if not (has "*" ($gw.allowedNamespaces | default list)) }}
+    # The namespaces the snapshots Role covers.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: {{ uniq (prepend ($gw.allowedNamespaces | default list) ($gw.namespace | default .Release.Namespace)) | toJson }}
+    {{- end }}
+  matchConditions:
+    - name: gateway-service-account
+      expression: 'request.userInfo.username == "system:serviceaccount:{{ .Release.Namespace }}:{{ $name }}"'
+  variables:
+    - name: snapshotKeys
+      expression: '["ai.roundtable.io/snapshot", "ai.roundtable.io/snapshot-caller"]'
+    - name: newAnnotations
+      expression: 'has(object.metadata.annotations) ? object.metadata.annotations : {}'
+    - name: oldAnnotations
+      expression: 'has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}'
+  validations:
+    - expression: 'has(object.spec) == has(oldObject.spec) && (!has(object.spec) || object.spec == oldObject.spec)'
+      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its spec"
+      reason: Forbidden
+    - expression: '(has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})'
+      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its labels"
+      reason: Forbidden
+    - expression: '(has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : []) && (has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) == (has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : [])'
+      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its finalizers or owner references"
+      reason: Forbidden
+    - expression: >-
+        variables.newAnnotations.all(k, k in variables.snapshotKeys || (k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k])) &&
+        variables.oldAnnotations.all(k, k in variables.snapshotKeys || k in variables.newAnnotations)
+      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its other annotations"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}-snapshots
+  labels:
+    {{- include "roundtable-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  policyName: {{ $name }}-snapshots
+  validationActions: [Deny]
+{{- end }}
 {{- if $hooks.enabled }}
 {{- /*
 Webhook credentials. RBAC cannot select Secrets by label, so the gateway gets
