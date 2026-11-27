@@ -35,6 +35,12 @@ env:
   TILT_VERSION: 0.34.2
   HELM_VERSION: v3.17.0
 
+# Cancel the superseded runs of a pull request when it is pushed again. Push to
+# main runs get a unique group (run_id), so they are never cancelled or queued.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tilt-ci:
     runs-on: ubuntu-latest
