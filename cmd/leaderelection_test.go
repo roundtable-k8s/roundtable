@@ -98,7 +98,8 @@ func TestLogLeaseState(t *testing.T) {
 			[]string{"Leader lease state at start-up", `"holderIdentity"=""`, `"released"=true`, `"leaderTransitions"=0`}, nil},
 		{"empty holder", &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &empty}}, nil,
 			[]string{`"released"=true`}, nil},
-		{"held", &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &holder, LeaseTransitions: &transitions}}, nil,
+		{"held", &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &holder, LeaseTransitions: &transitions}}, nil,
 			[]string{`"holderIdentity"="pod-a"`, `"released"=false`, `"leaderTransitions"=3`, `"leaseDuration"="1m0s"`}, nil},
 	}
 	for _, tc := range tests {
