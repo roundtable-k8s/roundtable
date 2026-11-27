@@ -583,7 +583,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(nc.Flush()).To(Succeed())
 
 			natsTrigger("infocache", prefix+".events.infocache", nil)
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				publish(prefix+".events.infocache", "", `{"service":"api"}`)
 			}
 			Eventually(func() int { return len(runsOf("infocache")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(3))
