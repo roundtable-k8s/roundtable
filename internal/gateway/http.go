@@ -634,6 +634,15 @@ func (a *TokenAuth) Wrap(next http.Handler) http.Handler {
 				a.Log.V(1).Info("Refused request: not authenticated", "reason", err.Error(), "path", r.URL.Path)
 				w.Header().Set("WWW-Authenticate", `Bearer realm="roundtable-gateway"`)
 				writeJSON(w, code, map[string]string{"error": "unauthorized"})
+			case http.StatusTooManyRequests:
+				var le *reviewLimitedError
+				wait := time.Second
+				if errors.As(err, &le) {
+					wait = le.wait
+				}
+				a.Log.Info("Refused request: token review rate limit exceeded", "path", r.URL.Path)
+				w.Header().Set("Retry-After", retryAfterSeconds(wait))
+				writeJSON(w, code, map[string]string{"error": "too many token reviews, retry later"})
 			case http.StatusForbidden:
 				a.Log.Info("Refused request: caller not allowed", "reason", err.Error(), "path", r.URL.Path)
 				writeJSON(w, code, map[string]string{"error": "forbidden: " + err.Error()})

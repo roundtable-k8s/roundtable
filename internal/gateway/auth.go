@@ -23,7 +23,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +106,31 @@ func forbidden(format string, args ...any) error {
 	return &authError{forbidden: true, reason: fmt.Sprintf(format, args...)}
 }
 
+// reviewLimitedError is a TokenReview refused by the review rate limit: 429,
+// retry after wait.
+type reviewLimitedError struct{ wait time.Duration }
+
+func (e *reviewLimitedError) Error() string {
+	return fmt.Sprintf("%v: too many token reviews, retry later", ErrBusy)
+}
+
+func (e *reviewLimitedError) Unwrap() error { return ErrBusy }
+
+// retryAfterSeconds is the Retry-After value for a wait (at least 1).
+func retryAfterSeconds(wait time.Duration) string {
+	return strconv.Itoa(int(math.Ceil(max(wait.Seconds(), 1))))
+}
+
+// Defaults of the TokenReview rate limit: generous, so normal callers never
+// reach it.
+const (
+	DefaultReviewRate  = 50.0
+	DefaultReviewBurst = 100
+)
+
+// reviewLimitKey is the single bucket every uncached TokenReview draws from.
+const reviewLimitKey = "tokenreview"
+
 // TokenReviewer validates a bearer token for the given audiences.
 type TokenReviewer interface {
 	Review(ctx context.Context, token string, audiences []string) (authnv1.TokenReviewStatus, error)
@@ -147,10 +174,17 @@ type ServiceAccountAuth struct {
 	FailureTTL time.Duration
 	// MaxEntries bounds the cache (default 4096).
 	MaxEntries int
+	// ReviewRate is the TokenReviews per second the gateway sends to the API
+	// server on average, cache hits excluded (default DefaultReviewRate).
+	ReviewRate float64
+	// ReviewBurst is how many TokenReviews may go out at once (default
+	// DefaultReviewBurst). Beyond them a caller gets 429 with Retry-After.
+	ReviewBurst int
 
-	now   func() time.Time
-	mu    sync.Mutex
-	cache map[[32]byte]saEntry
+	now     func() time.Time
+	mu      sync.Mutex
+	cache   map[[32]byte]saEntry
+	limiter *hookLimiter
 }
 
 type saEntry struct {
@@ -174,6 +208,15 @@ func (a *ServiceAccountAuth) defaults() {
 	}
 	if a.MaxEntries <= 0 {
 		a.MaxEntries = 4096
+	}
+	if a.ReviewRate <= 0 {
+		a.ReviewRate = DefaultReviewRate
+	}
+	if a.ReviewBurst <= 0 {
+		a.ReviewBurst = DefaultReviewBurst
+	}
+	if a.limiter == nil {
+		a.limiter = newHookLimiter(a.ReviewRate, a.ReviewBurst)
 	}
 	if a.now == nil {
 		a.now = time.Now
@@ -210,6 +253,11 @@ func (a *ServiceAccountAuth) Authenticate(ctx context.Context, token string) (Ca
 		return Caller{}, unauthenticated("token expired")
 	}
 
+	// Only a cache miss reaches here: bound how many reviews go to the API
+	// server, whatever the tokens.
+	if ok, wait := a.limiter.allow(reviewLimitKey, now); !ok {
+		return Caller{}, &reviewLimitedError{wait: wait}
+	}
 	status, err := a.Reviewer.Review(ctx, token, []string{a.Audience})
 	if err != nil {
 		// Not cached: the API server may be back on the next request.
@@ -324,6 +372,8 @@ func authStatus(err error) int {
 	switch {
 	case errors.As(err, &ae) && ae.forbidden:
 		return 403
+	case errors.Is(err, ErrBusy):
+		return 429
 	case errors.Is(err, ErrUnavailable):
 		return 503
 	default:

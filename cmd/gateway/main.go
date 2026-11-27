@@ -79,8 +79,8 @@ func main() {
 		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
 		schedulesEnabled, scheduleRunsEnabled                                                           bool
 		saAudience, saNamespaces                                                                        string
-		maxBudgetUSD, hookRate                                                                          float64
-		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
+		maxBudgetUSD, hookRate, saReviewRate                                                            float64
+		maxMissionTTL, maxMissionTimeout, hookBurst, saReviewBurst                                      int
 		hookMaxBody                                                                                     int64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "Address the HTTP API and MCP endpoint listen on.")
@@ -133,6 +133,11 @@ func main() {
 		"Audience a ServiceAccount token must be issued for.")
 	flag.StringVar(&saNamespaces, "service-account-namespaces", "*",
 		"Comma-separated namespaces whose ServiceAccounts may call the gateway (\"*\" for any).")
+	flag.Float64Var(&saReviewRate, "service-account-review-rate", gateway.DefaultReviewRate,
+		"TokenReviews per second the gateway sends to the API server on average (cache hits excluded); "+
+			"beyond it callers get 429.")
+	flag.IntVar(&saReviewBurst, "service-account-review-burst", gateway.DefaultReviewBurst,
+		"TokenReviews the gateway may send to the API server at once.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -184,6 +189,8 @@ func main() {
 			Reviewer:          gateway.KubeTokenReviewer{Client: k8s},
 			Audience:          saAudience,
 			AllowedNamespaces: splitList(saNamespaces),
+			ReviewRate:        saReviewRate,
+			ReviewBurst:       saReviewBurst,
 		}
 	}
 

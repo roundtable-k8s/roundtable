@@ -321,6 +321,8 @@ spec:
             {{- if $saAuth.enabled }}
             - --service-account-audience={{ $saAuth.audience | default "roundtable-gateway" }}
             - --service-account-namespaces={{ join "," ($saAuth.allowedNamespaces | default (list "*")) }}
+            - --service-account-review-rate={{ $saAuth.reviewRate | default 50 }}
+            - --service-account-review-burst={{ $saAuth.reviewBurst | default 100 }}
             {{- end }}
             - --missions={{ $missions.enabled | default false }}
             {{- if $missions.enabled }}
