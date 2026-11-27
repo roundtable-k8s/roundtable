@@ -263,7 +263,7 @@ the operator does not commit results to git.
 
    The Knight CRD has no schema defaults for these fields, so "unset" means unset. `status.model` (the `Model` column of `kubectl get knight`) shows the effective model. A change to a table's defaults or vault re-reconciles the knights labelled with it, and their pods roll when the rendered pod template changes. Chains and the gateway read knights with the same defaults applied (effective image, concurrency and model).
 4. **Policy Enforcement:**
-   - `policies.costBudgetUSD`: aggregate costs. If exceeding it, the table goes `OverBudget`, `Available` is set to `False` and a `BudgetExceeded` event is recorded. Knights are not suspended or otherwise limited.
+   - `policies.costBudgetUSD`: the table's cost: the `costUSD` of its chains' current (or most recent) run plus the `totalCost` of its missions. This is not a lifetime total (a chain's cost restarts with each run). If exceeding it, the table goes `OverBudget`, `Available` is set to `False` and a `BudgetExceeded` event is recorded once per transition into `OverBudget`. If the usage cannot be read, the previous totals are kept. Knights are not suspended or otherwise limited.
    - `policies.maxConcurrentPlanTasks`: caps plan-backed knights' replicas (see Knight `PlanCapLimited`).
    - `policies.maxMissions`: caps concurrently active missions; extra missions wait in `Pending`.
    - Not enforced (deprecated): `policies.costResetSchedule`. It is still accepted; a standing table that sets it gets a `DeprecatedFieldsUsed=True` condition and a Warning event. `policies.maxConcurrentTasks` and `policies.maxKnights` were removed in chart 0.24.0 (they were never enforced; the API server now prunes them). The reported cost is cumulative; nothing resets it.

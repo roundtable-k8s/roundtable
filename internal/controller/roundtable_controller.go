@@ -129,6 +129,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			r.reconcileCards(ctx, rt, knights)
 		}
 		rt.Status.Phase = aiv1alpha1.RoundTablePhaseSuspended
+		r.setDeprecatedFieldsCondition(rt)
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
 			Status:             metav1.ConditionFalse,
@@ -163,10 +164,15 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Cost and task totals come from Chains and Missions; the Knight status
 	// fields are not written by anything (#547).
+	// A failed read keeps the previous totals and evaluates the budget
+	// against them, so it never resets the counters or clears OverBudget.
 	totalTasksCompleted, totalCost, usageErr := r.tableUsage(ctx, rt)
 	if usageErr != nil {
-		log.Error(usageErr, "Failed to compute table usage")
+		log.Error(usageErr, "Failed to compute table usage; keeping previous totals")
+		totalTasksCompleted = rt.Status.TotalTasksCompleted
+		totalCost = parseCost(rt.Status.TotalCost)
 	}
+	wasOverBudget := rt.Status.Phase == aiv1alpha1.RoundTablePhaseOverBudget
 
 	total := int32(len(knights))
 	rt.Status.KnightsTotal = total
@@ -175,8 +181,10 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	rt.Status.KnightsSuspended = counts.suspended
 	rt.Status.KnightsNotReady = counts.notReady
 	rt.Status.Knights = knightSummaries
-	rt.Status.TotalTasksCompleted = totalTasksCompleted
-	rt.Status.TotalCost = fmt.Sprintf("%.4f", totalCost)
+	if usageErr == nil {
+		rt.Status.TotalTasksCompleted = totalTasksCompleted
+		rt.Status.TotalCost = fmt.Sprintf("%.4f", totalCost)
+	}
 
 	// 3. NATS Stream Management
 	if rt.Spec.NATS.CreateStreams {
@@ -217,10 +225,15 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Set availability condition
 	switch phase {
 	case aiv1alpha1.RoundTablePhaseReady:
+		// No knight is up when all are idle (scaled to zero) or suspended.
+		reason := aiv1alpha1.ReasonAllKnightsReady
+		if counts.ready == 0 {
+			reason = aiv1alpha1.ReasonKnightsHealthy
+		}
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
 			Status:             metav1.ConditionTrue,
-			Reason:             aiv1alpha1.ReasonAllKnightsReady,
+			Reason:             reason,
 			Message:            counts.String(),
 			ObservedGeneration: rt.Generation,
 		})
@@ -240,7 +253,9 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Message:            fmt.Sprintf("Cost %.4f exceeds budget %s", totalCost, rt.Spec.Policies.CostBudgetUSD),
 			ObservedGeneration: rt.Generation,
 		})
-		r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded")
+		if !wasOverBudget {
+			r.Recorder.Event(rt, corev1.EventTypeWarning, "BudgetExceeded", "Cost budget exceeded")
+		}
 	default:
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
