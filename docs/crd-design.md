@@ -848,5 +848,13 @@ sets `Reconciling` or `Stalled` for run progress. Run state lives in
 only `InProgress` before the operator has seen its spec for the first time.
 `TestChainKstatus` pins this.
 
-Mission, Trigger, Knight and RoundTable have not been audited against kstatus
-yet; follow-ups: Mission #928, Trigger #929, Knight #930, RoundTable #931.
+**Knight.** A Knight is healthy (`Current`) in every phase: `Provisioning`,
+`Ready`, `Degraded` and `Suspended` (including KEDA scale-to-zero and waking).
+`status.observedGeneration` is written on every status update, including the
+parked, suspended and reconcile-error paths, and the operator never sets
+`Reconciling` or `Stalled`. Whether the pod is up is reported by
+`status.phase`, `status.ready` and the `Available`, `RuntimeAvailable` and
+`Degraded` conditions, not by kstatus. `TestKnightKstatus` pins this.
+
+Mission, Trigger and RoundTable have not been audited against kstatus
+yet; follow-ups: Mission #928, Trigger #929, RoundTable #931.
