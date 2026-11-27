@@ -427,6 +427,20 @@ var _ = Describe("Knight Controller", func() {
 			}, &corev1.PersistentVolumeClaim{})
 			Expect(errors.IsNotFound(err)).To(BeTrue(),
 				"per-knight Nix PVC must not be created after the shared-store cutover")
+
+			By("Verifying the ConfigMap has the tools data but no mise.toml/apt.txt")
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "knight-" + knightName + "-config",
+				Namespace: knightNamespace,
+			}, cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("KNIGHT_SKILLS", "shared"))
+			Expect(cm.Data).To(HaveKey("TOOLS.md"))
+			Expect(cm.Data["TOOLS.md"]).To(ContainSubstring("- nmap\n"))
+			Expect(cm.Data["TOOLS.md"]).To(ContainSubstring("- curl\n"))
+			Expect(cm.Data).NotTo(HaveKey("mise.toml"))
+			Expect(cm.Data).NotTo(HaveKey("apt.txt"))
+			Expect(cm.Data).NotTo(HaveKey("flake.nix"))
 		})
 	})
 })

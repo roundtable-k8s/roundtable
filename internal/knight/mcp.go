@@ -43,14 +43,6 @@ func sanitizeEnvPart(s string) string {
 	return string(b)
 }
 
-// MCPServersEnv renders spec.mcpServers into the MCP_SERVERS_JSON value. It
-// returns an empty value when no
-// servers are declared. Header values are ${VAR} placeholders.
-func MCPServersEnv(servers []aiv1alpha1.KnightMCPServer) string {
-	js, _ := renderMCP(servers, nil)
-	return js
-}
-
 // UniqueMCPHeaders returns headers without entries whose name repeats an
 // earlier one case-insensitively (HTTP header names are case-insensitive;
 // the CRD can only reject exact duplicates).
@@ -66,8 +58,8 @@ func UniqueMCPHeaders(headers []aiv1alpha1.KnightMCPHeader) []aiv1alpha1.KnightM
 	return out
 }
 
-// renderMCP renders the MCP config JSON and the header env vars. taken holds env var names already in use on the container; a header
-// whose base name is taken (or was assigned to an earlier header, e.g.
+// renderMCP renders the MCP config JSON and the header env vars. taken holds
+// env var names already in use on the container; a header whose base name is taken (or was assigned to an earlier header, e.g.
 // server "a-b"/header "c" and server "a"/header "b-c") gets a numeric
 // suffix (_2, _3, ...), assigned in spec order. The JSON only ever contains
 // "${NAME}" placeholders, never a header value.

@@ -361,9 +361,10 @@ Both 200 and 202 return the task record:
 A quota refusal is `"status": "failed"` with `"usageLimited": true` and the
 knight's message in `error`.
 
-`traceId` is the OpenTelemetry trace of the call, present only when tracing is
+`traceId` is the OpenTelemetry trace of the call. It is present when tracing is
 on (`OTEL_EXPORTER_OTLP_ENDPOINT` set; the chart does this when telemetry is
-enabled). The gateway starts a server span per request (named `<METHOD> <route
+enabled) and is also echoed from an incoming `traceparent` header when the
+gateway has no tracing. The gateway starts a server span per request (named `<METHOD> <route
 template>`, none for `/healthz`), honours an incoming `traceparent` header
 (the span becomes its child), and publishes the task with that span's context, so
 the knight's `invoke_agent` span is in the same trace. The `Request` log line

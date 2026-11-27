@@ -16,7 +16,7 @@
 ```mermaid
 flowchart LR
   subgraph cluster[Kubernetes cluster]
-    op[Operator<br/>Knight, RoundTable, Chain, Mission controllers]
+    op[Operator<br/>Knight, RoundTable, Chain, Mission, Trigger controllers]
     gw[Invoke gateway<br/>cmd/gateway]
     subgraph pods[Knight pods]
       k1[Knight A]
@@ -24,8 +24,13 @@ flowchart LR
     end
     nats[(NATS JetStream)]
     keda[KEDA]
+    cj[Trigger CronJobs<br/>fire-trigger pods]
   end
   op -- reconciles --> pods
+  op -- renders CronJob per schedule Trigger --> cj
+  cj -- POST fire --> gw
+  gw -- schedule events --> nats
+  nats -- events, Trigger controller --> op
   op -- streams, consumers, KV --> nats
   op -- publishes tasks, polls results --> nats
   gw -- publishes tasks, reads results --> nats
@@ -254,7 +259,9 @@ sequenceDiagram
   else target.mission
     TC->>TC: create a Mission
   else target.knight
-    TC->>T: publish TaskPayload on prefix.tasks.domain.knight
+    TC->>G: Invoke (idempotency key)
+    G->>T: publish TaskPayload on prefix.tasks.domain.knight
+    G->>G: task record in roundtable_gateway_tasks
     T-->>K: pull via Knight-consumer
   end
   TC->>TC: record the firing in status.recentFirings
