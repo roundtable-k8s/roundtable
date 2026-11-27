@@ -18,8 +18,8 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
