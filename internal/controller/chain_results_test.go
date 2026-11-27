@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -293,6 +294,7 @@ func (f *erroringFetchNATS) FetchOne(context.Context, string, jetstream.Consumer
 // A failed stream read must not hide a result already stored in KV (#908), and
 // the recovered step keeps the model, tokens and cost the entry holds.
 func TestCollectStepResult_RecoversFromKVAfterStreamReadError(t *testing.T) {
+	t.Cleanup(metrics.ChainStepCostUSDTotal.Reset) // keep the global series count of the usage tests stable
 	ctx := context.Background()
 	r, fake, chain, run := newResultsFixture()
 	r.NATS = natspkg.NewProviderWithClient(&erroringFetchNATS{fake}, logr.Discard())
@@ -327,6 +329,7 @@ func TestCollectStepResult_RecoversOldKVEntryWithoutUsage(t *testing.T) {
 
 // The KV entry written on success carries the result's model, tokens and cost.
 func TestApplyStepSuccessStoresUsageInKV(t *testing.T) {
+	t.Cleanup(metrics.ChainStepCostUSDTotal.Reset) // keep the global series count of the usage tests stable
 	ctx := context.Background()
 	r, fake, chain, run := newResultsFixture()
 	ss := &chain.Status.StepStatuses[0]
