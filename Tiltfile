@@ -81,7 +81,7 @@ watch_file(CHART)
 watch_file('hack/tilt-values.yaml')
 watch_file('hack/quickstart-kind.sh')
 objs = decode_yaml_stream(local(
-    'helm template %s %s --namespace %s -f hack/tilt-values.yaml' % (RELEASE, CHART, NAMESPACE),
+    'helm template --skip-tests %s %s --namespace %s -f hack/tilt-values.yaml' % (RELEASE, CHART, NAMESPACE),
     quiet=True,
 ))
 # Live update and the restart wrapper write the binary and /tmp inside the

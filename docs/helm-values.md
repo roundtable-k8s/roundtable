@@ -582,6 +582,15 @@ A try-it-out setup with Jaeger as the trace viewer is in
 | `tolerations` | list | `[]` | Tolerations for operator pod |
 | `affinity` | object | `{}` | Affinity rules for operator pod |
 
+### Helm test
+
+`helm test <release>` runs a Pod (`templates/tests/connection.yaml`) that calls the gateway `/readyz` (when `gateway.enabled`) and the dashboard `/api/health` (when `dashboard.enabled`) and fails if either does not answer. Nothing is rendered when both are disabled. The Pod runs in the release namespace, which the default gateway NetworkPolicy admits.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `tests.image.repository` | string | `busybox` | Image of the test Pod; it needs `wget` (the operator image is distroless) |
+| `tests.image.tag` | string | `1.37.0` | Tag of the test image; pin a version, not `latest` |
+
 ### Alerts
 
 Opt-in `PrometheusRule` (`templates/prometheusrule.yaml`). Rendered only when

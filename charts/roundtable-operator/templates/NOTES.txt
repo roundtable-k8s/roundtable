@@ -22,3 +22,31 @@ this warning may be wrong.)
 Isolation: no default RuntimeClass (isolation.runtimeClassName is empty);
 knights run on the cluster's default runtime unless they set runtimeClassName.
 {{- end }}
+
+Next steps (NATS is required; see docs/dependencies.md):
+
+  kubectl -n {{ .Release.Namespace }} get knights
+{{- if .Values.gateway.enabled }}
+
+Gateway: Service {{ include "roundtable-operator.fullname" . }}-gateway, port {{ .Values.gateway.service.port | default 80 }}.
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "roundtable-operator.fullname" . }}-gateway 8081:{{ .Values.gateway.service.port | default 80 }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "roundtable-operator.gatewayTokenSecret" . }} -o jsonpath='{.data.{{ .Values.gateway.auth.secretKey | default "token" }}}' | base64 -d
+{{- if .Values.gateway.auth.existingSecret }}
+(The token is in your own Secret "{{ .Values.gateway.auth.existingSecret }}", gateway.auth.existingSecret.)
+{{- end }}
+{{- end }}
+{{- if .Values.dashboard.enabled }}
+
+Dashboard: Service {{ include "roundtable-operator.fullname" . }}-dashboard.
+{{- if and .Values.dashboard.ingress.enabled .Values.dashboard.ingress.host }}
+  http://{{ .Values.dashboard.ingress.host }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "roundtable-operator.fullname" . }}-dashboard 8080:80
+{{- end }}
+{{- end }}
+{{- if or .Values.gateway.enabled .Values.dashboard.enabled }}
+
+Check it works: helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- end }}
+
+Docs: docs/getting-started.md, docs/troubleshooting.md, docs/install.md.

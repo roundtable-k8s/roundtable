@@ -139,7 +139,8 @@ helm install roundtable \
 
 Pass `--version` to pin the chart. Omit it to get the latest release. Chart
 values can be set with `--set` or `-f values.yaml`; see
-[Helm values](helm-values.md).
+[Helm values](helm-values.md). After the install, `helm test roundtable
+--namespace roundtable` checks that the gateway and dashboard answer.
 
 This is the install for a normal cluster. Do steps 1 and 2 first (install NATS,
 then choose the isolation flags for your cluster), then pass those flags to this

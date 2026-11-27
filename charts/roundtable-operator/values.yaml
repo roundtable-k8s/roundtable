@@ -813,3 +813,10 @@ dashboards:
     # matchLabels selecting the Grafana instance(s) to load the dashboards into.
     instanceSelector:
       dashboards: grafana
+
+# Image for the `helm test` Pod (templates/tests/connection.yaml). It needs
+# wget (BusyBox); the operator image is distroless. Pin a tag, not latest.
+tests:
+  image:
+    repository: busybox
+    tag: "1.37.0"
