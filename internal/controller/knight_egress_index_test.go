@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -107,15 +106,15 @@ func TestHostNetworkEndpointsReadsEachPodOnce(t *testing.T) {
 	es := &discoveryv1.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{Name: "s-1", Namespace: "ns", Labels: map[string]string{discoveryv1.LabelServiceName: "s"}},
 		Endpoints: []discoveryv1.Endpoint{
-			{Addresses: []string{"10.0.0.1"}, TargetRef: ref("a", "uid-a"), Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}},
-			{Addresses: []string{"10.0.0.2"}, TargetRef: ref("b", "uid-b"), Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}},
+			{Addresses: []string{"10.0.0.1"}, TargetRef: ref("a", "uid-a"), Conditions: discoveryv1.EndpointConditions{Ready: new(true)}},
+			{Addresses: []string{"10.0.0.2"}, TargetRef: ref("b", "uid-b"), Conditions: discoveryv1.EndpointConditions{Ready: new(true)}},
 		},
 	}
 	fc := fake.NewClientBuilder().WithScheme(indexTestScheme(t)).WithObjects(es, pod("a", "uid-a"), pod("b", "uid-b")).Build()
 	spy := &spyClient{Client: fc}
 	r := &KnightReconciler{Client: spy}
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"}}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		hostNet, addrs, _, err := r.hostNetworkEndpoints(context.Background(), svc)
 		if err != nil || !hostNet || len(addrs) != 2 {
 			t.Fatalf("run %d: hostNet=%v addrs=%v err=%v", i, hostNet, addrs, err)
