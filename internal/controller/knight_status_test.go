@@ -182,6 +182,21 @@ func TestKnightFinalizerRemovalUsesPatch(t *testing.T) {
 	}
 }
 
+func TestKnightDeletionDropsWakeBackoff(t *testing.T) {
+	s := statusTestScheme()
+	now := metav1.Now()
+	k := newParkedKnight("m")
+	k.DeletionTimestamp = &now
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
+	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
+	key := client.ObjectKeyFromObject(k)
+	r.wakeBackoff.Store(key, wakeBackoffState{attempt: 2, next: now.Time})
+	reconcileByName(t, r, "parked")
+	if _, ok := r.wakeBackoff.Load(key); ok {
+		t.Errorf("wakeBackoff entry of a deleted knight was not dropped")
+	}
+}
+
 func TestRuntimeClassKnightRequests(t *testing.T) {
 	s := statusTestScheme()
 	gv, other := "gvisor", "kata"

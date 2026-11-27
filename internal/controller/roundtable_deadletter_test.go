@@ -25,6 +25,11 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go/jetstream"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
@@ -222,5 +227,65 @@ func TestEnsureStreamsCreatesResultsWithMaxAge(t *testing.T) {
 	}
 	if info.Config.MaxAge != 168*time.Hour {
 		t.Fatalf("MaxAge = %v", info.Config.MaxAge)
+	}
+}
+
+// Switching createStreams to false stops the table's dead-letter watcher
+// (#1124); the streams stay.
+func TestReconcileStopsDeadLetterWatcherWhenCreateStreamsOff(t *testing.T) {
+	opts := natstest.DefaultTestOptions
+	opts.Port = -1
+	opts.JetStream = true
+	opts.StoreDir = t.TempDir()
+	ctx := context.Background()
+	ns := natstest.RunServer(&opts)
+	defer ns.Shutdown()
+
+	cli := natspkg.NewClient(natspkg.Config{URL: ns.ClientURL()}, logr.Discard())
+	if err := cli.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cli.Close() }()
+	dl := deadletter.NewManager(logr.Discard())
+	defer dl.StopAll()
+
+	s := k8sruntime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	rt := &aiv1alpha1.RoundTable{
+		ObjectMeta: metav1.ObjectMeta{Name: "dev", Namespace: "roundtable"},
+		Spec: aiv1alpha1.RoundTableSpec{NATS: aiv1alpha1.RoundTableNATS{
+			SubjectPrefix: "rt-dev", TasksStream: "rt_dev_tasks", ResultsStream: "rt_dev_results", CreateStreams: true,
+		}},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rt).WithStatusSubresource(rt).Build()
+	r := &RoundTableReconciler{
+		Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50), DeadLetters: dl,
+		NATS: natspkg.NewProviderWithClient(cli, logr.Discard()),
+	}
+	key := client.ObjectKeyFromObject(rt)
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if !dl.Running(key.String()) {
+		t.Fatal("watcher not running with createStreams true")
+	}
+
+	if err := c.Get(ctx, key, rt); err != nil {
+		t.Fatal(err)
+	}
+	rt.Spec.NATS.CreateStreams = false
+	if err := c.Update(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if dl.Running(key.String()) {
+		t.Error("watcher still running after createStreams was switched off")
+	}
+	if _, err := cli.StreamInfo(ctx, "rt_dev_tasks_DLQ"); err != nil {
+		t.Errorf("dead-letter stream must be kept: %v", err)
 	}
 }

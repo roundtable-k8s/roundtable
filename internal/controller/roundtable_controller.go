@@ -101,6 +101,11 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// A Mission that names this table (or did, before its deletion) moves
+	// between table="none" and the table without waiting for its own
+	// reconcile.
+	defer updateUnownedMissionMetrics(ctx, r.Client)
+
 	rt := &aiv1alpha1.RoundTable{}
 	if err := r.Get(ctx, req.NamespacedName, rt); err != nil {
 		if client.IgnoreNotFound(err) == nil {
@@ -193,6 +198,10 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// 3. NATS Stream Management
+	if !rt.Spec.NATS.CreateStreams && r.DeadLetters != nil {
+		// Streams and KV state are kept; only the watcher goroutine stops.
+		r.DeadLetters.Stop(client.ObjectKeyFromObject(rt).String())
+	}
 	if rt.Spec.NATS.CreateStreams {
 		if err := r.ensureStreams(ctx, rt); err != nil {
 			log.Error(err, "Failed to ensure NATS streams")
@@ -693,10 +702,14 @@ func missionTable(m *aiv1alpha1.Mission) string {
 }
 
 // deleteTableMetrics drops every table-scoped series of a deleted RoundTable:
-// the knight and mission gauges and the cost gauge. (There is no warm-pool
-// vector in pkg/metrics.)
+// every per-table gauge vector in pkg/metrics. Counters and histograms are
+// left alone: their history stays valid after the table is gone. The Trigger
+// gauges are keyed per trigger and owned by the Trigger controller.
 func deleteTableMetrics(table string) {
 	l := prometheus.Labels{"table": table}
+	rtmetrics.DeadLettersOpen.DeletePartialMatch(l)
+	rtmetrics.KnightIsolated.DeletePartialMatch(l)
+	rtmetrics.KnightConsumerReady.DeletePartialMatch(l)
 	rtmetrics.Knights.DeletePartialMatch(l)
 	rtmetrics.Missions.DeletePartialMatch(l)
 	rtmetrics.TableCostUSD.DeletePartialMatch(l)

@@ -17,9 +17,10 @@ Point the operator at it with `--github-api-url=http://stubgithub:8080`.
 | POST | `/repos/{owner}/{repo}/labels` | Body `{"name", "color", "description"}`; 422 if it exists |
 
 Every `/repos/` route needs a non-empty `Authorization` header; without one the
-stub answers 401, so a missing token Secret fails the test. The first `/repos/`
-call that names a repository creates it (empty), so `EnsureLabel` works before
-anything is seeded; unlike GitHub, an unknown repository is not a 404. Any
+stub answers 401, so a missing token Secret fails the test. The first matched
+`/repos/` route that names a repository creates it (empty), so `EnsureLabel`
+works before anything is seeded; a path that matches no route (an unknown
+sub-route) creates nothing and answers 404; unlike GitHub, an unknown repository is not a 404. Any
 unknown route answers 404 with a JSON body and is logged as `unhandled route`.
 Issues carry `assignees` as `[]` when none are assigned, never `null`.
 

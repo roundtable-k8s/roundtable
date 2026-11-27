@@ -203,6 +203,52 @@ func TestEnsureLabelCreatesRepo(t *testing.T) {
 	}
 }
 
+// TestUnknownSubRouteCreatesNoRepo checks that a request matching no route
+// does not create its repository: the sub-route 404s, and the repository is
+// still unknown to the control state route afterwards.
+func TestUnknownSubRouteCreatesNoRepo(t *testing.T) {
+	srv := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/repos/acme/fresh/milestones", nil)
+	req.Header.Set("Authorization", "token test-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown sub-route status = %d, want 404", resp.StatusCode)
+	}
+
+	state, err := http.Get(srv.URL + "/_stub/state?repo=acme/fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = state.Body.Close() }()
+	if state.StatusCode != http.StatusNotFound {
+		t.Fatalf("state after unknown sub-route = %d, want 404 (repo must not exist)", state.StatusCode)
+	}
+
+	// A matched route on the same repository does create it.
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/repos/acme/fresh/issues", nil)
+	req.Header.Set("Authorization", "token test-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("matched route status = %d, want 200", resp.StatusCode)
+	}
+	state2, err := http.Get(srv.URL + "/_stub/state?repo=acme/fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = state2.Body.Close() }()
+	if state2.StatusCode != http.StatusOK {
+		t.Fatalf("state after matched route = %d, want 200", state2.StatusCode)
+	}
+}
+
 // TestSeededIssueSerialisesAssignees checks the raw JSON: a seeded issue has an
 // empty assignees array, not null, as GitHub returns it.
 func TestSeededIssueSerialisesAssignees(t *testing.T) {

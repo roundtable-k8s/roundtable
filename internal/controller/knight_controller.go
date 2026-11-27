@@ -245,6 +245,7 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 				return ctrl.Result{RequeueAfter: retry}, nil
 			}
 			deleteConsumerMetric(knight)
+			r.wakeBackoff.Delete(client.ObjectKeyFromObject(knight))
 			// Best effort: the RoundTable reconcile also drops the card (#393).
 			if err := deleteKnightCards(ctx, r.Client, r.NATS, r.CardsBucket, knight); err != nil {
 				log.Error(err, "Failed to delete agent cards")
@@ -495,8 +496,20 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if (mcpHeadersPending || consumerErr != nil) && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
+	if consumerErr != nil && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
 		nixRequeue = RequeueSlow
+	}
+
+	// Header Secrets: poll fast while one is unresolved, and keep polling at
+	// the steady-state interval after they resolve so a later delete shows up.
+	if mcpHeadersPending != mcpHeadersNone {
+		d := RequeueVerySlow
+		if mcpHeadersPending == mcpHeadersUnresolved {
+			d = RequeueSlow
+		}
+		if nixRequeue == 0 || d < nixRequeue {
+			nixRequeue = d
+		}
 	}
 
 	if rolloutDeferred && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
@@ -556,7 +569,7 @@ type wakeBackoffState struct {
 	next    time.Time
 }
 
-func (r *KnightReconciler) wakeBackoffStep(attempt int) time.Duration {
+func wakeBackoffStep(attempt int) time.Duration {
 	if attempt >= len(wakeBackoffSteps) {
 		attempt = len(wakeBackoffSteps) - 1
 	}
@@ -576,7 +589,7 @@ func (r *KnightReconciler) advanceWakeBackoff(key client.ObjectKey) {
 	if v, ok := r.wakeBackoff.Load(key); ok {
 		st = v.(wakeBackoffState)
 	}
-	st.next = r.now().Add(r.wakeBackoffStep(st.attempt))
+	st.next = r.now().Add(wakeBackoffStep(st.attempt))
 	st.attempt++
 	r.wakeBackoff.Store(key, st)
 }
@@ -688,6 +701,9 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 	log := logf.FromContext(ctx)
 	prevRT := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRuntimeAvailable)
 	prevAv := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+	// The Warning is raised only when the reason or message changed,
+	// not when the caller only changed e.g. the model. Every needsEvent case
+	// also sets changed, so the status write is gated on changed alone.
 	needsEvent := prevRT == nil || prevRT.Reason != reason || prevRT.Message != msg ||
 		prevAv == nil || prevAv.Reason != reason || prevAv.Message != msg
 	changed = meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
@@ -714,9 +730,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 		needsEvent = true
 	}
 
-	if changed || needsEvent {
-		// The Warning is raised only when the reason or message changed,
-		// not when the caller only changed e.g. the model.
+	if changed {
 		if needsEvent {
 			log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
 			// event-reasons: RuntimeClassNotFound SandboxUnavailable
@@ -1321,10 +1335,21 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 // builder renders nothing in that case. The condition is removed otherwise.
 func (r *KnightReconciler) setMCPServersCondition(knight *aiv1alpha1.Knight) {
 	c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
+	image := knightpkg.EffectiveImage(knight, r.DefaultImage)
 	unsupported := len(knight.Spec.MCPServers) > 0 &&
-		knightpkg.AgentRuntimeForImage(knightpkg.EffectiveImage(knight, r.DefaultImage)) != knightpkg.AgentRuntimeClaude
+		knightpkg.AgentRuntimeForImage(image) != knightpkg.AgentRuntimeClaude
 	if !unsupported {
-		if c != nil && c.Reason == aiv1alpha1.ReasonMCPServersUnsupported {
+		if why := knightpkg.MCPServersIgnored(knight, image); why != "" {
+			meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+				Type:               aiv1alpha1.ConditionKnightDegraded,
+				Status:             metav1.ConditionTrue,
+				Reason:             aiv1alpha1.ReasonMCPServersIgnored,
+				Message:            "spec.mcpServers is not rendered: " + why,
+				ObservedGeneration: knight.Generation,
+			})
+			return
+		}
+		if c != nil && (c.Reason == aiv1alpha1.ReasonMCPServersUnsupported || c.Reason == aiv1alpha1.ReasonMCPServersIgnored) {
 			meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
 		}
 		return
@@ -1338,14 +1363,23 @@ func (r *KnightReconciler) setMCPServersCondition(knight *aiv1alpha1.Knight) {
 	})
 }
 
+type mcpHeadersState int
+
+const (
+	mcpHeadersNone       mcpHeadersState = iota // no header references rendered
+	mcpHeadersResolved                          // every referenced key exists
+	mcpHeadersUnresolved                        // a Secret or key is missing or unreadable
+)
+
 // setMCPHeadersCondition checks that every Secret key named by
 // spec.mcpServers[].headersFrom exists and sets MCPHeadersReady. It reports
-// whether a reference is unresolved (the caller requeues: Secrets are not
-// watched). A header repeated in a different case on one server is reported
+// whether the Knight has header references and whether they all resolved (the
+// caller requeues in both cases: Secrets are not watched, so a Secret deleted
+// later is noticed on the next poll). A header repeated in a different case on one server is reported
 // too (MCPHeaderDuplicate). Only key presence is checked; values never reach a
 // condition, event or log line. The condition is removed when no headers are
 // rendered (none declared, or not a claude-knight image).
-func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *aiv1alpha1.Knight) bool {
+func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *aiv1alpha1.Knight) mcpHeadersState {
 	type ref struct{ secret, key string }
 	var refs []ref
 	var dups []string
@@ -1367,7 +1401,7 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 	}
 	if len(refs) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
-		return false
+		return mcpHeadersNone
 	}
 
 	type lookup struct {
@@ -1424,7 +1458,10 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 		cond.Message = "cannot read " + strings.Join(unreadable, ", ")
 	}
 	meta.SetStatusCondition(&knight.Status.Conditions, cond)
-	return len(missing) > 0 || len(unreadable) > 0
+	if len(missing) > 0 || len(unreadable) > 0 {
+		return mcpHeadersUnresolved
+	}
+	return mcpHeadersResolved
 }
 
 // eventReasonMaxDeliverIgnored is the Warning event reason for the deprecated,

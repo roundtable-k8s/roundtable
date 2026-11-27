@@ -159,6 +159,11 @@ const (
 	// that has no MCP client (anything but claude-knight); nothing is rendered.
 	ReasonMCPServersUnsupported = "MCPServersUnsupported"
 
+	// ReasonMCPServersIgnored means the user's MCP_SERVERS_JSON env entry is
+	// set via valueFrom or is unparsable, so it is kept as is and none of
+	// spec.mcpServers reach the pod.
+	ReasonMCPServersIgnored = "MCPServersIgnored"
+
 	// ReasonKnightDeprecatedFieldsUsed is the reason (and event reason base)
 	// for ConditionKnightDeprecatedFieldsUsed.
 	ReasonKnightDeprecatedFieldsUsed = "DeprecatedFieldsUsed"

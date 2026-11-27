@@ -222,6 +222,24 @@ func TestDeploymentBackend_Cleanup_NotFoundIsOK(t *testing.T) {
 	assert.NoError(t, err, "cleanup of non-existent deployment should not error")
 }
 
+func TestDeploymentBackend_Cleanup_DropsIdleSince(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
+
+	knight := newTestKnight("gone")
+	b.idleSince.Store("ai/gone", idleWait{hash: "h", since: time.Now()})
+	b.idleSince.Store("ai/kept", idleWait{hash: "h", since: time.Now()})
+
+	require.NoError(t, b.Cleanup(ctx, knight))
+
+	_, ok := b.idleSince.Load("ai/gone")
+	assert.False(t, ok, "idleSince entry of the cleaned-up knight should be dropped")
+	_, ok = b.idleSince.Load("ai/kept")
+	assert.True(t, ok, "other knights' idleSince entries must stay")
+}
+
 func TestDeploymentBackend_IsReady_TrueWhenAvailable(t *testing.T) {
 	ctx := context.Background()
 	s := newTestScheme(t)

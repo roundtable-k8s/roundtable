@@ -131,7 +131,7 @@ spec:
               unless on (namespace, job_name) (
                 max by (namespace, job_name, knight) (label_replace(kube_job_created{job_name=~".+-toolsimg-.+"} * on (namespace, job_name) group_left () (kube_job_failed{condition="true"} > 0), "knight", "$1", "job_name", "(.+)-toolsimg-.+"))
                 < on (namespace, knight) group_left ()
-                max by (namespace, knight) (label_replace(kube_job_created{job_name=~".+-toolsimg-.+"} * on (namespace, job_name) group_left () (kube_job_status_succeeded > 0), "knight", "$1", "job_name", "(.+)-toolsimg-.+"))
+                max by (namespace, knight) (label_replace(kube_job_created{job_name=~".+-toolsimg-.+"} and on (namespace, job_name) (kube_job_status_succeeded > 0), "knight", "$1", "job_name", "(.+)-toolsimg-.+"))
               )
           labels:
             {{- toYaml $labels | nindent 12 }}

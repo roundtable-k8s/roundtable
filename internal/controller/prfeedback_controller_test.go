@@ -95,7 +95,7 @@ func (f *fakePRGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		write(map[string]any{"workflow_runs": f.mgRuns})
 	case r.Method == http.MethodGet && len(parts) == 4 && parts[1] == "jobs" && parts[3] == "logs":
 		http.Redirect(w, r, "http://"+r.Host+"/blob/"+parts[2], http.StatusFound)
-	case r.Method == http.MethodGet && len(parts) == 0 || strings.HasPrefix(r.URL.Path, "/blob/"):
+	case (r.Method == http.MethodGet && len(parts) == 0) || strings.HasPrefix(r.URL.Path, "/blob/"):
 		_, _ = io.WriteString(w, f.logs[strings.TrimPrefix(r.URL.Path, "/blob/")])
 	case r.Method == http.MethodGet && len(parts) == 4 && parts[1] == "runs" && parts[3] == "jobs":
 		write(map[string]any{"jobs": []map[string]any{{"id": 900, "name": "build", "conclusion": "failure"}}})

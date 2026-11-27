@@ -271,3 +271,31 @@ func TestMCPHeadersCaseDuplicateDropped(t *testing.T) {
 		t.Errorf("first header must win: %+v", e)
 	}
 }
+
+func TestMCPServersIgnored(t *testing.T) {
+	ref := &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "k"}}
+	cases := []struct {
+		name string
+		env  []corev1.EnvVar
+		img  string
+		want bool
+	}{
+		{"none", nil, claudeImg, false},
+		{"valueFrom", []corev1.EnvVar{{Name: "MCP_SERVERS_JSON", ValueFrom: ref}}, claudeImg, true},
+		{"unparsable", []corev1.EnvVar{{Name: "MCP_SERVERS_JSON", Value: "{nope"}}, claudeImg, true},
+		{"mergeable", []corev1.EnvVar{{Name: "MCP_SERVERS_JSON", Value: `{"mcpServers":{"a":{}}}`}}, claudeImg, false},
+		{"empty", []corev1.EnvVar{{Name: "MCP_SERVERS_JSON", Value: " "}}, claudeImg, false},
+		{"other runtime", []corev1.EnvVar{{Name: "MCP_SERVERS_JSON", ValueFrom: ref}}, "ghcr.io/roundtable-k8s/pi-knight:latest", false},
+	}
+	for _, c := range cases {
+		k := mcpKnight(c.env...)
+		if got := MCPServersIgnored(k, c.img) != ""; got != c.want {
+			t.Errorf("%s: ignored=%v want %v", c.name, got, c.want)
+		}
+	}
+	k := mcpKnight(corev1.EnvVar{Name: "MCP_SERVERS_JSON", Value: "{nope"})
+	k.Spec.MCPServers = nil
+	if MCPServersIgnored(k, claudeImg) != "" {
+		t.Error("no spec.mcpServers must not report")
+	}
+}

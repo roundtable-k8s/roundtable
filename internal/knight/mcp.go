@@ -155,19 +155,26 @@ func mergeEnvValue(env []corev1.EnvVar, name, value string, merge func(user, op 
 // (a {"mcpServers":{...}} object or a bare map). User entries win on a name
 // clash. An unparsable user value is kept unchanged.
 func mergeMCPJSON(user, op string) string {
+	out, _ := mergeMCPJSONOK(user, op)
+	return out
+}
+
+// mergeMCPJSONOK is mergeMCPJSON that also reports whether the merge
+// happened; false means the user's value was kept as is.
+func mergeMCPJSONOK(user, op string) (string, bool) {
 	var opObj map[string]map[string]json.RawMessage
 	if json.Unmarshal([]byte(op), &opObj) != nil {
-		return user
+		return user, false
 	}
 	var userMap map[string]json.RawMessage
 	if json.Unmarshal([]byte(user), &userMap) != nil {
-		return user
+		return user, false
 	}
 	servers := userMap
 	if raw, ok := userMap["mcpServers"]; ok {
 		servers = nil
 		if json.Unmarshal(raw, &servers) != nil {
-			return user
+			return user, false
 		}
 	}
 	if servers == nil { // JSON null
@@ -180,7 +187,37 @@ func mergeMCPJSON(user, op string) string {
 	}
 	b, err := json.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
-		return user
+		return user, false
 	}
-	return string(b)
+	return string(b), true
+}
+
+// MCPServersIgnored reports why the operator's spec.mcpServers do not reach
+// the pod: the user's MCP_SERVERS_JSON env entry is set via valueFrom or is
+// not parsable JSON, so it is kept untouched. It returns "" when the servers
+// are rendered (or there are none, or the runtime is not claude-knight).
+func MCPServersIgnored(k *aiv1alpha1.Knight, image string) string {
+	if len(k.Spec.MCPServers) == 0 || AgentRuntimeForImage(image) != AgentRuntimeClaude {
+		return ""
+	}
+	servers, _ := renderMCP(k.Spec.MCPServers, nil)
+	if servers == "" {
+		return ""
+	}
+	for _, e := range k.Spec.Env {
+		if e.Name != EnvMCPServersJSON {
+			continue
+		}
+		if e.ValueFrom != nil {
+			return EnvMCPServersJSON + " is set via valueFrom and cannot be merged"
+		}
+		if strings.TrimSpace(e.Value) == "" {
+			return ""
+		}
+		if _, ok := mergeMCPJSONOK(e.Value, servers); !ok {
+			return EnvMCPServersJSON + " is not valid MCP JSON and cannot be merged"
+		}
+		return ""
+	}
+	return ""
 }
