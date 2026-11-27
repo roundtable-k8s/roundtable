@@ -1,5 +1,5 @@
 # Flux source for the Round Table Helm chart, published as an OCI artifact.
-# The layerSelector extracts the chart tarball layer so helm-controller can
+# The layerSelector copies the chart tarball layer so helm-controller can
 # load the artifact as a chart. Requires Flux v2.3+.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository

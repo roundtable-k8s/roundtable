@@ -241,7 +241,7 @@ RoundTable, a Knight and a two-step Chain from [`examples/quickstart/`](examples
 hack/quickstart-kind.sh
 ```
 
-On your own cluster, follow [Installing Round Table](docs/install.md): [install NATS](docs/install.md#install-nats), [choose your isolation](docs/install.md#choose-your-isolation) and [create your first knight](docs/install.md#your-first-knight). [Pointing Round Table at your NATS](docs/install.md#pointing-round-table-at-your-nats) covers the NATS URLs. If a knight is not Ready or a chain does nothing, see [troubleshooting](docs/troubleshooting.md).
+On your own cluster, follow [Installing Round Table](docs/install.md): [install NATS](docs/install.md#1-install-nats), [choose your isolation](docs/install.md#2-choose-your-isolation) and [create your first knight](docs/install.md#4-your-first-knight). [Pointing Round Table at your NATS](docs/install.md#pointing-round-table-at-your-nats) covers the NATS URLs. If a knight is not Ready or a chain does nothing, see [troubleshooting](docs/troubleshooting.md).
 
 For an existing cluster (Kubernetes 1.28+, NATS with JetStream, a model API key),
 install the chart (it installs the CRDs, the operator and the [dashboard](#ecosystem)):
@@ -261,8 +261,10 @@ git clone https://github.com/roundtable-k8s/roundtable.git
 cd roundtable
 
 make install   # CRDs
-make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
+make deploy IMG=ghcr.io/roundtable-k8s/roundtable:v0.X.Y
 ```
+
+Replace `v0.X.Y` with the release tag you want to run (see the [releases](https://github.com/roundtable-k8s/roundtable/releases)).
 
 ### What Happens
 
@@ -312,8 +314,10 @@ make test
 # Pinned toolchain via Nix: `nix develop`, or the installable
 # `nix build .#knight-tools` (tools in bin/, envtest assets in share/envtest)
 # Build the operator image
-make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
+make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:v0.X.Y
 ```
+
+Replace `v0.X.Y` with your own tag and point `IMG` at a registry you can push to.
 
 ## Roadmap
 

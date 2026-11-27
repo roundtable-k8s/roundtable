@@ -19,7 +19,10 @@ doc_semver="$(sed -nE "s/.*\`semver\` constraint.*\(\`\^($ver_re)\`\).*/\1/p" "$
 if [ -z "$doc_semver" ]; then
   doc_semver="$(grep -oE "\(\`\^$ver_re\`\)" "$doc" | head -n1 | grep -oE "$ver_re" || true)"
 fi
-helm_pin="$(sed -nE "s/^[[:space:]]*--version[[:space:]]+($ver_re).*/\1/p" "$doc" | head -n1)"
+# The chart pin is the --version of the `helm install roundtable` command. The NATS
+# install above it also has a --version (its chart, not ours), so start at the command.
+helm_pin="$(awk '/^helm install roundtable[[:space:]]/{f=1} f && /--version/{print; exit}' "$doc" |
+  sed -nE "s/.*--version[[:space:]]+($ver_re).*/\1/p")"
 chart_ver="$(sed -nE "s/^version:[[:space:]]*\"?($ver_re)\"?.*/\1/p" "$chart" | head -n1)"
 
 [ -n "$semver_pin" ] || fail "no semver pin found in $flux"
