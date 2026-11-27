@@ -338,8 +338,11 @@ func taskFailureReason(rec *gateway.TaskRecord) string {
 // (status.activeRuns): a task with a result, without a record, or without a
 // result after timeoutSeconds is no longer active, and its firing gets the
 // outcome. It updates trg's status in place and returns when to look again
-// (0: nothing is in flight).
-func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Trigger, now time.Time) time.Duration {
+// (0: nothing is in flight). The Events for failed and lost tasks are
+// returned, not raised: the caller raises them once the status patch holds,
+// so a conflicted patch does not repeat them on retry.
+func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Trigger, now time.Time) (time.Duration, []triggerEvent) {
+	var events []triggerEvent
 	var tracked []string
 	for _, id := range trg.Status.ActiveRuns {
 		// Runs of an earlier chainRef target are not tasks.
@@ -349,14 +352,14 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	}
 	if len(tracked) == 0 {
 		trg.Status.ActiveRuns = nil
-		return 0
+		return 0, nil
 	}
 	svc, err := r.taskService(ctx)
 	if err != nil {
 		// Keep tracking them; look again later.
 		trg.Status.ActiveRuns = tracked
 		logf.FromContext(ctx).Error(err, "Could not read Trigger task results")
-		return triggerTaskPoll
+		return triggerTaskPoll, nil
 	}
 	timeout := time.Duration(trg.Spec.Target.Knight.EffectiveTimeoutSeconds()) * time.Second
 	var active []string
@@ -383,9 +386,9 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 				f.Reason = reason
 				switch outcome {
 				case aiv1alpha1.TriggerFiringFailed:
-					r.event(trg, corev1.EventTypeWarning, "TaskFailed", "Task %s failed: %s", id, reason)
+					events = append(events, triggerEvent{"TaskFailed", fmt.Sprintf("Task %s failed: %s", id, reason)})
 				case aiv1alpha1.TriggerFiringLost:
-					r.event(trg, corev1.EventTypeWarning, "TaskLost", "Task %s lost: %s", id, reason)
+					events = append(events, triggerEvent{"TaskLost", fmt.Sprintf("Task %s lost: %s", id, reason)})
 				}
 			}
 		}
@@ -393,7 +396,10 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	}
 	trg.Status.ActiveRuns = active
 	if len(active) == 0 {
-		return 0
+		return 0, events
 	}
-	return triggerTaskPoll
+	return triggerTaskPoll, events
 }
+
+// triggerEvent is a Warning Event waiting for its status patch.
+type triggerEvent struct{ reason, message string }
