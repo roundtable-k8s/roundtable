@@ -61,13 +61,13 @@ probes:
   liveness:
     initialDelaySeconds: 15
     periodSeconds: 20
-    # timeoutSeconds: 1
-    # failureThreshold: 3
+    timeoutSeconds: null
+    failureThreshold: null
   readiness:
     initialDelaySeconds: 5
     periodSeconds: 10
-    # timeoutSeconds: 1
-    # failureThreshold: 3
+    timeoutSeconds: null
+    failureThreshold: null
 priorityClassName: ""
 # Pull secrets for the operator, gateway, dashboard and collector pods,
 # e.g. [{name: regcred}]. Knight pods are configured on the Knight.
