@@ -68,6 +68,9 @@ type Bus interface {
 	CreateIdempotency(ctx context.Context, key string, e IdempotencyEntry) (existing *IdempotencyEntry, err error)
 	// DeleteIdempotency removes an idempotency key.
 	DeleteIdempotency(ctx context.Context, key string) error
+	// DeleteIdempotencyAt removes the key only if it is still at revision
+	// rev (an entry's Revision); deleted is false when it has changed.
+	DeleteIdempotencyAt(ctx context.Context, key string, rev uint64) (deleted bool, err error)
 
 	// DeadLetterRecords returns the state of every dead-letter entry.
 	DeadLetterRecords(ctx context.Context) ([]DeadLetterRecord, error)
@@ -338,6 +341,7 @@ func (b *NATSBus) GetIdempotency(ctx context.Context, key string) (*IdempotencyE
 	if err := json.Unmarshal(entry.Value(), &e); err != nil {
 		return nil, fmt.Errorf("decode idempotency key: %w", err)
 	}
+	e.Revision = entry.Revision()
 	return &e, nil
 }
 
@@ -363,6 +367,20 @@ func (b *NATSBus) DeleteIdempotency(ctx context.Context, key string) error {
 		return nil
 	}
 	return err
+}
+
+// DeleteIdempotencyAt implements Bus.
+func (b *NATSBus) DeleteIdempotencyAt(ctx context.Context, key string, rev uint64) (bool, error) {
+	err := b.kv.Delete(ctx, key, jetstream.LastRevision(rev))
+	if err == nil {
+		return true, nil
+	}
+	var apiErr *jetstream.APIError
+	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyExists) ||
+		(errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence) {
+		return false, nil
+	}
+	return false, err
 }
 
 // drainKV reads every live entry of kv with one watch: it collects entries

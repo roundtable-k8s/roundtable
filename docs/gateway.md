@@ -322,16 +322,20 @@ Responses:
 - **404**: unknown knight.
 - **422**: an `Idempotency-Key` repeated with a different `task`, `model` or `runId`.
 - **429**: `maxInFlight` waits are already open.
-- **503**: the knight is suspended, or NATS is unavailable (also when the idempotency key cannot be looked up, so a replay can fail with 503 and be retried).
+- **503**: the knight is suspended, or NATS is unavailable (also when the idempotency key cannot be looked up, so a replay can fail with 503 and be retried). A replay also gets 503 while the first call is still being started (its key exists but the task is not stored yet).
 
 **Idempotency.** Send an `Idempotency-Key` header (1 to 255 printable ASCII
 characters, else **400**) to make the call safe to retry after a dropped
 connection. The first call publishes the task and stores the key (scoped to
 namespace and knight) next to the task record; a repeat publishes nothing and
-returns the original task (**200** or **202** as the current state says) with
-the response header `Idempotent-Replay: true`. A repeat with a different
+returns the original task with the response header `Idempotent-Replay: true`.
+Like the first call, a repeat of a task that is still running waits up to
+`timeoutSeconds` for the result (**200**), else answers **202**. A repeat with a different
 `task`, `model` or `runId` is a **422**. The key lives as long as the task
 record (`gateway.taskTTL`); a call that fails before publishing releases it.
+If the first call crashed after storing the key but before storing the task, a
+repeat within 30 seconds gets **503** (retry shortly); after that the orphaned
+key is removed and the repeat runs as a new call.
 
 Both 200 and 202 return the task record:
 

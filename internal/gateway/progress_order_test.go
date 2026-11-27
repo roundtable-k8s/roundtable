@@ -147,3 +147,126 @@ func TestFollowStepActivityAlreadyFollowedSkipsReads(t *testing.T) {
 		t.Fatalf("already followed step cost %d extra reads", got-first)
 	}
 }
+
+func TestInvokeReplayWaitsForResult(t *testing.T) {
+	e := newEnv(t, Options{})
+	zero, wait := 0, 10
+	first, err := e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &zero, IdempotencyKey: "w"})
+	if err != nil || first.Done() {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		close(e.knight.release)
+	}()
+	rec, err := e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &wait, IdempotencyKey: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Replayed || rec.TaskID != first.TaskID || !rec.Done() || rec.Status != TaskSucceeded {
+		t.Fatalf("replay = %+v, want the finished original task", rec)
+	}
+}
+
+func TestInvokeStaleOrphanKeyIsReplaced(t *testing.T) {
+	e := newEnv(t, Options{})
+	req := InvokeRequest{Task: "hello", IdempotencyKey: "o"}
+	key := idempotencyPrefix + idempotencyHash(testNS, "operator", "o")
+	old := IdempotencyEntry{TaskID: "operator-ghost", Fingerprint: invokeFingerprint(req), CreatedAt: time.Now().Add(-time.Minute)}
+	if prior, err := e.svc.Bus.CreateIdempotency(context.Background(), key, old); err != nil || prior != nil {
+		t.Fatal(prior, err)
+	}
+	rec, err := e.svc.Invoke(context.Background(), "operator", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Replayed || rec.TaskID == "operator-ghost" || e.knight.received() != 1 {
+		t.Fatalf("rec = %+v published=%d, want a new task", rec, e.knight.received())
+	}
+
+	// A fresh orphan still answers 503.
+	req2 := InvokeRequest{Task: "hello", IdempotencyKey: "o2"}
+	key2 := idempotencyPrefix + idempotencyHash(testNS, "operator", "o2")
+	fresh := IdempotencyEntry{TaskID: "operator-ghost", Fingerprint: invokeFingerprint(req2), CreatedAt: time.Now()}
+	if prior, err := e.svc.Bus.CreateIdempotency(context.Background(), key2, fresh); err != nil || prior != nil {
+		t.Fatal(prior, err)
+	}
+	if _, err := e.svc.Invoke(context.Background(), "operator", req2); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestInvokePublishFailureReleasesKey(t *testing.T) {
+	e := newEnv(t, Options{})
+	bus := &hookBus{Bus: e.svc.Bus, publishErr: errors.New("no stream")}
+	e.svc.Bus = bus
+	req := InvokeRequest{Task: "hello", IdempotencyKey: "r"}
+	if _, err := e.svc.Invoke(context.Background(), "operator", req); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	bus.publishErr = nil
+	rec, err := e.svc.Invoke(context.Background(), "operator", req)
+	if err != nil || rec.Replayed || rec.Status != TaskSucceeded {
+		t.Fatalf("retry = %+v %v, want a new run", rec, err)
+	}
+	if n := e.knight.received(); n != 1 {
+		t.Fatalf("published %d, want 1", n)
+	}
+}
+
+func TestInvokeReplayWaitCountsAgainstMaxInFlight(t *testing.T) {
+	e := newEnv(t, Options{MaxInFlight: 1})
+	zero, wait := 0, 10
+	first, err := e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &zero, IdempotencyKey: "m"})
+	if err != nil || first.Done() {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	release, err := e.svc.acquireSlot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, err = e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &wait, IdempotencyKey: "m"})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+}
+
+func TestStaleIdempotencyDeleteKeepsNewerEntry(t *testing.T) {
+	e := newEnv(t, Options{})
+	ctx := context.Background()
+	req := InvokeRequest{Task: "hello", IdempotencyKey: "s"}
+	key := idempotencyPrefix + idempotencyHash(testNS, "operator", "s")
+	old := IdempotencyEntry{TaskID: "operator-ghost", Fingerprint: invokeFingerprint(req), CreatedAt: time.Now().Add(-time.Minute)}
+	if prior, err := e.svc.Bus.CreateIdempotency(ctx, key, old); err != nil || prior != nil {
+		t.Fatal(prior, err)
+	}
+	stale, err := e.svc.Bus.GetIdempotency(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another retry replaces the orphan before this one deletes it.
+	if err := e.svc.Bus.DeleteIdempotency(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	newer := IdempotencyEntry{TaskID: "operator-new", Fingerprint: invokeFingerprint(req), CreatedAt: time.Now()}
+	if prior, err := e.svc.Bus.CreateIdempotency(ctx, key, newer); err != nil || prior != nil {
+		t.Fatal(prior, err)
+	}
+	deleted, err := e.svc.Bus.DeleteIdempotencyAt(ctx, key, stale.Revision)
+	if err != nil || deleted {
+		t.Fatalf("deleted = %v, %v; want false", deleted, err)
+	}
+	got, err := e.svc.Bus.GetIdempotency(ctx, key)
+	if err != nil || got.TaskID != "operator-new" {
+		t.Fatalf("entry = %+v %v, want the newer entry kept", got, err)
+	}
+	// The replay with the stale read re-reads rather than starting a new call.
+	_, isStale, err := e.svc.replayInvoke(ctx, key, stale, invokeFingerprint(req), 0, false)
+	if isStale || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("stale = %v err = %v, want the newer fresh orphan to answer 503", isStale, err)
+	}
+	if e.knight.received() != 0 {
+		t.Fatal("published a duplicate task")
+	}
+}
