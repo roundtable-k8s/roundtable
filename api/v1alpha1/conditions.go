@@ -194,6 +194,29 @@ const (
 	// ConditionRoundTableDeprecatedFieldsUsed.
 	ReasonRoundTableDeprecatedFieldsUsed = "DeprecatedFieldsUsed"
 
+	// ConditionRoundTablePlannerKnightMissing is True when spec.planner.knightRef
+	// names a Knight that does not exist (reason PlannerKnightMissing) or that is
+	// not a member of the table (reason PlannerKnightNotInTable). It is
+	// advisory: the table keeps reconciling. Absent otherwise.
+	ConditionRoundTablePlannerKnightMissing = "PlannerKnightMissing"
+
+	// ReasonPlannerKnightMissing: the referenced planner Knight does not exist.
+	ReasonPlannerKnightMissing = "PlannerKnightMissing"
+
+	// ReasonPlannerKnightNotInTable: the planner Knight exists but is not a
+	// member of the table (its labels do not match the knightSelector).
+	ReasonPlannerKnightNotInTable = "PlannerKnightNotInTable"
+
+	// ConditionMissionResultsRetained is False when retainResults is set but the
+	// results could not be written to NATS KV (status.resultsRef is then unset).
+	ConditionMissionResultsRetained = "ResultsRetained"
+
+	// ReasonResultsStored: the results were written to NATS KV.
+	ReasonResultsStored = "Stored"
+
+	// ReasonResultsStoreFailed: writing the results to NATS KV failed.
+	ReasonResultsStoreFailed = "StoreFailed"
+
 	// ===== Chain Condition Types =====
 
 	// ConditionChainValid indicates whether the chain spec passed validation.

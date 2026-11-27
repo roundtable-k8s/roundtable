@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -202,5 +203,74 @@ func TestStoreResultsToKVCostBreakdown(t *testing.T) {
 	bd := doc.Costs.Breakdown
 	if len(bd) != 2 || bd[0].CostUSD != "0.3000" || bd[1].CostUSD != "0.1000" || doc.Costs.Total != "0.4000" {
 		t.Errorf("costs = %+v", doc.Costs)
+	}
+}
+
+type failingKV struct{ fakeNATS }
+
+func (*failingKV) KVPut(context.Context, string, string, []byte) error { return errors.New("kv down") }
+
+// A failed KV write must not set resultsRef (it would point at nothing).
+func TestStoreResultsToKVFailureLeavesRefUnset(t *testing.T) {
+	c := &Cleaner{
+		Client: fake.NewClientBuilder().WithScheme(testScheme(t)).Build(),
+		NATS:   natspkg.NewProviderWithClient(&failingKV{}, logr.Discard()),
+	}
+	m := &aiv1alpha1.Mission{ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "ns"}}
+	if err := c.StoreResultsToKV(t.Context(), m); err == nil {
+		t.Fatal("expected an error")
+	}
+	if m.Status.ResultsRef != nil || m.Status.ResultsConfigMap != "" {
+		t.Errorf("resultsRef = %+v, resultsConfigMap = %q; want unset", m.Status.ResultsRef, m.Status.ResultsConfigMap)
+	}
+}
+
+// The KV entry carries the summary and the chain outputs.
+func TestStoreResultsToKVSummaryAndChainOutputs(t *testing.T) {
+	kv := &kvCapture{}
+	chain := &aiv1alpha1.Chain{
+		ObjectMeta: metav1.ObjectMeta{Name: "m1-research", Namespace: "ns"},
+		Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{
+			{Name: "s1", Output: "first"}, {Name: "s2", Output: "final answer"},
+		}},
+	}
+	c := &Cleaner{
+		Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(chain).Build(),
+		NATS:   natspkg.NewProviderWithClient(kv, logr.Discard()),
+	}
+	m := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "ns"},
+		Spec:       aiv1alpha1.MissionSpec{Objective: "obj"},
+		Status: aiv1alpha1.MissionStatus{
+			Phase:  aiv1alpha1.MissionPhaseCleaningUp,
+			Result: "done",
+			ChainStatuses: []aiv1alpha1.MissionChainStatus{
+				{Name: "research", ChainCRName: "m1-research", Phase: aiv1alpha1.ChainPhaseSucceeded},
+			},
+		},
+	}
+	if err := c.StoreResultsToKV(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Summary struct {
+			Mission, Objective, Result string
+		} `json:"summary"`
+		Chains map[string]struct {
+			Output string `json:"output"`
+			Steps  []struct{ Name, Output string }
+		} `json:"chains"`
+	}
+	if err := json.Unmarshal(kv.value, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Summary.Mission != "m1" || doc.Summary.Objective != "obj" || doc.Summary.Result != "done" {
+		t.Errorf("summary = %+v", doc.Summary)
+	}
+	if got := doc.Chains["research"]; got.Output != "final answer" || len(got.Steps) != 2 {
+		t.Errorf("chain = %+v", got)
+	}
+	if m.Status.ResultsRef == nil || m.Status.ResultsRef.Bucket != "mission-results" || m.Status.ResultsRef.Key != "m1" {
+		t.Errorf("resultsRef = %+v", m.Status.ResultsRef)
 	}
 }

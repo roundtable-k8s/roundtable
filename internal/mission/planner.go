@@ -124,7 +124,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	if pr.Error != "" {
 		log.Error(fmt.Errorf("%s", pr.Error), "Planning failed, marking mission as failed")
 		mission.Status.Phase = aiv1alpha1.MissionPhaseFailed
-		failMsg := fmt.Sprintf("Planning failed: %s", pr.Error)
+		failMsg := fmt.Sprintf("Planning failed: %s", TruncateMessage(pr.Error, MaxPlanErrorMessage))
 		mission.Status.Result = failMsg
 		meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
 			Type:               aiv1alpha1.ConditionMissionComplete,
@@ -1493,4 +1493,16 @@ func (p *Planner) validateExistingChains(ctx context.Context, mission *aiv1alpha
 // validChainPhase reports whether phase is empty or a known mission phase.
 func validChainPhase(phase string) bool {
 	return phase == "" || phase == "Setup" || phase == "Active" || phase == "Teardown"
+}
+
+// MaxPlanErrorMessage bounds planner error text in condition messages and events.
+const MaxPlanErrorMessage = 1000
+
+// TruncateMessage cuts s to at most max runes, marking the cut with "...".
+func TruncateMessage(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-3]) + "..."
 }

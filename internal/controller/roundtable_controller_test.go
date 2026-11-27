@@ -257,3 +257,49 @@ var _ = Describe("RoundTable deprecated policies", func() {
 		Expect(c).To(BeNil())
 	})
 })
+
+var _ = Describe("RoundTable planner knightRef check", func() {
+	run := func(rt *aiv1alpha1.RoundTable, members []aiv1alpha1.Knight, objs ...client.Object) (*metav1.Condition, *record.FakeRecorder) {
+		s := k8sruntime.NewScheme()
+		Expect(aiv1alpha1.AddToScheme(s)).To(Succeed())
+		rec := record.NewFakeRecorder(10)
+		r := &RoundTableReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).Build(), Recorder: rec}
+		r.setPlannerKnightCondition(context.Background(), rt, members)
+		r.setPlannerKnightCondition(context.Background(), rt, members) // same generation: one event
+		return meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTablePlannerKnightMissing), rec
+	}
+	table := func(ref string) *aiv1alpha1.RoundTable {
+		rt := &aiv1alpha1.RoundTable{
+			ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: "default", Generation: 1},
+		}
+		if ref != "" {
+			rt.Spec.Planner = &aiv1alpha1.RoundTablePlanner{KnightRef: aiv1alpha1.LocalRef(ref)}
+		}
+		return rt
+	}
+	knight := func(name string) *aiv1alpha1.Knight {
+		return &aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}}
+	}
+
+	It("flags a knightRef naming a missing Knight", func() {
+		c, rec := run(table("ghost"), nil)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonPlannerKnightMissing))
+		Expect(c.Message).To(ContainSubstring(`"ghost"`))
+		Expect(countEvents(rec, aiv1alpha1.ReasonPlannerKnightMissing)).To(Equal(1))
+	})
+
+	It("warns when the Knight exists but is not a member of the table", func() {
+		c, _ := run(table("outsider"), []aiv1alpha1.Knight{*knight("other")}, knight("outsider"))
+		Expect(c).NotTo(BeNil())
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonPlannerKnightNotInTable))
+	})
+
+	It("is silent for a member Knight, no knightRef, or a disabled planner", func() {
+		c, _ := run(table("mine"), []aiv1alpha1.Knight{*knight("mine")}, knight("mine"))
+		Expect(c).To(BeNil())
+		c, _ = run(table(""), nil)
+		Expect(c).To(BeNil())
+	})
+})

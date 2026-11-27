@@ -523,24 +523,24 @@ var _ = Describe("Mission Integration Tests", func() {
 				return m.Status.Phase
 			}, timeout, interval).Should(Equal(aiv1alpha1.MissionPhaseSucceeded))
 
-			// Transition to CleaningUp and reconcile — without NATS, KV fails gracefully
-			// but ResultsConfigMap is still set to prevent infinite retry
+			// Without NATS the KV write fails: no results reference is recorded and
+			// ResultsRetained=False says why.
 			m := &aiv1alpha1.Mission{}
 			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
 			for range 10 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 				_ = k8sClient.Get(ctx, missionNN, m)
-				if m.Status.ResultsConfigMap != "" {
+				if meta.FindStatusCondition(m.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained) != nil {
 					break
 				}
 				time.Sleep(200 * time.Millisecond)
 			}
 
-			// Verify ResultsConfigMap reference is set (KV key reference)
-			Expect(m.Status.ResultsConfigMap).NotTo(BeEmpty())
-
-			// Results are stored in NATS KV (not available in test env)
-			// The ResultsConfigMap field serves as the KV key reference
+			cond := meta.FindStatusCondition(m.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(m.Status.ResultsRef).To(BeNil())
+			Expect(m.Status.ResultsConfigMap).To(BeEmpty())
 		})
 	})
 

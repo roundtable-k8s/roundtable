@@ -776,15 +776,17 @@ var _ = Describe("Mission Controller", func() {
 				return k8sClient.Status().Update(ctx, missionChain)
 			}, "5s", "500ms").Should(Succeed())
 
-			// Wait for completion and cleanup — without NATS, KV store fails gracefully
-			// but ResultsConfigMap is still set (to prevent infinite retry)
-			// Check both phase transition AND ResultsConfigMap in one Eventually
-			Eventually(func() string {
+			// Wait for cleanup — without NATS the KV store fails: resultsRef stays
+			// unset and ResultsRetained=False says why.
+			mission := &aiv1alpha1.Mission{}
+			Eventually(func() *metav1.Condition {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
-				mission := &aiv1alpha1.Mission{}
 				_ = k8sClient.Get(ctx, missionNN, mission)
-				return mission.Status.ResultsConfigMap
-			}, "15s", "500ms").ShouldNot(BeEmpty())
+				return meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained)
+			}, "15s", "500ms").ShouldNot(BeNil())
+			Expect(meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained).Status).To(Equal(metav1.ConditionFalse))
+			Expect(mission.Status.ResultsRef).To(BeNil())
+			Expect(mission.Status.ResultsConfigMap).To(BeEmpty())
 		})
 	})
 

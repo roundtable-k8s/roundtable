@@ -26,9 +26,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -250,6 +252,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	r.setDeprecatedFieldsCondition(rt)
+	r.setPlannerKnightCondition(ctx, rt, knights)
 
 	rt.Status.ObservedGeneration = rt.Generation
 
@@ -287,6 +290,56 @@ func (r *RoundTableReconciler) setDeprecatedFieldsCondition(rt *aiv1alpha1.Round
 		Type:               aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed,
 		Status:             metav1.ConditionTrue,
 		Reason:             aiv1alpha1.ReasonRoundTableDeprecatedFieldsUsed,
+		Message:            msg,
+		ObservedGeneration: rt.Generation,
+	})
+}
+
+// setPlannerKnightCondition checks spec.planner.knightRef: a missing Knight, or
+// one outside the table (not in the discovered knights), sets
+// PlannerKnightMissing=True with a message and a Warning event once per
+// generation. It is advisory and never fails the reconcile.
+func (r *RoundTableReconciler) setPlannerKnightCondition(ctx context.Context, rt *aiv1alpha1.RoundTable, members []aiv1alpha1.Knight) {
+	name := ""
+	if rt.PlannerEnabled() && rt.Spec.Planner != nil {
+		name = aiv1alpha1.RefName(rt.Spec.Planner.KnightRef)
+	}
+	if name == "" {
+		meta.RemoveStatusCondition(&rt.Status.Conditions, aiv1alpha1.ConditionRoundTablePlannerKnightMissing)
+		return
+	}
+	var reason, msg string
+	k := &aiv1alpha1.Knight{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: rt.Namespace}, k)
+	switch {
+	case apierrors.IsNotFound(err):
+		reason = aiv1alpha1.ReasonPlannerKnightMissing
+		msg = fmt.Sprintf("spec.planner.knightRef names Knight %q, which does not exist in namespace %q", name, rt.Namespace)
+	case err != nil:
+		return // transient: keep the previous condition
+	default:
+		inTable := false
+		for i := range members {
+			if members[i].Name == name {
+				inTable = true
+				break
+			}
+		}
+		if inTable {
+			meta.RemoveStatusCondition(&rt.Status.Conditions, aiv1alpha1.ConditionRoundTablePlannerKnightMissing)
+			return
+		}
+		reason = aiv1alpha1.ReasonPlannerKnightNotInTable
+		msg = fmt.Sprintf("spec.planner.knightRef names Knight %q, which is not a member of this table (check spec.knightSelector)", name)
+	}
+	prev := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTablePlannerKnightMissing)
+	if prev == nil || prev.ObservedGeneration != rt.Generation || prev.Reason != reason {
+		r.Recorder.Event(rt, corev1.EventTypeWarning, reason, msg)
+	}
+	meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionRoundTablePlannerKnightMissing,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: rt.Generation,
 	})

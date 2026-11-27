@@ -9,6 +9,10 @@ metadata:
 {{- if and (not $leaderElect) (gt (int .Values.replicaCount) 1) }}
 {{- fail "leader election is disabled (leaderElect/leaderElection.enabled=false): replicaCount must be 1" }}
 {{- end }}
+{{- $ttl := toString (.Values.mission.resultsTTL | default "720h") }}
+{{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $ttl) }}
+{{- fail (printf "mission.resultsTTL must be a Go duration such as 720h (d and w suffixes are not supported), got %q" $ttl) }}
+{{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   {{- if not $leaderElect }}
