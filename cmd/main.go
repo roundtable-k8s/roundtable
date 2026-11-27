@@ -51,7 +51,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -668,7 +667,8 @@ func logLeaseHolder(cfg *rest.Config, t leaderElectionTimings) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), leaseReadTimeout)
 	defer cancel()
-	l, err := cs.CoordinationV1().Leases(strings.TrimSpace(string(nsBytes))).Get(ctx, leaderElectionID, metav1.GetOptions{})
+	ns := strings.TrimSpace(string(nsBytes))
+	l, err := cs.CoordinationV1().Leases(ns).Get(ctx, leaderElectionID, metav1.GetOptions{})
 	logLeaseState(l, err, t)
 }
 
@@ -711,7 +711,7 @@ func managerOptions(s *runtime.Scheme, metrics metricsserver.Options, webhooks w
 		HealthProbeBindAddress:        probeAddr,
 		LeaderElection:                leaderElect,
 		LeaderElectionID:              leaderElectionID,
-		GracefulShutdownTimeout:       ptr.To(managerShutdownTimeout),
+		GracefulShutdownTimeout:       new(managerShutdownTimeout),
 		LeaderElectionReleaseOnCancel: true,
 		LeaseDuration:                 &t.LeaseDuration,
 		RenewDeadline:                 &t.RenewDeadline,

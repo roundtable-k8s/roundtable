@@ -526,8 +526,7 @@ func TestStopAllContextTimesOut(t *testing.T) {
 	// A watcher whose loop ignores cancellation: stop blocks on wg.Wait.
 	w := &watcher{cancel: func() {}}
 	release := make(chan struct{})
-	w.wg.Add(1)
-	go func() { defer w.wg.Done(); <-release }()
+	w.wg.Go(func() { <-release })
 	t.Cleanup(func() { close(release) })
 	m.watchers["k"] = w
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
