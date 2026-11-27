@@ -58,6 +58,9 @@ func (r *ChainReconciler) handleCancel(ctx context.Context, chain *aiv1alpha1.Ch
 		chain.Status.StartedAt = &now
 	}
 	r.cancelRun(ctx, chain, reason)
+	// Mark the current generation observed, as the timeout path does: a spec
+	// edit made during the run must not make the chain look changed and reset
+	// it to Idle after the cancel.
 	chain.Status.ObservedGeneration = chain.Generation
 	if err := r.Status().Update(ctx, chain); err != nil {
 		if apierrors.IsConflict(err) {

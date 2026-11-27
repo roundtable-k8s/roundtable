@@ -113,6 +113,12 @@ func isEmptyStepOutput(output string) bool {
 // storeStepOutputToKV stores the full step output to the NATS KV "chain-outputs" bucket.
 // This is best-effort — failures are logged but do not block chain execution.
 func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, runID, stepName, output, errStr, knight string, startedAt, completedAt *metav1.Time, structured ...natspkg.Structured) {
+	r.storeStepOutputToKVWithResult(ctx, chainName, runID, stepName, output, errStr, knight, startedAt, completedAt, nil, structured...)
+}
+
+// storeStepOutputToKVWithResult is storeStepOutputToKV plus the result's model,
+// tokens, cost and billing, so a step recovered from KV keeps them. res may be nil.
+func (r *ChainReconciler) storeStepOutputToKVWithResult(ctx context.Context, chainName, runID, stepName, output, errStr, knight string, startedAt, completedAt *metav1.Time, res *natspkg.TaskResult, structured ...natspkg.Structured) {
 	log := logf.FromContext(ctx)
 
 	// Never persist empty outputs — a poisoned KV entry would be restored as a
@@ -140,6 +146,21 @@ func (r *ChainReconciler) storeStepOutputToKV(ctx context.Context, chainName, ru
 		"runId":    runID,
 		"duration": durationStr,
 		"storedAt": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if res != nil {
+		if res.Model != "" {
+			kvValue["model"] = res.Model
+		}
+		if res.Cost > 0 {
+			kvValue["cost"] = res.Cost
+		}
+		if res.Tokens != nil {
+			kvValue["tokens"] = res.Tokens
+		}
+		if res.Billing != "" {
+			kvValue["billing"] = res.Billing
+		}
 	}
 
 	if len(structured) > 0 {
@@ -222,7 +243,10 @@ func (r *ChainReconciler) recoverStepResultFromKV(ctx context.Context, chain *ai
 	log.Info("Recovered step result from KV (result already acked, status write was lost)", "step", ss.Name)
 	// Carry the knight's reported PRs and verdict: applyStepSuccess rewrites the
 	// KV entry from this result, and must not replace them with parsed values.
-	return &natspkg.TaskResult{TaskID: ss.TaskID, Output: entry.Output, Error: entry.Error, PRs: entry.PRs, Verdict: entry.Verdict}
+	return &natspkg.TaskResult{
+		TaskID: ss.TaskID, Output: entry.Output, Error: entry.Error, PRs: entry.PRs, Verdict: entry.Verdict,
+		Model: entry.Model, Cost: entry.Cost, Tokens: entry.Tokens, Billing: entry.Billing,
+	}
 }
 
 // restoreStepOutputsFromKV attempts to restore step outputs from NATS KV.

@@ -666,3 +666,83 @@ func TestDeferLoopForProviderOrdinaryFailure(t *testing.T) {
 		t.Fatalf("deferred=%v msg=%q ss=%+v", deferred, msg, ss)
 	}
 }
+
+// loopBodyFixture returns a reconciler, fake NATS and a loop with one body step
+// that has a task in flight.
+func loopBodyFixture(t *testing.T) (*ChainReconciler, *fanoutFakeNATS, *aiv1alpha1.Chain, *aiv1alpha1.ChainLoopStep, *aiv1alpha1.ChainLoopStepStatus, *aiv1alpha1.ChainStepStatus) {
+	t.Helper()
+	r, nc := newPhasesReconciler(t)
+	r.ProviderMaxRetries = 4
+	body := aiv1alpha1.ChainLoopStep{Name: "fix", Task: "fix"}
+	body.KnightRef.Name = phasesKnight
+	spec := aiv1alpha1.ChainStep{Name: "lp", Loop: &aiv1alpha1.ChainLoop{Steps: []aiv1alpha1.ChainLoopStep{body}}}
+	chain := phasesChain([]aiv1alpha1.ChainStep{spec})
+	ss := &aiv1alpha1.ChainStepStatus{Name: "lp", Phase: aiv1alpha1.ChainStepPhaseRunning}
+	bs := &aiv1alpha1.ChainLoopStepStatus{Name: "fix", Phase: aiv1alpha1.ChainStepPhaseRunning, Iteration: 1, TaskID: "task-1", StartedAt: longAgo(), PickedUpAt: longAgo()}
+	return r, nc, chain, &body, bs, ss
+}
+
+// A successful body task resets the provider retry count (#621). Removing the
+// reset makes this fail.
+func TestCollectBodyTaskResetsProviderRetriesOnSuccess(t *testing.T) {
+	r, nc, chain, body, bs, ss := loopBodyFixture(t)
+	ss.ProviderRetries = 3
+	ss.TransientReason = "overloaded"
+	nc.results[natspkg.ResultSubject(phasesPrefix, "task-1")] = natspkg.TaskResult{Output: "fixed"}
+
+	r.collectBodyTask(context.Background(), phasesNATS, chain, &chain.Spec.Steps[0], body, bs, ss)
+
+	if bs.Phase != aiv1alpha1.ChainStepPhaseSucceeded || ss.ProviderRetries != 0 || ss.TransientReason != "" {
+		t.Fatalf("bs=%+v ss.ProviderRetries=%d reason=%q", bs, ss.ProviderRetries, ss.TransientReason)
+	}
+}
+
+// collectBodyTask -> defer -> wake -> re-dispatch -> success: the retry count
+// grows on the 529 and is reset once the re-run succeeds.
+func TestCollectBodyTaskProviderDeferWakeThenSuccess(t *testing.T) {
+	r, nc, chain, body, bs, ss := loopBodyFixture(t)
+	ctx := context.Background()
+	nc.results[natspkg.ResultSubject(phasesPrefix, "task-1")] = natspkg.TaskResult{Error: "API Error: 529 Overloaded"}
+
+	r.collectBodyTask(ctx, phasesNATS, chain, &chain.Spec.Steps[0], body, bs, ss)
+
+	if ss.Phase != aiv1alpha1.ChainStepPhaseDeferred || ss.ProviderRetries != 1 || bs.Phase != aiv1alpha1.ChainStepPhasePending || bs.TaskID != "" {
+		t.Fatalf("after 529: ss=%+v bs=%+v", ss, bs)
+	}
+
+	// The backoff elapses: the loop wakes.
+	wake := &aiv1alpha1.Chain{Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{*ss}}}
+	wake.Status.StepStatuses[0].Loop = &aiv1alpha1.ChainLoopStatus{Steps: []aiv1alpha1.ChainLoopStepStatus{*bs}}
+	past := metav1.NewTime(time.Now().Add(-time.Second))
+	wake.Status.StepStatuses[0].DeferUntil = &past
+	wakeDeferredSteps(wake, time.Now())
+	*ss = wake.Status.StepStatuses[0]
+	*bs = ss.Loop.Steps[0]
+	ss.Loop = nil
+	if ss.Phase != aiv1alpha1.ChainStepPhasePending || ss.ProviderRetries != 1 {
+		t.Fatalf("after wake: ss=%+v", ss)
+	}
+
+	// Re-dispatch: the body runs again and succeeds.
+	bs.Phase, bs.TaskID, bs.StartedAt, bs.PickedUpAt = aiv1alpha1.ChainStepPhaseRunning, "task-2", longAgo(), longAgo()
+	nc.results[natspkg.ResultSubject(phasesPrefix, "task-2")] = natspkg.TaskResult{Output: "fixed"}
+	r.collectBodyTask(ctx, phasesNATS, chain, &chain.Spec.Steps[0], body, bs, ss)
+	if bs.Phase != aiv1alpha1.ChainStepPhaseSucceeded || ss.ProviderRetries != 0 {
+		t.Fatalf("after re-run: bs=%+v retries=%d", bs, ss.ProviderRetries)
+	}
+}
+
+// Once provider retries are exhausted the body fails over to its retry policy
+// without a further provider backoff (documented in docs/crd-design.md).
+func TestCollectBodyTaskProviderExhaustedHandsToRetryPolicy(t *testing.T) {
+	r, nc, chain, body, bs, ss := loopBodyFixture(t)
+	body.Retry = &aiv1alpha1.StepRetry{MaxAttempts: 1}
+	ss.ProviderRetries = 4
+	nc.results[natspkg.ResultSubject(phasesPrefix, "task-1")] = natspkg.TaskResult{Error: "API Error: 529 Overloaded"}
+
+	r.collectBodyTask(context.Background(), phasesNATS, chain, &chain.Spec.Steps[0], body, bs, ss)
+
+	if ss.Phase == aiv1alpha1.ChainStepPhaseDeferred || bs.Retries != 1 || bs.Phase != aiv1alpha1.ChainStepPhasePending {
+		t.Fatalf("ss=%+v bs=%+v", ss, bs)
+	}
+}

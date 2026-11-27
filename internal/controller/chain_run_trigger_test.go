@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -42,6 +44,8 @@ type pickupFakeNATS struct {
 	floor     uint64
 	delivered uint64
 	seq       uint64
+	// result, when set, is served once by FetchOne (acked off the stream).
+	result *natspkg.TaskResult
 }
 
 func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
@@ -54,8 +58,13 @@ func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 func (f *pickupFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return f.delivered, nil
 }
-func (f *pickupFakeNATS) FetchOne(context.Context, string, jetstream.ConsumerConfig, time.Duration) (jetstream.Msg, error) {
-	return nil, nil
+func (f *pickupFakeNATS) FetchOne(_ context.Context, _ string, cfg jetstream.ConsumerConfig, _ time.Duration) (jetstream.Msg, error) {
+	if f.result == nil {
+		return nil, nil
+	}
+	data, _ := json.Marshal(f.result)
+	f.result = nil
+	return &fakeMsg{subject: cfg.FilterSubject, data: data}, nil
 }
 
 var _ = Describe("Chain run triggers and step timeout clock", func() {
@@ -320,11 +329,15 @@ var _ = Describe("Chain run triggers and step timeout clock", func() {
 		Expect(c.Status.StepStatuses[0].Tokens).To(Equal(&aiv1alpha1.TokenTotals{Input: 100, Output: 10}))
 		Expect(c.Status.CostUSD).To(Equal("0.250000"))
 
-		// The retried attempt adds its cost to the kept one.
+		DeferCleanup(metrics.ChainStepCostUSDTotal.Reset)
+		// The retried attempt runs through the reconcile loop: dispatch it, then
+		// serve its result and let collectResults add the cost to the kept one.
+		reconcileN(1)
+		Expect(get().Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseRunning))
+		fake.result = &natspkg.TaskResult{Output: "fixed", Cost: 0.5, Tokens: &natspkg.TokenUsage{Input: 50, Output: 5}}
+		reconcileN(1)
 		chain := get()
-		r.recordUsage(ctx, chain, &chain.Status.StepStatuses[0], knight,
-			&natspkg.TaskResult{Cost: 0.5, Tokens: &natspkg.TokenUsage{Input: 50, Output: 5}})
-		refreshChainUsage(chain)
+		Expect(chain.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
 		Expect(chain.Status.StepStatuses[0].CostUSD).To(Equal("0.750000"))
 		Expect(chain.Status.StepStatuses[0].Tokens).To(Equal(&aiv1alpha1.TokenTotals{Input: 150, Output: 15}))
 		Expect(chain.Status.CostUSD).To(Equal("0.750000"))

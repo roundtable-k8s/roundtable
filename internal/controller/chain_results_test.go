@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -283,5 +284,65 @@ func TestChainReconciler_ConcurrentChains(t *testing.T) {
 	wg.Wait()
 	if len(fake.waits) != 40 {
 		t.Fatalf("got %d polls, want 40", len(fake.waits))
+	}
+}
+
+// erroringFetchNATS fails every stream read; the KV still works.
+type erroringFetchNATS struct{ *ackingKVNATS }
+
+func (f *erroringFetchNATS) FetchOne(context.Context, string, jetstream.ConsumerConfig, time.Duration) (jetstream.Msg, error) {
+	return nil, fmt.Errorf("stream read failed")
+}
+
+// A failed stream read must not hide a result already stored in KV (#908), and
+// the recovered step keeps the model, tokens and cost the entry holds.
+func TestCollectStepResult_RecoversFromKVAfterStreamReadError(t *testing.T) {
+	t.Cleanup(metrics.ChainStepCostUSDTotal.Reset) // keep the global series count of the usage tests stable
+	ctx := context.Background()
+	r, fake, chain, run := newResultsFixture()
+	r.NATS = natspkg.NewProviderWithClient(&erroringFetchNATS{fake}, logr.Discard())
+	ss := &chain.Status.StepStatuses[0]
+	b, _ := json.Marshal(map[string]any{
+		"runId": "run-1", "output": "built ok", "storedAt": time.Now().Add(time.Second).UTC().Format(time.RFC3339),
+		"model": "claude-sonnet-4", "cost": 0.25, "tokens": map[string]any{"input": 10, "output": 5},
+	})
+	fake.kv["c.build"] = b
+
+	r.collectStepResult(ctx, chain, run, ss)
+
+	if ss.Phase != aiv1alpha1.ChainStepPhaseSucceeded || ss.Output != "built ok" {
+		t.Fatalf("phase=%s output=%q error=%q", ss.Phase, ss.Output, ss.Error)
+	}
+	if ss.Model != "claude-sonnet-4" || ss.CostUSD == "" || ss.Tokens.Input != 10 || ss.Tokens.Output != 5 {
+		t.Fatalf("usage not carried: model=%q cost=%q tokens=%+v", ss.Model, ss.CostUSD, ss.Tokens)
+	}
+}
+
+// Old KV entries without model/tokens/cost still recover.
+func TestCollectStepResult_RecoversOldKVEntryWithoutUsage(t *testing.T) {
+	ctx := context.Background()
+	r, fake, chain, run := newResultsFixture()
+	ss := &chain.Status.StepStatuses[0]
+	putKV(fake, "run-1", "old entry", "", time.Now().Add(time.Second))
+	r.collectStepResult(ctx, chain, run, ss)
+	if ss.Phase != aiv1alpha1.ChainStepPhaseSucceeded || ss.Model != "" || ss.CostUSD != "" {
+		t.Fatalf("%+v", ss)
+	}
+}
+
+// The KV entry written on success carries the result's model, tokens and cost.
+func TestApplyStepSuccessStoresUsageInKV(t *testing.T) {
+	t.Cleanup(metrics.ChainStepCostUSDTotal.Reset) // keep the global series count of the usage tests stable
+	ctx := context.Background()
+	r, fake, chain, run := newResultsFixture()
+	ss := &chain.Status.StepStatuses[0]
+	fake.queue(natspkg.TaskResult{TaskID: "task-1", Output: "ok", Model: "m1", Cost: 0.5, Tokens: &natspkg.TokenUsage{Input: 3}})
+	r.collectStepResult(ctx, chain, run, ss)
+	var got map[string]any
+	if err := json.Unmarshal(fake.kv["c.build"], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "m1" || got["cost"] != 0.5 || got["tokens"] == nil {
+		t.Fatalf("kv entry: %v", got)
 	}
 }

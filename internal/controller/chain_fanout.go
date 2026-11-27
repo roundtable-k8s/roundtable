@@ -261,6 +261,12 @@ type kvRecord struct {
 	PRs     []natspkg.PRRef `json:"prs"`
 	Verdict string          `json:"verdict"`
 
+	// Optional usage fields (absent in older entries).
+	Model   string              `json:"model,omitempty"`
+	Cost    float64             `json:"cost,omitempty"`
+	Tokens  *natspkg.TokenUsage `json:"tokens,omitempty"`
+	Billing string              `json:"billing,omitempty"`
+
 	StoredAtRaw string `json:"storedAt"`
 }
 
