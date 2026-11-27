@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -77,5 +79,50 @@ func TestManagerOptionsGracefulShutdownBelowGracePeriod(t *testing.T) {
 	// terminationGracePeriodSeconds is 10 in the chart.
 	if managerShutdownTimeout+shutdownTimeout >= 10*time.Second {
 		t.Fatalf("shutdown budget %s must stay below the 10s pod grace period", managerShutdownTimeout+shutdownTimeout)
+	}
+}
+
+func TestLogLeaseState(t *testing.T) {
+	holder, empty := "pod-a", ""
+	transitions := int32(3)
+	tests := []struct {
+		name  string
+		lease *coordinationv1.Lease
+		err   error
+		want  []string
+		deny  []string
+	}{
+		{"error", nil, errors.New("forbidden"),
+			[]string{"Lease not readable; continuing", `"error"="forbidden"`}, []string{"Leader lease state"}},
+		{"nil holder", &coordinationv1.Lease{}, nil,
+			[]string{"Leader lease state at start-up", `"holderIdentity"=""`, `"released"=true`, `"leaderTransitions"=0`}, nil},
+		{"empty holder", &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &empty}}, nil,
+			[]string{`"released"=true`}, nil},
+		{"held", &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &holder, LeaseTransitions: &transitions}}, nil,
+			[]string{`"holderIdentity"="pod-a"`, `"released"=false`, `"leaderTransitions"=3`, `"leaseDuration"="1m0s"`}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out []string
+			saved := setupLog
+			setupLog = funcr.New(func(prefix, args string) { out = append(out, prefix+" "+args) }, funcr.Options{})
+			defer func() { setupLog = saved }()
+
+			logLeaseState(tc.lease, tc.err, leaderElectionTimings{LeaseDuration: time.Minute})
+			if len(out) != 1 {
+				t.Fatalf("logged %d lines, want 1: %q", len(out), out)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(out[0], w) {
+					t.Errorf("log %q missing %q", out[0], w)
+				}
+			}
+			for _, d := range tc.deny {
+				if strings.Contains(out[0], d) {
+					t.Errorf("log %q should not contain %q", out[0], d)
+				}
+			}
+		})
 	}
 }
