@@ -618,7 +618,7 @@ var _ = Describe("Knight mcpServers headersFrom", func() {
 
 	It("sets Degraded=MCPServersIgnored when MCP_SERVERS_JSON is valueFrom or unparsable", func() {
 		for name, env := range map[string]corev1.EnvVar{
-			"mcp-ignored-vf":  {Name: "MCP_SERVERS_JSON", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "k"}}},
+			"mcp-ignored-vf":  {Name: "MCP_SERVERS_JSON", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "user-mcp"}, Key: "k"}}},
 			"mcp-ignored-bad": {Name: "MCP_SERVERS_JSON", Value: "{not json"},
 		} {
 			k := newKnight(name)
