@@ -241,3 +241,45 @@ func TestFetchOneResult(t *testing.T) {
 		t.Fatalf("%d message(s) left in the stream", n)
 	}
 }
+
+// TestFetchOneNoWait pins wait <= 0: an empty stream returns (nil, nil)
+// immediately, and a queued message is returned and acked.
+func TestFetchOneNoWait(t *testing.T) {
+	ctx := context.Background()
+	c := connectTestClient(t)
+	if err := c.CreateStream(ctx, StreamConfig{
+		Name: "rt_results", Subjects: []string{"rt.results.>"},
+		Retention: RetentionWorkQueue, Storage: StorageMemory,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := ResultConsumerConfig("chain-c-s", ResultSubject("rt", "t1"))
+
+	start := time.Now()
+	msg, err := c.FetchOne(ctx, "rt_results", cfg, 0)
+	if err != nil || msg != nil {
+		t.Fatalf("empty fetch = %v, %v", msg, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("no-wait fetch took %s", d)
+	}
+
+	if err := c.PublishJSON(ResultSubject("rt", "t1"), TaskResult{TaskID: "t1", Output: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err = c.FetchOne(ctx, "rt_results", cfg, 0)
+	if err != nil || msg == nil {
+		t.Fatalf("queued fetch = %v, %v", msg, err)
+	}
+	var r TaskResult
+	if err := json.Unmarshal(msg.Data(), &r); err != nil || r.GetOutput() != "one" {
+		t.Fatalf("result = %+v, %v", r, err)
+	}
+	info, err := c.StreamInfo(ctx, "rt_results")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State.Msgs != 0 {
+		t.Fatalf("message not acked: %d left", info.State.Msgs)
+	}
+}

@@ -454,7 +454,13 @@ func (c *JetStreamClient) FetchOne(
 		return nil, fmt.Errorf("consumer %s on stream %s: %w", config.Durable, stream, err)
 	}
 
-	batch, err := cons.Fetch(1, jetstream.FetchMaxWait(wait))
+	var batch jetstream.MessageBatch
+	if wait <= 0 {
+		// No wait: return at once with whatever is queued.
+		batch, err = cons.FetchNoWait(1)
+	} else {
+		batch, err = cons.Fetch(1, jetstream.FetchMaxWait(wait))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fetch from %s/%s: %w", stream, config.Durable, err)
 	}

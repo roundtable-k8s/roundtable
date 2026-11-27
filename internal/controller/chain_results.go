@@ -112,7 +112,7 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 	consumerName := natspkg.ChainConsumerName(chainName, stepName)
 
 	msg, err := natsCli.FetchOne(ctx, nc.ResultsStream,
-		natspkg.ResultConsumerConfig(consumerName, subject), 2*time.Second)
+		natspkg.ResultConsumerConfig(consumerName, subject), 0)
 
 	// Clean up the consumer
 	defer func() {
@@ -123,7 +123,7 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 		return nil, err
 	}
 	if msg == nil {
-		return nil, nil // Timeout, no result yet
+		return nil, nil // No result yet
 	}
 
 	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg, natspkg.WithTable(nc.Table), natspkg.WithTaskID(taskID))

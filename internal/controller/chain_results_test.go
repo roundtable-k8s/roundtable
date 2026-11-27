@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -217,5 +219,76 @@ func TestCollectStepResult_RecoveryPreservesPRsAndVerdict(t *testing.T) {
 	}
 	if len(kv.PRs) != 1 || kv.PRs[0].Number != 7 {
 		t.Fatalf("KV PRs = %+v", kv.PRs)
+	}
+}
+
+// lockedWaitNATS serves queued results under a lock and records the wait each
+// FetchOne was called with, so concurrent reconciles can share it.
+type lockedWaitNATS struct {
+	*fakeNATSClient
+	mu    sync.Mutex
+	waits []time.Duration
+}
+
+func (f *lockedWaitNATS) FetchOne(_ context.Context, _ string, _ jetstream.ConsumerConfig, wait time.Duration) (jetstream.Msg, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.waits = append(f.waits, wait)
+	return nil, nil
+}
+
+func (f *lockedWaitNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
+	return 1, nil
+}
+
+func (f *lockedWaitNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
+	return 1, nil
+}
+
+func (f *lockedWaitNATS) PublishJSONSeq(string, any) (uint64, error) { return 1, nil }
+
+// The result poll must not block: no wait, and a step with no result yet
+// returns quickly.
+func TestPollResult_DoesNotBlock(t *testing.T) {
+	fake := &lockedWaitNATS{fakeNATSClient: newFakeNATSClient()}
+	r := &ChainReconciler{NATS: natspkg.NewProviderWithClient(fake, logr.Discard())}
+	nc := natsConfig{SubjectPrefix: "p", ResultsStream: "res"}
+
+	start := time.Now()
+	res, err := r.pollResult(context.Background(), nc, "c", "build", "task-1")
+	if err != nil || res != nil {
+		t.Fatalf("pollResult = %v, %v", res, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("pollResult took %s", d)
+	}
+	if len(fake.waits) != 1 || fake.waits[0] > 0 {
+		t.Fatalf("FetchOne waits = %v, want [0]", fake.waits)
+	}
+}
+
+// Two chains poll and schedule through one reconciler at once; run with -race.
+func TestChainReconciler_ConcurrentChains(t *testing.T) {
+	fake := &lockedWaitNATS{fakeNATSClient: newFakeNATSClient()}
+	r := &ChainReconciler{NATS: natspkg.NewProviderWithClient(fake, logr.Discard())}
+	nc := natsConfig{SubjectPrefix: "p", ResultsStream: "res"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		name := fmt.Sprintf("chain-%d", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				if _, err := r.pollResult(context.Background(), nc, name, "build", "task-"+name); err != nil {
+					t.Error(err)
+				}
+				r.removeCronEntry(types.NamespacedName{Namespace: "ns", Name: name})
+			}
+		}()
+	}
+	wg.Wait()
+	if len(fake.waits) != 40 {
+		t.Fatalf("got %d polls, want 40", len(fake.waits))
 	}
 }

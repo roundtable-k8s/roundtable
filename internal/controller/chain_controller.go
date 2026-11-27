@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -82,8 +83,11 @@ type ChainReconciler struct {
 	// ScheduleMode selects how spec.schedule runs: the in-process cron
 	// (empty or inprocess) or an owned schedule Trigger (trigger).
 	ScheduleMode ChainScheduleMode
-	cron         *cron.Cron
-	mu           sync.Mutex
+	// MaxConcurrentReconciles is how many Chains reconcile in parallel;
+	// 0 or less means 1.
+	MaxConcurrentReconciles int
+	cron                    *cron.Cron
+	mu                      sync.Mutex
 	// cronEntries maps chain namespace/name to cron entry ID
 	cronEntries map[string]cron.EntryID
 	// cronSpecs maps chain namespace/name to the effective cron spec (with
@@ -499,5 +503,6 @@ func (r *ChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&aiv1alpha1.Chain{}).
 		Owns(&aiv1alpha1.Trigger{}).
 		Named("chain").
+		WithOptions(controller.Options{MaxConcurrentReconciles: max(r.MaxConcurrentReconciles, 1)}).
 		Complete(r)
 }
