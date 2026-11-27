@@ -81,7 +81,8 @@ available replica. The cluster is deleted afterwards, also on failure.
 
 Scenarios are gated by Ginkgo labels, one per tier; `TIER` picks the tier
 (`core` by default, `trace` for the Chain trace case, `trigger` for a NATS-source
-Trigger starting a Chain run on the stub knight, `all` for everything).
+Trigger starting a Chain run on the stub knight, `lost` for the lost-task case:
+a knight that dies mid-task ends as a dead-letter entry, `all` for everything).
 A new tier adds its own label and files without touching core. Plain
 `go test ./...` does not build the e2e package (it needs `-tags=e2e`).
 

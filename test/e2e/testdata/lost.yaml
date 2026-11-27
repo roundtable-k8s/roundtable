@@ -1,0 +1,43 @@
+# A table and one stub knight (test/e2e/stubknight, no LLM) for the e2e lost-task
+# tier: a STUB:crash task kills the knight without an ack.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: lost-table
+  namespace: roundtable-lost
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: lost
+    tasksStream: lost_tasks
+    resultsStream: lost_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-lost
+  labels:
+    ai.roundtable.io/round-table: lost-table
+spec:
+  domain: lost
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [lost]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: lost_tasks
+    resultsStream: lost_results
+    subjects:
+      - "lost.tasks.lost.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60
