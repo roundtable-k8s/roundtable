@@ -86,7 +86,7 @@ are sorted by key (range over a map is ordered) for stable output.
   value: {{ .service | quote }}
 {{- $attrs := list }}
 {{- range $k, $v := $t.resourceAttributes }}
-{{- $attrs = append $attrs (printf "%s=%v" $k $v) }}
+{{- $attrs = append $attrs (printf "%s=%s" (toString $k | replace "," "%2C" | replace "=" "%3D") (toString $v | replace "," "%2C" | replace "=" "%3D")) }}
 {{- end }}
 {{- if $attrs }}
 - name: OTEL_RESOURCE_ATTRIBUTES

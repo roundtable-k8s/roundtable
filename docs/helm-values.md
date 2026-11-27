@@ -227,6 +227,7 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 | `dashboard.env.FLEET_STREAM` | string | `fleet_a_results` | JetStream results stream the dashboard reads |
 | `dashboard.vault.enabled` | bool | `true` | Mount shared Obsidian vault |
 | `dashboard.vault.claimName` | string | `roundtable-vault` | Vault PVC name |
+| `dashboard.podSecurityContext` | object | `{runAsUser: 65532, runAsGroup: 65532}` | Dashboard pod `securityContext` (`runAsNonRoot` and the `RuntimeDefault` seccomp profile are always set). When `dashboard.vault.enabled` and `fsGroup` is not set, `fsGroup` defaults to `runAsGroup` so the pod can read the vault volume; set `fsGroup` explicitly to override |
 | `dashboard.gateway.tokenSecret` / `.tokenKey` | string | `""` | Secret and key of the token the dashboard sends to the gateway; empty = the gateway's own token Secret and key |
 | `dashboard.gateway.serviceAccountToken` | bool | `false` | Send a projected ServiceAccount token (audience `gateway.serviceAccountAuth.audience`) instead of the static token Secret; requires `gateway.serviceAccountAuth.enabled`, and `tokenSecret`/`tokenKey` are then ignored |
 
@@ -262,7 +263,7 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.auth.secretKey` | string | `token` | Key in that Secret; one token per line (two during a rotation), optionally `<name> <token>` to name the caller |
 | `gateway.serviceAccountAuth.enabled` | bool | `true` | Also accept in-cluster callers' own ServiceAccount tokens, checked with a TokenReview; grants the gateway `create` on `tokenreviews.authentication.k8s.io` (a ClusterRole, only when enabled) ([gateway.md](gateway.md#calling-from-a-workload)) |
 | `gateway.serviceAccountAuth.audience` | string | `roundtable-gateway` | Audience the projected ServiceAccount token must be issued for |
-| `gateway.serviceAccountAuth.allowedNamespaces` | list | `["*"]` | Namespaces whose ServiceAccounts may call (`"*"` or an empty list = any) |
+| `gateway.serviceAccountAuth.allowedNamespaces` | list | `["*"]` | Namespaces whose ServiceAccounts may call (`"*"` or an empty list = any). If you narrow it while `dashboard.gateway.serviceAccountToken=true`, include the release namespace or the dashboard's token is rejected |
 | `gateway.service.type` / `.port` | string / int | `ClusterIP` / `80` | Service |
 | `gateway.networkPolicy.enabled` | bool | `true` | Restrict ingress to the gateway |
 | `gateway.networkPolicy.from` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed in (default: release namespace). An empty list allows any source. |

@@ -11,9 +11,9 @@ doc="$root/docs/observability.md"
 values="$root/charts/roundtable-operator/values.yaml"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# values.yaml: from `telemetry:` up to (not including) the next top-level key,
+# values.yaml: from `telemetry:` up to (not including) the next top-level key or comment,
 # with trailing blank lines dropped.
-want="$(awk '/^telemetry:/{on=1} on && /^[A-Za-z]/ && !/^telemetry:/{exit} on' "$values" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
+want="$(awk '/^telemetry:/{on=1} on && /^[A-Za-z#]/ && !/^telemetry:/{exit} on' "$values" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
 [ -n "$want" ] || fail "no telemetry block in $values"
 
 # The doc: the fenced yaml between the markers.

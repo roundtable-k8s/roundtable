@@ -35,6 +35,9 @@ has "$on" 'value: "true"' "capture content should default true"
 has "$on" 'name: TRACE_URL_TEMPLATE' "dashboard trace URL missing"
 [ "$(grep -c 'name: TRACE_URL_TEMPLATE' <<<"$on")" = 1 ] || fail "TRACE_URL_TEMPLATE only on dashboard"
 
+esc="$(render --set telemetry.enabled=true --set 'telemetry.resourceAttributes.k=a\,b\=c')"
+has "$esc" 'value: "k=a%2Cb%3Dc"' "resource attribute ',' and '=' not percent-encoded"
+
 off="$(render --set telemetry.enabled=true --set telemetry.captureContent=false)"
 [ "$(grep -A1 'name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' <<<"$off" | grep -c 'value: "false"')" = 3 ] || fail "captureContent=false not honoured"
 lacks "$off" 'OTEL_EXPORTER_OTLP_ENDPOINT' "empty endpoint rendered"

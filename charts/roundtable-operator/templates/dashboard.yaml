@@ -99,12 +99,15 @@ spec:
       {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" .Values.dashboard "selector" (dict "app.kubernetes.io/name" "roundtable-dashboard" "app.kubernetes.io/instance" .Release.Name)) }}
       {{- . | nindent 6 }}
       {{- end }}
+      {{- $sc := deepCopy .Values.dashboard.podSecurityContext }}
+      {{- if and .Values.dashboard.vault.enabled (not (hasKey $sc "fsGroup")) }}
+      {{- $_ := set $sc "fsGroup" ($sc.runAsGroup | default 65532) }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+        {{- toYaml $sc | nindent 8 }}
       containers:
         - name: dashboard
           image: "{{ .Values.images.dashboard.repository }}:{{ .Values.images.dashboard.tag }}"
@@ -180,7 +183,7 @@ spec:
           projected:
             sources:
               - serviceAccountToken:
-                  audience: {{ .Values.gateway.serviceAccountAuth.audience }}
+                  audience: {{ .Values.gateway.serviceAccountAuth.audience | default "roundtable-gateway" | quote }}
                   expirationSeconds: 3600
                   path: token
           {{- else }}

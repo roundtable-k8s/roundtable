@@ -269,10 +269,9 @@ networkPolicy:
     - podSelector: {}
   # Port of the operator's metrics endpoint when it is enabled through
   # extraArgs. Ignored when metrics.enabled is true: the policy then allows
-  # the chart-managed port 8080.
+  # the chart-managed port (metrics.port).
   operatorMetricsPort: 8443
 
-# Dashboard (Round Table UI) — observability platform
 # OpenTelemetry export for the operator, gateway and dashboard (#343). Sets the
 # standard OTEL_* env vars on their Deployments. Off by default.
 telemetry:
@@ -320,6 +319,7 @@ telemetry:
       logs: [debug]
     extraConfig: {}       # merged last, for processors/connectors we don't model
 
+# Dashboard (Round Table UI) — observability platform
 dashboard:
   enabled: true
   replicas: 1
@@ -347,6 +347,12 @@ dashboard:
   vault:
     enabled: true
     claimName: "roundtable-vault"
+  # Pod securityContext (runAsNonRoot and the RuntimeDefault seccomp profile
+  # are always set). When the vault is mounted and fsGroup is not set here, it
+  # defaults to runAsGroup so the pod can read the vault volume.
+  podSecurityContext:
+    runAsUser: 65532
+    runAsGroup: 65532
   # Token the dashboard sends to the gateway (mounted read-only; the dashboard
   # re-reads it on a 401). Empty = the gateway's own token Secret and key.
   gateway:
