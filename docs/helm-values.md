@@ -517,7 +517,9 @@ operator (see "Per-table override" below).
 #### Per-table override
 
 A RoundTable can override these values for its own knights with
-`spec.telemetry`, so tables (tenants) can use different collectors:
+`spec.telemetry`, so tables (tenants) can use different collectors. Unset fields inherit the
+chart values. When the chart sets no `telemetry.otlp.endpoint`, a table needs
+its own `otlpEndpoint` to export traces:
 
 | Field | Effect on the table's knights |
 |-------|-------------------------------|
