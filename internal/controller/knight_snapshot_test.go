@@ -65,6 +65,14 @@ func volumeSnapshotCRD() *apiextensionsv1.CustomResourceDefinition {
 	}
 }
 
+func ptrs(items []unstructured.Unstructured) []*unstructured.Unstructured {
+	out := make([]*unstructured.Unstructured, len(items))
+	for i := range items {
+		out[i] = &items[i]
+	}
+	return out
+}
+
 func snapshotsOf(k *aiv1alpha1.Knight) []unstructured.Unstructured {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK.GroupVersion().WithKind("VolumeSnapshotList"))
@@ -327,6 +335,29 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 				Expect(snapshotsOf(k)).To(HaveLen(2))
 			})
 
+			It("serves the annotation and a due tick in one reconcile", func() {
+				k := schedKnight("snap-sched-both", "0 3 * * *", "", nil)
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				first := daily("").Next(getKnight(k).CreationTimestamp.Time)
+
+				annotateSnapshot(k, "manual")
+				at(r, first.Add(time.Second))
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(2))
+				Expect(snapshotServed(ptrs(snapshotsOf(k)), "manual")).To(BeTrue())
+				Expect(snapshotServed(ptrs(snapshotsOf(k)), fmt.Sprintf("schedule-%d", first.Unix()))).To(BeTrue())
+
+				// Even when the annotation snapshot is taken in the tick's own second.
+				k2 := schedKnight("snap-sched-same", "0 3 * * *", "", nil)
+				defer deleteKnight(k2)
+				first2 := daily("").Next(getKnight(k2).CreationTimestamp.Time)
+				annotateSnapshot(k2, "manual")
+				at(r, first2)
+				reconcileKnight(r, k2)
+				Expect(snapshotsOf(k2)).To(HaveLen(2))
+			})
+
 			It("reports an invalid cron and takes nothing", func() {
 				k := schedKnight("snap-sched-bad", "not a cron", "", nil)
 				defer deleteKnight(k)
@@ -339,6 +370,13 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 				Expect(c).NotTo(BeNil())
 				Expect(c.Status).To(Equal(metav1.ConditionFalse))
 				Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotFailed))
+
+				// With the annotation set the error still shows, and the annotation is served.
+				annotateSnapshot(k, "manual")
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(1))
+				Expect(cond(k).Reason).To(Equal(aiv1alpha1.ReasonSnapshotFailed))
+				Expect(cond(k).Status).To(Equal(metav1.ConditionFalse))
 			})
 
 			It("reports an ephemeral workspace", func() {

@@ -124,6 +124,11 @@ func snapshotSchedule(knight *aiv1alpha1.Knight) (cron.Schedule, error) {
 // time when none is due. Only the latest is returned so a long outage yields
 // one snapshot.
 func latestTick(sched cron.Schedule, after, now time.Time) time.Time {
+	// Bound the walk (a per-minute cron on a long-idle knight): ticks older
+	// than a year are not caught up.
+	if floor := now.AddDate(-1, 0, 0); after.Before(floor) {
+		after = floor
+	}
 	var tick time.Time
 	for t := sched.Next(after); !t.IsZero() && !t.After(now); t = sched.Next(t) {
 		tick = t
@@ -174,12 +179,14 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		return err
 	}
 	if schedErr != nil {
-		// Nothing to retry until the spec changes; report and skip the schedule.
-		r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotFailed, schedErr.Error())
-		if !annotated {
-			return 0, nil
-		}
+		// Nothing to retry until the spec changes: skip the schedule, keep
+		// serving annotations and pruning, and report the error at the end.
 		sched = nil
+	}
+	report := func() {
+		if schedErr != nil {
+			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotFailed, schedErr.Error())
+		}
 	}
 
 	ws := knight.Status.Workspace
@@ -209,6 +216,7 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 
 	if !annotated && tick.IsZero() && len(ws.Snapshots) == 0 {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+		report()
 		return requeue, nil
 	}
 
@@ -216,11 +224,11 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	if err != nil {
 		return requeue, fail(err)
 	}
-	create := func(v string) error {
+	create := func(v, name string) error {
 		if snapshotServed(snaps, v) {
 			return nil
 		}
-		if err := r.createSnapshot(ctx, knight, v); err != nil {
+		if err := r.createSnapshot(ctx, knight, v, name); err != nil {
 			return err
 		}
 		// The new snapshot may not be visible in the cache yet; the
@@ -229,13 +237,13 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		return err
 	}
 	if annotated && value != ws.LastSnapshotRequest {
-		if err := create(value); err != nil {
+		if err := create(value, fmt.Sprintf("%s-ws-%d", knight.Name, r.now().Unix())); err != nil {
 			return requeue, fail(err)
 		}
 		ws.LastSnapshotRequest = value
 	}
 	if !tick.IsZero() {
-		if err := create(tickValue); err != nil {
+		if err := create(tickValue, fmt.Sprintf("%s-ws-sched-%d", knight.Name, tick.Unix())); err != nil {
 			return requeue, fail(err)
 		}
 		t := metav1.NewTime(tick)
@@ -264,6 +272,17 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 	knight.Status.Workspace = ws
 	r.setSnapshotCondition(knight, metav1.ConditionTrue, aiv1alpha1.ReasonSnapshotsReady,
 		fmt.Sprintf("%d workspace snapshot(s)", len(ws.Snapshots)))
+	report()
+	if r.snapshotsLate() {
+		for _, st := range ws.Snapshots {
+			if !st.ReadyToUse {
+				if requeue == 0 || RequeueSlow < requeue {
+					requeue = RequeueSlow
+				}
+				break
+			}
+		}
+	}
 	return requeue, nil
 }
 
@@ -289,12 +308,14 @@ func snapshotServed(snaps []*unstructured.Unstructured, value string) bool {
 	return false
 }
 
-// createSnapshot creates <knight>-ws-<unix-ts> for the workspace PVC. An
-// existing snapshot of that name (same second) counts as created.
-func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha1.Knight, request string) error {
+// createSnapshot creates the named snapshot for the workspace PVC. An
+// existing snapshot of that name counts as created only when it carries the
+// same request label; otherwise it served another request and an error is
+// returned so the request is retried.
+func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha1.Knight, request, name string) error {
 	vs := &unstructured.Unstructured{}
 	vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
-	vs.SetName(fmt.Sprintf("%s-ws-%d", knight.Name, r.now().Unix()))
+	vs.SetName(name)
 	vs.SetNamespace(knight.Namespace)
 	vs.SetLabels(map[string]string{
 		snapshotKnightLabel:            knight.Name,
@@ -311,8 +332,18 @@ func (r *KnightReconciler) createSnapshot(ctx context.Context, knight *aiv1alpha
 	if err := controllerutil.SetControllerReference(knight, vs, r.Scheme); err != nil {
 		return err
 	}
-	if err := r.Create(ctx, vs); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating VolumeSnapshot: %w", err)
+	if err := r.Create(ctx, vs); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating VolumeSnapshot: %w", err)
+		}
+		existing := &unstructured.Unstructured{}
+		existing.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
+		if err := r.Get(ctx, client.ObjectKeyFromObject(vs), existing); err != nil {
+			return fmt.Errorf("checking existing VolumeSnapshot %s: %w", name, err)
+		}
+		if existing.GetLabels()[snapshotRequestLabel] != snapshotRequestHash(request) {
+			return fmt.Errorf("VolumeSnapshot %s already exists for another request", name)
+		}
 	}
 	logf.FromContext(ctx).Info("Workspace snapshot requested", "snapshot", vs.GetName())
 	return nil
