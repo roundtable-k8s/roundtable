@@ -134,10 +134,10 @@ func main() {
 	flag.StringVar(&saNamespaces, "service-account-namespaces", "*",
 		"Comma-separated namespaces whose ServiceAccounts may call the gateway (\"*\" for any).")
 	flag.Float64Var(&saReviewRate, "service-account-review-rate", gateway.DefaultReviewRate,
-		"TokenReviews per second the gateway sends to the API server on average (cache hits excluded); "+
-			"beyond it callers get 429.")
+		"TokenReviews per second each replica sends to the API server on average (cache hits excluded); "+
+			"beyond it callers get 429. A value of 0 or less means the default; the limit cannot be turned off.")
 	flag.IntVar(&saReviewBurst, "service-account-review-burst", gateway.DefaultReviewBurst,
-		"TokenReviews the gateway may send to the API server at once.")
+		"TokenReviews the gateway may send to the API server at once (0 or less means the default). Per replica.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

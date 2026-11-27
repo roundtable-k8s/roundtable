@@ -189,11 +189,19 @@ caller is recorded as `<namespace>/<name>`.
 | Unknown, expired, or issued for another audience | `401` |
 | Authenticated, but not a ServiceAccount, or its namespace is not allowed | `403` |
 | The `TokenReview` itself failed (API server unreachable) | `503`, retry |
+| Too many uncached tokens at once (see below) | `429` with `Retry-After` (seconds), retry |
 
 A success is cached in memory until 30 seconds before the token expires and
 at most 5 minutes, so a deleted pod's or ServiceAccount's token stops working
 within that time. A refusal is cached for 5 seconds. The cache is bounded
 (4096 tokens).
+
+TokenReviews are rate limited so a flood of random tokens cannot overload the
+API server. Cache misses share one bucket per gateway replica, by default 50
+per second with a burst of 100 (`gateway.serviceAccountAuth.reviewRate` and
+`reviewBurst`; 0 means the default, the limit cannot be turned off). Past it
+the gateway answers `429` with `Retry-After`. Cached tokens and static tokens
+are never limited.
 
 > **This first version grants the whole gateway API to any allowed
 > ServiceAccount**: it can invoke any knight, run any invokable chain and

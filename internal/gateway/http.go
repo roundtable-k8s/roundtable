@@ -640,7 +640,7 @@ func (a *TokenAuth) Wrap(next http.Handler) http.Handler {
 				if errors.As(err, &le) {
 					wait = le.wait
 				}
-				a.Log.Info("Refused request: token review rate limit exceeded", "path", r.URL.Path)
+				a.Log.V(1).Info("Refused request: token review rate limit exceeded", "path", r.URL.Path)
 				w.Header().Set("Retry-After", retryAfterSeconds(wait))
 				writeJSON(w, code, map[string]string{"error": "too many token reviews, retry later"})
 			case http.StatusForbidden:
