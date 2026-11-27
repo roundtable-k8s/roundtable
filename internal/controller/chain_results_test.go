@@ -25,7 +25,13 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -349,5 +355,69 @@ func TestApplyStepSuccessStoresUsageInKV(t *testing.T) {
 	}
 	if got["model"] != "m1" || got["cost"] != 0.5 || got["tokens"] == nil {
 		t.Fatalf("kv entry: %v", got)
+	}
+}
+
+// headerFetchNATS serves one result message with the given NATS headers.
+type headerFetchNATS struct {
+	*fakeNATSClient
+	headers nats.Header
+}
+
+type headerMsg struct {
+	*fakeMsg
+	headers nats.Header
+}
+
+func (m *headerMsg) Headers() nats.Header { return m.headers }
+
+func (f *headerFetchNATS) FetchOne(_ context.Context, _ string, cfg jetstream.ConsumerConfig, _ time.Duration) (jetstream.Msg, error) {
+	data, _ := json.Marshal(natspkg.TaskResult{TaskID: "task-1", Output: "ok"})
+	return &headerMsg{fakeMsg: &fakeMsg{subject: cfg.FilterSubject, data: data}, headers: f.headers}, nil
+}
+
+func (f *headerFetchNATS) PublishJSONSeq(string, any) (uint64, error) { return 1, nil }
+
+func (f *headerFetchNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
+	return 1, nil
+}
+
+// The result's consume span is parented on the message's traceparent, and on
+// the run span from ctx when the message carries none.
+func TestPollResult_ParentsConsumeSpanOnResultTraceparent(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP); otel.SetTextMapPropagator(prevProp) })
+
+	tid, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	fromMsg, _ := trace.SpanIDFromHex("b7ad6b7169203331")
+	fromRun, _ := trace.SpanIDFromHex("1111111111111111")
+	runCtx := trace.ContextWithRemoteSpanContext(context.Background(), trace.NewSpanContext(
+		trace.SpanContextConfig{TraceID: tid, SpanID: fromRun, TraceFlags: trace.FlagsSampled, Remote: true}))
+	nc := natsConfig{SubjectPrefix: "p", ResultsStream: "res"}
+
+	for name, tc := range map[string]struct {
+		headers nats.Header
+		want    trace.SpanID
+	}{
+		"header wins":     {nats.Header{"traceparent": {"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}}, fromMsg},
+		"fallback to ctx": {nil, fromRun},
+	} {
+		exp.Reset()
+		fake := &headerFetchNATS{fakeNATSClient: newFakeNATSClient(), headers: tc.headers}
+		r := &ChainReconciler{NATS: natspkg.NewProviderWithClient(fake, logr.Discard())}
+		if res, err := r.pollResult(runCtx, nc, "c", "build", "task-1"); err != nil || res == nil {
+			t.Fatalf("%s: pollResult = %v, %v", name, res, err)
+		}
+		spans := exp.GetSpans()
+		if len(spans) != 1 {
+			t.Fatalf("%s: got %d spans", name, len(spans))
+		}
+		if got := spans[0].Parent.SpanID(); got != tc.want || spans[0].SpanContext.TraceID() != tid {
+			t.Fatalf("%s: parent = %s, want %s (trace %s)", name, got, tc.want, spans[0].SpanContext.TraceID())
+		}
 	}
 }

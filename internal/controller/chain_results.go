@@ -89,6 +89,11 @@ func (r *ChainReconciler) taskDelivered(ctx context.Context, nc natsConfig, knig
 
 // pollResult checks for a result message for a given chain step.
 // If taskID is provided, polls for that exact result subject; otherwise falls back to wildcard.
+//
+// The consume span is parented on the traceparent header of the result
+// message (the knight's span). When the message carries none, it falls back
+// to the span in ctx, which callers set to the run span of the step, item or
+// round (withRunSpan), so the result still joins the Chain's trace.
 func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainName, stepName, taskID string) (*natspkg.TaskResult, error) {
 	log := logf.FromContext(ctx)
 
@@ -180,7 +185,7 @@ func (r *ChainReconciler) collectStepResult(ctx context.Context, chain *aiv1alph
 	// A result already published wins over the deadline (#776): after a
 	// restart or a late read the clock can say "timed out" while a good
 	// result sits in the stream.
-	result, err := r.pollResult(ctx, nc, chain.Name, ss.Name, ss.TaskID)
+	result, err := r.pollResult(withRunSpan(ctx, chain, plainStepSpanKey(ss.Name, ss.TaskID)), nc, chain.Name, ss.Name, ss.TaskID)
 	if err != nil {
 		log.Error(err, "Failed to poll result", "step", ss.Name)
 		result = nil

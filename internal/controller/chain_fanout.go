@@ -489,7 +489,7 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 		var errMsg, output string
 		done := false
 		// A published result wins over the deadline (#776).
-		result, err := r.pollResult(ctx, nc, chain.Name, fmt.Sprintf("%s-%d", ss.Name, idx), it.TaskID)
+		result, err := r.pollResult(withRunSpan(ctx, chain, itemSpanKey(it.TaskID)), nc, chain.Name, fmt.Sprintf("%s-%d", ss.Name, idx), it.TaskID)
 		if err != nil {
 			log.Error(err, "Failed to poll item result", "item", idx)
 			result = nil

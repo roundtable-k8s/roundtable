@@ -640,7 +640,7 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	var structured natspkg.Structured
 	var res *natspkg.TaskResult
 	// A published result wins over the deadline (#776).
-	result, err := r.pollResult(ctx, nc, chain.Name, spec.Name+"-"+bs.Name, bs.TaskID)
+	result, err := r.pollResult(withRunSpan(ctx, chain, roundSpanKey(groupStepSpanKey(spec.Name, ss.StartedAt), bs.Iteration)), nc, chain.Name, spec.Name+"-"+bs.Name, bs.TaskID)
 	if err != nil {
 		log.Error(err, "Failed to poll loop body result")
 		result = nil
