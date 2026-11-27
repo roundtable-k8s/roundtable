@@ -218,7 +218,11 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		idemKey = idempotencyPrefix + idempotencyHash(ns, knightName, req.IdempotencyKey)
 		fingerprint = invokeFingerprint(req)
 		if prior, err := s.Bus.GetIdempotency(ctx, idemKey); err == nil {
-			return s.replayInvoke(ctx, prior, fingerprint)
+			rec, stale, err := s.replayInvoke(ctx, idemKey, prior, fingerprint, wait)
+			if !stale {
+				return rec, err
+			}
+			// An orphaned entry was removed: run this request as a new call.
 		} else if !errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, err)
 		}
@@ -285,13 +289,23 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	}
 
 	if idemKey != "" {
-		prior, err := s.Bus.CreateIdempotency(ctx, idemKey, IdempotencyEntry{TaskID: taskID, Fingerprint: fingerprint})
-		if err != nil {
-			return nil, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, err)
-		}
-		if prior != nil {
+		entry := IdempotencyEntry{TaskID: taskID, Fingerprint: fingerprint, CreatedAt: s.now().UTC()}
+		for attempt := 0; ; attempt++ {
+			prior, err := s.Bus.CreateIdempotency(ctx, idemKey, entry)
+			if err != nil {
+				return nil, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, err)
+			}
+			if prior == nil {
+				break
+			}
 			// A concurrent request with the same key won.
-			return s.replayInvoke(ctx, prior, fingerprint)
+			rec, stale, err := s.replayInvoke(ctx, idemKey, prior, fingerprint, wait)
+			if !stale {
+				return rec, err
+			}
+			if attempt > 0 {
+				return nil, fmt.Errorf("%w: the request with this Idempotency-Key is still being started; retry shortly", ErrUnavailable)
+			}
 		}
 	}
 	// A failed start must not hold the key: the caller's retry should run.
@@ -358,20 +372,65 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	return rec, nil
 }
 
-// replayInvoke answers a repeated Idempotency-Key with the original task.
-func (s *Service) replayInvoke(ctx context.Context, prior *IdempotencyEntry, fingerprint string) (*TaskRecord, error) {
+// orphanGrace is how long an idempotency entry may exist without a task
+// record before it is treated as left by a crashed first call.
+const orphanGrace = 30 * time.Second
+
+// replayInvoke answers a repeated Idempotency-Key with the original task. Like
+// the first call it waits up to wait for a pending task's result. stale is
+// true when the entry was an orphan (no task record after orphanGrace): it is
+// deleted and the caller should proceed as a new call.
+func (s *Service) replayInvoke(ctx context.Context, idemKey string, prior *IdempotencyEntry, fingerprint string, wait time.Duration) (rec *TaskRecord, stale bool, err error) {
 	if prior.Fingerprint != fingerprint {
-		return nil, fmt.Errorf("%w: Idempotency-Key was already used with a different request (task, model or runId)", ErrUnprocessable)
+		return nil, false, fmt.Errorf("%w: Idempotency-Key was already used with a different request (task, model or runId)", ErrUnprocessable)
 	}
-	rec, err := s.GetTask(ctx, prior.TaskID)
+	rec, err = s.GetTask(ctx, prior.TaskID)
 	if errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("%w: the request with this Idempotency-Key is still being started; retry shortly", ErrUnavailable)
+		if !prior.CreatedAt.IsZero() && s.now().Sub(prior.CreatedAt) > orphanGrace {
+			if derr := s.Bus.DeleteIdempotency(context.WithoutCancel(ctx), idemKey); derr != nil {
+				return nil, false, fmt.Errorf("%w: idempotency key: %v", ErrUnavailable, derr)
+			}
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("%w: the request with this Idempotency-Key is still being started; retry shortly", ErrUnavailable)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if !rec.Done() && wait > 0 {
+		s.waitReplay(ctx, rec, wait)
 	}
 	rec.Replayed = true
-	return rec, nil
+	return rec, false, nil
+}
+
+// waitReplay waits up to wait for a pending task's result and completes rec
+// from it.
+func (s *Service) waitReplay(ctx context.Context, rec *TaskRecord, wait time.Duration) {
+	watch, err := s.Bus.Watch(rec.ResultSubject)
+	if err != nil {
+		s.Log.Error(err, "Watching result for replay failed", "taskId", rec.TaskID)
+		return
+	}
+	defer watch.Close()
+	// The result may have landed before the watch existed.
+	if data, err := s.Bus.LastResult(ctx, rec.ResultsStream, rec.ResultSubject); err == nil && data != nil {
+		s.complete(ctx, rec, data)
+		return
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	data, err := watch.Next(wctx)
+	cancel()
+	if err == nil {
+		s.complete(ctx, rec, data)
+		return
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		s.Log.Error(err, "Waiting for replayed result failed", "taskId", rec.TaskID)
+	}
+	if data, err := s.Bus.LastResult(ctx, rec.ResultsStream, rec.ResultSubject); err == nil && data != nil {
+		s.complete(ctx, rec, data)
+	}
 }
 
 // maxIdempotencyKeyLen bounds an Idempotency-Key.

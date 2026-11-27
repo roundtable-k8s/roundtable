@@ -147,3 +147,67 @@ func TestFollowStepActivityAlreadyFollowedSkipsReads(t *testing.T) {
 		t.Fatalf("already followed step cost %d extra reads", got-first)
 	}
 }
+
+func TestInvokeReplayWaitsForResult(t *testing.T) {
+	e := newEnv(t, Options{})
+	zero, wait := 0, 10
+	first, err := e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &zero, IdempotencyKey: "w"})
+	if err != nil || first.Done() {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		close(e.knight.release)
+	}()
+	rec, err := e.svc.Invoke(context.Background(), "operator", InvokeRequest{Task: "hold", TimeoutSeconds: &wait, IdempotencyKey: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Replayed || rec.TaskID != first.TaskID || !rec.Done() || rec.Status != TaskSucceeded {
+		t.Fatalf("replay = %+v, want the finished original task", rec)
+	}
+}
+
+func TestInvokeStaleOrphanKeyIsReplaced(t *testing.T) {
+	e := newEnv(t, Options{})
+	req := InvokeRequest{Task: "hello", IdempotencyKey: "o"}
+	key := idempotencyPrefix + idempotencyHash(testNS, "operator", "o")
+	old := IdempotencyEntry{TaskID: "operator-ghost", Fingerprint: invokeFingerprint(req), CreatedAt: time.Now().Add(-time.Minute)}
+	if prior, err := e.svc.Bus.CreateIdempotency(context.Background(), key, old); err != nil || prior != nil {
+		t.Fatal(prior, err)
+	}
+	rec, err := e.svc.Invoke(context.Background(), "operator", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Replayed || rec.TaskID == "operator-ghost" || e.knight.received() != 1 {
+		t.Fatalf("rec = %+v published=%d, want a new task", rec, e.knight.received())
+	}
+
+	// A fresh orphan still answers 503.
+	req2 := InvokeRequest{Task: "hello", IdempotencyKey: "o2"}
+	key2 := idempotencyPrefix + idempotencyHash(testNS, "operator", "o2")
+	fresh := IdempotencyEntry{TaskID: "operator-ghost", Fingerprint: invokeFingerprint(req2), CreatedAt: time.Now()}
+	_, _ = e.svc.Bus.CreateIdempotency(context.Background(), key2, fresh)
+	if _, err := e.svc.Invoke(context.Background(), "operator", req2); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestInvokePublishFailureReleasesKey(t *testing.T) {
+	e := newEnv(t, Options{})
+	bus := &hookBus{Bus: e.svc.Bus, publishErr: errors.New("no stream")}
+	e.svc.Bus = bus
+	req := InvokeRequest{Task: "hello", IdempotencyKey: "r"}
+	if _, err := e.svc.Invoke(context.Background(), "operator", req); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	bus.publishErr = nil
+	rec, err := e.svc.Invoke(context.Background(), "operator", req)
+	if err != nil || rec.Replayed || rec.Status != TaskSucceeded {
+		t.Fatalf("retry = %+v %v, want a new run", rec, err)
+	}
+	if n := e.knight.received(); n != 1 {
+		t.Fatalf("published %d, want 1", n)
+	}
+}

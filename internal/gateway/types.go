@@ -66,6 +66,9 @@ type InvokeRequest struct {
 type IdempotencyEntry struct {
 	TaskID      string `json:"taskId"`
 	Fingerprint string `json:"fingerprint"`
+	// CreatedAt lets a replay tell an entry whose first call crashed before
+	// storing the task from one still being started. Zero on old entries.
+	CreatedAt time.Time `json:"createdAt,omitempty"`
 }
 
 // TaskRecord is what the gateway stores per invoked task (NATS KV) and
