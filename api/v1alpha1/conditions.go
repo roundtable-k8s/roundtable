@@ -61,7 +61,9 @@ const (
 
 	// ConditionKnightRolloutPending is True while a changed pod template is
 	// not applied because the operator's max concurrent rollouts limit is
-	// reached (ReasonWaitingForOtherRollouts). Removed once the knight rolls.
+	// reached (ReasonWaitingForOtherRollouts) or, with spec.lifecycle.rollout
+	// whenIdle, because the knight still has tasks (ReasonWaitingForIdle).
+	// Removed once the knight rolls.
 	ConditionKnightRolloutPending = "RolloutPending"
 
 	// ConditionKnightRollingUpdate reports the Deployment rollout strategy.
@@ -313,6 +315,11 @@ const (
 	// ReasonWaitingForOtherRollouts indicates the pod rollout is deferred
 	// until fewer knights are rolling out than the configured limit.
 	ReasonWaitingForOtherRollouts = "WaitingForOtherRollouts"
+
+	// ReasonWaitingForIdle indicates a Recreate knight with
+	// spec.lifecycle.rollout whenIdle holds its pod rollout until it has no
+	// queued or in-flight tasks, or rolloutMaxWaitSeconds have passed.
+	ReasonWaitingForIdle = "WaitingForIdle"
 
 	// ReasonToolsImageBuilding indicates the tools image for the new spec is
 	// still building; the pod keeps its current template meanwhile.

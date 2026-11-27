@@ -1,7 +1,24 @@
+/*
+Copyright 2026 dapperdivers.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package controller
 
 import (
 	"context"
+	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -122,3 +139,38 @@ var _ = Describe("Knight RolloutPending condition", func() {
 		Expect(pending(names[0])).To(BeNil())
 	})
 })
+
+// The whenIdle maximum wait counts from the RolloutPending transition time:
+// it must stay put while the knight keeps waiting for the same reason and
+// restart when the reason changes.
+func TestSetRolloutPending_TransitionTime(t *testing.T) {
+	k := &aiv1alpha1.Knight{}
+	t0 := time.Date(2026, 11, 27, 6, 0, 0, 0, time.UTC)
+	since := func() time.Time {
+		c := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
+		if c == nil {
+			t.Fatal("RolloutPending not set")
+		}
+		return c.LastTransitionTime.Time
+	}
+
+	setRolloutPending(k, aiv1alpha1.ReasonWaitingForOtherRollouts, t0, "others")
+	if !since().Equal(t0) {
+		t.Fatalf("transition time %v, want %v", since(), t0)
+	}
+
+	t1 := t0.Add(time.Minute)
+	setRolloutPending(k, aiv1alpha1.ReasonWaitingForIdle, t1, "idle")
+	if !since().Equal(t1) {
+		t.Fatalf("reason change kept transition time %v, want %v", since(), t1)
+	}
+
+	setRolloutPending(k, aiv1alpha1.ReasonWaitingForIdle, t1.Add(time.Minute), "idle")
+	if !since().Equal(t1) {
+		t.Fatalf("same reason moved transition time to %v, want %v", since(), t1)
+	}
+	c := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
+	if c.Reason != aiv1alpha1.ReasonWaitingForIdle || c.Message != "idle" {
+		t.Fatalf("condition %+v", c)
+	}
+}

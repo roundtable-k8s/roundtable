@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -576,4 +577,131 @@ type emptyListClient struct{ client.Client }
 
 func (c *emptyListClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
 	return nil
+}
+
+func TestDeploymentBackend_Reconcile_RolloutWhenIdle(t *testing.T) {
+	ctx := context.Background()
+	start := time.Date(2026, 11, 27, 6, 0, 0, 0, time.UTC)
+
+	setup := func(t *testing.T, busy bool) *DeploymentBackend {
+		t.Helper()
+		s := newTestScheme(t)
+		c := fake.NewClientBuilder().WithScheme(s).Build()
+		b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
+		b.Busy = func(context.Context, *aiv1alpha1.Knight) bool { return busy }
+		b.Now = func() time.Time { return start }
+		require.NoError(t, b.Reconcile(ctx, newTestKnight("kay")))
+		return b
+	}
+	whenIdle := func(maxWait *int32) *aiv1alpha1.Knight {
+		k := bumpedKnight("kay")
+		k.Spec.Lifecycle = &aiv1alpha1.KnightLifecycle{Rollout: aiv1alpha1.RolloutWhenIdle, RolloutMaxWaitSeconds: maxWait}
+		return k
+	}
+	waitingSince := func(k *aiv1alpha1.Knight, at time.Time) {
+		k.Status.Conditions = []metav1.Condition{{
+			Type: aiv1alpha1.ConditionKnightRolloutPending, Status: metav1.ConditionTrue,
+			Reason: aiv1alpha1.ReasonWaitingForIdle, LastTransitionTime: metav1.NewTime(at),
+		}}
+	}
+	image := func(b *DeploymentBackend) string {
+		return getDeploy(t, b, "kay").Spec.Template.Spec.Containers[0].Image
+	}
+
+	t.Run("idle rolls at once", func(t *testing.T) {
+		b := setup(t, false)
+		require.NoError(t, b.Reconcile(ctx, whenIdle(nil)))
+		assert.Contains(t, image(b), ":v2")
+	})
+
+	t.Run("busy waits", func(t *testing.T) {
+		b := setup(t, true)
+		err := b.Reconcile(ctx, whenIdle(nil))
+		require.ErrorIs(t, err, ErrRolloutWaitingForIdle)
+		assert.Contains(t, image(b), ":v1", "held knight keeps its template")
+
+		// Still inside the default maximum wait.
+		k := whenIdle(nil)
+		waitingSince(k, start.Add(-59*time.Minute))
+		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
+		assert.Contains(t, image(b), ":v1")
+	})
+
+	t.Run("busy rolls once idle", func(t *testing.T) {
+		b := setup(t, true)
+		require.ErrorIs(t, b.Reconcile(ctx, whenIdle(nil)), ErrRolloutWaitingForIdle)
+		b.Busy = func(context.Context, *aiv1alpha1.Knight) bool { return false }
+		require.NoError(t, b.Reconcile(ctx, whenIdle(nil)))
+		assert.Contains(t, image(b), ":v2")
+	})
+
+	t.Run("max wait rolls anyway", func(t *testing.T) {
+		b := setup(t, true)
+		k := whenIdle(new(int32(60)))
+		waitingSince(k, start.Add(-30*time.Second))
+		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
+
+		waitingSince(k, start.Add(-60*time.Second))
+		require.NoError(t, b.Reconcile(ctx, k))
+		assert.Contains(t, image(b), ":v2")
+	})
+
+	t.Run("default max wait rolls anyway", func(t *testing.T) {
+		b := setup(t, true)
+		k := whenIdle(nil)
+		waitingSince(k, start.Add(-time.Duration(aiv1alpha1.DefaultRolloutMaxWaitSeconds)*time.Second))
+		require.NoError(t, b.Reconcile(ctx, k))
+		assert.Contains(t, image(b), ":v2")
+	})
+
+	t.Run("a wait for other rollouts does not count", func(t *testing.T) {
+		b := setup(t, true)
+		k := whenIdle(new(int32(60)))
+		k.Status.Conditions = []metav1.Condition{{
+			Type: aiv1alpha1.ConditionKnightRolloutPending, Status: metav1.ConditionTrue,
+			Reason: aiv1alpha1.ReasonWaitingForOtherRollouts, LastTransitionTime: metav1.NewTime(start.Add(-time.Hour)),
+		}}
+		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
+	})
+
+	t.Run("field unset rolls a busy knight at once", func(t *testing.T) {
+		b := setup(t, true)
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("kay")))
+		assert.Contains(t, image(b), ":v2")
+
+		k := bumpedKnight("kay")
+		k.Spec.Image = "ghcr.io/dapperdivers/openclaw-knight:v3"
+		k.Spec.Lifecycle = &aiv1alpha1.KnightLifecycle{Rollout: aiv1alpha1.RolloutImmediate}
+		require.NoError(t, b.Reconcile(ctx, k))
+		assert.Contains(t, image(b), ":v3")
+	})
+
+	t.Run("rolling update knights are not held", func(t *testing.T) {
+		s := newTestScheme(t)
+		c := fake.NewClientBuilder().WithScheme(s).Build()
+		b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(1, appsv1.RollingUpdateDeploymentStrategyType))
+		b.Busy = func(context.Context, *aiv1alpha1.Knight) bool { return true }
+		require.NoError(t, b.Reconcile(ctx, newTestKnight("kay")))
+		require.NoError(t, b.Reconcile(ctx, whenIdle(nil)))
+		assert.Contains(t, image(b), ":v2")
+	})
+
+	t.Run("unchanged template and new deployments are not held", func(t *testing.T) {
+		b := setup(t, true)
+		k := newTestKnight("kay")
+		k.Spec.Lifecycle = &aiv1alpha1.KnightLifecycle{Rollout: aiv1alpha1.RolloutWhenIdle}
+		require.NoError(t, b.Reconcile(ctx, k), "same template")
+
+		fresh := whenIdle(nil)
+		fresh.Name = "lancelot"
+		require.NoError(t, b.Reconcile(ctx, fresh), "create")
+	})
+
+	t.Run("scaled to zero knights are not held", func(t *testing.T) {
+		b := setup(t, true)
+		d := getDeploy(t, b, "kay")
+		d.Spec.Replicas = new(int32(0))
+		require.NoError(t, b.Client.Update(ctx, d))
+		require.NoError(t, b.Reconcile(ctx, whenIdle(nil)))
+	})
 }

@@ -1577,6 +1577,28 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                  rollout:
+                    description: |-
+                      rollout controls when a changed pod template is applied to a knight
+                      whose Deployment uses the Recreate strategy (it mounts a ReadWriteOnce
+                      workspace), where rolling deletes the running pod and its in-flight
+                      tasks. immediate (the default when unset) rolls at once. whenIdle holds
+                      the change while the knight's task consumer has queued or in-flight
+                      tasks, for at most rolloutMaxWaitSeconds, then rolls anyway. The wait is
+                      reported as condition RolloutPending reason WaitingForIdle. Ignored for
+                      RollingUpdate knights, which drain the old pod while the new one starts.
+                    enum:
+                    - immediate
+                    - whenIdle
+                    type: string
+                  rolloutMaxWaitSeconds:
+                    description: |-
+                      rolloutMaxWaitSeconds bounds how long rollout whenIdle holds a pod
+                      template change while the knight is busy (default 3600).
+                    format: int32
+                    maximum: 86400
+                    minimum: 1
+                    type: integer
                   scaleDownStabilizationSeconds:
                     description: |-
                       scaleDownStabilizationSeconds is the HPA scale-down stabilization

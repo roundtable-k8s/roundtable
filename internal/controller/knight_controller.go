@@ -412,17 +412,17 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			err = r.reconcileDeployment(ctx, knight)
 		}
 		switch {
+		case errors.Is(err, rtruntime.ErrRolloutWaitingForIdle):
+			rolloutDeferred = true
+			log.Info("Holding pod rollout until the knight is idle", "reason", err.Error())
+			setRolloutPending(knight, aiv1alpha1.ReasonWaitingForIdle, r.now(),
+				"Waiting for the knight's queued and in-flight tasks to finish (spec.lifecycle.rollout whenIdle)")
 		case errors.Is(err, rtruntime.ErrRolloutDeferred):
 			rolloutDeferred = true
 			log.Info("Deferring pod rollout", "reason", err.Error())
-			meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
-				Type:   aiv1alpha1.ConditionKnightRolloutPending,
-				Status: metav1.ConditionTrue,
-				Reason: aiv1alpha1.ReasonWaitingForOtherRollouts,
-				Message: fmt.Sprintf("Waiting for other knight rollouts to finish (limit %d concurrent)",
-					r.MaxConcurrentRollouts),
-				ObservedGeneration: knight.Generation,
-			})
+			setRolloutPending(knight, aiv1alpha1.ReasonWaitingForOtherRollouts, r.now(),
+				fmt.Sprintf("Waiting for other knight rollouts to finish (limit %d concurrent)",
+					r.MaxConcurrentRollouts))
 		case err != nil:
 			reconcileErr = err
 			log.Error(err, "Failed to reconcile runtime", "backend", knight.Spec.Runtime)
@@ -497,6 +497,23 @@ func (r *KnightReconciler) now() time.Time {
 		return r.Now()
 	}
 	return time.Now()
+}
+
+// setRolloutPending sets the RolloutPending condition. A change of reason
+// restarts LastTransitionTime, which the whenIdle maximum wait counts from.
+func setRolloutPending(knight *aiv1alpha1.Knight, reason string, now time.Time, msg string) {
+	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending); c != nil &&
+		c.Reason != reason {
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
+	}
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightRolloutPending,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: knight.Generation,
+		LastTransitionTime: metav1.NewTime(now),
+	})
 }
 
 // wakingRequeue is how often a waking knight is re-checked.
@@ -919,6 +936,9 @@ func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
 	if r.APIReader != nil {
 		b.Reader = r.APIReader // uncached: a cold cache must not hide mid-rollout knights
 	}
+
+	b.Busy = r.hasPendingTasks
+	b.Now = r.now
 	return b
 }
 

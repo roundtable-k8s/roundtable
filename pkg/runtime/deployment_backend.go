@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -71,12 +73,26 @@ type DeploymentBackend struct {
 	// cache can lag and miss mid-rollout Deployments, letting more than
 	// MaxConcurrentRollouts roll. Nil falls back to Client.
 	Reader client.Reader
+
+	// Busy reports whether the knight's task consumer has queued or
+	// in-flight tasks. spec.lifecycle.rollout whenIdle holds a Recreate
+	// knight's template change while it returns true. Nil means never busy.
+	Busy func(ctx context.Context, knight *aiv1alpha1.Knight) bool
+
+	// Now is the clock for the whenIdle maximum wait (nil means time.Now).
+	Now func() time.Time
 }
 
 // ErrRolloutDeferred is returned (wrapped) by Reconcile when a changed pod
 // template was not applied because MaxConcurrentRollouts other knights are
 // still rolling out. The Deployment is left untouched; retry later.
 var ErrRolloutDeferred = errors.New("rollout deferred: waiting for other knight rollouts")
+
+// ErrRolloutWaitingForIdle is returned (wrapped) by Reconcile when a Recreate
+// knight with spec.lifecycle.rollout whenIdle has a changed pod template but
+// still has tasks, and the maximum wait has not passed. The Deployment is
+// left untouched; retry later.
+var ErrRolloutWaitingForIdle = errors.New("rollout deferred: waiting for the knight to be idle")
 
 // NewDeploymentBackend creates a new DeploymentBackend.
 func NewDeploymentBackend(
@@ -138,6 +154,9 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 	if strategy.Type == "" {
 		strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	}
+	if err := b.gateIdle(ctx, knight, strategy, desiredHash); err != nil {
+		return err
+	}
 	if err := b.gateRollout(ctx, knight, desiredHash); err != nil {
 		return err
 	}
@@ -193,6 +212,55 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		"defaultImage", b.DefaultImage,
 		"resolvedImage", deploy.Spec.Template.Spec.Containers[0].Image)
 	return nil
+}
+
+// gateIdle returns ErrRolloutWaitingForIdle when a Recreate knight with
+// spec.lifecycle.rollout whenIdle would get a new pod template while Busy,
+// until the wait (counted from the RolloutPending WaitingForIdle condition)
+// reaches rolloutMaxWaitSeconds. New Deployments, unchanged templates and
+// scaled-to-zero knights are never held.
+func (b *DeploymentBackend) gateIdle(
+	ctx context.Context, knight *aiv1alpha1.Knight, strategy appsv1.DeploymentStrategy, desiredHash string,
+) error {
+	lc := knight.Spec.Lifecycle
+	if lc == nil || lc.Rollout != aiv1alpha1.RolloutWhenIdle ||
+		strategy.Type != appsv1.RecreateDeploymentStrategyType || b.Busy == nil {
+		return nil
+	}
+	existing := &appsv1.Deployment{}
+	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, existing)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get deployment: %w", err)
+	}
+	if existing.Spec.Template.Annotations[specHashAnnotation] == desiredHash || isScaledToZero(existing) {
+		return nil
+	}
+	if !b.Busy(ctx, knight) {
+		return nil
+	}
+	maxWait := time.Duration(aiv1alpha1.DefaultRolloutMaxWaitSeconds) * time.Second
+	if lc.RolloutMaxWaitSeconds != nil {
+		maxWait = time.Duration(*lc.RolloutMaxWaitSeconds) * time.Second
+	}
+	now := time.Now()
+	if b.Now != nil {
+		now = b.Now()
+	}
+	waited := time.Duration(0)
+	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending); c != nil &&
+		c.Status == metav1.ConditionTrue && c.Reason == aiv1alpha1.ReasonWaitingForIdle {
+		waited = now.Sub(c.LastTransitionTime.Time)
+	}
+	if waited >= maxWait {
+		logf.FromContext(ctx).Info("Rolling busy knight: rollout whenIdle maximum wait passed",
+			"knight", knight.Name, "maxWait", maxWait.String())
+		return nil
+	}
+	return fmt.Errorf("%w (waited %s of %s)", ErrRolloutWaitingForIdle,
+		waited.Truncate(time.Second), maxWait)
 }
 
 // gateRollout returns ErrRolloutDeferred when applying desiredHash to the
