@@ -964,3 +964,50 @@ func TestListKnightsLoadRealConsumer(t *testing.T) {
 		t.Fatalf("operator queue = %v", q)
 	}
 }
+
+// Admit runs only when the idempotency lookup finds no earlier task: a replay
+// returns the earlier task without asking, and a declined new invoke returns
+// the Admit error unchanged, publishing nothing.
+func TestInvokeAdmitAfterReplayAndDeclined(t *testing.T) {
+	e := newEnv(t, Options{})
+	published := 0
+	e.svc.Bus = publishCounter{Bus: e.svc.Bus, n: &published}
+	zero := 0
+	ctx := context.Background()
+	first, err := e.svc.Invoke(ctx, "operator", InvokeRequest{Task: "hello", IdempotencyKey: "k-admit", TimeoutSeconds: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted := 0
+	admit := func() error { admitted++; return ErrDeclined }
+
+	replay, err := e.svc.Invoke(ctx, "operator", InvokeRequest{Task: "hello", IdempotencyKey: "k-admit", TimeoutSeconds: &zero, Admit: admit})
+	if err != nil || replay.TaskID != first.TaskID {
+		t.Fatalf("replay = %v, %v; want task %s", replay, err, first.TaskID)
+	}
+	if admitted != 0 {
+		t.Fatalf("Admit ran %d times on a replay, want 0", admitted)
+	}
+
+	_, err = e.svc.Invoke(ctx, "operator", InvokeRequest{Task: "hello", IdempotencyKey: "k-new", TimeoutSeconds: &zero, Admit: admit})
+	if !errors.Is(err, ErrDeclined) {
+		t.Fatalf("declined invoke error = %v, want ErrDeclined", err)
+	}
+	if admitted != 1 {
+		t.Fatalf("Admit ran %d times, want 1", admitted)
+	}
+	if published != 1 {
+		t.Fatalf("published %d tasks after a declined invoke, want 1", published)
+	}
+}
+
+// publishCounter counts the tasks the gateway publishes.
+type publishCounter struct {
+	Bus
+	n *int
+}
+
+func (b publishCounter) Publish(ctx context.Context, subject string, p natspkg.TaskPayload, table string) error {
+	*b.n++
+	return b.Bus.Publish(ctx, subject, p, table)
+}

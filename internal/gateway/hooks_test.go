@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,8 +35,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +49,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -477,6 +481,24 @@ func TestHookShortCredentialLooksLikeBadToken(t *testing.T) {
 	}
 }
 
+// The short credential is refused like a bad one, but the operator's log says
+// why: the secret key is shorter than minTokenLength.
+func TestHookShortCredentialLogsReason(t *testing.T) {
+	e := newHookEnv(t, HookOptions{}, true)
+	var reasons []string
+	e.svc.Log = funcr.New(func(_, args string) { reasons = append(reasons, args) }, funcr.Options{})
+	if resp, _ := e.post(t, "/v1/hooks/"+testNS+"/short", []byte(`{}`), map[string]string{"Authorization": "Bearer too-short"}); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", resp.StatusCode)
+	}
+	want := fmt.Sprintf("must hold at least %d characters", minTokenLength)
+	for _, r := range reasons {
+		if strings.Contains(r, "Refused webhook: Trigger credential unusable") && strings.Contains(r, want) {
+			return
+		}
+	}
+	t.Fatalf("no refusal reason containing %q in logs %q", want, reasons)
+}
+
 // countingReader counts Gets of Triggers.
 type countingReader struct {
 	client.Reader
@@ -599,7 +621,51 @@ func TestHookTableCached(t *testing.T) {
 	for range 2 {
 		e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), h)
 	}
+	const route = "POST /v1/hooks/{namespace}/{trigger}"
+	before := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(route, "429", "dev", callerNone))
 	if resp, _ := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), h); resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status %d, want 429", resp.StatusCode)
+	}
+	if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(route, "429", "dev", callerNone)); got != before+1 {
+		t.Fatalf("429 requests with table dev = %v after one more, want %v", got, before+1)
+	}
+}
+
+// chainFailer fails Gets of Chains with a transient error while *fail is set.
+type chainFailer struct {
+	client.Reader
+	fail *bool
+}
+
+func (r chainFailer) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*aiv1alpha1.Chain); ok && *r.fail {
+		return apierrors.NewServiceUnavailable("apiserver busy")
+	}
+	return r.Reader.Get(ctx, key, obj, opts...)
+}
+
+// A transient Chain Get failure answers with the Trigger's own table for this
+// request only; the next request resolves the target and gets its table.
+func TestHookTableTransientFailureNotCached(t *testing.T) {
+	e := newHookEnv(t, HookOptions{}, true)
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { return clock }
+	fail := true
+	e.svc.Hooks = chainFailer{Reader: e.svc.Hooks, fail: &fail}
+	trg := hookTrigger(testNS, "alerts2", aiv1alpha1.TriggerWebhookAuth{})
+	trg.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: "own"}
+	trg.Spec.Target.ChainRef.Name = "tabled"
+	ctx := context.Background()
+	if got := e.svc.hookTable(ctx, trg); got != "own" {
+		t.Fatalf("table during the failure = %q, want the trigger's own", got)
+	}
+	fail = false
+	if got := e.svc.hookTable(ctx, trg); got != "dev" {
+		t.Fatalf("table after the failure = %q, want the chain's dev (failure must not be cached)", got)
+	}
+	// The resolved table is cached now: a further failure does not change it.
+	fail = true
+	if got := e.svc.hookTable(ctx, trg); got != "dev" {
+		t.Fatalf("table from the cache = %q, want dev", got)
 	}
 }

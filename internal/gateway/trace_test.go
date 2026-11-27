@@ -136,6 +136,24 @@ func (b *spyBus) Publish(ctx context.Context, subject string, p natspkg.TaskPayl
 	return b.Bus.Publish(ctx, subject, p, table)
 }
 
+// A request no route matched is named just its HTTP method, so a scanner's
+// paths cannot grow the span-name set.
+func TestInstrumentUnmatchedSpanNamedByMethod(t *testing.T) {
+	exp := installTracer(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/things/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := instrument(mux, logr.Discard())
+
+	serve(h, "/wp-admin/setup.php", nil)
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	if spans[0].Name != "GET" {
+		t.Fatalf("unmatched span name = %q, want %q", spans[0].Name, "GET")
+	}
+}
+
 func TestInvokePublishesInRequestSpanAndReturnsTraceID(t *testing.T) {
 	exp := installTracer(t)
 	e := newEnv(t, Options{})
