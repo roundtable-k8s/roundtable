@@ -489,15 +489,17 @@ func TestTableSuspendReadsEachScheduleOnce(t *testing.T) {
 	if _, err := e.svc.SuspendSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS}); err != nil {
 		t.Fatal(err)
 	}
-	// One list for the table plus one fetch per schedule (t-a, t-b), and no
-	// separate read to detect the change.
-	list := cc.gets
+	// The table is listed with List (not counted); each schedule (t-a, t-b) is
+	// fetched once, and no separate read detects the change.
+	if cc.gets != 2 {
+		t.Errorf("suspend Gets = %d, want 2", cc.gets)
+	}
 	cc.gets = 0
 	if _, err := e.svc.ResumeSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS}); err != nil {
 		t.Fatal(err)
 	}
-	if cc.gets != list {
-		t.Errorf("resume Gets = %d, suspend Gets = %d", cc.gets, list)
+	if cc.gets != 2 {
+		t.Errorf("resume Gets = %d, want 2", cc.gets)
 	}
 }
 
