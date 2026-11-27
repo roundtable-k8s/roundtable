@@ -29,28 +29,35 @@ It ships in the chart and is on by default (`dashboard.enabled: true`).
 
 ## What it can change
 
-The dashboard reads Kubernetes with its own ServiceAccount and Role. The Role
-is read-only on pods, pod logs, events, Deployments, HorizontalPodAutoscalers,
-ScaledObjects, Knights, Chains, RoundTables, Triggers and Missions
-(`charts/roundtable-operator/templates/dashboard.yaml`). It never writes to
-the Kubernetes API itself.
+The dashboard reads Kubernetes with its own ServiceAccount and Role
+(`charts/roundtable-operator/templates/dashboard.yaml`). The Role is read-only
+on pods, pod logs, events, Deployments, ReplicaSets, HorizontalPodAutoscalers,
+ScaledObjects (when KEDA is installed), pod metrics (when the metrics API is
+installed), Knights, Chains, RoundTables and Triggers.
+
+**The one exception is Missions: the Role also grants `create`, `update`,
+`patch` and `delete` on them.** The dashboard API's `POST /api/missions` and
+`DELETE /api/missions/{name}` create and delete Mission resources directly
+through the Kubernetes API, not through the gateway, so they work even when
+`gateway.enabled` is false.
 
 It reads results and queues from NATS (`dashboard.env.NATS_URL`).
 
-Everything it changes goes through the [invoke gateway](gateway.md), using the
+All other changes go through the [invoke gateway](gateway.md), using the
 `GATEWAY_URL` and `GATEWAY_TOKEN_FILE` the chart sets when `gateway.enabled`
 is true:
 
-- chat messages and task launches, including Mission launch
+- chat messages and task dispatch
+- Chain run and Chain run cancel
 - dead-letter retry on `/failed`
-- schedule create, replace, delete, suspend and resume
+- schedule create, replace, delete, suspend, resume and run-now
 
 The gateway token is the gateway's own token Secret by default. Set
 `dashboard.gateway.tokenSecret` / `dashboard.gateway.tokenKey` for a separate
 one, or `dashboard.gateway.serviceAccountToken: true` to send a projected
 ServiceAccount token instead (this needs `gateway.serviceAccountAuth.enabled`).
-Without the gateway the pages that read still work, and the pages that write
-do not.
+Without the gateway the read pages and Mission create and delete still work;
+the pages that go through the gateway do not.
 
 ## One fleet
 
@@ -70,8 +77,9 @@ quickstart does (`values-minimal.yaml`).
 ## Reaching it
 
 - **Port-forward** (the quickstart way):
-  `kubectl -n roundtable port-forward svc/roundtable-operator-dashboard 8080:80`.
-  The Service is a ClusterIP named `<fullname>-dashboard`.
+  `kubectl -n <namespace> port-forward svc/<fullname>-dashboard 8080:80`
+  (the quickstart release is `roundtable-operator`, so the Service there is
+  `roundtable-operator-dashboard`). The Service is a ClusterIP.
 - **Ingress**: set `dashboard.ingress.enabled`, `dashboard.ingress.host`,
   and optionally `dashboard.ingress.className` and `dashboard.ingress.annotations`.
 - **NetworkPolicy**: when the chart's network policies are on, only the
@@ -80,8 +88,9 @@ quickstart does (`values-minimal.yaml`).
 
 ## Who can use it
 
-The dashboard can launch tasks, retry dead letters and edit schedules. Treat
-anyone who can reach it as able to do those things.
+The dashboard can launch tasks, run and cancel Chains, retry dead letters,
+edit schedules, and create and delete Missions. Treat anyone who can reach it
+as able to do all of those things.
 
 **It has no login unless `DASHBOARD_API_KEY` is set.** The dashboard API reads
 that environment variable at start-up:
