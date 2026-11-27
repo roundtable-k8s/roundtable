@@ -183,14 +183,24 @@ func prURLs(v any) string {
 // structured result (KV entry, else the prose fallback over out).
 func (r *ChainReconciler) fillStructured(ctx context.Context, chain *aiv1alpha1.Chain, d map[string]any, key, out string) {
 	prs, verdict := r.structuredVars(ctx, chain, key, out, true)
+	list := templatePRs(prs)
+	d["PRs"] = list
+	d["Verdict"] = verdict
+}
+
+// templatePRs converts the structuredVars PR maps to template values. Missing
+// or mistyped fields yield zero values rather than panicking.
+func templatePRs(prs []any) []templatePR {
 	list := make([]templatePR, 0, len(prs))
 	for _, p := range prs {
 		m, _ := p.(map[string]any)
 		n, _ := m["number"].(int64)
-		list = append(list, templatePR{URL: m["url"].(string), Repo: m["repo"].(string), Number: int(n), State: m["action"].(string)})
+		url, _ := m["url"].(string)
+		repo, _ := m["repo"].(string)
+		action, _ := m["action"].(string)
+		list = append(list, templatePR{URL: url, Repo: repo, Number: int(n), State: action})
 	}
-	d["PRs"] = list
-	d["Verdict"] = verdict
+	return list
 }
 
 // templateWantsStructured reports whether a task template may use the

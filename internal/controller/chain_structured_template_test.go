@@ -52,3 +52,14 @@ func TestRenderTemplateStructuredEmpty(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestTemplatePRsMissingFields(t *testing.T) {
+	got := templatePRs([]any{
+		map[string]any{"number": int64(3)},
+		map[string]any{"url": 5, "repo": nil},
+		"not a map",
+	})
+	if len(got) != 3 || got[0] != (templatePR{Number: 3}) || got[1] != (templatePR{}) || got[2] != (templatePR{}) {
+		t.Errorf("got %+v", got)
+	}
+}

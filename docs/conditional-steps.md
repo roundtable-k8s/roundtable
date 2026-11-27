@@ -125,7 +125,9 @@ output when it reports none):
 
 `.State` is what the task did with the PR (`opened`, `updated`, ...) and is
 empty when the knight did not say. A step that did not succeed, has no
-structured result or does not exist renders the empty values, never an error.
+structured result renders the empty values, never an error. A step that does
+not exist is not in the template data at all, so `{{ .Steps.<missing>.Verdict }}`
+renders `<no value>` (also never an error); check the step name.
 The fields work in plain steps, `forEach` item tasks and loop bodies, and in
 `.Loop.Steps.<body>` for the other body steps of the loop.
 

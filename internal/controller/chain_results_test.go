@@ -273,6 +273,9 @@ func TestChainReconciler_ConcurrentChains(t *testing.T) {
 				if _, err := r.pollResult(context.Background(), nc, name, "build", "task-"+name); err != nil {
 					t.Error(err)
 				}
+				ch := &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
+					Spec: aiv1alpha1.ChainSpec{Schedule: "0 0 * * *"}}
+				r.reconcileSchedule(context.Background(), ch)
 				r.removeCronEntry(types.NamespacedName{Namespace: "ns", Name: name})
 			}
 		})

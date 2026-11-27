@@ -582,6 +582,30 @@ func TestApplyStepErrorProviderOverloaded(t *testing.T) {
 	}
 }
 
+// A transient result reaches ss.TransientReason and the Warning event through
+// applyStepResult, the reconcile-level entry point.
+func TestApplyStepResultTransientReasonAndEvent(t *testing.T) {
+	rec := record.NewFakeRecorder(20)
+	r := &ChainReconciler{Recorder: rec, ProviderMaxRetries: 4}
+	chain := &aiv1alpha1.Chain{}
+	spec := &aiv1alpha1.ChainStep{Name: "s"}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "s"}
+	res := &natspkg.TaskResult{Error: "connection reset", Transient: true, TransientReason: "network"}
+	r.applyStepResult(context.Background(), natsConfig{}, chain, spec, ss, res)
+	if ss.Phase != aiv1alpha1.ChainStepPhaseDeferred || ss.TransientReason != "network" {
+		t.Fatalf("phase=%s reason=%q", ss.Phase, ss.TransientReason)
+	}
+	var ev string
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "StepProviderOverloaded") {
+			ev = e
+		}
+	}
+	if !strings.HasPrefix(ev, "Warning ") || !strings.Contains(ev, "(network;") {
+		t.Fatalf("event = %q", ev)
+	}
+}
+
 func TestApplyStepErrorOrdinaryNotRetried(t *testing.T) {
 	r := &ChainReconciler{Recorder: record.NewFakeRecorder(20), ProviderMaxRetries: 4}
 	ss := &aiv1alpha1.ChainStepStatus{Name: "s"}
