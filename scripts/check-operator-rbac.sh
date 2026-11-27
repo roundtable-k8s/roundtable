@@ -22,6 +22,10 @@ ALLOWED_CHART_ONLY=(
   '^ai\.roundtable\.io [a-z]+/(status|finalizers) '
 )
 
+fail() { echo "FAIL: $*" >&2; exit 1; }
+command -v yq >/dev/null 2>&1 || fail "yq (v4) is required"
+yq --version 2>&1 | grep -Eq 'version v?4\.' || fail "yq v4 is required (mikefarah/yq), found: $(yq --version 2>&1 | head -1)"
+
 triples() { # yq-expression file-or-stdin -> sorted "group resource verb" lines
   yq eval-all '[.] | .[] | select(.kind == "ClusterRole" or .kind == "Role") | .rules[] |
     . as $r | $r.apiGroups[] as $g | $r.resources[] as $res | $r.verbs[] as $v |

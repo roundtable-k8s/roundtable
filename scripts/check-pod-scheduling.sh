@@ -17,9 +17,19 @@ def="$(render)"
 # The gateway also serves /healthz and /readyz, so compare against probes off.
 [ "$(count "$def" 'path: /healthz')" = 2 ] || fail "operator liveness probe missing"
 [ "$(count "$def" 'path: /readyz')" = 2 ] || fail "operator readiness probe missing"
-[ "$(count "$def" 'port: 8081')" = 2 ] || fail "operator probes not on port 8081"
+# Count only inside the operator Deployment document, so other templates may use 8081.
+opdep="$(awk -v RS='\n---\n' '/kind: Deployment/ && /path: \/healthz/ && /name: manager/' <<<"$def")"
+[ "$(count "$opdep" 'port: 8081')" = 2 ] || fail "operator probes not on port 8081"
 lacks "$def" 'topologySpreadConstraints' "constraints rendered by default"
 lacks "$def" 'kind: PodDisruptionBudget' "PDB rendered by default"
+lacks "$def" 'timeoutSeconds' "probe timeoutSeconds rendered by default"
+lacks "$def" 'failureThreshold' "probe failureThreshold rendered by default"
+pt="$(render --set probes.liveness.timeoutSeconds=4 --set probes.liveness.failureThreshold=6 \
+  --set probes.readiness.timeoutSeconds=2 --set probes.readiness.failureThreshold=5)"
+has "$pt" 'timeoutSeconds: 4' "liveness timeoutSeconds missing"
+has "$pt" 'failureThreshold: 6' "liveness failureThreshold missing"
+has "$pt" 'timeoutSeconds: 2' "readiness timeoutSeconds missing"
+has "$pt" 'failureThreshold: 5' "readiness failureThreshold missing"
 off="$(render --set probes.enabled=false)"
 [ "$(count "$off" 'path: /healthz')" = 1 ] || fail "probes rendered while disabled"
 

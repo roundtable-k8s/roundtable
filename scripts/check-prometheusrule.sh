@@ -54,8 +54,12 @@ grep -q 'sum by (namespace, table, route) (increase(roundtable_gateway_requests_
   || fail "gateway rule does not keep route and table"
 ! grep -qE 'sum by \(namespace, table\) \(increase\(roundtable_gateway' <<<"$on" \
   || fail "gateway rule aggregates away route"
-grep -q 'sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="rtns"}\[10m\])) > 0' <<<"$on" \
+grep -q 'sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="rtns", job="rt-roundtable-operator-metrics"}\[10m\])) > 0' <<<"$on" \
   || fail "RoundtableReconcileErrors expr missing"
+oj="$(render --set alerts.enabled=true "${api[@]}" --set alerts.operatorJob=my-op --set alerts.gatewayMinRequests=50 --namespace rtns)"
+grep -q 'reconcile_errors_total{namespace="rtns", job="my-op"}' <<<"$oj" || fail "alerts.operatorJob not applied"
+grep -q '\[15m\])) >= 50$' <<<"$oj" || fail "alerts.gatewayMinRequests not applied"
+grep -q '\[15m\])) >= 20$' <<<"$on" || fail "default gatewayMinRequests not 20"
 grep -q 'roundtable.operator' <<<"$on" || fail "roundtable.operator group missing"
 grep -q 'roundtable.platform' <<<"$on" || fail "roundtable.platform group missing"
 grep -q 'for: 15m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$on")" || fail "default knightNotReadyMinutes not 15m"

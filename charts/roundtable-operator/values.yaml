@@ -56,12 +56,18 @@ topologySpreadConstraints: []
 probes:
   enabled: true
   port: 8081
+  # timeoutSeconds and failureThreshold are omitted unless set (Kubernetes
+  # defaults: 1 and 3).
   liveness:
     initialDelaySeconds: 15
     periodSeconds: 20
+    # timeoutSeconds: 1
+    # failureThreshold: 3
   readiness:
     initialDelaySeconds: 5
     periodSeconds: 10
+    # timeoutSeconds: 1
+    # failureThreshold: 3
 priorityClassName: ""
 # Pull secrets for the operator, gateway, dashboard and collector pods,
 # e.g. [{name: regcred}]. Knight pods are configured on the Knight.
@@ -752,9 +758,16 @@ alerts:
   # before RoundtableScheduleMissed fires.
   scheduleMissedSeconds: 600
   # Share (0-1) of a gateway route's requests over 15m that are 5xx above which
-  # RoundtableGatewayErrors fires. Routes with fewer than 20 requests in 15m are
-  # ignored, so one failed request does not page.
+  # RoundtableGatewayErrors fires. Routes with fewer than gatewayMinRequests
+  # requests in 15m are ignored, so one failed request does not page.
   gatewayErrorRatio: 0.05
+  gatewayMinRequests: 20
+  # Prometheus `job` label of the operator's metrics target, which
+  # RoundtableReconcileErrors selects so another controller-runtime binary in the
+  # release namespace does not raise it. Empty uses the default job name of the
+  # operator metrics Service, <fullname>-metrics; set it if the ServiceMonitor
+  # uses jobLabel or the target is relabelled.
+  operatorJob: ""
   # Knight NATS reconnects over 30m above which KnightNatsFlapping fires.
   natsReconnectsPer30m: 3
   # Minutes a github-source Trigger may hold a repository back because of an

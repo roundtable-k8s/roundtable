@@ -205,12 +205,24 @@ spec:
               port: {{ .Values.probes.port }}
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            {{- with .Values.probes.liveness.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.probes.liveness.failureThreshold }}
+            failureThreshold: {{ . }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: {{ .Values.probes.port }}
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            {{- with .Values.probes.readiness.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.probes.readiness.failureThreshold }}
+            failureThreshold: {{ . }}
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
