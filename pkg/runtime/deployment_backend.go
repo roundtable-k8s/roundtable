@@ -65,6 +65,12 @@ type DeploymentBackend struct {
 	// may be mid-rollout when another one's pod template changes. 0 means
 	// unlimited (the default).
 	MaxConcurrentRollouts int
+
+	// Reader lists the namespace's Deployments for the rollout gate. Set it
+	// to an uncached reader: right after an operator restart the informer
+	// cache can lag and miss mid-rollout Deployments, letting more than
+	// MaxConcurrentRollouts roll. Nil falls back to Client.
+	Reader client.Reader
 }
 
 // ErrRolloutDeferred is returned (wrapped) by Reconcile when a changed pod
@@ -209,7 +215,11 @@ func (b *DeploymentBackend) gateRollout(ctx context.Context, knight *aiv1alpha1.
 		return nil
 	}
 	list := &appsv1.DeploymentList{}
-	if err := b.Client.List(ctx, list, client.InNamespace(knight.Namespace),
+	var reader client.Reader = b.Client
+	if b.Reader != nil {
+		reader = b.Reader
+	}
+	if err := reader.List(ctx, list, client.InNamespace(knight.Namespace),
 		client.MatchingLabels{"app.kubernetes.io/name": "knight", "app.kubernetes.io/managed-by": "roundtable-operator"},
 	); err != nil {
 		return fmt.Errorf("failed to list knight deployments: %w", err)

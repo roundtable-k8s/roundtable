@@ -660,6 +660,8 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 	knight.Status.Ready = false
 	// A suspended knight is not parked: drop a stale RuntimeAvailable=False.
 	r.setRuntimeAvailable(knight)
+	// A suspended knight rolls nothing: drop a stale RolloutPending.
+	meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,
@@ -681,6 +683,8 @@ func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alph
 	knight.Status.Ready = false
 	// A suspended knight is not parked: drop a stale RuntimeAvailable=False.
 	r.setRuntimeAvailable(knight)
+	// A suspended knight rolls nothing: drop a stale RolloutPending.
+	meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,
@@ -909,6 +913,9 @@ func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
 	b := rtruntime.NewDeploymentBackend(r.Client, r.Scheme, r.DefaultImage, r.BuildDeploymentSpec)
 	b.Autoscaled = r.isAutoscaled
 	b.MaxConcurrentRollouts = r.MaxConcurrentRollouts
+	if r.APIReader != nil {
+		b.Reader = r.APIReader // uncached: a cold cache must not hide mid-rollout knights
+	}
 	return b
 }
 
