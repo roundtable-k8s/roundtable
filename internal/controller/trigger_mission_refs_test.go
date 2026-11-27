@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -50,8 +49,8 @@ func TestCheckMissionRefsDefaultPlanner(t *testing.T) {
 	}{
 		{"default planner exists", []client.Object{table(nil), plannerKnight}, aiv1alpha1.TriggerMissionTarget{}, "", false},
 		{"default planner missing", []client.Object{table(nil)}, aiv1alpha1.TriggerMissionTarget{}, "no default planner", true},
-		{"planner disabled", []client.Object{table(&aiv1alpha1.RoundTablePlanner{Enabled: ptr.To(false)})}, aiv1alpha1.TriggerMissionTarget{}, "no default planner", true},
-		{"not a meta-mission", []client.Object{table(nil)}, aiv1alpha1.TriggerMissionTarget{MetaMission: ptr.To(false)}, "", false},
+		{"planner disabled", []client.Object{table(&aiv1alpha1.RoundTablePlanner{Enabled: new(false)})}, aiv1alpha1.TriggerMissionTarget{}, "no default planner", true},
+		{"not a meta-mission", []client.Object{table(nil)}, aiv1alpha1.TriggerMissionTarget{MetaMission: new(false)}, "", false},
 		{"planner without a knight", []client.Object{table(nil)}, aiv1alpha1.TriggerMissionTarget{Planner: &aiv1alpha1.TriggerMissionPlanner{MaxChains: 2}}, "no default planner", true},
 	}
 	for _, tc := range cases {
