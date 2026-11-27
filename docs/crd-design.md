@@ -854,7 +854,8 @@ only `InProgress` before the operator has seen its spec for the first time.
 parked, suspended and reconcile-error paths, and the operator never sets
 `Reconciling` or `Stalled`. Whether the pod is up is reported by
 `status.phase`, `status.ready` and the `Available`, `RuntimeAvailable` and
-`Degraded` conditions, not by kstatus. `TestKnightKstatus` pins this.
+`Degraded` conditions, not by kstatus. `TestKnightKstatus` pins this for Provisioning, Ready, scaled to zero, waking and a
+reconcile error (Degraded); `TestKnightKstatusSuspended` covers `spec.suspend`.
 
 Mission, Trigger and RoundTable have not been audited against kstatus
 yet; follow-ups: Mission #928, Trigger #929, RoundTable #931.
