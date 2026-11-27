@@ -671,9 +671,11 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 		prev := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
 		if r.Recorder != nil && (prev == nil || prev.Message != cond.Message) {
 			for _, w := range missing {
+				// event-reasons: ServiceNotFound
 				r.Recorder.Event(k, corev1.EventTypeWarning, aiv1alpha1.ReasonEgressServiceNotFound, w)
 			}
 			for _, w := range hostWarnings {
+				// event-reasons: InClusterAllowedHost
 				r.Recorder.Event(k, corev1.EventTypeWarning, eventReasonInClusterHost, w)
 			}
 		}

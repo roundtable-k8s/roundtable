@@ -203,6 +203,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml and the v
 	HELM="$(HELM)" scripts/check-observability-example.sh
 	scripts/check-observability-doc.sh
 	scripts/check-metrics-doc.sh
+	scripts/check-events-doc.sh
 	scripts/check-doc-links.sh
 	scripts/check-install-versions.sh
 	scripts/check-helm-values-doc.sh

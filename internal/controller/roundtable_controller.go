@@ -284,6 +284,7 @@ func (r *RoundTableReconciler) setDeprecatedFieldsCondition(rt *aiv1alpha1.Round
 	msg := "deprecated and ignored: " + strings.Join(used, "; ")
 	prev := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed)
 	if prev == nil || prev.ObservedGeneration != rt.Generation {
+		// event-reasons: DeprecatedFieldsUsed
 		r.Recorder.Event(rt, corev1.EventTypeWarning, aiv1alpha1.ReasonRoundTableDeprecatedFieldsUsed, msg)
 	}
 	meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
@@ -334,6 +335,7 @@ func (r *RoundTableReconciler) setPlannerKnightCondition(ctx context.Context, rt
 	}
 	prev := meta.FindStatusCondition(rt.Status.Conditions, aiv1alpha1.ConditionRoundTablePlannerKnightMissing)
 	if prev == nil || prev.ObservedGeneration != rt.Generation || prev.Reason != reason {
+		// event-reasons: PlannerKnightMissing PlannerKnightNotInTable
 		r.Recorder.Event(rt, corev1.EventTypeWarning, reason, msg)
 	}
 	meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{

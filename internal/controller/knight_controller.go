@@ -635,6 +635,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 
 	if changed {
 		log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
+		// event-reasons: RuntimeClassNotFound SandboxUnavailable
 		r.Recorder.Event(knight, corev1.EventTypeWarning, reason, msg)
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
 		knight.Status.Ready = false
@@ -1346,6 +1347,7 @@ func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knigh
 	msgs := make([]string, 0, len(used))
 	for _, d := range used {
 		if newGen {
+			// event-reasons: MaxDeliverIgnored
 			r.Recorder.Event(knight, corev1.EventTypeWarning, d.reason, d.msg)
 		}
 		msgs = append(msgs, d.msg)
