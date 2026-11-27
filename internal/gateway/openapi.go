@@ -191,6 +191,20 @@ var openAPIOperations = map[string]obj{
 	},
 	"GET /v1/knights": listOp("List knights", "knights", "knights", "KnightInfo",
 		queryParam("namespace", "Namespace to list; omit for the gateway's default.")),
+	"GET /v1/knights/{name}/snapshots": {
+		"summary": "List a knight's workspace snapshots", "tags": []any{"knights"},
+		"description": "status.workspace.snapshots (oldest first), the WorkspaceSnapshots condition and the last handled snapshot request.",
+		"parameters":  []any{pathParam("name", "Knight name."), queryParam("namespace", "Knight namespace; omit for the gateway's default.")},
+		"responses":   errs(obj{"200": jsonResp("OK", schemaRef("KnightSnapshots"))}, "400", "401", "404", "503"),
+	},
+	"POST /v1/knights/{name}/snapshot": {
+		"summary": "Take a workspace snapshot of a knight", "tags": []any{"knights"},
+		"description": "Sets the ai.roundtable.io/snapshot annotation to a fresh value; the operator takes a VolumeSnapshot named <knight>-ws-<unix seconds>. 409 for a second request within the same second, 422 for an ephemeral workspace. A suspended knight answers 202 with a note: the snapshot runs on resume. With waitSeconds the call waits (capped) until the snapshot is readyToUse.",
+		"parameters": []any{pathParam("name", "Knight name."), queryParam("namespace", "Knight namespace; omit for the gateway's default."),
+			queryInteger("waitSeconds", "Seconds to wait for the snapshot to be readyToUse (default 0).")},
+		"responses": errs(obj{"202": jsonResp("Snapshot requested.", schemaRef("SnapshotRequest"))},
+			"400", "401", "404", "409", "422", "503"),
+	},
 	"POST /v1/knights/{name}/invoke": {
 		"summary": "Invoke a knight and wait for the answer", "tags": []any{"tasks"},
 		"parameters":  []any{pathParam("name", "Knight name."), idempotencyKeyParam},
@@ -410,6 +424,22 @@ var openAPISchemas = obj{
 		"completedAt":    obj{"type": "string", "format": "date-time"},
 		"resultSubject":  str("NATS subject holding the result."),
 		"resultsStream":  str("NATS stream holding the result."),
+	}),
+	"KnightSnapshots": object([]string{"knight", "namespace", "snapshots"}, obj{
+		"knight": str(""), "namespace": str(""),
+		"lastSnapshotRequest": str("Last handled value of the ai.roundtable.io/snapshot annotation."),
+		"snapshots": array(object([]string{"name", "readyToUse"}, obj{
+			"name": str("VolumeSnapshot name."), "createdAt": obj{"type": "string", "format": "date-time"}, "readyToUse": boolean(""),
+		})),
+		"condition": object([]string{"status", "reason"}, obj{"status": str("True or False."), "reason": str(""), "message": str("")}),
+	}),
+	"SnapshotRequest": object([]string{"knight", "namespace", "request", "expectedName"}, obj{
+		"knight": str(""), "namespace": str(""), "request": str("Value set on the snapshot annotation (unix nanoseconds)."),
+		"expectedName": str("Name the VolumeSnapshot will get: <knight>-ws-<unix seconds>."),
+		"caller":       str(""), "note": str("Set for a suspended knight: the snapshot runs on resume."),
+		"ready":     boolean("True once the snapshot is readyToUse (only with waitSeconds)."),
+		"snapshot":  object([]string{"name", "readyToUse"}, obj{"name": str(""), "createdAt": obj{"type": "string", "format": "date-time"}, "readyToUse": boolean("")}),
+		"condition": object([]string{"status", "reason"}, obj{"status": str(""), "reason": str(""), "message": str("")}),
 	}),
 	"KnightInfo": object([]string{"name", "namespace", "domain", "ready"}, obj{
 		"name": str(""), "namespace": str(""), "domain": str(""), "model": str(""), "runtime": str(""),

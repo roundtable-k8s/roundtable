@@ -189,6 +189,7 @@ func NewMCPServer(svc *Service) *mcp.Server {
 			Text: fmt.Sprintf("Retrying %s as %s (attempt %d) on knight %s. Call get_task with taskId %s.",
 				res.RetryOf, res.TaskID, res.Attempt, res.Knight, res.TaskID)}}}, res, nil
 	})
+	addSnapshotTools(s, svc)
 	if svc.MissionsEnabled() {
 		addMissionTools(s, svc)
 	}

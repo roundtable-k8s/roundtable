@@ -470,6 +470,46 @@ Optional body: `{"force": true, "namespace": "...", "table": "..."}`.
 Lists knights with their name, domain, model, agent runtime, phase, readiness
 and whether they are suspended.
 
+### Knight snapshots
+
+Workspace snapshots of a knight (see [workspace-snapshots.md](workspace-snapshots.md))
+can be listed and requested without `kubectl`. Taking one only sets the Knight
+annotation `ai.roundtable.io/snapshot` to a fresh value (unix nanoseconds) and
+records the caller in `ai.roundtable.io/snapshot-caller`; the operator does the
+rest. Taking one needs `gateway.knightSnapshots.enabled` (default true), which
+lets the gateway `get` and `patch` Knights.
+
+#### `GET /v1/knights/{name}/snapshots?namespace=`
+
+`{knight, namespace, lastSnapshotRequest, snapshots: [{name, createdAt, readyToUse}], condition}`:
+`status.workspace` (oldest snapshot first) and the `WorkspaceSnapshots`
+condition (`status`, `reason`, `message`), which says why a request failed.
+`404` for an unknown knight.
+
+#### `POST /v1/knights/{name}/snapshot?namespace=&waitSeconds=`
+
+Answers `202` with `{knight, namespace, request, expectedName, caller}`.
+`expectedName` is `<knight>-ws-<unix seconds>`; the operator names the
+snapshot with its own clock, so confirm with the list.
+
+| Status | Meaning |
+|---|---|
+| `202` | Requested. A suspended knight answers with a `note`: the snapshot is taken when it resumes. |
+| `404` | Unknown knight. |
+| `409` | Another request came in during the same second (the snapshot name has second resolution); retry shortly. |
+| `422` | `workspace.mode` is `ephemeral`: only `pvc` workspaces can be snapshotted. |
+
+With `waitSeconds` (capped at the gateway's maximum wait) the call polls until
+the snapshot is `readyToUse` and then adds `ready: true` and `snapshot`; on
+timeout it still answers `202`, with the current `condition`. Not available on
+a suspended knight (it answers at once).
+
+```bash
+curl -sX POST -H "Authorization: Bearer $TOKEN" \
+  "$GATEWAY/v1/knights/galahad/snapshot?waitSeconds=120"
+curl -s -H "Authorization: Bearer $TOKEN" "$GATEWAY/v1/knights/galahad/snapshots"
+```
+
 ## Missions
 
 A mission is a goal that a planner knight breaks into chains over standing
@@ -1341,6 +1381,8 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
 | `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
+| `list_knight_snapshots` | `name`, `namespace?` | The `GET /v1/knights/{name}/snapshots` answer |
+| `snapshot_knight` | `name`, `namespace?`, `waitSeconds?` | Requests a workspace snapshot (see `POST /v1/knights/{name}/snapshot`); listed when `gateway.knightSnapshots.enabled` is true |
 | `list_schedules` | `namespace?`, `table?` | `{schedules: [...]}`: the same list as `GET /v1/schedules` |
 | `get_schedule` | `name`, `namespace?` | The schedule projection |
 | `schedule_next_runs` | `name`, `namespace?` or `cron`, `timeZone?`; `count?` | The same as `GET .../next` or `GET /v1/schedules/preview`: the next fire times (cron ticks only) |

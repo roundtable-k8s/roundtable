@@ -77,7 +77,7 @@ func main() {
 		defaultTimeout, maxTimeout, taskTTL, runTTL, scheduleRetention                                  time.Duration
 		maxInFlight, maxStreams                                                                         int
 		missionsEnabled, allowSkillGeneration, runsEnabled, hooksEnabled, saAuth                        bool
-		schedulesEnabled, scheduleRunsEnabled                                                           bool
+		schedulesEnabled, scheduleRunsEnabled, snapshotsEnabled                                         bool
 		saAudience, saNamespaces                                                                        string
 		maxBudgetUSD, hookRate                                                                          float64
 		maxMissionTTL, maxMissionTimeout, hookBurst                                                     int
@@ -120,6 +120,8 @@ func main() {
 			"(needs RBAC to get Triggers, get and list Chains).")
 	flag.DurationVar(&scheduleRetention, "schedule-result-retention", gateway.DefaultScheduleResultRetention,
 		"How long the results of a schedule's runs stay readable: the task record TTL is raised to it.")
+	flag.BoolVar(&snapshotsEnabled, "knight-snapshots", true,
+		"Serve POST /v1/knights/{name}/snapshot (needs RBAC to get and patch Knights).")
 	flag.BoolVar(&hooksEnabled, "hooks", true,
 		"Serve POST /v1/hooks/{namespace}/{trigger} for webhook Triggers (needs RBAC to get Triggers and "+
 			"Secrets labelled ai.roundtable.io/webhook-secret=true).")
@@ -236,6 +238,9 @@ func main() {
 	if scheduleRunsEnabled {
 		svc.ScheduleReader = k8s
 	}
+	if snapshotsEnabled {
+		svc.Knights = k8s
+	}
 	if hooksEnabled {
 		svc.Hooks = k8s
 	}
@@ -296,7 +301,7 @@ func main() {
 	}()
 
 	log.Info("Starting gateway", "listen", listen, "missions", missionsEnabled, "runs", runsEnabled, "hooks", hooksEnabled,
-		"scheduleRuns", scheduleRunsEnabled,
+		"scheduleRuns", scheduleRunsEnabled, "knightSnapshots", snapshotsEnabled,
 		"serviceAccountAuth", saAuth, "serviceAccountAudience", saAudience,
 		"schedules", schedulesEnabled,
 		"namespace", namespace, "nats", natsURL)
