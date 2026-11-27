@@ -117,10 +117,11 @@ type ActivityEvent struct {
 	QueuedForMs *int64 `json:"queuedFor,omitempty"` // publish -> pickup, ms, when known
 
 	// task.heartbeat and task.finished
-	Turns        *int     `json:"turns,omitempty"`
-	InputTokens  *int64   `json:"inputTokens,omitempty"`
-	OutputTokens *int64   `json:"outputTokens,omitempty"`
-	CostUSD      *float64 `json:"costUsd,omitempty"`
+	Turns            *int     `json:"turns,omitempty"`
+	InputTokens      *int64   `json:"inputTokens,omitempty"`
+	OutputTokens     *int64   `json:"outputTokens,omitempty"`
+	CacheWriteTokens *int64   `json:"cacheWriteTokens,omitempty"`
+	CostUSD          *float64 `json:"costUsd,omitempty"`
 	// CurrentTool is the tool in flight at heartbeat time, if any.
 	CurrentTool string `json:"currentTool,omitempty"`
 

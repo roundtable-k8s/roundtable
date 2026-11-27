@@ -13,6 +13,9 @@ type TaskActivityEvent struct {
 	// Attempt corresponds to the JSON schema field "attempt".
 	Attempt *int `json:"attempt,omitempty,omitzero"`
 
+	// CacheWriteTokens corresponds to the JSON schema field "cacheWriteTokens".
+	CacheWriteTokens *int `json:"cacheWriteTokens,omitempty,omitzero"`
+
 	// ChainName corresponds to the JSON schema field "chainName".
 	ChainName *string `json:"chainName,omitempty,omitzero"`
 
