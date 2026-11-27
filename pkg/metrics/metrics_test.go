@@ -110,7 +110,8 @@ func TestTriggerLastFiredNameAndLabels(t *testing.T) {
 	TriggerLastFiredTimestampSeconds.Reset()
 	TriggerLastFiredTimestampSeconds.WithLabelValues("ns1", "t1", "nightly").Set(1700000000)
 	const want = `
-# HELP roundtable_trigger_last_fired_timestamp_seconds Unix time of the Trigger's last started run, by namespace, table and trigger
+# HELP roundtable_trigger_last_fired_timestamp_seconds ` +
+		`Unix time of the Trigger's last started run, by namespace, table and trigger
 # TYPE roundtable_trigger_last_fired_timestamp_seconds gauge
 roundtable_trigger_last_fired_timestamp_seconds{namespace="ns1",table="t1",trigger="nightly"} 1.7e+09
 `
