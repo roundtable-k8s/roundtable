@@ -270,6 +270,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	// Events too: a conflicted patch is retried and would raise them again.
 	for _, ev := range taskEvents {
+		// event-reasons: TaskFailed TaskLost
 		r.event(latest, corev1.EventTypeWarning, ev.reason, "%s", ev.message)
 	}
 	// Count after the patch so a conflict-retried reconcile cannot count a

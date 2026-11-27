@@ -82,6 +82,7 @@ A cause marked "inferred" is not stated by the code; it is the likely reason.
 | `ClaimFailed` | Trigger controller | Claiming a GitHub item failed; retried on the next poll | The GitHub token and its scopes; [triggers](triggers.md) |
 | `TaskFailed` | Trigger controller | The knight task a firing sent failed | The knight's logs; the dead-letter entry |
 | `TaskLost` | Trigger controller | A firing's task was lost (never answered) | The dead-letter stream ([knight task contract](knight-task-contract.md#delivery-and-failure)) |
+| `RunNowNotFired` | Trigger controller | A run-now request could not fire yet; it is retried, and the Warning is raised once per request | The message has the error; the Trigger's target; [triggers](triggers.md) |
 
 ## Mission
 
