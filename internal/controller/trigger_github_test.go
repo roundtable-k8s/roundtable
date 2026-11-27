@@ -763,8 +763,43 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(c).NotTo(BeNil())
 		Expect(c.Status).To(Equal(metav1.ConditionTrue))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerBreakingPullRequest))
+		// The age is the fake clock minus the condition's wall-clock time,
+		// rounded to the minute, so it reads 30m0s unless setup took over
+		// 30 seconds.
 		Expect(c.Message).To(ContainSubstring(repo + ": pull requests could not be listed, held for 30m0s"))
 		Expect(c.LastTransitionTime).To(Equal(transition))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(transition.Unix())))
+	})
+
+	It("seeds the hold start from the condition after a restart when the listing works", func() {
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("restart-ok", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "restart-ok") })
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("restart-ok").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		labels := prometheus.Labels{"namespace": ns, "trigger": "restart-ok", "repository": repo}
+
+		poll("restart-ok")
+		before := heldCond()
+		Expect(before).NotTo(BeNil())
+		Expect(before.Status).To(Equal(metav1.ConditionTrue))
+		// The condition's transition time is wall-clock, not the fake clock.
+		transition := before.LastTransitionTime
+
+		// The operator restarts: the hold start is gone from memory and gauges.
+		r.clearRepositoryHolds(ns, "restart-ok")
+		_, loaded := r.holdSince.Load(holdKey(ns, "restart-ok", repo))
+		Expect(loaded).To(BeFalse())
+		clock = clock.Add(30 * time.Minute)
+		poll("restart-ok")
+
+		c := heldCond()
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.LastTransitionTime).To(Equal(transition))
+		Expect(c.Message).To(ContainSubstring(repo + ": #7 (rt/7-big) for 30m0s"))
 		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(transition.Unix())))
 	})
 
