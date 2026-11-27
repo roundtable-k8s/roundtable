@@ -284,3 +284,57 @@ func TestFetchOneNoWait(t *testing.T) {
 		t.Fatalf("message not acked: %d left", info.State.Msgs)
 	}
 }
+
+// TestFetchOneReplacesPushConsumer pins that a durable left in push mode by an
+// earlier version does not break FetchOne: it is replaced by the pull consumer
+// and the result is read and acked.
+func TestFetchOneReplacesPushConsumer(t *testing.T) {
+	ctx := context.Background()
+	c := connectTestClient(t)
+	if err := c.CreateStream(ctx, StreamConfig{
+		Name: "rt_results", Subjects: []string{"rt.results.>"},
+		Retention: RetentionWorkQueue, Storage: StorageMemory,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	js, err := c.jetStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const durable = "mission-planner-m"
+	subject := ResultSubject("rt", "t1")
+	if _, err := js.CreateOrUpdateConsumer(ctx, "rt_results", jetstream.ConsumerConfig{
+		Durable:        durable,
+		FilterSubject:  subject,
+		DeliverSubject: "deliver.planner",
+		DeliverPolicy:  jetstream.DeliverAllPolicy,
+		AckPolicy:      jetstream.AckExplicitPolicy,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.PublishJSON(subject, TaskResult{TaskID: "t1", Output: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := c.FetchOne(ctx, "rt_results", ResultConsumerConfig(durable, subject), 200*time.Millisecond)
+	if err != nil {
+		t.Fatalf("FetchOne over a leftover push durable: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("FetchOne returned no message, want the stored result")
+	}
+	var r TaskResult
+	if err := json.Unmarshal(msg.Data(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.GetOutput() != "one" {
+		t.Fatalf("result = %+v, want output one", r)
+	}
+	if info, err := c.StreamInfo(ctx, "rt_results"); err != nil {
+		t.Fatal(err)
+	} else if info.State.Msgs != 0 {
+		t.Fatalf("result not acked: %d message(s) left", info.State.Msgs)
+	}
+	_ = c.DeleteConsumer(ctx, "rt_results", durable)
+}

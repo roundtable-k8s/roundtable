@@ -645,6 +645,13 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	if parentDefaults != nil {
 		rt.Spec.Defaults = parentDefaults
 	} else {
+		// Deliberate mission profile (#418), not the operator defaults: with
+		// no parent defaults, mission knights get concurrency 3 and a 300s
+		// task timeout, where the operator defaults are 2 and 120s
+		// (RoundTableDefaults in api/v1alpha1; DefaultConcurrency and
+		// DefaultTaskTimeoutSeconds in internal/knight). Changing these
+		// values changes mission knights' behaviour, so align them only as a
+		// separate, explicit decision.
 		rt.Spec.Defaults = &aiv1alpha1.RoundTableDefaults{
 			Model:              "openrouter/deepseek/deepseek-v3.2",
 			Concurrency:        3,
