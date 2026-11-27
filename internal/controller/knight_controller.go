@@ -86,6 +86,7 @@ type KnightReconciler struct {
 	// steady-state reconcile does no Pod read. Bounded by hostNetPodCacheMax.
 	hostNetPods     sync.Map
 	hostNetPodCount atomic.Int64
+	hostNetPodSeq   atomic.Int64
 
 	// KnightSecurity is the pod-level security context applied to both knight
 	// Deployments and Nix build Jobs. Chart-driven (KNIGHT_* env vars); zero
@@ -1402,7 +1403,7 @@ func runtimeName(knight *aiv1alpha1.Knight) string {
 // Sandbox objects are only watched when SandboxEnabled is true: a watch on a
 // kind the API server doesn't serve never syncs, and the manager exits.
 func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := r.registerEgressIndexes(context.Background(), mgr); err != nil {
+	if err := r.registerEgressIndexes(context.Background(), mgr.GetFieldIndexer()); err != nil {
 		return err
 	}
 	b := ctrl.NewControllerManagedBy(mgr).

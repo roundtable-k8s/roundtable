@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -594,6 +595,63 @@ func TestResolveEgressHostNetworkUnresolvedPort(t *testing.T) {
 	assert.Contains(t, missing[0], "ha/hass")
 }
 
+func TestReconcileEgressWarnsOnUnresolvedHostNetworkPort(t *testing.T) {
+	sch := k8sruntime.NewScheme()
+	require.NoError(t, scheme.AddToScheme(sch))
+	require.NoError(t, aiv1alpha1.AddToScheme(sch))
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "hass"},
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8123)},
+				{Name: "metrics", Port: 81, TargetPort: intstr.FromString("prom")},
+			},
+		},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "a"}, Spec: corev1.PodSpec{HostNetwork: true}}
+	es := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ha", Name: "hass-x", Labels: map[string]string{discoveryv1.LabelServiceName: "hass"}},
+		Endpoints: []discoveryv1.Endpoint{{
+			Addresses:  []string{"10.0.0.1"},
+			Conditions: discoveryv1.EndpointConditions{Ready: new(true)},
+			TargetRef:  &corev1.ObjectReference{Kind: "Pod", Namespace: "ha", Name: "a"},
+		}},
+	}
+	k := testEgressKnight("")
+	k.UID = "uid-1"
+	k.Spec.Egress.AllowedServices = []aiv1alpha1.EgressService{{Name: "hass", Namespace: "ha", Ports: []int32{80, 81}}}
+	rec := record.NewFakeRecorder(100)
+	r := &KnightReconciler{
+		Client:   fake.NewClientBuilder().WithScheme(sch).WithObjects(svc, pod, es).Build(),
+		Scheme:   sch,
+		Recorder: rec,
+	}
+	drain := func() []string {
+		var out []string
+		for len(rec.Events) > 0 {
+			out = append(out, <-rec.Events)
+		}
+		return out
+	}
+
+	require.NoError(t, r.reconcileEgress(context.Background(), k))
+	events := drain()
+	var n int
+	for _, e := range events {
+		if strings.Contains(e, "Warning HostNetworkPortUnresolved") {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "events: %v", events)
+
+	// Unchanged message: no repeated warning.
+	require.NoError(t, r.reconcileEgress(context.Background(), k))
+	for _, e := range drain() {
+		assert.NotContains(t, e, "HostNetworkPortUnresolved")
+	}
+}
+
 func TestHostNetworkPortsReportsUnresolved(t *testing.T) {
 	svc := &corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
 		{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8123)},
@@ -603,9 +661,16 @@ func TestHostNetworkPortsReportsUnresolved(t *testing.T) {
 	assert.Equal(t, []EgressServicePort{{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP}}, ports)
 	assert.Equal(t, []int32{9090}, unresolved)
 
-	notes := hostNetworkNotes([]EgressServicePeer{{Namespace: "ha", Name: "hass", HostNetwork: true, Ports: ports, UnresolvedPorts: unresolved}})
-	require.Len(t, notes, 2)
-	assert.Contains(t, notes[1], "ha/hass: listed port 9090 could not be resolved")
+	peer := EgressServicePeer{Namespace: "ha", Name: "hass", HostNetwork: true, Ports: ports, UnresolvedPorts: unresolved}
+	require.Len(t, hostNetworkNotes([]EgressServicePeer{peer}), 1)
+	warns := hostNetworkUnresolvedWarnings([]EgressServicePeer{peer})
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "ha/hass: listed port 9090 could not be resolved to a number and is not allowed")
+
+	peer.UnresolvedPorts = []int32{80, 81}
+	warns = hostNetworkUnresolvedWarnings([]EgressServicePeer{peer})
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "listed ports 80, 81 could not be resolved to a number and are not allowed")
 }
 
 func TestEgressEndpointSliceChangedPredicate(t *testing.T) {

@@ -39,7 +39,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -666,7 +665,8 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 	}
 	if err == nil {
 		hostWarnings := inClusterHostWarnings(allow.AllowedHosts)
-		for _, w := range slices.Concat(missing, hostWarnings, hostNetworkNotes(allow.Services)) {
+		unresolvedWarnings := hostNetworkUnresolvedWarnings(allow.Services)
+		for _, w := range slices.Concat(missing, hostWarnings, hostNetworkNotes(allow.Services), unresolvedWarnings) {
 			cond.Message += "; " + w
 		}
 		prev := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
@@ -678,6 +678,10 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 			for _, w := range hostWarnings {
 				// event-reasons: InClusterAllowedHost
 				r.Recorder.Event(k, corev1.EventTypeWarning, eventReasonInClusterHost, w)
+			}
+			for _, w := range unresolvedWarnings {
+				// event-reasons: HostNetworkPortUnresolved
+				r.Recorder.Event(k, corev1.EventTypeWarning, eventReasonHostNetworkPortUnresolved, w)
 			}
 		}
 	}
@@ -699,6 +703,10 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 // eventReasonInClusterHost is the Warning event reason for an allowedHosts
 // entry that names an in-cluster Service.
 const eventReasonInClusterHost = "InClusterAllowedHost"
+
+// eventReasonHostNetworkPortUnresolved is the Warning event reason for a listed
+// port of a host-network Service that does not resolve to a number.
+const eventReasonHostNetworkPortUnresolved = "HostNetworkPortUnresolved"
 
 // inClusterHostWarnings returns a warning for each allowedHosts entry that is
 // an in-cluster name (ending in .svc or .cluster.local): it resolves to a
@@ -834,7 +842,7 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 				// spec.hostNetwork is immutable, so the answer for a pod UID
 				// never changes: no Pod read in the steady state.
 				if v, ok := r.hostNetPods.Load(ep.TargetRef.UID); ok {
-					isHost, seen = v.(bool), true
+					isHost, seen = v.(hostNetPodEntry).hostNet, true
 					podHost[key] = isHost
 				}
 			}
@@ -935,14 +943,28 @@ func hostNetworkNotes(services []EgressServicePeer) []string {
 		ports = slices.Compact(ports)
 		out = append(out, fmt.Sprintf("Service %s/%s uses the host network: reaches every node on port %s",
 			svc.Namespace, svc.Name, strings.Join(ports, ", ")))
-		if len(svc.UnresolvedPorts) > 0 {
-			un := make([]string, 0, len(svc.UnresolvedPorts))
-			for _, p := range svc.UnresolvedPorts {
-				un = append(un, strconv.Itoa(int(p)))
-			}
-			out = append(out, fmt.Sprintf("Service %s/%s: listed port %s could not be resolved to a number and is not allowed",
-				svc.Namespace, svc.Name, strings.Join(un, ", ")))
+	}
+	return out
+}
+
+// hostNetworkUnresolvedWarnings returns one warning per host-network Service
+// with listed ports that do not resolve to a number; those ports are not allowed.
+func hostNetworkUnresolvedWarnings(services []EgressServicePeer) []string {
+	var out []string
+	for _, svc := range services {
+		if !svc.HostNetwork || len(svc.UnresolvedPorts) == 0 {
+			continue
 		}
+		un := make([]string, 0, len(svc.UnresolvedPorts))
+		for _, p := range svc.UnresolvedPorts {
+			un = append(un, strconv.Itoa(int(p)))
+		}
+		noun, verb := "port", "is"
+		if len(un) > 1 {
+			noun, verb = "ports", "are"
+		}
+		out = append(out, fmt.Sprintf("Service %s/%s: listed %s %s could not be resolved to a number and %s not allowed",
+			svc.Namespace, svc.Name, noun, strings.Join(un, ", "), verb))
 	}
 	return out
 }
@@ -1066,27 +1088,62 @@ func tableEgressIndexValues(obj client.Object) []string {
 	return out
 }
 
-func (r *KnightReconciler) registerEgressIndexes(ctx context.Context, mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &aiv1alpha1.Knight{}, knightEgressServiceIndex, knightEgressIndexValues); err != nil {
+func (r *KnightReconciler) registerEgressIndexes(ctx context.Context, idx client.FieldIndexer) error {
+	if err := idx.IndexField(ctx, &aiv1alpha1.Knight{}, knightEgressServiceIndex, knightEgressIndexValues); err != nil {
 		return err
 	}
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &aiv1alpha1.RoundTable{}, tableEgressServiceIndex, tableEgressIndexValues); err != nil {
+	if err := idx.IndexField(ctx, &aiv1alpha1.RoundTable{}, tableEgressServiceIndex, tableEgressIndexValues); err != nil {
 		return err
 	}
 	r.serviceIndexed = true
 	return nil
 }
 
-// rememberHostNetPod records a pod's immutable host-network flag by UID.
+// hostNetPodEntry is a cached host-network flag with the insertion sequence
+// used to find the oldest entries.
+type hostNetPodEntry struct {
+	hostNet bool
+	seq     int64
+}
+
+// rememberHostNetPod records a pod's immutable host-network flag by UID. When
+// the cache passes hostNetPodCacheMax it drops the oldest half, so recently
+// seen pods stay cached. Eviction follows insertion order, not recency of use
+// (it is not LRU): a cache hit does not refresh an entry, so a long-lived pod
+// can be evicted and costs one extra Pod read.
 func (r *KnightReconciler) rememberHostNetPod(uid types.UID, hostNet bool) {
 	if uid == "" {
 		return
 	}
+	seq := r.hostNetPodSeq.Add(1)
 	if r.hostNetPodCount.Add(1) > hostNetPodCacheMax {
-		r.hostNetPods.Clear()
-		r.hostNetPodCount.Store(1)
+		r.evictOldestHostNetPods()
 	}
-	r.hostNetPods.Store(uid, hostNet)
+	r.hostNetPods.Store(uid, hostNetPodEntry{hostNet: hostNet, seq: seq})
+}
+
+func (r *KnightReconciler) evictOldestHostNetPods() {
+	var seqs []int64
+	r.hostNetPods.Range(func(_, v any) bool {
+		seqs = append(seqs, v.(hostNetPodEntry).seq)
+		return true
+	})
+	slices.Sort(seqs)
+	if len(seqs) == 0 {
+		r.hostNetPodCount.Store(0)
+		return
+	}
+	cutoff := seqs[len(seqs)/2]
+	kept := int64(0)
+	r.hostNetPods.Range(func(k, v any) bool {
+		if v.(hostNetPodEntry).seq < cutoff {
+			r.hostNetPods.Delete(k)
+		} else {
+			kept++
+		}
+		return true
+	})
+	r.hostNetPodCount.Store(kept + 1)
 }
 
 // serviceCandidateKnights lists the knights that may name the Service: through
