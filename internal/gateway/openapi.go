@@ -658,12 +658,31 @@ var openAPISchemas = obj{
 	}),
 	"ScheduleRequest": object([]string{specKey}, obj{
 		"name": str("Trigger name; required on POST."), "namespace": str("Defaults to the gateway's namespace on POST; must match the path on PUT."),
-		specKey: obj{"type": "object", "description": "The Trigger's spec; spec.source.schedule is required and no other source may be set."},
+		specKey: schemaRef("ScheduleTriggerSpec"),
 	}),
 	"ScheduleRecord": object([]string{"name", "namespace", "managedBy", "createdAt", specKey}, obj{
 		"name": str(""), "namespace": str(""), "managedBy": str("git, api or other."), "caller": str(""),
-		"createdAt": obj{"type": "string", "format": "date-time"}, specKey: obj{"type": "object"},
+		"createdAt": obj{"type": "string", "format": "date-time"}, specKey: schemaRef("ScheduleTriggerSpec"),
 	}),
+	"ScheduleTriggerSpec": obj{
+		"type":                 "object",
+		"description":          "The Trigger's spec. Only the schedule source is documented here; other fields are accepted as the Trigger CRD defines them.",
+		"required":             []string{"source"},
+		"additionalProperties": true,
+		"properties": obj{
+			"source": object([]string{"schedule"}, obj{
+				"schedule": object([]string{"cron"}, obj{
+					"cron": str(`Five-field cron expression, e.g. "0 7 * * 1-5".`),
+					"timeZone": withDescription(obj{"type": "string", "maxLength": 64,
+						"pattern": `^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$`},
+						"IANA time zone the cron is evaluated in; defaults to UTC. \"Local\" is not accepted."),
+					"startingDeadlineSeconds": withDescription(obj{"type": "integer", "minimum": 1},
+						"How late a missed fire may still run, in seconds; unset leaves it to the CronJob controller."),
+				}),
+			}),
+			"target": obj{"type": "object", "description": "What each firing starts: exactly one of chainRef, knight or mission."},
+		},
+	},
 	"ScheduleState": object([]string{"name", "namespace", "suspended"}, scheduleStateProps),
 	"ScheduleRunNow": object([]string{"schedule", "namespace", "target", "key", "state"}, obj{
 		"schedule": str(""), "namespace": str(""), "target": str("chain, knight or mission."),

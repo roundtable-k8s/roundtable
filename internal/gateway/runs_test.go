@@ -910,6 +910,36 @@ func TestRerunRunRejects(t *testing.T) {
 	}
 }
 
+func TestRerunRunWithoutTemplateLink(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d %v", resp.StatusCode, out)
+	}
+	run, _ := out["run"].(string)
+	e.finish(t, aiv1alpha1.ChainPhaseSucceeded, nil)
+
+	// Drop the run-of annotation from the finished copy: the gateway no
+	// longer knows which Chain to rerun.
+	ctx := context.Background()
+	var c aiv1alpha1.Chain
+	if err := e.k8s.Get(ctx, client.ObjectKey{Namespace: testNS, Name: run}, &c); err != nil {
+		t.Fatal(err)
+	}
+	delete(c.Annotations, annotationRunOf)
+	if err := e.k8s.Update(ctx, &c); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, out = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/"+run+"/rerun", testToken, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("rerun without run-of: %d %v, want 404", resp.StatusCode, out)
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "has no template chain") {
+		t.Errorf("error = %q, want it to say the run has no template chain", msg)
+	}
+}
+
 func TestRerunRunDisabled(t *testing.T) {
 	e := newRunEnv(t, Options{}, false)
 	if resp, _ := e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/x/rerun", testToken, nil); resp.StatusCode != http.StatusNotFound {
