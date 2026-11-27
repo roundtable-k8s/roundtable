@@ -915,6 +915,28 @@ var _ = Describe("Trigger controller", func() {
 			Eventually(func() int { return len(runsOf("unset")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
 		})
 
+		It("dedupes a late redelivery of a slot that already ran instead of skipping it as missed", func() {
+			hour := int64(3600)
+			t := scheduleTrigger("redeliver", func(spec *aiv1alpha1.TriggerSpec) {
+				spec.Source.Schedule.StartingDeadlineSeconds = &hour
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(-time.Minute)
+			reconcileTrigger("redeliver")
+			clock = due.Add(time.Minute)
+			fireSchedule("redeliver", due, "redeliver")
+			Eventually(func() int { return len(runsOf("redeliver")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+
+			// Redelivered two hours later, past the deadline: the run exists.
+			clock = due.Add(2 * time.Hour)
+			fireSchedule("redeliver", due, "redeliver-again")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("redeliver").Status.RecentFirings }, 10*time.Second).Should(HaveLen(2))
+			skipped := getTrigger("redeliver").Status.RecentFirings[0]
+			Expect(skipped.SkipReason).To(ContainSubstring("duplicate dedupe key"))
+			Expect(skipped.SkipReason).NotTo(ContainSubstring("startingDeadlineSeconds"))
+			Expect(runsOf("redeliver")).To(HaveLen(1))
+		})
+
 		It("updates the CronJob on a schedule change and suspend, and reads lastScheduledAt from it", func() {
 			scheduleTrigger("upd", nil)
 			reconcileTrigger("upd")
@@ -1170,6 +1192,18 @@ var _ = Describe("Trigger controller", func() {
 			// Reconciling again starts nothing more.
 			reconcileTrigger("runnow")
 			Expect(runsOf("runnow")).To(HaveLen(1))
+		})
+
+		It("never skips a run-now firing for startingDeadlineSeconds, however late the clock", func() {
+			deadline := int64(60)
+			t := scheduleTrigger("runnow-late", func(s *aiv1alpha1.TriggerSpec) {
+				s.Source.Schedule.StartingDeadlineSeconds = &deadline
+			})
+			clock = t.CreationTimestamp.Add(5 * time.Hour)
+			annotate("runnow-late", map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-late"})
+			reconcileTrigger("runnow-late")
+			Expect(runsOf("runnow-late")).To(HaveLen(1))
+			Expect(getTrigger("runnow-late").Status.RecentFirings[0].SkipReason).To(BeEmpty())
 		})
 
 		It("records a skipped firing and clears a run-now request for a missing Chain", func() {

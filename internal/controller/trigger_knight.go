@@ -131,6 +131,9 @@ type knightFiring struct {
 	mutate func(*aiv1alpha1.TriggerStatus)
 	// manual is set for a run-now firing; its caller is recorded on the task.
 	manual *triggerManualFiring
+	// late is the reason a schedule firing is past startingDeadlineSeconds,
+	// checked after the dedupe; empty when it is on time.
+	late string
 	// skip records a firing that sent nothing; deduped does for a duplicate
 	// dedupe key.
 	skip    func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error)
@@ -194,8 +197,17 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 		Namespace:      trg.Namespace,
 		TimeoutSeconds: new(0),
 		IdempotencyKey: triggerTaskIdempotencyKey(trg, f.key),
+		// Checked after the idempotency lookup, so a replay is deduped.
+		Admit: func() error {
+			if f.late != "" {
+				return fmt.Errorf("%w: %s", gateway.ErrDeclined, f.late)
+			}
+			return nil
+		},
 	})
 	switch {
+	case errors.Is(err, gateway.ErrDeclined):
+		return f.skip(triggerHandled, "%s", f.late)
 	case errors.Is(err, gateway.ErrUnprocessable):
 		// The key already sent a different task text.
 		return f.deduped("duplicate dedupe key: a task was already sent for it")

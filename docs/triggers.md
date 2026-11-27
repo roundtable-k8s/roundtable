@@ -806,7 +806,7 @@ and the `Suspended` condition's message names it too.
 | `source.nats.subject` | Subject filter (wildcards allowed). Must sit under `<subjectPrefix>.events.` of `roundTableRef`. |
 | `source.webhook.auth` | `bearerTokenSecretRef` or `hmacSecretRef`: a key of a labelled Secret in the Trigger's namespace. |
 | `source.webhook.eventType` | Fire only on deliveries with this `Ce-Type` (else `X-GitHub-Event`). |
-| `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire: the CronJob's fields (see [Schedule source](#schedule-source)). |
+| `source.schedule.cron` / `timeZone` / `startingDeadlineSeconds` | Standard cron, IANA zone (default UTC), and how late a missed time may still fire: the CronJob's fields (see [Schedule source](#schedule-source)). A firing (including an explicit old `scheduledTime` on the fire endpoint) older than the deadline is skipped, unless its run already exists (then it is deduped); run-now is never skipped for it. |
 | `source.github.repositories` | `owner/name` of each repository polled (1 to 50). |
 | `source.github.kind` | `issue` (default) or `pullRequest`. |
 | `source.github.query.labels` / `state` | Labels an item must all carry (1 to 10), and `open` (default), `closed` or `all`. |

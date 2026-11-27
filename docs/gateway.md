@@ -1209,7 +1209,8 @@ makes (`manager fire-trigger`, below). Served with the webhook endpoint
   truncated to the minute. An explicit old `scheduledTime` is accepted and
   published, but the trigger controller skips the firing when it is older than
   the schedule's `startingDeadlineSeconds` (`skipReason: missed schedule time
-  … by more than startingDeadlineSeconds`).
+  … by more than startingDeadlineSeconds`). A slot whose run already exists is
+  deduped first, whatever its age. Run-now is never skipped for the deadline.
 - **Publish, don't run.** The gateway publishes a schedule event to
   `<subjectPrefix>.events.schedule.<namespace>.<name>` on the Trigger's
   RoundTable events stream (its `roundTableRef`, else its target Chain's, else its target knight's, else `default`, the same table the trigger controller reads) and answers **202**:
