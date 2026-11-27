@@ -37,8 +37,8 @@ import (
 const (
 	restartNamespace = "roundtable-restart"
 	restartRelease   = "rt-restart"
-	restartOperator  = "rt-restart" // fullnameOverride in trigger-values.yaml
-	restartValues    = "test/e2e/testdata/trigger-values.yaml"
+	restartOperator  = "rt-restart" // fullnameOverride in restart-values.yaml
+	restartValues    = "test/e2e/testdata/restart-values.yaml"
 	restartManifests = "test/e2e/testdata/restart.yaml"
 	restartKnight    = "stub"
 	restartChain     = "restart-e2e"
