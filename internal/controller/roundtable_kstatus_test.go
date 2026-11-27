@@ -49,7 +49,7 @@ func roundTableKstatusOf(t *testing.T, rt *aiv1alpha1.RoundTable) status.Status 
 	return res.Status
 }
 
-func kstatusTestReconciler(t *testing.T, objs ...client.Object) (*RoundTableReconciler, *aiv1alpha1.RoundTable) {
+func kstatusTestReconciler(t *testing.T, objs ...client.Object) *RoundTableReconciler {
 	t.Helper()
 	s := k8sruntime.NewScheme()
 	if err := aiv1alpha1.AddToScheme(s); err != nil {
@@ -57,7 +57,7 @@ func kstatusTestReconciler(t *testing.T, objs ...client.Object) (*RoundTableReco
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).
 		WithStatusSubresource(&aiv1alpha1.RoundTable{}).Build()
-	return &RoundTableReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50)}, nil
+	return &RoundTableReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50)}
 }
 
 // anyPhase skips the phase assertion: the table-owned planner knight is created
@@ -104,7 +104,7 @@ func TestRoundTableKstatus(t *testing.T) {
 			if got := roundTableKstatusOf(t, rt); got != status.InProgressStatus {
 				t.Fatalf("unobserved spec: kstatus = %s, want InProgress", got)
 			}
-			r, _ := kstatusTestReconciler(t, append([]client.Object{rt.DeepCopy()}, tc.knights...)...)
+			r := kstatusTestReconciler(t, append([]client.Object{rt.DeepCopy()}, tc.knights...)...)
 			_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "table"}})
 			if tc.wantPhase == "" {
 				if err == nil {
