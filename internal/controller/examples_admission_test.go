@@ -71,8 +71,14 @@ var _ = Describe("examples admission", func() {
 					continue
 				}
 				obj := &unstructured.Unstructured{}
-				if err := yaml.Unmarshal([]byte(doc), &obj.Object); err != nil || obj.Object == nil {
+				if err := yaml.Unmarshal([]byte(doc), &obj.Object); err != nil {
+					if strings.Contains(doc, aiv1alpha1.GroupVersion.Group) {
+						failures = append(failures, f+" doc "+strconv.Itoa(i)+": unparsable document mentions "+aiv1alpha1.GroupVersion.Group+": "+err.Error())
+					}
 					continue // not a Kubernetes object (values files, templates)
+				}
+				if obj.Object == nil {
+					continue
 				}
 				if obj.GroupVersionKind().Group != aiv1alpha1.GroupVersion.Group {
 					continue

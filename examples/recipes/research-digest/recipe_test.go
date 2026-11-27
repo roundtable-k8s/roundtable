@@ -81,7 +81,7 @@ func TestFailureOutcomeInstructions(t *testing.T) {
 }
 
 func TestKnightLabelMatchesTrigger(t *testing.T) {
-	read := func(file string, docIdx int, out any) {
+	read := func(file, kind string, out any) {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
@@ -90,9 +90,22 @@ func TestKnightLabelMatchesTrigger(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := yaml.Unmarshal(docs[docIdx], out); err != nil {
-			t.Fatal(err)
+		for _, doc := range docs {
+			var head struct {
+				Kind string `json:"kind"`
+			}
+			if err := yaml.Unmarshal(doc, &head); err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			if head.Kind != kind {
+				continue
+			}
+			if err := yaml.Unmarshal(doc, out); err != nil {
+				t.Fatal(err)
+			}
+			return
 		}
+		t.Fatalf("%s: no %s document", file, kind)
 	}
 	var knight struct {
 		Metadata struct {
@@ -106,8 +119,8 @@ func TestKnightLabelMatchesTrigger(t *testing.T) {
 			} `json:"roundTableRef"`
 		} `json:"spec"`
 	}
-	read("knight.yaml", 0, &knight)
-	read("trigger.yaml", 0, &trigger)
+	read("knight.yaml", "Knight", &knight)
+	read("trigger.yaml", "Trigger", &trigger)
 	want := trigger.Spec.RoundTableRef.Name
 	if want == "" {
 		t.Fatal("trigger has no roundTableRef")
