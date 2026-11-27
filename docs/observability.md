@@ -303,6 +303,9 @@ Tasks that were redelivered:
 { span.roundtable.attempt > 1 }
 ```
 
+A redelivered result's consumer span starts a new root trace, because the
+reconcile context carries no span, and links to the original trace.
+
 In Jaeger, search by service and tags instead, for example
 `roundtable.run.id=<run id>`, or `gen_ai.operation.name=execute_tool error=true`.
 

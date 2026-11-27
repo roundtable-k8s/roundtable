@@ -93,8 +93,7 @@ The same key is used for both where the value is stable for the process.
 | `roundtable.cost.usd` | Cost of the span's work in USD. | `costUsd` |
 | `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name` | From the downward API. | `pod`, `node` |
 
-The activity event JSON names are the camelCase form of these; the mapping above
-is normative.
+The mapping above is normative.
 
 ## Span tree
 
@@ -171,7 +170,8 @@ Used as defined by OpenTelemetry:
 `gen_ai.tool.call.id`.
 
 **Pinned version.** Written against the OpenTelemetry GenAI semantic conventions
-as of 2026-11 (status: *Development*). They moved to
+as of 2026-11, release v0.1.0 of `open-telemetry/semantic-conventions-genai`
+(commit `81b5d438519f868a186bff088d9de24aefdb2f6b`, status: *Development*). They moved to
 `open-telemetry/semantic-conventions-genai` in 2026. Implementations record the
 semconv version they follow in code, and a component upgrades by following the
 upstream changelog. Renames are handled as they have been before, for example

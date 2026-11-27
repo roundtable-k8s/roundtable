@@ -254,8 +254,7 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "Failed to set up OpenTelemetry; continuing without tracing")
 		shutdownTelemetry = func(context.Context) error { return nil }
-	}
-	if telemetry.Enabled() {
+	} else if telemetry.Enabled() {
 		setupLog.Info("OpenTelemetry tracing enabled", "endpoint", telemetry.Endpoint())
 	} else {
 		setupLog.Info("OpenTelemetry tracing disabled (no OTLP endpoint configured or OTEL_SDK_DISABLED=true)")
