@@ -57,11 +57,15 @@ func specTier(r types.SpecReport) string {
 	return unlabelledTier
 }
 
-// selectedReports keeps the reports of the tiers that ran, so a tier that was
+// selectedReports keeps the scenario reports (It nodes only, so BeforeSuite and
+// AfterSuite steps are not counted) of the tiers that ran, so a tier that was
 // not selected with TIER does not show up in the summary.
 func selectedReports(reports []types.SpecReport) []types.SpecReport {
 	var out []types.SpecReport
 	for _, r := range reports {
+		if !r.LeafNodeType.Is(types.NodeTypeIt) {
+			continue
+		}
 		if tierSelected(specTier(r)) {
 			out = append(out, r)
 		}

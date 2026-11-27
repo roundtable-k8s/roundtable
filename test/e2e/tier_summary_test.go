@@ -28,6 +28,7 @@ import (
 
 func specReport(state types.SpecState, runTime time.Duration, labels ...string) types.SpecReport {
 	return types.SpecReport{
+		LeafNodeType:             types.NodeTypeIt,
 		State:                    state,
 		RunTime:                  runTime,
 		ContainerHierarchyLabels: [][]string{labels},
@@ -107,14 +108,42 @@ func TestFormatTierTable(t *testing.T) {
 }
 
 func TestSelectedReports(t *testing.T) {
-	t.Setenv("TIER", tierCore)
+	suiteSetup := types.SpecReport{
+		LeafNodeType: types.NodeTypeBeforeSuite,
+		State:        types.SpecStatePassed,
+		RunTime:      time.Minute,
+	}
 	reports := []types.SpecReport{
+		suiteSetup,
 		specReport(types.SpecStatePassed, time.Second, tierCore),
 		specReport(types.SpecStatePassed, time.Second, tierTrace),
 		specReport(types.SpecStatePassed, time.Second),
 	}
-	got := selectedReports(reports)
-	if len(got) != 1 || specTier(got[0]) != tierCore {
-		t.Fatalf("selectedReports() kept %d reports, want only the core one", len(got))
-	}
+
+	t.Run("single tier keeps only its scenarios", func(t *testing.T) {
+		t.Setenv("TIER", tierCore)
+		got := selectedReports(reports)
+		if len(got) != 1 || specTier(got[0]) != tierCore {
+			t.Fatalf("selectedReports() kept %d reports, want only the core one", len(got))
+		}
+	})
+
+	t.Run("all tiers drops suite setup", func(t *testing.T) {
+		t.Setenv("TIER", "all")
+		got := selectedReports(reports)
+		if len(got) != 3 {
+			t.Fatalf("selectedReports() kept %d reports, want 3 scenarios", len(got))
+		}
+		for _, r := range got {
+			if r.LeafNodeType != types.NodeTypeIt {
+				t.Errorf("kept non-scenario report of type %s", r.LeafNodeType)
+			}
+		}
+		rows := summarizeTiers(got)
+		for _, row := range rows {
+			if row.Tier == unlabelledTier && row.Passed != 1 {
+				t.Errorf("unlabelled passed = %d, want 1 (BeforeSuite must not count)", row.Passed)
+			}
+		}
+	})
 }
