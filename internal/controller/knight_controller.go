@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -111,6 +112,10 @@ type KnightReconciler struct {
 	// The controller selects the backend based on knight.Spec.Runtime.
 	// If nil or the key is missing, falls back to RuntimeBackend.
 	RuntimeBackends map[string]rtruntime.RuntimeBackend
+
+	// MaxConcurrentRollouts limits how many knights of a namespace roll out a
+	// changed pod template at once. 0 (default) means unlimited.
+	MaxConcurrentRollouts int
 
 	// SandboxEnabled reports whether the agent-sandbox v1beta1 API is served
 	// and the sandbox backend is registered. When false, the controller does
@@ -370,6 +375,8 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// 2d. Isolated condition and metric from the RuntimeClass and egress.
 	r.reconcileIsolated(knight)
 
+	rolloutDeferred := false
+
 	// 3. Runtime (Deployment or Sandbox, depending on knight.Spec.Runtime).
 	//    Held while the tools image for the current spec is unpublished, so the
 	//    pod doesn't roll onto a spec that expects tools its image lacks.
@@ -378,16 +385,32 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		log.Error(err, "Failed to check tools image rollout hold")
 	} else if hold {
 		log.Info("Holding pod rollout until the tools image is published", "image", knightpkg.ToolsImageRef(knight))
-	} else if backend != nil {
-		if err := backend.Reconcile(ctx, knight); err != nil {
+	} else {
+		var err error
+		if backend != nil {
+			err = backend.Reconcile(ctx, knight)
+		} else {
+			err = r.reconcileDeployment(ctx, knight)
+		}
+		switch {
+		case errors.Is(err, rtruntime.ErrRolloutDeferred):
+			rolloutDeferred = true
+			log.Info("Deferring pod rollout", "reason", err.Error())
+			meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+				Type:   aiv1alpha1.ConditionKnightRolloutPending,
+				Status: metav1.ConditionTrue,
+				Reason: aiv1alpha1.ReasonWaitingForOtherRollouts,
+				Message: fmt.Sprintf("Waiting for other knight rollouts to finish (limit %d concurrent)",
+					r.MaxConcurrentRollouts),
+				ObservedGeneration: knight.Generation,
+			})
+		case err != nil:
 			reconcileErr = err
 			log.Error(err, "Failed to reconcile runtime", "backend", knight.Spec.Runtime)
 		}
-	} else {
-		if err := r.reconcileDeployment(ctx, knight); err != nil {
-			reconcileErr = err
-			log.Error(err, "Failed to reconcile Deployment")
-		}
+	}
+	if !rolloutDeferred {
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
 	}
 
 	// 4. Scaling: KEDA ScaledObject and PodDisruptionBudget
@@ -424,6 +447,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if (mcpHeadersPending || consumerErr != nil) && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
+		nixRequeue = RequeueSlow
+	}
+
+	if rolloutDeferred && (nixRequeue == 0 || RequeueSlow < nixRequeue) {
 		nixRequeue = RequeueSlow
 	}
 
@@ -839,6 +866,7 @@ func (r *KnightReconciler) reconcileDeployment(ctx context.Context, knight *aiv1
 func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
 	b := rtruntime.NewDeploymentBackend(r.Client, r.Scheme, r.DefaultImage, r.BuildDeploymentSpec)
 	b.Autoscaled = r.isAutoscaled
+	b.MaxConcurrentRollouts = r.MaxConcurrentRollouts
 	return b
 }
 

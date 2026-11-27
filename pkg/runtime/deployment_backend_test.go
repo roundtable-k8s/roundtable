@@ -440,3 +440,85 @@ func TestDeploymentBackend_Reconcile_LeavesKEDAReplicasAlone(t *testing.T) {
 	require.NoError(t, b.Reconcile(ctx, knight))
 	assert.Equal(t, int32(1), *getDeploy(t, b, "gareth").Spec.Replicas)
 }
+
+// settle marks a Deployment as fully rolled out; roll marks it mid-rollout.
+func setRolloutStatus(t *testing.T, b *DeploymentBackend, name string, settled bool) {
+	t.Helper()
+	d := getDeploy(t, b, name)
+	d.Status = appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1, UpdatedReplicas: 1}
+	if !settled {
+		d.Status.UpdatedReplicas = 0
+		d.Status.UnavailableReplicas = 1
+	}
+	require.NoError(t, b.Client.Status().Update(context.Background(), d))
+}
+
+func bumpedKnight(name string) *aiv1alpha1.Knight {
+	k := newTestKnight(name)
+	k.Spec.Image = "ghcr.io/dapperdivers/openclaw-knight:v2"
+	return k
+}
+
+func TestDeploymentBackend_Reconcile_MaxConcurrentRollouts(t *testing.T) {
+	ctx := context.Background()
+	names := []string{"a", "b", "c"}
+
+	setup := func(t *testing.T, limit int) *DeploymentBackend {
+		s := newTestScheme(t)
+		c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&appsv1.Deployment{}).Build()
+		b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
+		b.MaxConcurrentRollouts = limit
+		for _, n := range names {
+			require.NoError(t, b.Reconcile(ctx, newTestKnight(n)))
+			setRolloutStatus(t, b, n, true)
+		}
+		return b
+	}
+	image := func(b *DeploymentBackend, n string) string {
+		return getDeploy(t, b, n).Spec.Template.Spec.Containers[0].Image
+	}
+
+	t.Run("limit 1 rolls one knight at a time", func(t *testing.T) {
+		b := setup(t, 1)
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("a")))
+		setRolloutStatus(t, b, "a", false)
+
+		for _, n := range []string{"b", "c"} {
+			err := b.Reconcile(ctx, bumpedKnight(n))
+			require.ErrorIs(t, err, ErrRolloutDeferred)
+			assert.Contains(t, image(b, n), ":v1", "deferred knight keeps its template")
+		}
+		assert.Contains(t, image(b, "a"), ":v2")
+
+		// a finishes: exactly one more may roll.
+		setRolloutStatus(t, b, "a", true)
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("b")))
+		setRolloutStatus(t, b, "b", false)
+		require.ErrorIs(t, b.Reconcile(ctx, bumpedKnight("c")), ErrRolloutDeferred)
+		// A knight that is itself mid-rollout is never held.
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("b")))
+	})
+
+	t.Run("limit 0 rolls everything at once", func(t *testing.T) {
+		b := setup(t, 0)
+		for _, n := range names {
+			require.NoError(t, b.Reconcile(ctx, bumpedKnight(n)))
+			setRolloutStatus(t, b, n, false)
+		}
+		for _, n := range names {
+			assert.Contains(t, image(b, n), ":v2")
+		}
+	})
+
+	t.Run("scaled to zero knights are not counted", func(t *testing.T) {
+		b := setup(t, 1)
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("a")))
+		setRolloutStatus(t, b, "a", false)
+		zero := int32(0)
+		d := getDeploy(t, b, "a")
+		d.Spec.Replicas = &zero
+		require.NoError(t, b.Client.Update(ctx, d))
+
+		require.NoError(t, b.Reconcile(ctx, bumpedKnight("b")))
+	})
+}

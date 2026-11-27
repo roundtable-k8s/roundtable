@@ -94,6 +94,11 @@ keda: auto
 # Empty derives it from each knight's spec.nats.url host on port 8222.
 natsMonitoringEndpoint: ""
 
+# Max knights per namespace rolling out a changed pod template at once (e.g.
+# after an image bump). 0 = unlimited. A rolling knight's surge pod needs one
+# pod of headroom. (Top-level: `knights` is the map of knights to create.)
+maxConcurrentRollouts: 0
+
 # Transient model provider failures (#481). A chain step whose task fails with
 # HTTP 529/503/502/500 or "overloaded" is retried after a 1m, 2m, 4m, 8m...
 # backoff instead of failing the run. After 2 retries the step moves to

@@ -109,6 +109,7 @@ func main() {
 	var githubAPIURL string
 	var providerMaxRetries int
 	var chainMaxConcurrentReconciles int
+	var maxConcurrentRollouts int
 	var missionResultsTTL time.Duration
 	var triggerTaskBucket string
 	var triggerTaskTTL, scheduleResultRetention time.Duration
@@ -147,6 +148,9 @@ func main() {
 			"An existing bucket with a different TTL is updated.")
 	flag.IntVar(&chainMaxConcurrentReconciles, "chain-max-concurrent-reconciles", 1,
 		"How many Chains reconcile in parallel. 1 keeps the single worker.")
+	flag.IntVar(&maxConcurrentRollouts, "max-concurrent-rollouts", 0,
+		"Maximum number of knights per namespace rolling out a changed pod template at once. "+
+			"0 means unlimited.")
 	flag.IntVar(&providerMaxRetries, "provider-overload-max-retries", 4,
 		"Retries (1m, 2m, 4m, 8m backoff) of a chain step whose task failed with a transient "+
 			"model provider error (HTTP 529/503/502/500, overloaded). 0 disables.")
@@ -438,6 +442,7 @@ func main() {
 		CardsBucket:    cardsBucket,
 		SandboxEnabled: sandboxEnabled,
 
+		MaxConcurrentRollouts:  maxConcurrentRollouts,
 		KEDAEnabled:            kedaEnabled,
 		NATSMonitoringEndpoint: natsMonitoringEndpoint,
 		NATS:                   natsProvider,

@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -59,7 +60,17 @@ type DeploymentBackend struct {
 	// replica count. When it returns true, Reconcile sets replicas only on
 	// create and otherwise leaves them to KEDA. Nil means never autoscaled.
 	Autoscaled func(ctx context.Context, knight *aiv1alpha1.Knight) bool
+
+	// MaxConcurrentRollouts caps how many knight Deployments of a namespace
+	// may be mid-rollout when another one's pod template changes. 0 means
+	// unlimited (the default).
+	MaxConcurrentRollouts int
 }
+
+// ErrRolloutDeferred is returned (wrapped) by Reconcile when a changed pod
+// template was not applied because MaxConcurrentRollouts other knights are
+// still rolling out. The Deployment is left untouched; retry later.
+var ErrRolloutDeferred = errors.New("rollout deferred: waiting for other knight rollouts")
 
 // NewDeploymentBackend creates a new DeploymentBackend.
 func NewDeploymentBackend(
@@ -121,6 +132,9 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 	if strategy.Type == "" {
 		strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	}
+	if err := b.gateRollout(ctx, knight, desiredHash); err != nil {
+		return err
+	}
 	autoscaled := b.Autoscaled != nil && b.Autoscaled(ctx, knight)
 
 	op, err := controllerutil.CreateOrUpdate(ctx, b.Client, deploy, func() error {
@@ -170,6 +184,69 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		"defaultImage", b.DefaultImage,
 		"resolvedImage", deploy.Spec.Template.Spec.Containers[0].Image)
 	return nil
+}
+
+// gateRollout returns ErrRolloutDeferred when applying desiredHash to the
+// knight's existing Deployment would exceed MaxConcurrentRollouts. New
+// Deployments, unchanged templates and scaled-to-zero knights are never held.
+func (b *DeploymentBackend) gateRollout(ctx context.Context, knight *aiv1alpha1.Knight, desiredHash string) error {
+	if b.MaxConcurrentRollouts <= 0 {
+		return nil
+	}
+	existing := &appsv1.Deployment{}
+	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, existing)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get deployment: %w", err)
+	}
+	if existing.Spec.Template.Annotations[specHashAnnotation] == desiredHash || isScaledToZero(existing) {
+		return nil
+	}
+	// Already mid-rollout itself: let it carry on with the new template.
+	if isRollingOut(existing) {
+		return nil
+	}
+	list := &appsv1.DeploymentList{}
+	if err := b.Client.List(ctx, list, client.InNamespace(knight.Namespace),
+		client.MatchingLabels{"app.kubernetes.io/name": "knight", "app.kubernetes.io/managed-by": "roundtable-operator"},
+	); err != nil {
+		return fmt.Errorf("failed to list knight deployments: %w", err)
+	}
+	rolling := 0
+	for i := range list.Items {
+		d := &list.Items[i]
+		if d.Name == knight.Name || !d.DeletionTimestamp.IsZero() || isScaledToZero(d) {
+			continue
+		}
+		if isRollingOut(d) {
+			rolling++
+		}
+	}
+	if rolling >= b.MaxConcurrentRollouts {
+		return fmt.Errorf("%w (limit %d, %d rolling)", ErrRolloutDeferred, b.MaxConcurrentRollouts, rolling)
+	}
+	return nil
+}
+
+func isScaledToZero(d *appsv1.Deployment) bool {
+	return d.Spec.Replicas != nil && *d.Spec.Replicas == 0
+}
+
+// isRollingOut reports whether a Deployment has not settled on its current
+// template: the controller has not observed the latest generation, replicas
+// are not all updated, unavailable or surplus (surge) pods exist.
+func isRollingOut(d *appsv1.Deployment) bool {
+	want := int32(1)
+	if d.Spec.Replicas != nil {
+		want = *d.Spec.Replicas
+	}
+	st := d.Status
+	return st.ObservedGeneration < d.Generation ||
+		st.UpdatedReplicas < want ||
+		st.UnavailableReplicas > 0 ||
+		st.Replicas > want
 }
 
 // Cleanup deletes the Deployment owned by the Knight.
