@@ -1,0 +1,110 @@
+# For the e2e github tier: a dummy token, the stub GitHub API (test/e2e/stubgithub),
+# a table with issue pickup on the trigger engine, one stub knight and a one-step
+# Chain the pickup copies per issue.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-token
+  namespace: roundtable-github
+stringData:
+  token: dummy-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stubgithub
+  namespace: roundtable-github
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: stubgithub}
+  template:
+    metadata:
+      labels: {app: stubgithub}
+    spec:
+      containers:
+        - name: stubgithub
+          image: stubgithub:e2e
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            tcpSocket: {port: 8080}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stubgithub
+  namespace: roundtable-github
+spec:
+  selector: {app: stubgithub}
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: gh-table
+  namespace: roundtable-github
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: gh
+    tasksStream: gh_tasks
+    resultsStream: gh_results
+    createStreams: true
+    streamRetention: WorkQueue
+  github:
+    tokenSecretRef:
+      name: github-token
+      key: token
+  issuePickup:
+    engine: trigger
+    repos: [acme/widgets]
+    chainRef: {name: pickup-e2e}
+    intervalSeconds: 60
+    ttlSecondsAfterFinished: 0
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-github
+  labels:
+    ai.roundtable.io/round-table: gh-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: gh_tasks
+    resultsStream: gh_results
+    subjects:
+      - "gh.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: pickup-e2e
+  namespace: roundtable-github
+spec:
+  roundTableRef: {name: gh-table}
+  timeoutSeconds: 600
+  steps:
+    - name: work
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Work on {{ .Input }}
