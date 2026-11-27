@@ -442,6 +442,10 @@ const (
 	// ReasonAllKnightsReady indicates all knights in the roundtable are ready.
 	ReasonAllKnightsReady = "AllKnightsReady"
 
+	// ReasonKnightsHealthy indicates no knight is unhealthy but none is up
+	// either: every knight is idle (scaled to zero) or suspended.
+	ReasonKnightsHealthy = "KnightsHealthy"
+
 	// ReasonKnightsDegraded indicates some knights are not ready.
 	ReasonKnightsDegraded = "KnightsDegraded"
 

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
@@ -182,6 +183,73 @@ var _ = Describe("RoundTable health with knights at rest", func() {
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Message).To(Equal("3 knights: 0 ready, 3 scaled to zero, 0 suspended, 0 not ready"))
+		Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonKnightsHealthy))
+	})
+
+	It("keeps the previous totals and OverBudget when usage cannot be read", func() {
+		newKnight("idle-ready", false, aiv1alpha1.KnightPhaseReady, true, aiv1alpha1.ReasonKnightReady)
+		key := types.NamespacedName{Name: table, Namespace: namespace}
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{CostBudgetUSD: "1"}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		rt.Status.TotalCost = "5.0000"
+		rt.Status.TotalTasksCompleted = 7
+		rt.Status.Phase = aiv1alpha1.RoundTablePhaseOverBudget
+		Expect(k8sClient.Status().Update(ctx, rt)).To(Succeed())
+
+		rec := record.NewFakeRecorder(100)
+		r := &RoundTableReconciler{Client: failingListClient{k8sClient}, Scheme: k8sClient.Scheme(), Recorder: rec}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		Expect(rt.Status.TotalCost).To(Equal("5.0000"))
+		Expect(rt.Status.TotalTasksCompleted).To(Equal(int64(7)))
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseOverBudget))
+		Expect(countEvents(rec, "BudgetExceeded")).To(BeZero(), "already OverBudget: no new event")
+	})
+
+	It("records BudgetExceeded once when the table goes over budget", func() {
+		newKnight("idle-ready", false, aiv1alpha1.KnightPhaseReady, true, aiv1alpha1.ReasonKnightReady)
+		key := types.NamespacedName{Name: table, Namespace: namespace}
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{CostBudgetUSD: "1"}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+
+		mission := &aiv1alpha1.Mission{
+			ObjectMeta: metav1.ObjectMeta{Name: "idle-budget-mission", Namespace: namespace},
+			Spec: aiv1alpha1.MissionSpec{
+				Objective:     "spend",
+				RoundTableRef: &corev1.LocalObjectReference{Name: table},
+			},
+		}
+		Expect(k8sClient.Create(ctx, mission)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, mission) })
+		mission.Status.TotalCost = "5.0000"
+		Expect(k8sClient.Status().Update(ctx, mission)).To(Succeed())
+
+		rec := record.NewFakeRecorder(100)
+		r := &RoundTableReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		for range 2 {
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseOverBudget))
+		Expect(countEvents(rec, "BudgetExceeded")).To(Equal(1))
+	})
+
+	It("reports DeprecatedFieldsUsed on a suspended table", func() {
+		key := types.NamespacedName{Name: table, Namespace: namespace}
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		rt.Spec.Suspend = true
+		rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{CostResetSchedule: "0 0 1 * *"}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		rt = reconcileTable()
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseSuspended))
+		Expect(meta.IsStatusConditionTrue(rt.Status.Conditions, aiv1alpha1.ConditionRoundTableDeprecatedFieldsUsed)).To(BeTrue())
 	})
 
 	It("counts ready, waking, user-suspended knights as healthy and a crashed one as Degraded", func() {
@@ -303,3 +371,13 @@ var _ = Describe("RoundTable planner knightRef check", func() {
 		Expect(c).To(BeNil())
 	})
 })
+
+// failingListClient fails listing Missions, so tableUsage errors.
+type failingListClient struct{ client.Client }
+
+func (c failingListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*aiv1alpha1.MissionList); ok {
+		return errors.New("boom")
+	}
+	return c.Client.List(ctx, list, opts...)
+}
