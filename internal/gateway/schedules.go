@@ -100,7 +100,17 @@ type ScheduleView struct {
 	// Description is the cron in words, e.g. "at 07:00 on Monday to Friday".
 	Description string         `json:"description"`
 	Target      ScheduleTarget `json:"target"`
-	Suspended   bool           `json:"suspended"`
+	// Suspended is the effective suspension: spec.suspend or the suspend
+	// annotation the gateway sets.
+	Suspended bool `json:"suspended"`
+	// SuspendedBy says what suspends it: "spec", "annotation" or both
+	// comma-separated; omitted when not suspended.
+	SuspendedBy string `json:"suspendedBy,omitempty"`
+	// Concurrency is what a firing does while earlier runs are active.
+	Concurrency ScheduleConcurrency `json:"concurrency"`
+	// StartingDeadlineSeconds is how late a missed tick may still run; omitted
+	// when unset (the CronJob controller's default applies).
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
 	// NextRunAt is status.nextScheduledAt.
 	NextRunAt *time.Time `json:"nextRunAt,omitempty"`
 	// LastRunAt is status.lastFiredAt: when a firing last started a run.
@@ -108,6 +118,14 @@ type ScheduleView struct {
 	// LastResult is the newest entry of status.recentFirings.
 	LastResult *ScheduleFiring `json:"lastResult,omitempty"`
 	ManagedBy  ManagedBy       `json:"managedBy"`
+}
+
+// ScheduleConcurrency is Trigger.spec.concurrency.
+type ScheduleConcurrency struct {
+	// Policy is Allow, Forbid or Replace (Allow when unset).
+	Policy string `json:"policy"`
+	// MaxActive caps active runs under Allow; 0 means no cap.
+	MaxActive int32 `json:"maxActive"`
 }
 
 // ScheduleTarget is what a schedule starts.
@@ -293,8 +311,17 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string, knightTa
 		TimeZone:    src.TimeZone,
 		Description: DescribeCron(src.Cron),
 		Target:      target,
-		Suspended:   t.Spec.Suspend,
-		ManagedBy:   ScheduleManagedBy(t),
+		Suspended:   t.Suspended(),
+		SuspendedBy: t.SuspendedBy(),
+		Concurrency: ScheduleConcurrency{
+			Policy:    string(aiv1alpha1.TriggerConcurrencyAllow),
+			MaxActive: t.Spec.Concurrency.MaxActive,
+		},
+		StartingDeadlineSeconds: src.StartingDeadlineSeconds,
+		ManagedBy:               ScheduleManagedBy(t),
+	}
+	if p := t.Spec.Concurrency.Policy; p != "" {
+		v.Concurrency.Policy = string(p)
 	}
 	if v.Table == "" && chain != "" {
 		v.Table = chainTables[chain]
