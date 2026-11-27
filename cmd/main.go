@@ -703,13 +703,13 @@ const leaderElectionID = "dcc66784.roundtable.io"
 // is shorter than terminationGracePeriodSeconds, so releasing the lease cannot
 // let a second leader run alongside leftover work. A new pod can then take over
 // at once instead of waiting leaseDuration; a crash still waits it out.
-func managerOptions(s *runtime.Scheme, metrics metricsserver.Options, webhooks webhook.Server,
+func managerOptions(s *runtime.Scheme, metricsOpts metricsserver.Options, webhooks webhook.Server,
 	probeAddr string, leaderElect bool, t leaderElectionTimings) ctrl.Options {
 	return ctrl.Options{
 		Scheme: s,
 		// Secrets are read uncached (no cluster-wide Secret informer).
 		Client:                        controller.ManagerClientOptions(),
-		Metrics:                       metrics,
+		Metrics:                       metricsOpts,
 		WebhookServer:                 webhooks,
 		HealthProbeBindAddress:        probeAddr,
 		LeaderElection:                leaderElect,
