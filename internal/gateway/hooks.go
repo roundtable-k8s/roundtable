@@ -25,9 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -384,7 +382,7 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	}
 	setRequestTable(ctx, s.hookTable(ctx, trg))
 	if ok, wait := s.hookLimits.allow(ns+"/"+name, s.now()); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(max(wait.Seconds(), 1)))))
+		w.Header().Set("Retry-After", retryAfterSeconds(wait))
 		writeError(w, fmt.Errorf("%w: rate limit for this hook exceeded", ErrBusy))
 		return
 	}

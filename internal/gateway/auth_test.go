@@ -441,3 +441,67 @@ func TestCallerAnnotations(t *testing.T) {
 		t.Error("annotation without a caller")
 	}
 }
+
+func TestServiceAccountAuthReviewLimit(t *testing.T) {
+	f := newSAFixture()
+	f.auth.ReviewRate, f.auth.ReviewBurst = 1, 3
+	ctx := context.Background()
+
+	// Warm the cache with one valid token (uses one of the burst).
+	if _, err := f.auth.Authenticate(ctx, f.valid); err != nil {
+		t.Fatal(err)
+	}
+	// A burst of distinct tokens: the rest of the burst reaches the reviewer.
+	for i := range 10 {
+		_, err := f.auth.Authenticate(ctx, fmt.Sprintf("random-token-%d", i))
+		var le *reviewLimitedError
+		if i < 2 {
+			if err == nil || errors.Is(err, ErrBusy) {
+				t.Fatalf("token %d: %v, want a plain refusal", i, err)
+			}
+		} else if !errors.As(err, &le) || authStatus(err) != http.StatusTooManyRequests {
+			t.Fatalf("token %d: %v, want rate limited", i, err)
+		}
+	}
+	if n := f.reviewer.callCount(); n != 3 {
+		t.Fatalf("reviews = %d, want burst 3", n)
+	}
+	// A cached token is not limited.
+	for range 5 {
+		if c, err := f.auth.Authenticate(ctx, f.valid); err != nil || c.Name != "jobs/runner" {
+			t.Fatalf("cached token: %v %v", c, err)
+		}
+	}
+	if n := f.reviewer.callCount(); n != 3 {
+		t.Fatalf("reviews after cached hits = %d, want 3", n)
+	}
+	// The bucket refills with time.
+	f.clock.advance(2 * time.Second)
+	if _, err := f.auth.Authenticate(ctx, "another-random-token"); errors.Is(err, ErrBusy) {
+		t.Fatalf("after refill: %v", err)
+	}
+}
+
+func TestHTTPReviewLimit(t *testing.T) {
+	e := newEnv(t, Options{})
+	f := newSAFixture()
+	f.auth.ReviewRate, f.auth.ReviewBurst = 1, 2
+	e.auth.ServiceAccounts = f.auth
+
+	for i := range 2 {
+		if resp, _ := e.do(t, "GET", "/v1/knights", fmt.Sprintf("random-token-%d", i), nil); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("token %d: %d", i, resp.StatusCode)
+		}
+	}
+	resp, _ := e.do(t, "GET", "/v1/knights", "random-token-x", nil)
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("limited: %d Retry-After=%q", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	// Static tokens never reach the reviewer.
+	if resp, _ := e.do(t, "GET", "/v1/knights", testToken, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("static token: %d", resp.StatusCode)
+	}
+	if n := f.reviewer.callCount(); n != 2 {
+		t.Fatalf("reviews = %d, want 2", n)
+	}
+}

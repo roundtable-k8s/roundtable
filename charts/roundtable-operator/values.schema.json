@@ -636,6 +636,12 @@
             },
             "allowedNamespaces": {
               "type": "array"
+            },
+            "reviewRate": {
+              "type": "number"
+            },
+            "reviewBurst": {
+              "type": "integer"
             }
           }
         },

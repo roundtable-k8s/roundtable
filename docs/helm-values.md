@@ -272,6 +272,8 @@ Note: `helm template` has no cluster to `lookup`, so it renders a fresh random t
 | `gateway.serviceAccountAuth.enabled` | bool | `true` | Also accept in-cluster callers' own ServiceAccount tokens, checked with a TokenReview; grants the gateway `create` on `tokenreviews.authentication.k8s.io` (a ClusterRole, only when enabled) ([gateway.md](gateway.md#calling-from-a-workload)) |
 | `gateway.serviceAccountAuth.audience` | string | `roundtable-gateway` | Audience the projected ServiceAccount token must be issued for |
 | `gateway.serviceAccountAuth.allowedNamespaces` | list | `["*"]` | Namespaces whose ServiceAccounts may call (`"*"` or an empty list = any). If you narrow it while `dashboard.gateway.serviceAccountToken=true`, include the release namespace or the dashboard's token is rejected |
+| `gateway.serviceAccountAuth.reviewRate` | number | `50` | TokenReviews per second each gateway replica sends to the API server on average (cache hits and static tokens excluded); beyond the burst a caller gets `429` with `Retry-After` |
+| `gateway.serviceAccountAuth.reviewBurst` | int | `100` | TokenReviews each gateway replica may send at once (0 = default; the limit cannot be turned off) |
 | `gateway.service.type` / `.port` | string / int | `ClusterIP` / `80` | Service |
 | `gateway.networkPolicy.enabled` | bool | `true` | Restrict ingress to the gateway |
 | `gateway.networkPolicy.from` | list | `[{podSelector: {}}]` | NetworkPolicyPeers allowed in (default: release namespace). An empty list allows any source. |

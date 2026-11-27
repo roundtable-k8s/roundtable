@@ -442,6 +442,12 @@ gateway:
     audience: roundtable-gateway
     # Namespaces whose ServiceAccounts may call ("*" = any, an empty list too).
     allowedNamespaces: ["*"]
+    # Bound on the TokenReviews the gateway sends to the API server (cache
+    # hits excluded): reviewRate per second on average, reviewBurst at once.
+    # Beyond it callers get 429 with Retry-After. The defaults never touch
+    # normal callers.
+    reviewRate: 50
+    reviewBurst: 100
   service:
     type: ClusterIP
     port: 80
