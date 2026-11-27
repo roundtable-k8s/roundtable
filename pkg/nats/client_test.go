@@ -626,7 +626,8 @@ func TestTaskResultRefusedTolerant(t *testing.T) {
 
 func TestTokenUsageFractionalDecode(t *testing.T) {
 	var r TaskResult
-	if err := json.Unmarshal([]byte(`{"tokens":{"input":10.7,"output":5,"cacheRead":1e3,"cacheWrite":2.2}}`), &r); err != nil {
+	payload := `{"tokens":{"input":10.7,"output":5,"cacheRead":1e3,"cacheWrite":2.2}}`
+	if err := json.Unmarshal([]byte(payload), &r); err != nil {
 		t.Fatal(err)
 	}
 	want := TokenUsage{Input: 10, Output: 5, CacheRead: 1000, CacheWrite: 2}

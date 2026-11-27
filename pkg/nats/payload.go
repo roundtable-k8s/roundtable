@@ -163,7 +163,12 @@ func (t *TokenUsage) UnmarshalJSON(b []byte) error {
 		}
 		return int64(math.Floor(*f))
 	}
-	*t = TokenUsage{Input: floor(raw.Input), Output: floor(raw.Output), CacheRead: floor(raw.CacheRead), CacheWrite: floor(raw.CacheWrite)}
+	*t = TokenUsage{
+		Input:      floor(raw.Input),
+		Output:     floor(raw.Output),
+		CacheRead:  floor(raw.CacheRead),
+		CacheWrite: floor(raw.CacheWrite),
+	}
 	return nil
 }
 
