@@ -21,12 +21,15 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/go-logr/logr"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
 func TestTriggerTable(t *testing.T) {
@@ -88,7 +91,7 @@ func TestResolverKnightTable(t *testing.T) {
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		table("labelled"), table("legacy"),
 		knight("by-label", map[string]string{aiv1alpha1.LabelRoundTable: "labelled"}),
-		knight("by-legacy", map[string]string{legacyTableLabel: "legacy"}),
+		knight("by-legacy", map[string]string{knightpkg.LegacyTableLabel: "legacy"}),
 		ownerless,
 	).Build()
 	r := &Resolver{Client: k8s}
@@ -104,5 +107,31 @@ func TestResolverKnightTable(t *testing.T) {
 	}
 	if _, err := r.KnightTable(context.Background(), "ns", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing knight: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServiceKnightTables(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: "rt", Namespace: "ns"}, Spec: aiv1alpha1.RoundTableSpec{NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "rt"}}},
+		&aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: "galahad", Namespace: "ns", Labels: map[string]string{aiv1alpha1.LabelRoundTable: "rt"}}},
+	).Build()
+	s := &Service{Resolver: &Resolver{Client: k8s}, Log: logr.Discard()}
+	lookup := s.knightTables(context.Background(), "ns")
+	if got := lookup("galahad"); got != "rt" {
+		t.Errorf("galahad = %q, want rt", got)
+	}
+	if got := lookup("missing"); got != "" {
+		t.Errorf("missing = %q, want empty", got)
+	}
+	// Memoised: deleting the knight does not change a cached answer.
+	if err := k8s.Delete(context.Background(), &aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: "galahad", Namespace: "ns"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lookup("galahad"); got != "rt" {
+		t.Errorf("cached galahad = %q, want rt", got)
 	}
 }

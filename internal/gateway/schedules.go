@@ -114,8 +114,8 @@ type ScheduleView struct {
 type ScheduleTarget struct {
 	// Kind is "chain" or "knight" (a mission comes later).
 	Kind string `json:"kind"`
-	// Summary is a short description of the target: the chain's or the
-	// knight's name.
+	// Summary is a short description of the target: "chain <name>", or
+	// "knight <name>: <first line of the task>" (the line cut to 80 characters).
 	Summary string `json:"summary"`
 	// Chain is the target Chain (kind chain).
 	Chain string `json:"chain,omitempty"`
@@ -159,13 +159,14 @@ func (s *Service) ListSchedules(ctx context.Context, f ScheduleFilter) ([]*Sched
 		return nil, k8sError("list triggers", err)
 	}
 	tables := s.chainTables(ctx, ns)
+	knightTable := s.knightTables(ctx, ns)
 	out := make([]*ScheduleView, 0, len(list.Items))
 	for i := range list.Items {
 		t := &list.Items[i]
 		if !isSchedule(t) {
 			continue
 		}
-		v := scheduleView(t, tables)
+		v := scheduleView(t, tables, knightTable)
 		if f.Table != "" && v.Table != f.Table {
 			continue
 		}
@@ -181,7 +182,7 @@ func (s *Service) GetSchedule(ctx context.Context, namespace, name string) (*Sch
 	if err != nil {
 		return nil, err
 	}
-	return scheduleView(t, s.chainTables(ctx, t.Namespace)), nil
+	return scheduleView(t, s.chainTables(ctx, t.Namespace), s.knightTables(ctx, t.Namespace)), nil
 }
 
 // ScheduleManifest returns a schedule's Trigger as YAML without status or
@@ -235,7 +236,44 @@ func (s *Service) chainTables(ctx context.Context, ns string) map[string]string 
 	return out
 }
 
-func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *ScheduleView {
+// knightTables returns a memoised lookup of a knight's RoundTable, for
+// schedules without a roundTableRef. Best effort: an unknown knight or a
+// failed lookup yields "".
+func (s *Service) knightTables(ctx context.Context, ns string) func(string) string {
+	cache := map[string]string{}
+	return func(name string) string {
+		if tbl, ok := cache[name]; ok {
+			return tbl
+		}
+		tbl, err := s.Resolver.KnightTable(ctx, ns, name)
+		if err != nil {
+			s.Log.V(1).Info("Unable to resolve knight table for schedule", "namespace", ns, "knight", name, "error", err.Error())
+			tbl = ""
+		}
+		cache[name] = tbl
+		return tbl
+	}
+}
+
+// knightSummary is "knight <name>: <first non-empty line of the task>", the
+// line cut to 80 characters.
+func knightSummary(name, task string) string {
+	for line := range strings.SplitSeq(task, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > 80 {
+			line = string(r[:80])
+		}
+		return "knight " + name + ": " + line
+	}
+	return "knight " + name
+}
+
+// scheduleView renders a Trigger. knightTable (may be nil) resolves a knight
+// target's table when the Trigger has no roundTableRef.
+func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string, knightTable func(string) string) *ScheduleView {
 	src := t.Spec.Source.Schedule
 	var target ScheduleTarget
 	var chain string
@@ -245,7 +283,7 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *Schedul
 		target = ScheduleTarget{Kind: ScheduleTargetChain, Summary: "chain " + chain, Chain: chain}
 	case t.Spec.Target.Knight != nil:
 		k := t.Spec.Target.Knight.Name
-		target = ScheduleTarget{Kind: ScheduleTargetKnight, Summary: "knight " + k, Knight: k}
+		target = ScheduleTarget{Kind: ScheduleTargetKnight, Summary: knightSummary(k, t.Spec.Target.Knight.Task), Knight: k}
 	}
 	v := &ScheduleView{
 		Name:        t.Name,
@@ -260,6 +298,9 @@ func scheduleView(t *aiv1alpha1.Trigger, chainTables map[string]string) *Schedul
 	}
 	if v.Table == "" && chain != "" {
 		v.Table = chainTables[chain]
+	}
+	if v.Table == "" && target.Kind == ScheduleTargetKnight && knightTable != nil {
+		v.Table = knightTable(target.Knight)
 	}
 	if v.TimeZone == "" {
 		v.TimeZone = defaultScheduleTimeZone

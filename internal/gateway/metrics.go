@@ -187,7 +187,22 @@ func instrument(next http.Handler, log logr.Logger) http.Handler {
 			if traceID != "" {
 				kv = append(kv, "trace_id", traceID)
 			}
-			log.Info("Request", kv...)
+			if r.Method == http.MethodGet && code < http.StatusBadRequest && isPollRoute(route) {
+				log.V(1).Info("Request", kv...)
+			} else {
+				log.Info("Request", kv...)
+			}
 		}
 	})
+}
+
+// isPollRoute reports whether a route pattern is a task or schedule-run read,
+// which clients poll; successful polls log at V(1).
+func isPollRoute(route string) bool {
+	_, path, ok := strings.Cut(route, " ")
+	if !ok {
+		path = route
+	}
+	return strings.HasPrefix(path, "/v1/tasks") ||
+		(strings.HasPrefix(path, "/v1/schedules/") && strings.Contains(path, "/runs"))
 }

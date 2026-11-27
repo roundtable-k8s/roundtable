@@ -2,6 +2,9 @@ package v1alpha1
 
 import "fmt"
 
+// ConcurrencyPolicyField is the field path ValidateConcurrency errors lead with.
+const ConcurrencyPolicyField = "spec.concurrency.policy"
+
 // ValidateConcurrency reports a concurrency policy that cannot work with the
 // Trigger's target: Replace needs to withdraw the active run, which a sent
 // knight task or a created Mission does not allow. The controller uses it for
@@ -13,9 +16,9 @@ func ValidateConcurrency(spec *TriggerSpec) error {
 	}
 	switch {
 	case spec.Target.Knight != nil:
-		return fmt.Errorf("spec.concurrency.policy Replace is not supported with target.knight: a sent task cannot be withdrawn")
+		return fmt.Errorf("%s Replace is not supported with target.knight: a sent task cannot be withdrawn", ConcurrencyPolicyField)
 	case spec.Target.Mission != nil:
-		return fmt.Errorf("spec.concurrency.policy Replace is not supported with target.mission: a created Mission is not withdrawn")
+		return fmt.Errorf("%s Replace is not supported with target.mission: a created Mission is not withdrawn", ConcurrencyPolicyField)
 	}
 	return nil
 }
