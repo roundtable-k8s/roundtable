@@ -18,10 +18,12 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -457,5 +459,75 @@ func TestTableSchedulesRequiresTable(t *testing.T) {
 	resp, out := e.do(t, http.MethodPost, "/v1/schedules/suspend", testToken, map[string]any{})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status %d %v", resp.StatusCode, out)
+	}
+}
+
+// countingClient counts Get calls and fails Patch for the names in failPatch.
+type countingClient struct {
+	client.Client
+	gets      int
+	failPatch map[string]bool
+}
+
+func (c *countingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	c.gets++
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *countingClient) Patch(ctx context.Context, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+	if c.failPatch[obj.GetName()] {
+		return errors.New("boom")
+	}
+	return c.Client.Patch(ctx, obj, p, opts...)
+}
+
+func TestTableSuspendReadsEachScheduleOnce(t *testing.T) {
+	e := newActionEnv(t, true)
+	e.addTableTriggers(t)
+	cc := &countingClient{Client: e.k8s}
+	e.svc.Schedules = cc
+	if _, err := e.svc.SuspendSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS}); err != nil {
+		t.Fatal(err)
+	}
+	// One list for the table plus one fetch per schedule (t-a, t-b), and no
+	// separate read to detect the change.
+	list := cc.gets
+	cc.gets = 0
+	if _, err := e.svc.ResumeSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS}); err != nil {
+		t.Fatal(err)
+	}
+	if cc.gets != list {
+		t.Errorf("resume Gets = %d, suspend Gets = %d", cc.gets, list)
+	}
+}
+
+func TestTableSchedulesFailedPath(t *testing.T) {
+	for _, suspend := range []bool{true, false} {
+		e := newActionEnv(t, true)
+		e.addTableTriggers(t)
+		if !suspend {
+			// t-a must carry the annotation for resume to patch it.
+			if _, err := e.svc.SuspendSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.svc.Schedules = &countingClient{Client: e.k8s, failPatch: map[string]bool{"t-a": true}}
+		var res *TableSchedulesResult
+		var err error
+		if suspend {
+			res, err = e.svc.SuspendSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS})
+		} else {
+			res, err = e.svc.ResumeSchedules(context.Background(), TableSchedulesRequest{Table: "knights", Namespace: testNS})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Failed) != 1 || res.Failed[0].Name != "t-a" || !strings.Contains(res.Failed[0].Error, "patch schedule") {
+			t.Errorf("suspend=%v failed = %+v", suspend, res.Failed)
+		}
+		// The other schedule is still handled.
+		if len(res.Changed)+len(res.Unchanged) != 1 {
+			t.Errorf("suspend=%v changed=%d unchanged=%d, want 1 handled", suspend, len(res.Changed), len(res.Unchanged))
+		}
 	}
 }

@@ -220,3 +220,41 @@ func TestMCPScheduleRuns(t *testing.T) {
 		t.Errorf("list_schedule_runs = %s (%v)", b, err)
 	}
 }
+
+func TestMCPTableScheduleTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	e := newActionEnv(t, true)
+	e.addTableTriggers(t)
+	cs := connectMCP(ctx, t, e.server.URL)
+	call := func(name string) map[string]any {
+		t.Helper()
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{"table": "knights"}})
+		if err != nil || res.IsError {
+			t.Fatalf("%s: %v %+v", name, err, res)
+		}
+		var sc map[string]any
+		b, _ := json.Marshal(res.StructuredContent)
+		if err := json.Unmarshal(b, &sc); err != nil {
+			t.Fatal(err)
+		}
+		return sc
+	}
+	sc := call("suspend_table_schedules")
+	if got := names(sc["changed"]); len(got) != 1 || got[0] != "t-a" {
+		t.Errorf("suspend changed = %v", got)
+	}
+	if got := names(sc["unchanged"]); len(got) != 1 || got[0] != "t-b" {
+		t.Errorf("suspend unchanged = %v", got)
+	}
+	if !e.trigger(t, "t-a").SuspendedByAnnotation() || e.trigger(t, "t-c").Suspended() {
+		t.Error("suspend touched the wrong schedules")
+	}
+	sc = call("resume_table_schedules")
+	if got := names(sc["changed"]); len(got) != 2 {
+		t.Errorf("resume changed = %v", got)
+	}
+	if e.trigger(t, "t-a").Suspended() || e.trigger(t, "t-b").Suspended() {
+		t.Error("table schedules still suspended")
+	}
+}

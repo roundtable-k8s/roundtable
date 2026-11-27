@@ -40,7 +40,7 @@ func fireTimes(r *ScheduleNextRuns) []string {
 }
 
 func TestNextFireTimesBerlinAcrossDST(t *testing.T) {
-	r, err := nextFireTimes("0 7 * * 1-5", "Europe/Berlin", 4, nextTestNow)
+	r, err := nextFireTimes("0 7 * * 1-5", "Europe/Berlin", 4, nextTestNow, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestNextFireTimesBerlinAcrossDST(t *testing.T) {
 
 func TestNextFireTimesDefaultsAndStrictlyAfterNow(t *testing.T) {
 	now := time.Date(2026, 3, 26, 7, 0, 0, 0, time.UTC)
-	r, err := nextFireTimes("0 7 * * *", "", 2, now)
+	r, err := nextFireTimes("0 7 * * *", "", 2, now, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +93,13 @@ func TestNextFireTimesInvalid(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := nextFireTimes(c.expr, c.tz, c.count, nextTestNow)
+			_, err := nextFireTimes(c.expr, c.tz, c.count, nextTestNow, nil)
 			if !errors.Is(err, c.target) {
 				t.Fatalf("err = %v, want %v", err, c.target)
 			}
 		})
 	}
-	if r, err := nextFireTimes("0 7 * * *", "", maxNextCount, nextTestNow); err != nil || len(r.Times) != maxNextCount {
+	if r, err := nextFireTimes("0 7 * * *", "", maxNextCount, nextTestNow, nil); err != nil || len(r.Times) != maxNextCount {
 		t.Fatalf("max count: %v, %v", r, err)
 	}
 }
@@ -201,5 +201,20 @@ func TestScheduleNextSuspendedByAnnotation(t *testing.T) {
 	resp, body := e.do(t, "GET", base+"/next", testToken, nil)
 	if resp.StatusCode != http.StatusOK || body["suspended"] != true || len(body["times"].([]any)) != defaultNextCount {
 		t.Errorf("after annotation suspend: %d %v", resp.StatusCode, body)
+	}
+}
+
+func TestSchedulePreviewErrorsNameQueryParams(t *testing.T) {
+	e := newScheduleEnv(t, true)
+	for path, want := range map[string]string{
+		"/v1/schedules/preview?cron=not+a+cron":                   "cron:",
+		"/v1/schedules/preview?cron=0+7+*+*+*&timeZone=Mars/Base": "timeZone:",
+		"/v1/schedules/preview?cron=TZ%3DUTC+0+7+*+*+*":           "cron:",
+	} {
+		resp, body := e.do(t, "GET", path, testToken, nil)
+		msg, _ := body["error"].(string)
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(msg, want) || strings.Contains(msg, "spec.source") {
+			t.Errorf("%s: %d %q, want 422 naming %q without spec.source", path, resp.StatusCode, msg, want)
+		}
 	}
 }

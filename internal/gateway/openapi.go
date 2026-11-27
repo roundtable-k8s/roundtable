@@ -335,6 +335,62 @@ var openAPIOperations = map[string]obj{
 				"content": obj{"application/json": obj{"schema": schemaRef("Run")}}},
 		}, "400", "401", "403", "404", "409", "503"),
 	},
+	"GET /v1/schedules": {
+		"summary": "List schedules", "tags": []any{"schedules"},
+		"description": "The schedules (cron Triggers) of a namespace, by name.",
+		"parameters": []any{queryParam("namespace", "Namespace; default the gateway's."),
+			queryParam("table", "Only the schedules of this table (RoundTable).")},
+		"responses": errs(obj{"200": jsonResp("OK", object([]string{"schedules"}, obj{"schedules": array(schemaRef("ScheduleView"))}))}, "400", "401", "403", "503"),
+	},
+	"POST /v1/schedules": {
+		"summary": "Create a schedule", "tags": []any{"schedules"},
+		"description": "Creates a schedule Trigger labelled as the gateway's own. spec.source.schedule is required.",
+		"requestBody": jsonBody(schemaRef("ScheduleRequest"), true),
+		"responses": errs(obj{"201": obj{"description": "Created.",
+			"headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
+			"content": obj{"application/json": obj{"schema": schemaRef("ScheduleRecord")}}}}, "400", "401", "403", "404", "409", "422", "503"),
+	},
+	"GET /v1/schedules/{namespace}/{name}": {
+		"summary": "Get a schedule", "tags": []any{"schedules"},
+		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"responses":  errs(obj{"200": jsonResp("OK", schemaRef("ScheduleView"))}, "400", "401", "403", "404", "503"),
+	},
+	"PUT /v1/schedules/{namespace}/{name}": {
+		"summary": "Replace a schedule's spec", "tags": []any{"schedules"},
+		"description": "Replaces the spec of a schedule the gateway manages; a schedule applied from Git is a 409.",
+		"parameters":  []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"requestBody": jsonBody(schemaRef("ScheduleRequest"), true),
+		"responses":   errs(obj{"200": jsonResp("Replaced.", schemaRef("ScheduleRecord"))}, "400", "401", "403", "404", "409", "422", "503"),
+	},
+	"DELETE /v1/schedules/{namespace}/{name}": {
+		"summary": "Delete a schedule", "tags": []any{"schedules"},
+		"description": "Deletes a schedule the gateway manages; a schedule applied from Git is a 409.",
+		"parameters":  []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"responses": errs(obj{"200": jsonResp("Deleted.", object([]string{"deleted"}, obj{"deleted": str("namespace/name")}))},
+			"400", "401", "403", "404", "409", "503"),
+	},
+	"GET /v1/schedules/{namespace}/{name}/manifest": {
+		"summary": "A schedule's Trigger as YAML", "tags": []any{"schedules"},
+		"description": "The Trigger without status or server-set metadata, ready to commit to Git.",
+		"parameters":  []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"responses": errs(obj{"200": obj{"description": "The manifest.",
+			"content": obj{"application/yaml": obj{"schema": obj{"type": "string"}}}}}, "400", "401", "403", "404", "503"),
+	},
+	"POST /v1/schedules/{namespace}/{name}/suspend": scheduleActionOp("Suspend a schedule",
+		"Sets the suspended annotation (its value is the caller); spec.suspend and Git are untouched."),
+	"POST /v1/schedules/{namespace}/{name}/resume": scheduleActionOp("Resume a schedule",
+		"Removes the suspended annotation. A schedule suspended in its spec stays suspended (the state carries a message)."),
+	"POST /v1/schedules/{namespace}/{name}/run": {
+		"summary": "Run a schedule now", "tags": []any{"schedules"},
+		"description": "Asks the trigger controller to fire the schedule once, even while suspended, and waits briefly for it. 201 when the run started, 202 while still pending, 409 when the firing was skipped.",
+		"parameters":  []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"responses": errs(obj{
+			"201": obj{"description": "The run started.", "headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
+				"content": obj{"application/json": obj{"schema": schemaRef("ScheduleRunNow")}}},
+			"202": obj{"description": "The controller has not handled the request yet.", "headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
+				"content": obj{"application/json": obj{"schema": schemaRef("ScheduleRunNow")}}},
+		}, "400", "401", "403", "404", "409", "503"),
+	},
 	"GET /v1/schedules/{namespace}/{name}/next": {
 		"summary": "Next fire times of a schedule", "tags": []any{"schedules"},
 		"description": "The next `count` cron ticks of the stored cron in the schedule's time zone. A suspended schedule still answers, with `suspended: true`. Lists cron ticks only: skip rules (concurrency policy, deadlines) are not applied.",
@@ -555,6 +611,42 @@ var openAPISchemas = obj{
 		"runningSeconds": obj{"type": "integer", "description": "Seconds since the run started, while Running."},
 		"issue":          object([]string{"repo", "number"}, obj{"repo": str("owner/name"), "number": obj{"type": "integer"}}),
 	}),
+	"ScheduleView": object([]string{"name", "namespace", "cron", "timeZone", "description", "target", "suspended", "concurrency", "managedBy"}, obj{
+		"name": str(""), "namespace": str(""), "table": str("The RoundTable: the Trigger's roundTableRef, else its target Chain's."),
+		"cron": str(""), "timeZone": str("IANA zone the cron is evaluated in (UTC when unset)."),
+		"description": str("The cron in words."),
+		"target": object([]string{"kind", "summary"}, obj{
+			"kind": str("chain, knight or mission."), "summary": str("Short description of the target."),
+			"chain": str("Target Chain (kind chain)."), "knight": str("Target Knight (kind knight)."),
+		}),
+		"suspended":   boolean("Effective suspension: spec.suspend or the suspended annotation."),
+		"suspendedBy": str("spec, annotation or spec,annotation; omitted when not suspended."),
+		"concurrency": object([]string{"policy", "maxActive"}, obj{
+			"policy": str("Allow, Forbid or Replace."), "maxActive": integer("Cap on active runs under Allow; 0 means no cap."),
+		}),
+		"startingDeadlineSeconds": integer("How late a missed tick may still run."),
+		"nextRunAt":               obj{"type": "string", "format": "date-time"},
+		"lastRunAt":               obj{"type": "string", "format": "date-time"},
+		"lastResult": object([]string{"time", "outcome"}, obj{
+			"time": obj{"type": "string", "format": "date-time"}, "outcome": str("started, skipped, succeeded, failed or lost."),
+			"run": str(""), "skipReason": str(""),
+		}),
+		"managedBy": obj{"type": "string", "enum": []any{"git", "api", "other"}, "description": "Who owns the Trigger."},
+	}),
+	"ScheduleRequest": object([]string{"spec"}, obj{
+		"name": str("Trigger name; required on POST."), "namespace": str("Defaults to the gateway's namespace on POST; must match the path on PUT."),
+		"spec": obj{"type": "object", "description": "The Trigger's spec; spec.source.schedule is required and no other source may be set."},
+	}),
+	"ScheduleRecord": object([]string{"name", "namespace", "managedBy", "createdAt", "spec"}, obj{
+		"name": str(""), "namespace": str(""), "managedBy": str("git, api or other."), "caller": str(""),
+		"createdAt": obj{"type": "string", "format": "date-time"}, "spec": obj{"type": "object"},
+	}),
+	"ScheduleState": object([]string{"name", "namespace", "suspended"}, scheduleStateProps),
+	"ScheduleRunNow": object([]string{"schedule", "namespace", "target", "key", "state"}, obj{
+		"schedule": str(""), "namespace": str(""), "target": str("chain, knight or mission."),
+		"run": str("The run, task ID or Mission; empty while pending."), "key": str("The firing's dedupe key, manual:<id>."),
+		"state": str("started, pending or skipped."), "skipReason": str(""), "caller": str(""),
+	}),
 	"ScheduleNextRuns": object([]string{"cron", "timeZone", "times"}, obj{
 		"namespace": str("Schedule namespace (omitted by the preview)."), "name": str("Schedule name (omitted by the preview)."),
 		"cron": str(""), "timeZone": str("IANA zone the cron is evaluated in."),
@@ -617,6 +709,14 @@ var openAPISchemas = obj{
 var scheduleStateProps = obj{
 	"name": str(""), "namespace": str(""), "suspended": boolean("Effective suspension after the change."),
 	"suspendedBy": str("spec, annotation or spec,annotation."), "message": str("Set when a resume left the schedule suspended."),
+}
+
+func scheduleActionOp(summary, description string) obj {
+	return obj{
+		"summary": summary, "tags": []any{"schedules"}, "description": description,
+		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name.")},
+		"responses":  errs(obj{"200": jsonResp("The schedule's state after the change.", schemaRef("ScheduleState"))}, "400", "401", "403", "404", "503"),
+	}
 }
 
 func tableSchedulesOp(summary, description string) obj {
