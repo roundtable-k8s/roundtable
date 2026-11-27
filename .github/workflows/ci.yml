@@ -60,7 +60,7 @@ jobs:
       - name: Setup envtest
         run: |
           make setup-envtest
-          ENVTEST_ASSETS=$(bin/setup-envtest use "$(make -s print-envtest-k8s-version)" --bin-dir bin -p path)
+          ENVTEST_ASSETS=$(make -s print-envtest-assets)
           echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
 
       # -race: flaky tests only surfaced in the merge queue before (#253).
