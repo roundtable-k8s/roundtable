@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -73,25 +74,22 @@ func nextFireTimes(expr, tz string, count int, now time.Time) (*ScheduleNextRuns
 		return nil, fmt.Errorf("%w: count: must be between 1 and %d", ErrInvalid, maxNextCount)
 	}
 	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return nil, fmt.Errorf("%w: cron is required", ErrUnprocessable)
-	}
-	if strings.Contains(expr, "TZ=") {
-		return nil, fmt.Errorf("%w: invalid schedule %q: set the time zone with timeZone instead of a TZ= prefix", ErrUnprocessable, expr)
-	}
 	if tz == "" {
 		tz = defaultScheduleTimeZone
 	}
-	if tz == "Local" {
-		return nil, fmt.Errorf("%w: invalid timeZone %q: must be an IANA time zone name such as \"America/New_York\"", ErrUnprocessable, tz)
+	if err := validateTimeZone(tz); err != nil {
+		return nil, unprocessable(err)
+	}
+	if err := validateCron(expr, tz); err != nil {
+		return nil, unprocessable(err)
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid timeZone %q: %v", ErrUnprocessable, tz, err)
+		return nil, unprocessable(err)
 	}
 	sched, err := cron.ParseStandard("CRON_TZ=" + tz + " " + expr)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid schedule %q: %v", ErrUnprocessable, expr, err)
+		return nil, unprocessable(err)
 	}
 	out := &ScheduleNextRuns{Cron: expr, TimeZone: tz, Times: make([]ScheduleFireTime, 0, count)}
 	t := now
@@ -103,6 +101,15 @@ func nextFireTimes(expr, tz string, count int, now time.Time) (*ScheduleNextRuns
 		out.Times = append(out.Times, ScheduleFireTime{Time: t.UTC(), Local: t.In(loc).Format(time.RFC3339)})
 	}
 	return out, nil
+}
+
+// unprocessable turns a validation error into a 422, keeping its message.
+func unprocessable(err error) error {
+	var fe *FieldError
+	if errors.As(err, &fe) {
+		return fmt.Errorf("%w: %s: %s", ErrUnprocessable, fe.Field, fe.Message)
+	}
+	return fmt.Errorf("%w: %v", ErrUnprocessable, err)
 }
 
 // ScheduleNext returns the next count fire times of a stored schedule, from
@@ -117,7 +124,7 @@ func (s *Service) ScheduleNext(ctx context.Context, namespace, name string, coun
 	if err != nil {
 		return nil, err
 	}
-	out.Namespace, out.Name, out.Suspended = t.Namespace, t.Name, t.Spec.Suspend
+	out.Namespace, out.Name, out.Suspended = t.Namespace, t.Name, t.Suspended()
 	return out, nil
 }
 

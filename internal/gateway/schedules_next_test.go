@@ -21,6 +21,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +85,8 @@ func TestNextFireTimesInvalid(t *testing.T) {
 		{"empty cron", "", "", 5, ErrUnprocessable},
 		{"bad zone", "0 7 * * *", "Mars/Base", 5, ErrUnprocessable},
 		{"Local zone", "0 7 * * *", "Local", 5, ErrUnprocessable},
+		{"zone pattern", "0 7 * * *", "Europe/Ber lin", 5, ErrUnprocessable},
+		{"zone too long", "0 7 * * *", strings.Repeat("a", maxTimeZoneLength+1), 5, ErrUnprocessable},
 		{"TZ prefix", "TZ=UTC 0 7 * * *", "", 5, ErrUnprocessable},
 		{"count zero", "0 7 * * *", "", 0, ErrInvalid},
 		{"count too big", "0 7 * * *", "", maxNextCount + 1, ErrInvalid},
@@ -183,5 +186,20 @@ func TestMCPScheduleNextRuns(t *testing.T) {
 		if res := call(args); !res.IsError {
 			t.Errorf("%v: want a tool error", args)
 		}
+	}
+}
+
+func TestScheduleNextSuspendedByAnnotation(t *testing.T) {
+	e := newActionEnv(t, true)
+	base := "/v1/schedules/" + testNS + "/git-digest"
+	if resp, body := e.do(t, "GET", base+"/next", testToken, nil); resp.StatusCode != http.StatusOK || body["suspended"] != nil {
+		t.Fatalf("before suspend: %d %v", resp.StatusCode, body)
+	}
+	if resp, body := e.do(t, "POST", base+"/suspend", testToken, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("suspend: %d %v", resp.StatusCode, body)
+	}
+	resp, body := e.do(t, "GET", base+"/next", testToken, nil)
+	if resp.StatusCode != http.StatusOK || body["suspended"] != true || len(body["times"].([]any)) != defaultNextCount {
+		t.Errorf("after annotation suspend: %d %v", resp.StatusCode, body)
 	}
 }
