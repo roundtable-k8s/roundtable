@@ -140,16 +140,17 @@ under its own `ROUNDTABLE_TABLE`, and never itself.
 
 With no parameters it lists every other knight. Results are sorted by name.
 Each match gives the name, domain, description, the skills that matched, and a
-status:
+status, checked in this order:
 
-- `ready`: the knight has ready replicas (or `phase` is `Ready`).
-- `suspended`: `spec.suspend` is set.
+- `suspended`: `spec.suspend` is set (this wins even if replicas are still ready).
+- `ready`: otherwise, the knight has ready replicas (or `phase` is `Ready`).
 - `not ready`: neither of the above.
 
 A `live` flag is added when a pod answered a micro service PING for the knight
-within about 300 ms. It is omitted when nobody answered, so its absence means
-"no liveness information", not "not live". The PING is only sent when there is
-at least one match.
+within about 300 ms. A missing `live` is ambiguous: either nobody answered the
+PING (no liveness information at all), or other pods answered and this
+knight's did not (it is probably not running). The PING is only sent when
+there is at least one match.
 
 The knight reads the roster from a KV watch on the table's keys. Until that
 watch has loaded, and again after it ends (it is restarted with back-off from
@@ -175,7 +176,8 @@ The fields that decide what a knight finds are on the Knight:
 
 - `spec.domain`: the card's domain, used by the `domain` filter and by the task subject.
 - `spec.card.description` (else the first paragraph of `spec.prompt.identity`): the description that `query` matches.
-- `spec.card.tags` and the skills (`spec.skills` categories, the skills a running knight reports, and `spec.card.skills`): what `skill` and `query` match. See [Skills](#skills) and [Overrides](#overrides).
+- The skills (`spec.skills` categories, the skills a running knight reports, and `spec.card.skills`): their `id`s and `tags` are what `skill` matches, and their `id`s and descriptions are matched by `query`. See [Skills](#skills) and [Overrides](#overrides).
+- `spec.card.tags` is not searched: it only fills the card's `roundtable.tags`, which `find_knights` never reads. To make a knight findable with `skill`, put the tag on a skill (`spec.card.skills[].tags`).
 - `spec.suspend`: the status, and whether `includeSuspended: false` drops the knight.
 
 When there is no roster, `find_knights` answers
