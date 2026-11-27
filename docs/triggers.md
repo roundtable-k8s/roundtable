@@ -907,7 +907,7 @@ tasks and results streams:
 - subjects: `<subjectPrefix>.events.>`
 - Limits retention, max age `spec.nats.eventsMaxAge` (default 168h)
 
-The results stream has no max age by default. Set `spec.nats.resultsMaxAge`
+The results stream has no max age by default. The operator owns this setting: with `resultsMaxAge` unset, it resets a `MaxAge` set outside the operator (for example with the `nats` CLI) to unlimited on the next reconcile. Set `spec.nats.resultsMaxAge`
 (for example `168h`) to drop unread task results, such as those that arrive
 after their step timed out, was cancelled or lost its Chain. It must be longer
 than the longest step timeout and, where the gateway keeps task results in the

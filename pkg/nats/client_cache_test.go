@@ -2,10 +2,13 @@ package nats
 
 import (
 	"context"
+	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -71,11 +74,13 @@ func TestKVBucketCacheClearedOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cl.Close()
-	if err := cl.Connect(); err != nil {
-		t.Fatal(err)
-	}
 	if len(cl.kvs) != 0 {
 		t.Fatal("cache not cleared on Close")
+	}
+	// Connect clears the cache by itself; the cache must be empty already,
+	// and reconnecting still works.
+	if err := cl.Connect(); err != nil {
+		t.Fatal(err)
 	}
 	if v, err := cl.KVGet(ctx, "scratch", "k"); err != nil || string(v) != "v" {
 		t.Fatalf("get after reconnect = %q, %v", v, err)
@@ -140,17 +145,119 @@ func TestFetchOneFallbackLeavesNoConsumer(t *testing.T) {
 	}
 }
 
+// blackholeListener accepts TCP connections and never answers, so a NATS dial
+// blocks in the handshake.
+func blackholeListener(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	})
+	return "nats://" + ln.Addr().String()
+}
+
 func TestConnectDoesNotHoldLockWhileDialing(t *testing.T) {
 	c := DefaultConfig()
-	c.URL = "nats://10.255.255.1:4222" // unroutable: dial blocks until timeout
+	c.URL = blackholeListener(t)
 	cl := NewClient(c, logr.Discard()).(*JetStreamClient)
-	go func() { _ = cl.Connect() }()
+	t.Cleanup(func() { _ = cl.Close() })
+	dialed := make(chan struct{})
+	go func() { _ = cl.Connect(); close(dialed) }()
 	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-dialed:
+		t.Fatal("dial returned; the test needs it to block")
+	default:
+	}
 	done := make(chan struct{})
-	go func() { cl.IsConnected(); close(done) }()
+	go func() { cl.IsConnected(); _ = cl.Close(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("IsConnected blocked behind an in-flight dial")
+		t.Fatal("IsConnected/Close blocked behind an in-flight dial")
+	}
+	// The blocked dial ends once its handshake times out; it must not store
+	// its connection after Close.
+	select {
+	case <-dialed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Connect did not return")
+	}
+	if cl.Conn() != nil {
+		t.Fatal("connection stored after Close")
+	}
+}
+
+func TestConnectKeepsReconnectingConnection(t *testing.T) {
+	s := runJS(t)
+	c := DefaultConfig()
+	c.URL = s.ClientURL()
+	c.ReconnectWait = 50 * time.Millisecond
+	cl := NewClient(c, logr.Discard()).(*JetStreamClient)
+	t.Cleanup(func() { _ = cl.Close() })
+	if err := cl.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	nc := cl.Conn()
+	s.Shutdown()
+	deadline := time.Now().Add(5 * time.Second)
+	for nc.Status() != nats.RECONNECTING && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if nc.Status() != nats.RECONNECTING {
+		t.Fatalf("status = %v, want RECONNECTING", nc.Status())
+	}
+	if err := cl.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if cl.Conn() != nc {
+		t.Fatal("reconnecting connection was replaced")
+	}
+	if nc.IsClosed() {
+		t.Fatal("reconnecting connection was closed")
+	}
+}
+
+func TestEnsureStreamSingleLookup(t *testing.T) {
+	cl := newCacheTestClient(t)
+	ctx := context.Background()
+	cfg := StreamConfig{Name: "es", Subjects: []string{"es.>"}, Storage: StorageMemory}
+	if updated, err := cl.EnsureStream(ctx, cfg); err != nil || updated {
+		t.Fatalf("create = %v, %v", updated, err)
+	}
+	cfg.MaxAge = time.Hour
+	if updated, err := cl.EnsureStream(ctx, cfg); err != nil || !updated {
+		t.Fatalf("update = %v, %v", updated, err)
+	}
+	if updated, err := cl.EnsureStream(ctx, cfg); err != nil || updated {
+		t.Fatalf("noop = %v, %v", updated, err)
+	}
+	st, err := cl.js.Stream(ctx, "es")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.CachedInfo().Config.MaxAge; got != time.Hour {
+		t.Fatalf("MaxAge = %v", got)
 	}
 }

@@ -76,6 +76,9 @@ func (f *fakeNATSClient) CreateStream(context.Context, natspkg.StreamConfig) err
 func (f *fakeNATSClient) EnsureStreamMaxAge(context.Context, string, time.Duration) (bool, error) {
 	return false, nil
 }
+func (f *fakeNATSClient) EnsureStream(context.Context, natspkg.StreamConfig) (bool, error) {
+	return false, nil
+}
 func (f *fakeNATSClient) DeleteStream(context.Context, string) error { return nil }
 func (f *fakeNATSClient) StreamInfo(context.Context, string) (*jetstream.StreamInfo, error) {
 	return nil, fmt.Errorf("not implemented")

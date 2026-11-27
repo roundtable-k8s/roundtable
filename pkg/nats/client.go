@@ -70,6 +70,11 @@ type Client interface {
 	// other setting as it is. It reports whether an update was issued.
 	EnsureStreamMaxAge(ctx context.Context, name string, maxAge time.Duration) (bool, error)
 
+	// EnsureStream creates the stream if missing, otherwise makes its MaxAge
+	// equal config.MaxAge (0 = unlimited), with a single stream lookup. It
+	// reports whether an existing stream was updated.
+	EnsureStream(ctx context.Context, config StreamConfig) (bool, error)
+
 	// DeleteStream deletes a JetStream stream.
 	DeleteStream(ctx context.Context, name string) error
 
@@ -136,7 +141,10 @@ type JetStreamClient struct {
 	// kvs caches KeyValue handles per bucket for the current connection
 	// (guarded by mu). It is dropped whenever the connection changes.
 	kvs map[string]jetstream.KeyValue
-	log logr.Logger
+	// closeSeq counts Close calls (guarded by mu). A Connect whose dial
+	// started before a Close sees the change and discards its connection.
+	closeSeq uint64
+	log      logr.Logger
 }
 
 // NewClient creates a new NATS client with the given configuration.
@@ -149,16 +157,19 @@ func NewClient(config Config, log logr.Logger) Client {
 
 // Connect establishes a connection to NATS if not already connected.
 func (c *JetStreamClient) Connect() error {
-	if c.IsConnected() {
-		return nil // Already connected
+	if c.hasLiveConn() {
+		return nil // Already connected, or reconnecting by itself
 	}
 
 	// Only one caller dials at a time; the others wait here, not on c.mu.
 	c.dialMu.Lock()
 	defer c.dialMu.Unlock()
-	if c.IsConnected() {
+	if c.hasLiveConn() {
 		return nil // Another caller connected while we waited
 	}
+	c.mu.Lock()
+	startSeq := c.closeSeq
+	c.mu.Unlock()
 
 	opts := []nats.Option{}
 	if c.config.RetryOnFailedConnect {
@@ -183,6 +194,12 @@ func (c *JetStreamClient) Connect() error {
 	}
 
 	c.mu.Lock()
+	if c.closeSeq != startSeq {
+		// Close ran while we were dialling: do not bring the connection back.
+		c.mu.Unlock()
+		nc.Close()
+		return errors.New("NATS client closed while connecting")
+	}
 	old := c.nc
 	c.nc = nc
 	c.js = js
@@ -196,10 +213,29 @@ func (c *JetStreamClient) Connect() error {
 	return nil
 }
 
-// Close closes the NATS connection.
+// hasLiveConn reports whether Connect has nothing to do: the connection is
+// up, or it is reconnecting by itself with infinite reconnects (replacing it
+// would drop the connection that watchers and fetch loops already hold).
+func (c *JetStreamClient) hasLiveConn() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nc == nil {
+		return false
+	}
+	switch c.nc.Status() {
+	case nats.CONNECTED:
+		return true
+	case nats.RECONNECTING:
+		return c.config.MaxReconnects == -1
+	}
+	return false
+}
+
+// Close closes the NATS connection. A later Connect call opens a new one.
 func (c *JetStreamClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closeSeq++
 
 	if c.nc != nil {
 		c.nc.Close()
@@ -343,7 +379,30 @@ func (c *JetStreamClient) CreateStream(ctx context.Context, config StreamConfig)
 	if _, err := js.Stream(ctx, config.Name); err == nil {
 		return nil
 	}
+	return c.createStream(ctx, js, config)
+}
 
+// EnsureStream creates the stream when missing, otherwise makes its MaxAge
+// equal config.MaxAge (0 = unlimited). It looks the stream up once. It
+// reports whether an existing stream's MaxAge was updated.
+func (c *JetStreamClient) EnsureStream(ctx context.Context, config StreamConfig) (bool, error) {
+	js, err := c.jetStream()
+	if err != nil {
+		return false, err
+	}
+	stream, err := js.Stream(ctx, config.Name)
+	if err != nil {
+		if !errors.Is(err, jetstream.ErrStreamNotFound) {
+			return false, fmt.Errorf("failed to get stream %s: %w", config.Name, err)
+		}
+		return false, c.createStream(ctx, js, config)
+	}
+	return c.applyMaxAge(ctx, js, stream, config.MaxAge)
+}
+
+func (c *JetStreamClient) createStream(
+	ctx context.Context, js jetstream.JetStream, config StreamConfig,
+) error {
 	streamConfig := jetstream.StreamConfig{
 		Name:      config.Name,
 		Subjects:  config.Subjects,
@@ -378,15 +437,21 @@ func (c *JetStreamClient) EnsureStreamMaxAge(ctx context.Context, name string, m
 	if err != nil {
 		return false, fmt.Errorf("failed to get stream %s: %w", name, err)
 	}
+	return c.applyMaxAge(ctx, js, stream, maxAge)
+}
+
+func (c *JetStreamClient) applyMaxAge(
+	ctx context.Context, js jetstream.JetStream, stream jetstream.Stream, maxAge time.Duration,
+) (bool, error) {
 	cfg := stream.CachedInfo().Config
 	if cfg.MaxAge == maxAge {
 		return false, nil
 	}
 	cfg.MaxAge = maxAge
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
-		return false, fmt.Errorf("failed to update stream %s: %w", name, err)
+		return false, fmt.Errorf("failed to update stream %s: %w", cfg.Name, err)
 	}
-	c.log.Info("Updated JetStream stream max age", "name", name, "maxAge", maxAge)
+	c.log.Info("Updated JetStream stream max age", "name", cfg.Name, "maxAge", maxAge)
 	return true, nil
 }
 

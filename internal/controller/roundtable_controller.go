@@ -613,12 +613,9 @@ func (r *RoundTableReconciler) ensureStreams(ctx context.Context, rt *aiv1alpha1
 	if rt.Spec.NATS.ResultsMaxAge != nil && rt.Spec.NATS.ResultsMaxAge.Duration > 0 {
 		resultsStreamConfig.MaxAge = rt.Spec.NATS.ResultsMaxAge.Duration
 	}
-	if err := natsCli.CreateStream(ctx, resultsStreamConfig); err != nil {
-		return fmt.Errorf("results stream: %w", err)
-	}
-	// CreateStream leaves an existing stream alone; apply a changed (or
-	// removed) resultsMaxAge. No-op when it already matches.
-	if _, err := natsCli.EnsureStreamMaxAge(ctx, rt.Spec.NATS.ResultsStream, resultsStreamConfig.MaxAge); err != nil {
+	// Creates the stream, or applies a changed (or removed) resultsMaxAge to
+	// an existing one; one stream lookup either way.
+	if _, err := natsCli.EnsureStream(ctx, resultsStreamConfig); err != nil {
 		return fmt.Errorf("results stream: %w", err)
 	}
 
