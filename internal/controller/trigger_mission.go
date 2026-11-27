@@ -95,7 +95,20 @@ func (r *TriggerReconciler) checkMissionRefs(ctx context.Context, trg *aiv1alpha
 			return "", "", err
 		}
 	}
-	if mt.MetaMission != nil && !*mt.MetaMission || mt.Planner == nil || mt.Planner.Knight == "" {
+	if mt.MetaMission != nil && !*mt.MetaMission {
+		return "", "", nil
+	}
+	if mt.Planner == nil || mt.Planner.Knight == "" {
+		// No named planner: the mission uses the table's default one.
+		table := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
+		name, err := mission.LookupDefaultPlanner(ctx, r.reader(), trg.Namespace, table)
+		if err != nil {
+			return "", "", err
+		}
+		if name == "" {
+			return aiv1alpha1.ReasonTriggerTargetNotFound,
+				fmt.Sprintf("no default planner Knight for RoundTable %q: enable its spec.planner or set target.mission.planner.knight", table), nil
+		}
 		return "", "", nil
 	}
 	err = r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: mt.Planner.Knight}, &aiv1alpha1.Knight{})
@@ -114,7 +127,6 @@ type missionFiring struct {
 	firing *aiv1alpha1.TriggerFiring
 	now    time.Time
 	table  string
-	mutate func(*aiv1alpha1.TriggerStatus)
 	// manual is set for a run-now firing; its caller is recorded on the Mission.
 	manual *triggerManualFiring
 	// late is the reason a schedule firing is past startingDeadlineSeconds,
@@ -306,9 +318,6 @@ func (r *TriggerReconciler) fireMission(ctx context.Context, f missionFiring) (t
 		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, f.table, trg.Name).Set(float64(f.now.Unix()))
 		if !slices.Contains(st.ActiveRuns, name) {
 			st.ActiveRuns = append(st.ActiveRuns, name)
-		}
-		if f.mutate != nil {
-			f.mutate(st)
 		}
 	}); err != nil {
 		// The Mission exists; a redelivery finds it by name and skips.

@@ -1347,7 +1347,7 @@ var _ = Describe("Trigger controller", func() {
 		// Trigger's message loop does.
 		fireAt := func(name string, at time.Time) {
 			_, err := r.fire(ctx, types.NamespacedName{Namespace: ns, Name: name},
-				TriggerEvent{Time: at, Headers: map[string]string{}}, at.Format(time.RFC3339), "", nil, nil)
+				TriggerEvent{Time: at, Headers: map[string]string{}}, at.Format(time.RFC3339), "", nil)
 			Expect(err).NotTo(HaveOccurred())
 		}
 		knightTarget := func(task string) aiv1alpha1.TriggerTarget {

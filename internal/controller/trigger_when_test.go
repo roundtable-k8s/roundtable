@@ -22,6 +22,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -80,16 +82,57 @@ func TestEvalTriggerWhenStringPayload(t *testing.T) {
 	}
 }
 
+func whenTrigger(uid, expr string, gen int64) *aiv1alpha1.Trigger {
+	return &aiv1alpha1.Trigger{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "t", UID: types.UID(uid), Generation: gen},
+		Spec:       aiv1alpha1.TriggerSpec{When: expr},
+	}
+}
+
+func whenCacheLen() int {
+	triggerWhenMu.Lock()
+	defer triggerWhenMu.Unlock()
+	return len(triggerWhenPrograms)
+}
+
 func TestCompileTriggerWhenCaches(t *testing.T) {
-	a, err := compileTriggerWhen(`event.subject == "a"`)
+	trg := whenTrigger("uid-cache", `event.subject == "a"`, 1)
+	t.Cleanup(func() { forgetTriggerWhen(client.ObjectKeyFromObject(trg)) })
+	a, err := compileTriggerWhen(trg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := compileTriggerWhen(`event.subject == "a"`)
+	b, _ := compileTriggerWhen(trg)
 	if a != b {
 		t.Error("program not cached")
 	}
-	if _, err := compileTriggerWhen(`nope == 1`); err == nil {
+	if _, err := compileTriggerWhen(whenTrigger("uid-bad", `nope == 1`, 1)); err == nil {
 		t.Error("undeclared variable accepted")
+	}
+}
+
+func TestCompileTriggerWhenEvicts(t *testing.T) {
+	base := whenCacheLen()
+	trg := whenTrigger("uid-evict", `event.subject == "a"`, 1)
+	t.Cleanup(func() { forgetTriggerWhen(client.ObjectKeyFromObject(trg)) })
+	if _, err := compileTriggerWhen(trg); err != nil {
+		t.Fatal(err)
+	}
+	// A changed expression replaces the entry rather than adding one.
+	trg.Generation, trg.Spec.When = 2, `event.subject == "b"`
+	if _, err := compileTriggerWhen(trg); err != nil {
+		t.Fatal(err)
+	}
+	if got := whenCacheLen(); got != base+1 {
+		t.Fatalf("cache has %d entries, want %d", got, base+1)
+	}
+	got, err := evalTriggerWhen(trg, TriggerEvent{Subject: "b"})
+	if err != nil || !got {
+		t.Fatalf("changed expression not recompiled: %v, %v", got, err)
+	}
+	// Deleting the Trigger drops its entry.
+	forgetTriggerWhen(client.ObjectKeyFromObject(trg))
+	if got := whenCacheLen(); got != base {
+		t.Fatalf("cache has %d entries after delete, want %d", got, base)
 	}
 }

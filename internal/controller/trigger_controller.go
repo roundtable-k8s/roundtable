@@ -141,6 +141,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	trg := &aiv1alpha1.Trigger{}
 	if err := r.Get(ctx, req.NamespacedName, trg); err != nil {
 		if apierrors.IsNotFound(err) {
+			forgetTriggerWhen(req.NamespacedName)
 			r.consumers.stop(req.String())
 			r.pollers.stop(req.String())
 			deleteTriggerLastFired(req.Namespace, req.Name)
@@ -150,6 +151,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if !trg.DeletionTimestamp.IsZero() {
+		forgetTriggerWhen(req.NamespacedName)
 		return ctrl.Result{}, r.finalize(ctx, trg)
 	}
 	if trg.Spec.Source.Schedule == nil {
@@ -423,7 +425,7 @@ func (r *TriggerReconciler) runNow(ctx context.Context, trg *aiv1alpha1.Trigger,
 	nn := client.ObjectKeyFromObject(trg)
 	manual := &triggerManualFiring{caller: trg.Annotations[aiv1alpha1.AnnotationTriggerRunNowCaller]}
 	ev := TriggerEvent{Time: r.now(), Headers: map[string]string{}}
-	out, err := r.fire(ctx, nn, ev, aiv1alpha1.TriggerRunNowKey(id), "", nil, manual)
+	out, err := r.fire(ctx, nn, ev, aiv1alpha1.TriggerRunNowKey(id), "", manual)
 	if out == triggerRetry {
 		if err == nil {
 			err = errors.New("trigger is not ready to fire")
@@ -475,7 +477,7 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "%v", err)
 	}
 	if trg.Spec.When != "" {
-		if _, err := compileTriggerWhen(trg.Spec.When); err != nil {
+		if _, err := compileTriggerWhen(trg); err != nil {
 			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "when: %v", err)
 		}
 	}
@@ -726,7 +728,7 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 		if ev.Time.IsZero() {
 			ev.Time = r.now()
 		}
-		out, err := r.fire(ctx, nn, ev, key, msg.Subject(), nil, nil)
+		out, err := r.fire(ctx, nn, ev, key, msg.Subject(), nil)
 		switch out {
 		case triggerHandled:
 			if err := msg.DoubleAck(ctx); err != nil {
@@ -818,11 +820,10 @@ func (r *TriggerReconciler) fireLock(nn types.NamespacedName) *sync.Mutex {
 }
 
 // fire handles one event: render the input and dedupe key, apply dedupe and
-// concurrency, start the run, and record the firing. mutate, if set, also
-// changes the status written with the firing. A manual firing (run-now) fires
+// concurrency, start the run, and record the firing. A manual firing (run-now) fires
 // while the Trigger is suspended and keeps defaultKey: spec.dedupeKey is not
 // rendered, so the run's name is known to whoever asked for it.
-func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, mutate func(*aiv1alpha1.TriggerStatus), manual *triggerManualFiring) (_ triggerOutcome, retErr error) {
+func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, ev TriggerEvent, defaultKey, subject string, manual *triggerManualFiring) (_ triggerOutcome, retErr error) {
 	mu := r.fireLock(nn)
 	mu.Lock()
 	defer mu.Unlock()
@@ -864,7 +865,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	metricOutcome := ""
 	skip := func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error) {
 		firing.SkipReason = fmt.Sprintf(format, args...)
-		if err := r.recordFiring(ctx, nn, firing, mutate); err != nil {
+		if err := r.recordFiring(ctx, nn, firing, nil); err != nil {
 			return triggerRetry, err
 		}
 		switch {
@@ -970,7 +971,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 
 	if trg.Spec.Target.Mission != nil {
 		return r.fireMission(ctx, missionFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual, late: late,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, manual: manual, late: late,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -981,7 +982,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	if trg.Spec.Target.Knight != nil {
 		return r.fireKnight(ctx, knightFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual, late: late,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, manual: manual, late: late,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -1140,9 +1141,6 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, table, trg.Name).Set(float64(now.Unix()))
 		if !slices.Contains(st.ActiveRuns, name) {
 			st.ActiveRuns = append(st.ActiveRuns, name)
-		}
-		if mutate != nil {
-			mutate(st)
 		}
 	}); err != nil {
 		// The run started; a redelivery finds it by name and skips.

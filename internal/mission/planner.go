@@ -355,6 +355,31 @@ func plannerHasSource(planner *aiv1alpha1.MissionPlanner) bool {
 // not created yet. With no planner at all the spec is left as it is and
 // ensurePlannerKnight fails with errNoPlanner.
 func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.Mission) (changed, wait bool, err error) {
+	return defaultPlannerKnight(ctx, p.Client, p.Recorder, mission)
+}
+
+// LookupDefaultPlanner resolves the planner knight a meta-Mission in table
+// would use when it names none, by the rules of defaultPlannerKnight. It
+// reports "" when there is none, or when the table's own planner knight is not
+// created yet.
+func LookupDefaultPlanner(ctx context.Context, rd client.Reader, namespace, table string) (string, error) {
+	m := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		Spec: aiv1alpha1.MissionSpec{
+			Planner: &aiv1alpha1.MissionPlanner{},
+		},
+	}
+	if table != "" {
+		m.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: table}
+	}
+	changed, _, err := defaultPlannerKnight(ctx, rd, nil, m)
+	if err != nil || !changed {
+		return "", err
+	}
+	return aiv1alpha1.RefName(m.Spec.Planner.KnightRef), nil
+}
+
+func defaultPlannerKnight(ctx context.Context, rd client.Reader, rec record.EventRecorder, mission *aiv1alpha1.Mission) (changed, wait bool, err error) {
 	if plannerHasSource(mission.Spec.Planner) {
 		return false, false, nil
 	}
@@ -363,7 +388,7 @@ func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.
 	table := aiv1alpha1.RefName(mission.Spec.RoundTableRef)
 	if table != "" {
 		rt := &aiv1alpha1.RoundTable{}
-		err := p.Client.Get(ctx, types.NamespacedName{Name: table, Namespace: mission.Namespace}, rt)
+		err := rd.Get(ctx, types.NamespacedName{Name: table, Namespace: mission.Namespace}, rt)
 		if err != nil && !apierrors.IsNotFound(err) {
 			return false, false, fmt.Errorf("failed to get RoundTable %s: %w", table, err)
 		}
@@ -373,7 +398,7 @@ func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.
 					// The RoundTable controller creates it; wait for it
 					// rather than fail on a just-created table.
 					k := &aiv1alpha1.Knight{}
-					err := p.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: mission.Namespace}, k)
+					err := rd.Get(ctx, types.NamespacedName{Name: name, Namespace: mission.Namespace}, k)
 					if apierrors.IsNotFound(err) {
 						log.Info("Waiting for the table's planner Knight", "name", name, "table", table)
 						return false, true, nil
@@ -390,7 +415,7 @@ func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.
 	}
 
 	plannerKnights := &aiv1alpha1.KnightList{}
-	if err := p.Client.List(ctx, plannerKnights, client.InNamespace(mission.Namespace),
+	if err := rd.List(ctx, plannerKnights, client.InNamespace(mission.Namespace),
 		client.MatchingLabels{aiv1alpha1.LabelRole: "planner"}); err != nil {
 		return false, false, fmt.Errorf("failed to list planner knights: %w", err)
 	}
@@ -410,8 +435,8 @@ func (p *Planner) defaultPlannerKnight(ctx context.Context, mission *aiv1alpha1.
 		}
 		mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(k.Name)
 		log.Info("Using role-labelled planner knight", "name", k.Name)
-		if p.Recorder != nil {
-			p.Recorder.Eventf(mission, corev1.EventTypeWarning, "DeprecatedPlanner",
+		if rec != nil {
+			rec.Eventf(mission, corev1.EventTypeWarning, "DeprecatedPlanner",
 				"Planning with knight %s found by its %s=planner label; this is deprecated: "+
 					"give RoundTable %q a planner (spec.planner) or set spec.planner.knightRef",
 				k.Name, aiv1alpha1.LabelRole, table)
