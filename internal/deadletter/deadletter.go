@@ -39,6 +39,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/trace"
+
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -88,16 +91,19 @@ const (
 
 // Entry is the JSON body of a message on <prefix>.dlq.<knight>.<taskId>.
 type Entry struct {
-	TaskID         string               `json:"taskId"`
-	Table          string               `json:"table"`
-	Knight         string               `json:"knight"`
-	Reason         Reason               `json:"reason"`
-	Error          string               `json:"error"`
-	Attempt        int                  `json:"attempt"`
-	RetryOf        string               `json:"retryOf"`
-	ChainName      string               `json:"chainName"`
-	StepName       string               `json:"stepName"`
-	RunID          string               `json:"runId"`
+	TaskID    string `json:"taskId"`
+	Table     string `json:"table"`
+	Knight    string `json:"knight"`
+	Reason    Reason `json:"reason"`
+	Error     string `json:"error"`
+	Attempt   int    `json:"attempt"`
+	RetryOf   string `json:"retryOf"`
+	ChainName string `json:"chainName"`
+	StepName  string `json:"stepName"`
+	RunID     string `json:"runId"`
+	// TraceID is the trace of the original task (from its traceparent
+	// header), when it had a valid one.
+	TraceID        string               `json:"traceId,omitempty"`
 	Task           *natspkg.TaskPayload `json:"task"`
 	StreamSeq      uint64               `json:"streamSeq"`
 	DeadLetteredAt time.Time            `json:"deadLetteredAt"`
@@ -270,6 +276,21 @@ func (r *result) task(taskID string) *natspkg.TaskPayload {
 		return &natspkg.TaskPayload{TaskID: taskID, Task: s}
 	}
 	return nil
+}
+
+// TraceIDFromHeaders returns the 32-hex trace ID of the W3C traceparent header
+// in h, or "" when it is absent or not a valid version-00 traceparent with a
+// non-zero trace ID.
+func TraceIDFromHeaders(h nats.Header) string {
+	parts := strings.Split(h.Get("traceparent"), "-")
+	if len(parts) != 4 || parts[0] != "00" || len(parts[1]) != 32 || len(parts[2]) != 16 || len(parts[3]) != 2 {
+		return ""
+	}
+	tid, err := trace.TraceIDFromHex(parts[1])
+	if err != nil || !tid.IsValid() || parts[1] != strings.ToLower(parts[1]) {
+		return ""
+	}
+	return parts[1]
 }
 
 // applyTask copies the task's chain fields and attempt into e.

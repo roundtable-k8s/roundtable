@@ -402,7 +402,7 @@ var openAPISchemas = obj{
 		"state":  obj{"type": "string", "description": "open, retried or resolved."},
 		"reason": obj{"type": "string", "description": "lost, failed, timeout, usage_limited or refused."},
 		"error":  str(""), "attempt": integer(""), "retryOf": str(""), "chainName": str(""), "stepName": str(""),
-		"runId": str(""), "deadLetteredAt": obj{"type": "string", "format": "date-time"},
+		"runId": str(""), "traceId": str("Trace ID (32 hex) of the original task, when it carried a valid traceparent."), "deadLetteredAt": obj{"type": "string", "format": "date-time"},
 		"updatedAt": obj{"type": "string", "format": "date-time"}, "retriedAs": str(""),
 		"task": obj{"type": "object", "description": "The original task payload."},
 	}),

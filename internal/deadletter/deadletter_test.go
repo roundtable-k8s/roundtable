@@ -192,6 +192,11 @@ func eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 // again; the server emits it when the ack wait expires.
 func (e *env) loseTask(knight string, task natspkg.TaskPayload) {
 	e.t.Helper()
+	e.loseTaskWithHeader(knight, task, nil)
+}
+
+func (e *env) loseTaskWithHeader(knight string, task natspkg.TaskPayload, h nats.Header) {
+	e.t.Helper()
 	durable := natspkg.KnightTaskConsumerName(knight)
 	cons, err := e.js.CreateOrUpdateConsumer(context.Background(), testTasks, jetstream.ConsumerConfig{
 		Durable:       durable,
@@ -204,7 +209,8 @@ func (e *env) loseTask(knight string, task natspkg.TaskPayload) {
 		e.t.Fatal(err)
 	}
 	data, _ := json.Marshal(task)
-	if _, err := e.js.Publish(context.Background(), natspkg.TaskSubject(testPrefix, "dev", knight), data); err != nil {
+	msg := &nats.Msg{Subject: natspkg.TaskSubject(testPrefix, "dev", knight), Data: data, Header: h}
+	if _, err := e.js.PublishMsg(context.Background(), msg); err != nil {
 		e.t.Fatal(err)
 	}
 	if _, err := cons.Next(jetstream.FetchMaxWait(2 * time.Second)); err != nil {
@@ -512,5 +518,54 @@ func TestStopAllContextNoWatchers(t *testing.T) {
 	m := NewManager(logr.Discard())
 	if err := m.StopAllContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTraceIDFromHeaders(t *testing.T) {
+	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
+	for name, tc := range map[string]struct{ tp, want string }{
+		"valid":        {"00-" + tid + "-00f067aa0ba902b7-01", tid},
+		"absent":       {"", ""},
+		"malformed":    {"garbage", ""},
+		"zero trace":   {"00-00000000000000000000000000000000-00f067aa0ba902b7-01", ""},
+		"version ff":   {"ff-" + tid + "-00f067aa0ba902b7-01", ""},
+		"version 01":   {"01-" + tid + "-00f067aa0ba902b7-01", ""},
+		"short trace":  {"00-4bf92f35-00f067aa0ba902b7-01", ""},
+		"non hex":      {"00-zbf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", ""},
+		"uppercase":    {"00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01", ""},
+		"missing flag": {"00-" + tid + "-00f067aa0ba902b7", ""},
+	} {
+		h := nats.Header{}
+		if tc.tp != "" {
+			h.Set("traceparent", tc.tp)
+		}
+		if got := TraceIDFromHeaders(h); got != tc.want {
+			t.Errorf("%s: TraceIDFromHeaders = %q, want %q", name, got, tc.want)
+		}
+	}
+	if got := TraceIDFromHeaders(nil); got != "" {
+		t.Errorf("nil header = %q", got)
+	}
+}
+
+func TestLostTaskCapturesTraceID(t *testing.T) {
+	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
+	for name, tc := range map[string]struct{ tp, want string }{
+		"valid":     {"00-" + tid + "-00f067aa0ba902b7-01", tid},
+		"malformed": {"not-a-traceparent", ""},
+		"absent":    {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			h := nats.Header{}
+			if tc.tp != "" {
+				h.Set("traceparent", tc.tp)
+			}
+			e.loseTaskWithHeader("galahad", natspkg.TaskPayload{TaskID: "t-trace", Task: "x"}, h)
+			eventually(t, 10*time.Second, "entry", func() bool { return len(e.entries()) == 1 })
+			if got := e.entries()[0]; got.TraceID != tc.want || got.Reason != ReasonLost {
+				t.Fatalf("entry traceID = %q reason = %s, want %q", got.TraceID, got.Reason, tc.want)
+			}
+		})
 	}
 }

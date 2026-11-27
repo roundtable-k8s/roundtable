@@ -448,6 +448,7 @@ func (w *watcher) handleAdvisory(ctx context.Context, data []byte) error {
 	switch {
 	case err == nil:
 		e.Knight = knightFromSubject(orig.Subject)
+		e.TraceID = TraceIDFromHeaders(orig.Header)
 		var p natspkg.TaskPayload
 		if json.Unmarshal(orig.Data, &p) == nil && (p.TaskID != "" || p.Task != "") {
 			e.applyTask(&p)

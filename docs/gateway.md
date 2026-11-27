@@ -431,6 +431,8 @@ maximum is 200.
 Lists dead-lettered tasks (see the task contract's dead-letter section), newest
 first, each with its `state` (`open`, `retried` or `resolved`). The limit
 defaults to and is capped at 100. The list omits the original task payload.
+An entry carries `traceId` (32 hex) when the original task had a valid
+`traceparent` header, and omits it otherwise.
 
 ### `GET /v1/dead-letters/{taskId}`
 
