@@ -99,11 +99,14 @@ func TestChainKstatus(t *testing.T) {
 			chain.Generation = 2
 			chain.Status.ObservedGeneration = 1
 			chain.Finalizers = []string{chainFinalizer}
+			chain.Spec.RoundTableRef = aiv1alpha1.LocalRef("table")
 			if got := kstatusOf(t, chain); got != status.InProgressStatus {
 				t.Fatalf("unobserved spec: kstatus = %s, want InProgress", got)
 			}
 			r, _ := newPhasesReconciler(t)
-			r.Client = fake.NewClientBuilder().WithScheme(r.Scheme).WithObjects(chain.DeepCopy(), &aiv1alpha1.Knight{
+			r.Client = fake.NewClientBuilder().WithScheme(r.Scheme).WithObjects(chain.DeepCopy(), &aiv1alpha1.RoundTable{
+				ObjectMeta: metav1.ObjectMeta{Name: "table", Namespace: phasesNS},
+			}, &aiv1alpha1.Knight{
 				ObjectMeta: metav1.ObjectMeta{Name: phasesKnight, Namespace: phasesNS},
 				Spec:       aiv1alpha1.KnightSpec{Domain: "ops", Model: "claude-sonnet-4"},
 			}).WithStatusSubresource(&aiv1alpha1.Chain{}).Build()

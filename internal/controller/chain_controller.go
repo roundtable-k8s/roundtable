@@ -275,7 +275,12 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 	// kstatus (Helm --wait, Flux) never reads an active run as InProgress.
 	if chain.Status.ObservedGeneration != chain.Generation {
 		chain.Status.ObservedGeneration = chain.Generation
-		return r.updateStatus(ctx, chain, 0)
+		if err := r.Status().Update(ctx, chain); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Handle run-now / retry-failed annotations.
