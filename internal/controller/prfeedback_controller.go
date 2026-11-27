@@ -547,9 +547,9 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 			f = detectFailure(pr, checks, mg, ignoredChecks(cfg))
 		}
 		if f == nil && rec != nil && rec.Phase == aiv1alpha1.PRFeedbackQueued {
-			if mergeUnknown {
-				// The merge state is undetermined: a queued conflict may
-				// still stand, decide on a later poll.
+			if mergeUnknown && rec.FailureKind == failureKindConflict && rec.FailureHeadSHA == pr.Head.SHA {
+				// The merge state is undetermined: a queued conflict on this
+				// head may still stand, decide on a later poll.
 				continue
 			}
 			// Fixed or re-run before its turn came. Forget the failure key
