@@ -179,6 +179,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml) and check examples/chain-pr-pipeline.yaml equals its rendered PR pipeline.
 	HELM="$(HELM)" scripts/check-pr-pipeline-example.sh
 	HELM="$(HELM)" scripts/check-dashboard-rbac.sh
+	HELM="$(HELM)" scripts/check-operator-rbac.sh
 	HELM="$(HELM)" scripts/check-gateway-default.sh
 	HELM="$(HELM)" scripts/check-leader-election.sh
 	HELM="$(HELM)" scripts/check-pod-scheduling.sh
