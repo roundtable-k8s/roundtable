@@ -919,7 +919,7 @@ func failureJobs(ctx context.Context, gh *github.Client, rec *aiv1alpha1.PRFeedb
 		}
 	case failureKindMergeQueue:
 		sha := strings.TrimPrefix(rec.LastFailure, "mq:")
-		runs, err := gh.ListMergeGroupRuns(ctx, rec.Repo)
+		runs, err := gh.ListMergeGroupRunsWithin(ctx, rec.Repo, github.MergeGroupFailureWindow)
 		if err != nil {
 			return nil, err
 		}
