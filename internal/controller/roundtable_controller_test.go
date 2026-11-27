@@ -372,7 +372,10 @@ var _ = Describe("RoundTable planner knightRef check", func() {
 	})
 })
 
-// failingListClient fails listing Missions, so tableUsage errors.
+// failingListClient fails listing Missions, so tableUsage errors. It cannot
+// be narrowed to that one call: countActiveMissions lists Missions with the
+// same options, so a spec using it also logs a second "failed to list
+// missions" error from countActiveMissions. That is expected.
 type failingListClient struct{ client.Client }
 
 func (c failingListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {

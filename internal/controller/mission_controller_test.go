@@ -386,6 +386,7 @@ var _ = Describe("Mission Controller", func() {
 
 			r := newReconciler()
 			r.TracerProvider = sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(telemetry.NewIDGenerator()))
+			// Two reconciles suffice here; shuffled runs were clean (#1081), so the third from #901 is not needed.
 			for range 2 {
 				// Later cycles may error on the missing RoundTable; only the log matters.
 				_, _ = r.Reconcile(logCtx, reconcile.Request{NamespacedName: missionNN})
@@ -864,6 +865,7 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Assembling — it won't progress further since knight doesn't exist
 			driveToPhase(r, aiv1alpha1.MissionPhaseAssembling, 10, readyOnProvisioning())
 			// A few more reconciles to set KnightsReady condition (stays in Assembling)
+			// Two reconciles suffice here; shuffled runs were clean (#1081), so the third from #901 is not needed.
 			for range 2 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			}
