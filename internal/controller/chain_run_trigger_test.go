@@ -51,9 +51,6 @@ func (f *pickupFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *pickupFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return f.floor, nil
-}
 func (f *pickupFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return f.delivered, nil
 }

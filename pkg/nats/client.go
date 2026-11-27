@@ -57,10 +57,6 @@ type Client interface {
 	// PublishJSONSeqCtx is PublishJSONSeq with trace-context propagation.
 	PublishJSONSeqCtx(ctx context.Context, subject string, v any, opts ...PublishOption) (uint64, error)
 
-	// ConsumerAckFloor returns the stream sequence at or below which every
-	// message has been acknowledged by the named consumer.
-	ConsumerAckFloor(ctx context.Context, stream, consumer string) (uint64, error)
-
 	// ConsumerDeliveredSeq returns the highest stream sequence the named
 	// consumer has delivered to a client.
 	ConsumerDeliveredSeq(ctx context.Context, stream, consumer string) (uint64, error)
@@ -314,15 +310,6 @@ func (c *JetStreamClient) consumerInfo(ctx context.Context, stream, consumer str
 		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
 	}
 	return info, nil
-}
-
-// ConsumerAckFloor returns the consumer's acknowledged-floor stream sequence.
-func (c *JetStreamClient) ConsumerAckFloor(ctx context.Context, stream, consumer string) (uint64, error) {
-	info, err := c.consumerInfo(ctx, stream, consumer)
-	if err != nil {
-		return 0, err
-	}
-	return info.AckFloor.Stream, nil
 }
 
 // ConsumerDeliveredSeq returns the consumer's delivered stream sequence.

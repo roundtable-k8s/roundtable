@@ -50,9 +50,6 @@ func (f *modelFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *modelFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return f.seq, nil
-}
 func (f *modelFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return f.seq, nil
 }

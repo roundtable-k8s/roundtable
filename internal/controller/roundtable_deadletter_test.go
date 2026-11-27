@@ -88,7 +88,7 @@ func TestEnsureStreamsCreatesDeadLetterStreams(t *testing.T) {
 	if _, err := cli.StreamInfo(ctx, "rt_dev_tasks_ADVISORIES"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cli.ConsumerAckFloor(ctx, "rt_dev_tasks_ADVISORIES", deadletter.ConsumerName); err != nil {
+	if _, err := cli.ConsumerDeliveredSeq(ctx, "rt_dev_tasks_ADVISORIES", deadletter.ConsumerName); err != nil {
 		t.Fatal(err)
 	}
 }

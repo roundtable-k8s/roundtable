@@ -19,6 +19,7 @@ package nats
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -391,7 +392,6 @@ func TestTaskPayloadSerialization(t *testing.T) {
 	}
 }
 
-// TestTaskResultSerialization tests TaskResult JSON unmarshaling (both formats)
 func TestTaskResultRefusalDecode(t *testing.T) {
 	var credits TaskResult
 	if err := json.Unmarshal([]byte(`{"task_id":"t1","success":false,"refused":"credits"}`), &credits); err != nil {
@@ -409,6 +409,7 @@ func TestTaskResultRefusalDecode(t *testing.T) {
 	}
 }
 
+// TestTaskResultSerialization tests TaskResult JSON unmarshaling (both formats)
 func TestTaskResultSerialization(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -598,5 +599,38 @@ func TestJSONPublishErrors(t *testing.T) {
 	err := client.PublishJSON("test.subject", unmarshalable{BadField: make(chan int)})
 	if err == nil {
 		t.Error("expected error when marshaling unmarshalable type, got nil")
+	}
+}
+
+func TestTaskResultRefusedTolerant(t *testing.T) {
+	for in, want := range map[string]Refusal{
+		`"quota"`: RefusedQuota, `true`: RefusedUnspecified, `false`: "", `null`: "", `""`: "",
+	} {
+		var r TaskResult
+		if err := json.Unmarshal([]byte(`{"task_id":"t","refused":`+in+`}`), &r); err != nil {
+			t.Fatalf("refused %s: %v", in, err)
+		}
+		if r.Refused != want {
+			t.Errorf("refused %s = %q, want %q", in, r.Refused, want)
+		}
+	}
+	var r TaskResult
+	if err := json.Unmarshal([]byte(`{"refused":{}}`), &r); err == nil {
+		t.Error("refused object decoded without error")
+	}
+	out, err := json.Marshal(TaskResult{Refused: RefusedCredits})
+	if err != nil || !strings.Contains(string(out), `"refused":"credits"`) {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+}
+
+func TestTokenUsageFractionalDecode(t *testing.T) {
+	var r TaskResult
+	if err := json.Unmarshal([]byte(`{"tokens":{"input":10.7,"output":5,"cacheRead":1e3,"cacheWrite":2.2}}`), &r); err != nil {
+		t.Fatal(err)
+	}
+	want := TokenUsage{Input: 10, Output: 5, CacheRead: 1000, CacheWrite: 2}
+	if r.Tokens == nil || *r.Tokens != want {
+		t.Errorf("tokens = %+v, want %+v", r.Tokens, want)
 	}
 }

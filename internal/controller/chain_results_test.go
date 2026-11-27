@@ -65,10 +65,6 @@ func (f *ackingKVNATS) KVGet(_ context.Context, _, key string) ([]byte, error) {
 	return nil, fmt.Errorf("not found")
 }
 
-func (f *ackingKVNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return 1, nil
-}
-
 func (f *ackingKVNATS) PublishJSONSeq(string, any) (uint64, error) { return 1, nil }
 
 func (f *ackingKVNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
@@ -235,10 +231,6 @@ func (f *lockedWaitNATS) FetchOne(_ context.Context, _ string, _ jetstream.Consu
 	defer f.mu.Unlock()
 	f.waits = append(f.waits, wait)
 	return nil, nil
-}
-
-func (f *lockedWaitNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return 1, nil
 }
 
 func (f *lockedWaitNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {

@@ -80,12 +80,9 @@ func TestStreamAndConsumerLifecycle(t *testing.T) {
 	if seq, err := c.ConsumerDeliveredSeq(ctx, "rt_tasks", "knight-a"); err != nil || seq != 0 {
 		t.Fatalf("ConsumerDeliveredSeq = %d, %v; want 0", seq, err)
 	}
-	if seq, err := c.ConsumerAckFloor(ctx, "rt_tasks", "knight-a"); err != nil || seq != 0 {
-		t.Fatalf("ConsumerAckFloor = %d, %v; want 0", seq, err)
-	}
 
-	// Deliver and ack through the consumer; the floor and delivered
-	// sequence follow.
+	// Deliver and ack through the consumer; the delivered sequence
+	// follows.
 	cons, err := c.js.Consumer(ctx, "rt_tasks", "knight-a")
 	if err != nil {
 		t.Fatal(err)
@@ -100,14 +97,11 @@ func TestStreamAndConsumerLifecycle(t *testing.T) {
 	if seq, err := c.ConsumerDeliveredSeq(ctx, "rt_tasks", "knight-a"); err != nil || seq != 1 {
 		t.Fatalf("ConsumerDeliveredSeq = %d, %v; want 1", seq, err)
 	}
-	if seq, err := c.ConsumerAckFloor(ctx, "rt_tasks", "knight-a"); err != nil || seq != 1 {
-		t.Fatalf("ConsumerAckFloor = %d, %v; want 1", seq, err)
-	}
 
 	if err := c.DeleteConsumer(ctx, "rt_tasks", "knight-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ConsumerAckFloor(ctx, "rt_tasks", "knight-a"); err == nil {
+	if _, err := c.ConsumerDeliveredSeq(ctx, "rt_tasks", "knight-a"); err == nil {
 		t.Fatal("consumer still there after DeleteConsumer")
 	}
 	// Deleting a missing consumer is best effort.
