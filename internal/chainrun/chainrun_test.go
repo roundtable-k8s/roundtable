@@ -68,6 +68,9 @@ func TestStartNewCopy(t *testing.T) {
 	if got.Annotations[aiv1alpha1.AnnotationChainRun] != "t1" || got.Annotations["x"] != "y" {
 		t.Fatalf("annotations: %v", got.Annotations)
 	}
+	if got.Annotations[aiv1alpha1.AnnotationRunTemplate] != "tmpl" {
+		t.Fatalf("run-template annotation: %v", got.Annotations)
+	}
 	if len(got.OwnerReferences) != 1 || got.OwnerReferences[0].Name != "rt" {
 		t.Fatalf("owner refs: %v", got.OwnerReferences)
 	}
@@ -96,6 +99,9 @@ func TestStartRerunExisting(t *testing.T) {
 	var stored aiv1alpha1.Chain
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "run-1"}, &stored); err != nil {
 		t.Fatal(err)
+	}
+	if got.Annotations[aiv1alpha1.AnnotationRunTemplate] != "tmpl" || stored.Annotations[aiv1alpha1.AnnotationRunTemplate] != "tmpl" {
+		t.Fatalf("run-template annotation not set: %v / %v", got.Annotations, stored.Annotations)
 	}
 	if stored.Spec.Input != "in2" || stored.Annotations[aiv1alpha1.AnnotationChainRun] != "t2" {
 		t.Fatalf("patch not persisted: %+v", stored.ObjectMeta)

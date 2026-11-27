@@ -444,6 +444,14 @@ var _ = Describe("IssuePickup trigger engine helpers", func() {
 		Expect(hb).To(HavePrefix("Not picked up by the Round Table: this issue needs a human (labelled `needs-human`)."))
 	})
 
+	It("passes fairShare through to the trigger source", func() {
+		rt := &aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: "ns"}}
+		pick := &aiv1alpha1.IssuePickupSpec{Repos: []string{"a/b"}, ChainRef: corev1.LocalObjectReference{Name: "pr"}}
+		Expect(pickupTriggerSpec(rt, pick).Source.GitHub.FairShare).To(BeFalse())
+		pick.FairShare = true
+		Expect(pickupTriggerSpec(rt, pick).Source.GitHub.FairShare).To(BeTrue())
+	})
+
 	It("only treats Triggers controlled by their labelled RoundTable as pickup Triggers", func() {
 		trg := &aiv1alpha1.Trigger{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{aiv1alpha1.LabelPickupRoundTable: "t"}}}
 		Expect(pickupTable(trg)).To(BeEmpty())

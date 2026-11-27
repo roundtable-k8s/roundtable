@@ -422,7 +422,9 @@ func (r *RoundTableReconciler) cleanupDeletedTableCards(ctx context.Context, tab
 // knightChangedForTable filters the Knight watch: creates and deletes pass;
 // updates pass only when the generation, the labels or a status field a table
 // reads change (phase, ready, readyReplicas, model and the Available
-// condition's status and reason). Other status-only writes are dropped.
+// condition's status and reason). Other status-only writes are dropped, and
+// so are annotation-only updates (for example the planner spec-hash): they
+// change neither generation, labels nor those status fields, on purpose.
 func knightChangedForTable() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {

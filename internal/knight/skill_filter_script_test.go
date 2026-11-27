@@ -255,6 +255,28 @@ func TestSkillFilterFlatArsenalLayout(t *testing.T) {
 	}
 }
 
+func TestSkillFilterLaterCategoryArsenalOverridesEarlierFlat(t *testing.T) {
+	root := t.TempDir()
+	personal := filepath.Join(root, "arsenal", "personal")
+	platform := filepath.Join(root, "arsenal", "arsenal")
+	mkSkill(t, filepath.Join(personal, "pdf"))
+	mkSkill(t, filepath.Join(platform, "pdf", "pdf"))
+
+	k := &aiv1alpha1.Knight{}
+	k.Spec.Skills = []string{"pdf"}
+	// The flat arsenal comes first, the category arsenal later and wins.
+	k.Spec.Arsenals = []aiv1alpha1.KnightArsenal{{Name: "personal"}, {Name: "arsenal"}}
+	runSkillFilter(t, k, root)
+
+	got, err := os.Readlink(filepath.Join(root, "skills", "pdf", "pdf"))
+	if err != nil {
+		t.Fatalf("pdf/pdf should be linked: %v", err)
+	}
+	if want := filepath.Join(platform, "pdf", "pdf"); got != want {
+		t.Errorf("later category arsenal should win over the earlier flat one, got %s want %s", got, want)
+	}
+}
+
 func TestSkillFilterSwitchesFlatToCategoryLayout(t *testing.T) {
 	root := t.TempDir()
 	personal := filepath.Join(root, "arsenal", "personal")

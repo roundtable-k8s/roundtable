@@ -215,11 +215,14 @@ func TestApplyChainUsage(t *testing.T) {
 	t.Run("tokens only", func(t *testing.T) {
 		m := &aiv1alpha1.Mission{Status: aiv1alpha1.MissionStatus{
 			TotalCost:     "1.0000",
-			ChainStatuses: []aiv1alpha1.MissionChainStatus{{Name: "c", Tokens: &aiv1alpha1.TokenTotals{}}},
+			ChainStatuses: []aiv1alpha1.MissionChainStatus{{Name: "c", Tokens: &aiv1alpha1.TokenTotals{Input: 10, Output: 5}}, {Name: "d", Tokens: &aiv1alpha1.TokenTotals{Input: 7, Output: 3}}},
 		}}
 		ApplyChainUsage(m)
 		if m.Status.Tokens == nil {
-			t.Error("tokens not set")
+			t.Fatal("tokens not set")
+		}
+		if m.Status.Tokens.Input != 17 || m.Status.Tokens.Output != 8 {
+			t.Errorf("tokens = %+v, want input 17 output 8", m.Status.Tokens)
 		}
 		if m.Status.TotalCost != "1.0000" {
 			t.Errorf("TotalCost = %q, want unchanged", m.Status.TotalCost)

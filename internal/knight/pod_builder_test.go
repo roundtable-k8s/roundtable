@@ -954,6 +954,7 @@ var _ = Describe("PodBuilder browser image", func() {
 		Expect(img).To(Equal(DefaultBrowserImage))
 		Expect(img).NotTo(HaveSuffix(":latest"))
 		Expect(img).To(ContainSubstring(":"))
+		Expect(img).To(MatchRegexp(`@sha256:[0-9a-f]{64}$`))
 	})
 
 	It("uses the configured image", func() {
