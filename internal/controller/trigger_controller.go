@@ -99,6 +99,10 @@ type TriggerReconciler struct {
 	// DefaultKnightImage infers a knight's runtime to validate a knight
 	// target's model (the operator's DEFAULT_KNIGHT_IMAGE).
 	DefaultKnightImage string
+	// Missions are the gateway's mission caps (chart value gateway.missions),
+	// applied to the missions Triggers start. Zero fields use the gateway's
+	// defaults.
+	Missions gateway.MissionOptions
 	// Schedule renders the CronJob of schedule-source Triggers.
 	Schedule TriggerScheduleConfig
 
@@ -508,6 +512,13 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 				return notReady(aiv1alpha1.ReasonTriggerTargetNotFound, "RoundTable %q not found", trg.Spec.RoundTableRef.Name)
 			}
 			return ctrl.Result{}, metav1.Condition{}, err
+		}
+		reason, msg, err := r.checkMissionRefs(ctx, trg)
+		if err != nil {
+			return ctrl.Result{}, metav1.Condition{}, err
+		}
+		if reason != "" {
+			return notReady(reason, "%s", msg)
 		}
 	case target.ChainRef != nil:
 		chain := &aiv1alpha1.Chain{}

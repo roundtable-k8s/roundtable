@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -116,6 +117,9 @@ func main() {
 	var maxConcurrentRollouts int
 	var missionResultsTTL time.Duration
 	var triggerTaskBucket string
+	var missionMaxBudgetUSD float64
+	var missionMaxTTL, missionMaxTimeout int
+	var missionAllowSkillGeneration bool
 	var triggerTaskTTL, scheduleResultRetention time.Duration
 	var triggerSchedule controller.TriggerScheduleConfig
 	var triggerPullPolicy, triggerPullSecrets, triggerNodeSelector, triggerTolerations string
@@ -144,6 +148,13 @@ func main() {
 		"NATS KV bucket of the gateway's task records; Triggers with a knight target record their tasks there.")
 	flag.DurationVar(&triggerTaskTTL, "trigger-task-ttl", controller.DefaultGatewayTaskTTL,
 		"How long the gateway keeps task records (used if the operator creates the bucket first).")
+	// The mission caps are the gateway's own flags (chart gateway.missions),
+	// so a Trigger-started mission is capped like a gateway-started one.
+	flag.Float64Var(&missionMaxBudgetUSD, "mission-max-budget-usd", 10, "Upper bound on a mission's costBudgetUSD.")
+	flag.IntVar(&missionMaxTTL, "mission-max-ttl-seconds", 86400, "Upper bound on a mission's ttlSeconds.")
+	flag.IntVar(&missionMaxTimeout, "mission-max-timeout-seconds", 21600, "Upper bound on a mission's timeoutSeconds.")
+	flag.BoolVar(&missionAllowSkillGeneration, "mission-allow-skill-generation", false,
+		"Let Trigger missions set planner.allowSkillGeneration.")
 	flag.DurationVar(&scheduleResultRetention, "schedule-result-retention", gateway.DefaultScheduleResultRetention,
 		"How long the results of schedule Triggers' runs stay readable: finished runs are kept at least this "+
 			"long and the task record TTL is raised to it.")
@@ -526,7 +537,13 @@ func main() {
 		TaskTTL:            gateway.EffectiveTaskTTL(triggerTaskTTL, scheduleResultRetention),
 		ScheduleRetention:  scheduleResultRetention,
 		DefaultKnightImage: defaultImage,
-		Schedule:           triggerSchedule,
+		Missions: gateway.MissionOptions{
+			MaxBudgetUSD:         missionMaxBudgetUSD,
+			MaxTTLSeconds:        int32(max(min(missionMaxTTL, math.MaxInt32), 0)),
+			MaxTimeoutSeconds:    int32(max(min(missionMaxTimeout, math.MaxInt32), 0)),
+			AllowSkillGeneration: missionAllowSkillGeneration,
+		},
+		Schedule: triggerSchedule,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Trigger")
 		os.Exit(1)

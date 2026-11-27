@@ -76,6 +76,7 @@ func (r *TriggerReconciler) taskService(ctx context.Context) (*gateway.Service, 
 	svc := gateway.NewService(r.knightResolver(), bus, gateway.Options{
 		AllowedNamespaces:  []string{"*"},
 		DefaultKnightImage: r.DefaultKnightImage,
+		Missions:           r.Missions,
 	}, logf.Log.WithName("trigger-tasks"))
 	r.tasks, r.tasksConn = svc, nc
 	return svc, nil
