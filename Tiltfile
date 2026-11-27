@@ -6,6 +6,15 @@
 # host and live-updates the binary into the operator pod, which restarts the
 # process in place (no image rebuild).
 
+# Pin the extensions (restart_process, helm_resource) to a tilt-extensions
+# commit instead of the moving default branch: redefining the 'default'
+# extension repo makes every ext:// load use this ref.
+v1alpha1.extension_repo(
+    name='default',
+    url='https://github.com/tilt-dev/tilt-extensions',
+    ref='e72f135bc8aed2bb3d63f227f5508e6deb4560a9',
+)
+
 load('ext://restart_process', 'docker_build_with_restart')
 
 NAMESPACE = 'roundtable'
