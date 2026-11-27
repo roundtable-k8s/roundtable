@@ -1,0 +1,85 @@
+# A table, one stub knight (test/e2e/stubknight, no LLM), a one-step template
+# Chain, a credential Secret and a webhook Trigger, for the e2e webhook tier.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: e2e-table
+  namespace: roundtable-webhook
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: e2e
+    tasksStream: e2e_tasks
+    resultsStream: e2e_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-webhook
+  labels:
+    ai.roundtable.io/round-table: e2e-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: e2e_tasks
+    resultsStream: e2e_results
+    subjects:
+      - "e2e.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: trace-e2e
+  namespace: roundtable-webhook
+spec:
+  roundTableRef: {name: e2e-table}
+  timeoutSeconds: 600
+  steps:
+    - name: gather
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Handle this event: {{ .Input }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-hook
+  namespace: roundtable-webhook
+  labels:
+    ai.roundtable.io/webhook-secret: "true"
+stringData:
+  token: e2e-webhook-token-0123456789
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Trigger
+metadata:
+  name: on-hook
+  namespace: roundtable-webhook
+spec:
+  roundTableRef: {name: e2e-table}
+  source:
+    webhook:
+      auth:
+        bearerTokenSecretRef: {name: e2e-hook, key: token}
+  target:
+    chainRef: {name: trace-e2e}
+  input: |
+    deploy of {{ .Event.Data.service }} {{ .Event.Data.version }}
+  dedupeKey: "{{ .Event.Data.service }}@{{ .Event.Data.version }}"
