@@ -17,10 +17,13 @@ limitations under the License.
 package knight
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -218,7 +221,8 @@ func TerminationGracePeriod(k *aiv1alpha1.Knight) int64 {
 // SharedWorkspace reports whether more than one pod can mount the workspace
 // at once: ephemeral, or an existingClaim (ReadWriteMany when replicas or
 // maxReplicas exceed 1, which the Knight CEL rules enforce). Single-replica
-// existingClaim knights are treated as ReadWriteOnce, the safe assumption.
+// existingClaim knights are treated as ReadWriteOnce here; RecreateReason
+// checks their claims' actual access modes instead.
 func SharedWorkspace(k *aiv1alpha1.Knight) bool {
 	if EphemeralWorkspace(k) {
 		return true
@@ -229,16 +233,86 @@ func SharedWorkspace(k *aiv1alpha1.Knight) bool {
 	return SpecReplicas(k) > 1 || (k.Spec.MaxReplicas != nil && *k.Spec.MaxReplicas > 1)
 }
 
+// ClaimAccessModes maps a PVC name to its spec.accessModes. A claim missing
+// from the map has unknown access modes (not found, or not readable).
+type ClaimAccessModes map[string][]corev1.PersistentVolumeAccessMode
+
+// PodClaims returns the names of the PVCs a pod spec mounts through
+// persistentVolumeClaim volumes, in volume order. Generic ephemeral volumes
+// are left out: each pod gets its own claim.
+func PodClaims(spec *corev1.PodSpec) []string {
+	var claims []string
+	for _, v := range spec.Volumes {
+		if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName != "" {
+			claims = append(claims, v.PersistentVolumeClaim.ClaimName)
+		}
+	}
+	return claims
+}
+
+// shareableAccessModes reports whether a claim with these access modes can be
+// mounted by two pods at once on any nodes: it allows ReadWriteMany or
+// ReadOnlyMany. ReadWriteOnce, ReadWriteOncePod and unknown (empty) modes are
+// not shareable.
+func shareableAccessModes(modes []corev1.PersistentVolumeAccessMode) bool {
+	for _, m := range modes {
+		if m == corev1.ReadWriteMany || m == corev1.ReadOnlyMany {
+			return true
+		}
+	}
+	return false
+}
+
+// RecreateReason returns why the knight's Deployment must use Recreate, or ""
+// when it can roll with surge 1 / unavailable 0.
+//
+// A knight that can run more than one pod (replicas or maxReplicas above 1)
+// keeps the workspace rule of SharedWorkspace. A single-replica knight looks
+// at every PVC its pod spec mounts (workspace, memory, vault, the table's
+// shared workspace): it needs Recreate only if one of them is not shareable
+// (ReadWriteOnce, ReadWriteOncePod, or access modes unknown, the safe
+// default), because the old and the new pod overlap during a rolling update.
+func RecreateReason(k *aiv1alpha1.Knight, spec *corev1.PodSpec, modes ClaimAccessModes) string {
+	if SpecReplicas(k) > 1 || (k.Spec.MaxReplicas != nil && *k.Spec.MaxReplicas > 1) {
+		if SharedWorkspace(k) {
+			return ""
+		}
+		return "the workspace PVC is ReadWriteOnce"
+	}
+	for _, v := range spec.Volumes {
+		if v.PersistentVolumeClaim == nil || v.PersistentVolumeClaim.ClaimName == "" {
+			continue
+		}
+		claim := v.PersistentVolumeClaim.ClaimName
+		m, ok := modes[claim]
+		switch {
+		case !ok || len(m) == 0:
+			return fmt.Sprintf("volume %q: access modes of PVC %q are unknown", v.Name, claim)
+		case !shareableAccessModes(m):
+			return fmt.Sprintf("volume %q: PVC %q is %s", v.Name, claim, joinAccessModes(m))
+		}
+	}
+	return ""
+}
+
+func joinAccessModes(modes []corev1.PersistentVolumeAccessMode) string {
+	s := make([]string, len(modes))
+	for i, m := range modes {
+		s[i] = string(m)
+	}
+	return strings.Join(s, ", ")
+}
+
 // RolloutStrategy picks the Deployment strategy: a zero-downtime rolling
-// update (surge 1, unavailable 0) when the workspace is shareable, otherwise
-// Recreate because a ReadWriteOnce PVC cannot be mounted by two pods.
-func RolloutStrategy(k *aiv1alpha1.Knight) appsv1.DeploymentStrategy {
-	if !SharedWorkspace(k) {
-		return appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+// update (surge 1, unavailable 0) unless RecreateReason names a volume two
+// pods can't mount at once. The returned reason is "" for RollingUpdate.
+func RolloutStrategy(k *aiv1alpha1.Knight, spec *corev1.PodSpec, modes ClaimAccessModes) (appsv1.DeploymentStrategy, string) {
+	if reason := RecreateReason(k, spec, modes); reason != "" {
+		return appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, reason
 	}
 	surge, unavailable := intstr.FromInt32(1), intstr.FromInt32(0)
 	return appsv1.DeploymentStrategy{
 		Type:          appsv1.RollingUpdateDeploymentStrategyType,
 		RollingUpdate: &appsv1.RollingUpdateDeployment{MaxSurge: &surge, MaxUnavailable: &unavailable},
-	}
+	}, ""
 }

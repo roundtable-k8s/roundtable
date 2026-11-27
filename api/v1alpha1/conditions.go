@@ -64,6 +64,15 @@ const (
 	// reached (ReasonWaitingForOtherRollouts). Removed once the knight rolls.
 	ConditionKnightRolloutPending = "RolloutPending"
 
+	// ConditionKnightRollingUpdate reports the Deployment rollout strategy.
+	// Status=True (VolumesShareable) means the Deployment rolls with maxSurge 1
+	// / maxUnavailable 0: the new pod is serving before the old one drains.
+	// Status=False (VolumeNotShareable) means Recreate is kept; the message
+	// names the volume that forced it (a ReadWriteOnce or ReadWriteOncePod
+	// PVC, or one whose access modes are unknown). Only set on knights with
+	// runtime deployment.
+	ConditionKnightRollingUpdate = "RollingUpdate"
+
 	// ConditionKnightToolsImageReady reports whether the tools image for the
 	// current spec.tools is published. Only set on knights with Nix tools.
 	// Status=False means the pod rollout is held on its current template
@@ -346,6 +355,13 @@ const (
 	// ReasonMemoryNotRWX indicates the knight's memory PVC was bound without
 	// ReadWriteMany although the knight can run more than one pod.
 	ReasonMemoryNotRWX = "MemoryNotRWX"
+
+	// ReasonVolumesShareable: every PVC the pod mounts allows two pods.
+	ReasonVolumesShareable = "VolumesShareable"
+
+	// ReasonVolumeNotShareable: a PVC the pod mounts allows a single pod, so
+	// the Deployment keeps Recreate.
+	ReasonVolumeNotShareable = "VolumeNotShareable"
 
 	// ReasonMemoryRWX indicates the knight's memory PVC is bound ReadWriteMany.
 	ReasonMemoryRWX = "MemoryRWX"

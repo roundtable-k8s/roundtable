@@ -149,6 +149,10 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 		if !autoscaled || deploy.Spec.Replicas == nil {
 			deploy.Spec.Replicas = &replicas
 		}
+		// The strategy is not part of the spec hash and changing it doesn't
+		// roll the pods, so it follows the desired spec on every reconcile
+		// (e.g. a claim's access modes became known after it was created).
+		deploy.Spec.Strategy = strategy
 
 		// Check if the spec hash matches — if so, skip mutation
 		existingHash := ""
@@ -161,7 +165,6 @@ func (b *DeploymentBackend) Reconcile(ctx context.Context, knight *aiv1alpha1.Kn
 
 		// Apply desired state
 		deploy.Labels = labels
-		deploy.Spec.Strategy = strategy
 		deploy.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: labels,
 		}

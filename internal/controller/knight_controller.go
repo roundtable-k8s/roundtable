@@ -431,6 +431,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if !rolloutDeferred {
 		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending)
 	}
+	if runtimeName(knight) != runtimeDeployment {
+		meta.RemoveStatusCondition(&knight.Status.Conditions, aiv1alpha1.ConditionKnightRollingUpdate)
+	}
 
 	// 4. Scaling: KEDA ScaledObject and PodDisruptionBudget
 	if err := r.reconcileScaledObject(ctx, knight, plan.Scaling); err != nil {
@@ -916,14 +919,17 @@ func (r *KnightReconciler) NewDeploymentBackend() *rtruntime.DeploymentBackend {
 // Exported so it can be passed as a PodSpecBuilder to RuntimeBackend.
 //
 // Replicas is the fixed replica count, or the initial count when KEDA owns
-// it. A workspace that more than one pod can mount (ephemeral, or an
-// existingClaim) rolls with maxSurge 1 / maxUnavailable 0 so the old pod
-// drains in-flight tasks while the new one starts; a single ReadWriteOnce
-// PVC keeps Recreate. terminationGracePeriodSeconds is taskTimeoutSeconds+60.
+// it. When every PVC the pod mounts can be mounted by two pods (see
+// knightpkg.RecreateReason) the Deployment rolls with maxSurge 1 /
+// maxUnavailable 0 so the old pod drains in-flight tasks while the new one
+// starts; otherwise it keeps Recreate and the RollingUpdate condition names
+// the volume. terminationGracePeriodSeconds is taskTimeoutSeconds+60.
 func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.DeploymentSpec {
 	labels := knightLabels(knight)
 	replicas := r.scalingOrFallback(ctx, knight).InitialReplicas()
-	strategy := knightpkg.RolloutStrategy(knight)
+	podSpec := r.BuildDrainablePodSpec(ctx, knight)
+	strategy, recreateReason := knightpkg.RolloutStrategy(knight, &podSpec, r.claimAccessModes(ctx, knight, &podSpec))
+	setRollingUpdateCondition(knight, recreateReason)
 	// The table label goes on the pod template only: the selector is immutable.
 	podLabels := maps.Clone(labels)
 	if table := knightpkg.KnightTable(knight); table != "" {
@@ -939,9 +945,49 @@ func (r *KnightReconciler) BuildDeploymentSpec(ctx context.Context, knight *aiv1
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: podLabels,
 			},
-			Spec: r.BuildDrainablePodSpec(ctx, knight),
+			Spec: podSpec,
 		},
 	}
+}
+
+// claimAccessModes reads spec.accessModes of every PVC the pod spec mounts.
+// A claim that can't be read is left out, so RecreateReason treats its
+// access modes as unknown and keeps Recreate.
+func (r *KnightReconciler) claimAccessModes(ctx context.Context, knight *aiv1alpha1.Knight, spec *corev1.PodSpec) knightpkg.ClaimAccessModes {
+	modes := knightpkg.ClaimAccessModes{}
+	if r.Client == nil {
+		return modes
+	}
+	for _, claim := range knightpkg.PodClaims(spec) {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := r.Get(ctx, types.NamespacedName{Name: claim, Namespace: knight.Namespace}, pvc); err != nil {
+			if !apierrors.IsNotFound(err) {
+				logf.FromContext(ctx).Error(err, "Failed to read PVC access modes", "pvc", claim)
+			}
+			continue
+		}
+		modes[claim] = pvc.Spec.AccessModes
+	}
+	return modes
+}
+
+// setRollingUpdateCondition records the rollout strategy on the Knight:
+// True when it rolls with RollingUpdate, False with the volume that forced
+// Recreate.
+func setRollingUpdateCondition(knight *aiv1alpha1.Knight, recreateReason string) {
+	cond := metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightRollingUpdate,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonVolumesShareable,
+		Message:            "Rolls with maxSurge 1 / maxUnavailable 0: every mounted volume allows two pods",
+		ObservedGeneration: knight.Generation,
+	}
+	if recreateReason != "" {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = aiv1alpha1.ReasonVolumeNotShareable
+		cond.Message = "Recreate strategy: " + recreateReason
+	}
+	meta.SetStatusCondition(&knight.Status.Conditions, cond)
 }
 
 // BuildDrainablePodSpec is BuildPodSpec plus the drain grace period. Exported
