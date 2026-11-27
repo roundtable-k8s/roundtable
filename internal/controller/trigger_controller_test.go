@@ -43,6 +43,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -1030,7 +1031,7 @@ var _ = Describe("Trigger controller", func() {
 			reconcileTrigger("clr")
 			cj := getCronJob("trigger-clr")
 			Expect(cj.Spec.StartingDeadlineSeconds).To(HaveValue(Equal(int64(3600))))
-			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullAlways))
+			Expect(fireContainer(cj.Spec.JobTemplate.Spec.Template.Spec).ImagePullPolicy).To(Equal(corev1.PullAlways))
 
 			// Cleared on the Trigger and in the operator config: both reach the CronJob.
 			t := getTrigger("clr")
@@ -1042,12 +1043,27 @@ var _ = Describe("Trigger controller", func() {
 			Expect(cj.Spec.StartingDeadlineSeconds).To(BeNil())
 			// The API server defaults the empty policy for the image; that
 			// defaulted value is the one the operator must not churn on.
-			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullIfNotPresent))
+			Expect(fireContainer(cj.Spec.JobTemplate.Spec.Template.Spec).ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
 
 			// Unchanged, including the server-defaulted policy: no update.
 			rv := cj.ResourceVersion
 			reconcileTrigger("clr")
 			Expect(getCronJob("trigger-clr").ResourceVersion).To(Equal(rv))
+		})
+
+		It("does not update the CronJob on a second reconcile for a digest-only image", func() {
+			scheduleTrigger("dig", nil)
+			saved := r.Schedule
+			DeferCleanup(func() { r.Schedule = saved })
+			r.Schedule.Image = "registry.test/operator@sha256:" + strings.Repeat("ab", 32)
+			reconcileTrigger("dig")
+			c := fireContainer(getCronJob("trigger-dig").Spec.JobTemplate.Spec.Template.Spec)
+			Expect(c.Image).To(Equal(r.Schedule.Image))
+			Expect(c.ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
+
+			rv := getCronJob("trigger-dig").ResourceVersion
+			reconcileTrigger("dig")
+			Expect(getCronJob("trigger-dig").ResourceVersion).To(Equal(rv))
 		})
 
 		It("deletes the CronJob and ServiceAccount when the schedule source is removed", func() {
@@ -1275,6 +1291,13 @@ var _ = Describe("Trigger controller", func() {
 			})
 		})
 
+		// fireAt handles a schedule firing for time at directly, as the
+		// Trigger's message loop does.
+		fireAt := func(name string, at time.Time) {
+			_, err := r.fire(ctx, types.NamespacedName{Namespace: ns, Name: name},
+				TriggerEvent{Time: at, Headers: map[string]string{}}, at.Format(time.RFC3339), "", nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+		}
 		knightTarget := func(task string) aiv1alpha1.TriggerTarget {
 			return aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: knightName, Task: task}}
 		}
@@ -1383,9 +1406,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(rec.Done()).To(BeFalse())
 
 			// Firing the same schedule time again sends nothing.
-			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "kt-cron"},
-				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+			fireAt("kt-cron", due)
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
 			Expect(getTrigger("kt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))
 
@@ -1577,6 +1598,88 @@ var _ = Describe("Trigger controller", func() {
 			Expect(st.ActiveRuns).To(Equal([]string{sent[0].TaskID}))
 			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
 				HaveField("Run", sent[1].TaskID), HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded))))
+		})
+
+		// failOnSendBus publishes a failed result for each task right after
+		// the task is sent, so the task has already failed when Invoke returns.
+		failOnSend := func() {
+			svc, err := r.taskService(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			failing := gateway.NewService(r.knightResolver(), failOnSendBus{Bus: svc.Bus, publish: func(taskID string) {
+				publishResult(taskID, `{"taskId":"`+taskID+`","error":"boom","success":false}`)
+			}}, gateway.Options{
+				AllowedNamespaces:  []string{"*"},
+				DefaultKnightImage: r.DefaultKnightImage,
+			}, logr.Discard())
+			r.tasksMu.Lock()
+			r.tasks = failing
+			r.tasksMu.Unlock()
+			DeferCleanup(func() {
+				r.tasksMu.Lock()
+				r.tasks = svc
+				r.tasksMu.Unlock()
+			})
+		}
+		fireNow := func(name string, at time.Time) {
+			clock = at.Add(time.Second)
+			fireAt(name, at)
+		}
+		drainEvents := func() []string {
+			rec := r.Recorder.(*record.FakeRecorder)
+			var evs []string
+			for len(rec.Events) > 0 {
+				evs = append(evs, <-rec.Events)
+			}
+			return evs
+		}
+
+		It("counts a task already failed when sent and emits one TaskFailed Warning Event", func() {
+			t := scheduleKnightTrigger("kt-sentfail", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			reconcileTrigger("kt-sentfail")
+			failOnSend()
+			drainEvents()
+
+			fireNow("kt-sentfail", due)
+			st := getTrigger("kt-sentfail").Status
+			Expect(st.ActiveRuns).To(BeEmpty())
+			Expect(st.RecentFirings).To(HaveLen(1))
+			Expect(st.RecentFirings[0]).To(SatisfyAll(
+				HaveField("Outcome", aiv1alpha1.TriggerFiringFailed), HaveField("Reason", "boom")))
+			Expect(finishedRuns("kt-sentfail", "failed")).To(Equal(1.0))
+
+			var failed []string
+			for _, ev := range drainEvents() {
+				if strings.Contains(ev, "Warning TaskFailed") {
+					failed = append(failed, ev)
+				}
+			}
+			Expect(failed).To(HaveLen(1))
+			Expect(failed[0]).To(ContainSubstring("Task " + st.RecentFirings[0].Run + " failed: boom"))
+		})
+
+		It("does not count a finished run or emit TaskFailed when recording its firing fails", func() {
+			t := scheduleKnightTrigger("kt-norecord", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			reconcileTrigger("kt-norecord")
+			failOnSend()
+			drainEvents()
+
+			wc, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
+			Expect(err).NotTo(HaveOccurred())
+			saved := r.Client
+			r.Client = interceptor.NewClient(wc, interceptor.Funcs{
+				SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+					return errors.New("status write failed")
+				},
+			})
+			DeferCleanup(func() { r.Client = saved })
+
+			fireNow("kt-norecord", due)
+			Expect(finishedRuns("kt-norecord", "failed")).To(Equal(0.0))
+			for _, ev := range drainEvents() {
+				Expect(ev).NotTo(ContainSubstring("TaskFailed"))
+			}
 		})
 
 		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
@@ -1906,6 +2009,20 @@ func (j *jobListRecorder) List(ctx context.Context, list client.ObjectList, opts
 		j.selectors = append(j.selectors, sel)
 	}
 	return j.Client.List(ctx, list, opts...)
+}
+
+// failOnSendBus runs publish with the task ID right after the task is sent.
+type failOnSendBus struct {
+	gateway.Bus
+	publish func(taskID string)
+}
+
+func (b failOnSendBus) Publish(ctx context.Context, subject string, payload natspkg.TaskPayload, table string) error {
+	if err := b.Bus.Publish(ctx, subject, payload, table); err != nil {
+		return err
+	}
+	b.publish(payload.TaskID)
+	return nil
 }
 
 // failingGetBus fails reads of one task record, like a transient KV error.

@@ -227,7 +227,6 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 		if firing.Outcome == aiv1alpha1.TriggerFiringFailed {
 			firing.Reason = taskFailureReason(rec)
 		}
-		countTriggerRunFinished(f.table, trg, string(firing.Outcome))
 	}
 	countTriggerFiring(f.table, trg, triggerOutcomeStarted)
 	if err := r.recordFiring(ctx, f.nn, firing, func(st *aiv1alpha1.TriggerStatus) {
@@ -243,6 +242,12 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	}); err != nil {
 		// The task was sent; a redelivery replays its Idempotency-Key.
 		logf.FromContext(ctx).Error(err, "Failed to record Trigger firing", "trigger", f.nn.String(), "task", rec.TaskID)
+	} else if rec.Done() {
+		// Count the finished run only once its firing is recorded.
+		countTriggerRunFinished(f.table, trg, string(firing.Outcome))
+		if firing.Outcome == aiv1alpha1.TriggerFiringFailed {
+			r.event(trg, corev1.EventTypeWarning, "TaskFailed", "Task %s failed: %s", rec.TaskID, firing.Reason)
+		}
 	}
 	logf.Log.WithName("trigger").Info("Sent knight task", "trigger", f.nn.String(), "knight", kt.Name, "taskId", rec.TaskID, "key", firing.Key)
 	r.event(trg, corev1.EventTypeNormal, "Fired", "Sent task %s to knight %s", rec.TaskID, kt.Name)
