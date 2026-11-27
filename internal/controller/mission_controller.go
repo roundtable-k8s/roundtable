@@ -90,7 +90,13 @@ func (r *MissionReconciler) emitMissionSpan(ctx context.Context, mission *aiv1al
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
+// Reconcile runs one reconcile of a Mission and resets the requeue priority
+// (see requeuePriority, #700).
 func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	return resetRequeuePriority(r.reconcileOnce(ctx, req))
+}
+
+func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Count table-less missions (roundtable_missions{table="none"}); the
@@ -151,9 +157,12 @@ func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		expiresAt := metav1.NewTime(now.Add(time.Duration(mission.Spec.TTLSeconds) * time.Second))
 		mission.Status.ExpiresAt = &expiresAt
 		r.initKnightStatuses(mission)
+		prevTraceID := mission.Status.TraceID
 		missionpkg.EnsureTrace(ctx, r.TracerProvider, mission)
-		log = log.WithValues(telemetry.LogValues(mission.Status.TraceID)...)
-		ctx = logf.IntoContext(ctx, log)
+		if mission.Status.TraceID != prevTraceID {
+			log = log.WithValues(telemetry.LogValues(mission.Status.TraceID)...)
+			ctx = logf.IntoContext(ctx, log)
+		}
 		err := status.ForMission(mission).
 			Phase(aiv1alpha1.MissionPhasePending).
 			Apply(ctx, r.Client)

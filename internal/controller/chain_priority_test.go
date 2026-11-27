@@ -76,3 +76,23 @@ func TestReconcile_NoRequeueLeavesPriorityUnset(t *testing.T) {
 		t.Fatalf("got %+v, %v; want empty result", res, err)
 	}
 }
+
+// Chain and Mission reconcilers share resetRequeuePriority: any requeue or
+// error gets the explicit priority, a plain result is left alone.
+func TestResetRequeuePriority(t *testing.T) {
+	for name, res := range map[string]ctrl.Result{
+		"RequeueAfter": {RequeueAfter: 5},
+		"Requeue":      {Requeue: true}, //nolint:staticcheck
+	} {
+		got, _ := resetRequeuePriority(res, nil)
+		if got.Priority == nil || *got.Priority != requeuePriority {
+			t.Errorf("%s: Priority=%v, want %d", name, got.Priority, requeuePriority)
+		}
+	}
+	if got, _ := resetRequeuePriority(ctrl.Result{}, context.Canceled); got.Priority == nil {
+		t.Error("error result: Priority unset, want explicit")
+	}
+	if got, _ := resetRequeuePriority(ctrl.Result{}, nil); got.Priority != nil {
+		t.Errorf("plain result: Priority=%v, want nil", got.Priority)
+	}
+}

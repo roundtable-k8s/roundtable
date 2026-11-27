@@ -905,8 +905,13 @@ func checkTemplatesOnly(mission *aiv1alpha1.Mission, k PlannerKnight) error {
 	if k.EphemeralSpec != nil {
 		return fmt.Errorf("knight %q: ephemeralSpec is not allowed for gateway-created missions; use templateName", k.Name)
 	}
-	if o := k.SpecOverrides; o != nil && (len(o.Env) > 0 || o.Tools != nil) {
-		return fmt.Errorf("knight %q: specOverrides.env and specOverrides.tools are not allowed for gateway-created missions", k.Name)
+	if o := k.SpecOverrides; o != nil {
+		if len(o.Env) > 0 {
+			return fmt.Errorf("knight %q: specOverrides.env is not allowed for gateway-created missions", k.Name)
+		}
+		if o.Tools != nil {
+			return fmt.Errorf("knight %q: specOverrides.tools is not allowed for gateway-created missions", k.Name)
+		}
 	}
 	return nil
 }
