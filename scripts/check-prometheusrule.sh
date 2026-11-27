@@ -121,4 +121,8 @@ fi
 # The PrometheusRule spec is a rule file: take the spec: block, drop the indent.
 awk '/^kind: PrometheusRule$/{pr=1} pr&&/^spec:$/{s=1;next} s&&/^---$/{exit} s{sub(/^  /,"");print}' <<<"$on" >"$tmp/rules.yaml"
 "$PROMTOOL" check rules "$tmp/rules.yaml"
+# Behavioural checks: the rule tests load rules.yaml from their own directory.
+tests="$(cd "$(dirname "$0")" && pwd)/prometheusrule-tests"
+cp "$tests"/*_test.yaml "$tmp/"
+"$PROMTOOL" test rules "$tmp"/*_test.yaml
 echo "OK: PrometheusRule checks passed"
