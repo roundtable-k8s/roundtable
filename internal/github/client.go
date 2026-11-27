@@ -108,6 +108,17 @@ func (c *Client) api() (*gh.Client, error) {
 	return c.gh, nil
 }
 
+// graphQLURL returns the GraphQL endpoint for a REST API base URL. On
+// api.github.com that is <base>/graphql. On GitHub Enterprise Server the REST
+// base ends in /api/v3 and GraphQL lives at the sibling /api/graphql.
+func graphQLURL(base string) string {
+	b := strings.TrimRight(base, "/")
+	if root, ok := strings.CutSuffix(b, "/api/v3"); ok {
+		return root + "/api/graphql"
+	}
+	return b + "/graphql"
+}
+
 func splitRepo(repo string) (string, string, error) {
 	owner, name, ok := strings.Cut(repo, "/")
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
@@ -591,8 +602,7 @@ func (c *Client) EnableAutoMerge(ctx context.Context, nodeID string) error {
 		"query":     "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }",
 		"variables": map[string]string{"id": nodeID},
 	}
-	// Relative to the API base URL, as before (api.github.com/graphql).
-	req, err := g.NewRequest(ctx, http.MethodPost, "graphql", body)
+	req, err := g.NewRequest(ctx, http.MethodPost, graphQLURL(g.BaseURL()), body)
 	if err != nil {
 		return err
 	}
@@ -628,7 +638,7 @@ func (c *Client) LoadMergeQueueState(ctx context.Context, pr *PullRequest) error
 		"query":     "query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue mergeQueueEntry { id } } } }",
 		"variables": map[string]string{"id": pr.NodeID},
 	}
-	req, err := g.NewRequest(ctx, http.MethodPost, "graphql", body)
+	req, err := g.NewRequest(ctx, http.MethodPost, graphQLURL(g.BaseURL()), body)
 	if err != nil {
 		return err
 	}
@@ -763,7 +773,7 @@ func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]Workflo
 }
 
 // ListMergeGroupRunsWithin returns the merge_group workflow runs of repo, newest
-// first, created within window, following up to maxPages pages (500 runs) so a
+// first, created within window, following up to maxPages pages (see maxPages) so a
 // busy merge queue cannot hide an older failed run on page 2+. The cap also
 // bounds how long a huge history can stall a reconcile; runs beyond it are not
 // seen (counted by roundtable_github_pagination_truncated_total).

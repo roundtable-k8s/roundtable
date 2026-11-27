@@ -266,6 +266,35 @@ func TestEnableAutoMergeSendsGraphQL(t *testing.T) {
 	}
 }
 
+func TestGraphQLURL(t *testing.T) {
+	for _, tc := range []struct{ base, want string }{
+		{"https://api.github.com/", "https://api.github.com/graphql"},
+		{"https://api.github.com", "https://api.github.com/graphql"},
+		{"https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
+		{"https://ghe.example.com/api/v3", "https://ghe.example.com/api/graphql"},
+		{"http://127.0.0.1:8080/", "http://127.0.0.1:8080/graphql"},
+	} {
+		if got := graphQLURL(tc.base); got != tc.want {
+			t.Errorf("graphQLURL(%q) = %q, want %q", tc.base, got, tc.want)
+		}
+	}
+}
+
+func TestEnableAutoMergeUsesEnterpriseGraphQLPath(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = io.WriteString(w, `{"data":{"enablePullRequestAutoMerge":{"clientMutationId":null}}}`)
+	}))
+	defer srv.Close()
+	if err := NewClient(srv.URL+"/api/v3/", "tok").EnableAutoMerge(context.Background(), "PR_1"); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/graphql" {
+		t.Fatalf("GraphQL path = %q, want /api/graphql", path)
+	}
+}
+
 func TestLoadMergeQueueState(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
