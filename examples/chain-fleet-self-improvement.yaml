@@ -6,6 +6,8 @@
 # docs/recipe-fleet-self-improvement.md.
 #
 # Needs a RoundTable "fleet-a" and a lead knight "lead" (change both below).
+# The lead runs every assess item, so its spec.concurrency must be at least
+# maxParallel (4), or the extra items queue behind it and overrun the budget.
 # Skip the discovery by giving the knights in spec.input, e.g.
 #   input: '{"knights": ["galahad", "tristan"]}'
 apiVersion: ai.roundtable.io/v1alpha1
@@ -18,6 +20,8 @@ spec:
   roundTableRef: {name: fleet-a}
   schedule: "0 6 * * 1"          # Mondays 06:00
   timeZone: Europe/London
+  # Worst case: roster 600 + assess 5 waves (20 items / maxParallel 4) x 900
+  # + report 1200 = 6300s. Raise this if you raise maxItems or the step timeout.
   timeoutSeconds: 7200
   input: ""                      # optional: {"knights": ["name", ...]} to skip discovery
   outputKnightRef: {name: lead}
@@ -40,12 +44,12 @@ spec:
     - name: assess
       knightRef: {name: lead}
       dependsOn: [roster]
-      timeoutSeconds: 1200
+      timeoutSeconds: 900
       forEach:
         from: steps.roster
         path: .knights
         uniqueBy: name
-        maxItems: 30
+        maxItems: 20
       maxParallel: 4
       failurePolicy: continue      # one unreachable knight must not stop the review
       task: |

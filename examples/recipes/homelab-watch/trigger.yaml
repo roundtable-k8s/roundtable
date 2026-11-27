@@ -10,8 +10,9 @@ metadata:
     ai.roundtable.io/webhook-secret: "true"
 type: Opaque
 stringData:
-  # At least 16 characters, e.g. $(openssl rand -hex 32).
-  token: replace-me-with-a-long-random-token
+  # Deliberately shorter than the gateway minimum (16 characters), so the
+  # placeholder is rejected until you replace it, e.g. with $(openssl rand -hex 32).
+  token: CHANGE-ME
 ---
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Trigger
