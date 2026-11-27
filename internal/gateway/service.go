@@ -224,6 +224,12 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		}
 	}
 
+	if req.Admit != nil {
+		if err := req.Admit(); err != nil {
+			return nil, err
+		}
+	}
+
 	t, err := s.Resolver.resolve(ctx, ns, knightName)
 	if err != nil {
 		return nil, err

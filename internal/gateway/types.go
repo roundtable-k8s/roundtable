@@ -59,6 +59,10 @@ type InvokeRequest struct {
 	// the original task instead of publishing a new one. Not part of the
 	// JSON body.
 	IdempotencyKey string `json:"-"`
+	// Admit, when set, runs after the idempotency lookup finds no earlier
+	// task and before anything is sent; an error aborts the invoke and is
+	// returned as is. In-process callers only.
+	Admit func() error `json:"-"`
 }
 
 // IdempotencyEntry is what the gateway stores per idempotency key of an
@@ -147,6 +151,8 @@ var (
 	ErrConflict = errors.New("conflict")
 	// ErrUnprocessable maps to 422.
 	ErrUnprocessable = errors.New("unprocessable")
+	// ErrDeclined marks an invoke the caller's Admit hook refused.
+	ErrDeclined = errors.New("declined")
 )
 
 // ConflictError is a 409 that carries the dead-letter entry's current state.

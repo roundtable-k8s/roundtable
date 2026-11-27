@@ -915,14 +915,17 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	// A schedule firing consumed after startingDeadlineSeconds is stale (the
 	// operator was down, or the Trigger was not Ready): it is skipped, so a
 	// backlog does not start a burst of runs. ev.Time is the schedule time.
+	// Each target checks it after its dedupe, so a late redelivery of a slot
+	// that already ran is deduped, not a deadline skip. Run-now is exempt.
+	late := ""
 	if src := trg.Spec.Source.Schedule; src != nil && manual == nil && src.StartingDeadlineSeconds != nil &&
 		now.Sub(ev.Time) > time.Duration(*src.StartingDeadlineSeconds)*time.Second {
-		return skip(triggerHandled, "missed schedule time %s by more than startingDeadlineSeconds", ev.Time.UTC().Format(time.RFC3339))
+		late = fmt.Sprintf("missed schedule time %s by more than startingDeadlineSeconds", ev.Time.UTC().Format(time.RFC3339))
 	}
 
 	if trg.Spec.Target.Mission != nil {
 		return r.fireMission(ctx, missionFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual, late: late,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -933,7 +936,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	if trg.Spec.Target.Knight != nil {
 		return r.fireKnight(ctx, knightFiring{
-			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual,
+			nn: nn, trg: trg, data: data, key: key, firing: &firing, now: now, table: table, mutate: mutate, manual: manual, late: late,
 			skip: skip,
 			deduped: func(format string, args ...any) (triggerOutcome, error) {
 				metricOutcome = triggerOutcomeDeduped
@@ -1001,6 +1004,10 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		rerun = existing
 	case !apierrors.IsNotFound(err):
 		return triggerRetry, err
+	}
+
+	if late != "" {
+		return skip(triggerHandled, "%s", late)
 	}
 
 	active, err := r.activeRuns(ctx, trg)

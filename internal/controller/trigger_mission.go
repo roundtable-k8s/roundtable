@@ -95,6 +95,9 @@ type missionFiring struct {
 	mutate func(*aiv1alpha1.TriggerStatus)
 	// manual is set for a run-now firing; its caller is recorded on the Mission.
 	manual *triggerManualFiring
+	// late is the reason a schedule firing is past startingDeadlineSeconds,
+	// checked after the dedupe; empty when it is on time.
+	late string
 	// skip records a firing that created nothing; deduped does for a
 	// duplicate dedupe key.
 	skip    func(outcome triggerOutcome, format string, args ...any) (triggerOutcome, error)
@@ -208,6 +211,10 @@ func (r *TriggerReconciler) fireMission(ctx context.Context, f missionFiring) (t
 		return f.deduped("duplicate dedupe key: mission %s exists", name)
 	case !apierrors.IsNotFound(err):
 		return triggerRetry, err
+	}
+
+	if f.late != "" {
+		return f.skip(triggerHandled, "%s", f.late)
 	}
 
 	missions, err := r.listMissions(ctx, trg)
