@@ -17,7 +17,9 @@ limitations under the License.
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -415,5 +417,83 @@ func TestScheduleViewConcurrencyAndSuspension(t *testing.T) {
 	tr.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "true"}
 	if v = scheduleView(tr, nil, nil); !v.Suspended || v.SuspendedBy != "spec,annotation" {
 		t.Errorf("spec+annotation: suspended = %v by %q", v.Suspended, v.SuspendedBy)
+	}
+}
+
+// chainCountingClient counts the Chain objects a client returns from List and
+// the Gets it serves for Chains.
+type chainCountingClient struct {
+	client.Client
+	listed, gets int
+}
+
+func (c *chainCountingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	err := c.Client.List(ctx, list, opts...)
+	if cl, ok := list.(*aiv1alpha1.ChainList); ok {
+		c.listed += len(cl.Items)
+	}
+	return err
+}
+
+func (c *chainCountingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*aiv1alpha1.Chain); ok {
+		c.gets++
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// A schedules list must read only the Chains the schedules reference, not
+// every Chain in the namespace (finished runs carry full step outputs).
+func TestListSchedulesDoesNotListChains(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(scheme)
+	digest := templateChain("digest", false)
+	digest.Spec.RoundTableRef = aiv1alpha1.LocalRef("fleet-a")
+	objs := []client.Object{digest,
+		scheduleTrigger(testNS, "a", "0 7 * * *", "digest"),
+		scheduleTrigger(testNS, "b", "0 8 * * *", "digest")}
+	for i := range 300 {
+		objs = append(objs, templateChain(fmt.Sprintf("run-%d", i), false))
+	}
+	cc := &chainCountingClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()}
+	svc := NewService(&Resolver{Client: cc}, nil, Options{Namespace: testNS}, logr.Discard())
+	svc.Schedules = cc
+
+	views, err := svc.ListSchedules(t.Context(), ScheduleFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 2 || views[0].Table != "fleet-a" || views[1].Table != "fleet-a" {
+		t.Fatalf("views = %+v", views)
+	}
+	if cc.listed != 0 || cc.gets != 1 {
+		t.Fatalf("chains listed = %d, gets = %d; want 0 listed and 1 get for the one referenced chain", cc.listed, cc.gets)
+	}
+}
+
+// BenchmarkListSchedules800Chains reports allocations of a schedules list with
+// 800 Chains (each with a large status) in the namespace.
+func BenchmarkListSchedules800Chains(b *testing.B) {
+	scheme := runtime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(scheme)
+	digest := templateChain("digest", false)
+	digest.Spec.RoundTableRef = aiv1alpha1.LocalRef("fleet-a")
+	objs := []client.Object{digest,
+		scheduleTrigger(testNS, "a", "0 7 * * *", "digest"),
+		scheduleTrigger(testNS, "b", "0 8 * * *", "digest")}
+	big := strings.Repeat("x", 32<<10)
+	for i := range 800 {
+		c := templateChain(fmt.Sprintf("run-%d", i), false)
+		c.Annotations = map[string]string{"output": big}
+		objs = append(objs, c)
+	}
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	svc := NewService(&Resolver{Client: k8s}, nil, Options{Namespace: testNS}, logr.Discard())
+	svc.Schedules = k8s
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := svc.ListSchedules(b.Context(), ScheduleFilter{}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

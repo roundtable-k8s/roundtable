@@ -176,14 +176,16 @@ func (s *Service) ListSchedules(ctx context.Context, f ScheduleFilter) ([]*Sched
 	if err := s.Schedules.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, k8sError("list triggers", err)
 	}
-	tables := s.chainTables(ctx, ns)
-	knightTable := s.knightTables(ctx, ns)
-	out := make([]*ScheduleView, 0, len(list.Items))
+	schedules := make([]*aiv1alpha1.Trigger, 0, len(list.Items))
 	for i := range list.Items {
-		t := &list.Items[i]
-		if !isSchedule(t) {
-			continue
+		if t := &list.Items[i]; isSchedule(t) {
+			schedules = append(schedules, t)
 		}
+	}
+	tables := s.chainTables(ctx, ns, schedules)
+	knightTable := s.knightTables(ctx, ns)
+	out := make([]*ScheduleView, 0, len(schedules))
+	for _, t := range schedules {
 		v := scheduleView(t, tables, knightTable)
 		if f.Table != "" && v.Table != f.Table {
 			continue
@@ -200,7 +202,7 @@ func (s *Service) GetSchedule(ctx context.Context, namespace, name string) (*Sch
 	if err != nil {
 		return nil, err
 	}
-	return scheduleView(t, s.chainTables(ctx, t.Namespace), s.knightTables(ctx, t.Namespace)), nil
+	return scheduleView(t, s.chainTables(ctx, t.Namespace, []*aiv1alpha1.Trigger{t}), s.knightTables(ctx, t.Namespace)), nil
 }
 
 // ScheduleManifest returns a schedule's Trigger as YAML without status or
@@ -236,19 +238,27 @@ func (s *Service) fetchSchedule(ctx context.Context, namespace, name string) (*a
 	return t, nil
 }
 
-// chainTables maps the Chains of a namespace to their RoundTable, for
-// schedules without a roundTableRef of their own. Best effort: a failed list
-// leaves those tables empty.
-func (s *Service) chainTables(ctx context.Context, ns string) map[string]string {
-	var list aiv1alpha1.ChainList
-	if err := s.Schedules.List(ctx, &list, client.InNamespace(ns)); err != nil {
-		s.Log.V(1).Info("Unable to list chains for schedule tables", "namespace", ns, "error", err.Error())
-		return nil
-	}
-	out := make(map[string]string, len(list.Items))
-	for i := range list.Items {
-		if rt := aiv1alpha1.RefName(list.Items[i].Spec.RoundTableRef); rt != "" {
-			out[list.Items[i].Name] = rt
+// chainTables maps the Chains the given schedules target to their RoundTable,
+// for schedules without a roundTableRef of their own. It does one Get per
+// distinct referenced chain rather than listing every Chain in the namespace,
+// whose finished runs carry full step outputs. Best effort: a failed Get
+// leaves that table empty.
+func (s *Service) chainTables(ctx context.Context, ns string, triggers []*aiv1alpha1.Trigger) map[string]string {
+	out := map[string]string{}
+	seen := map[string]bool{}
+	for _, t := range triggers {
+		ref := t.Spec.Target.ChainRef
+		if ref == nil || ref.Name == "" || seen[ref.Name] || aiv1alpha1.RefName(t.Spec.RoundTableRef) != "" {
+			continue
+		}
+		seen[ref.Name] = true
+		var c aiv1alpha1.Chain
+		if err := s.Schedules.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref.Name}, &c); err != nil {
+			s.Log.V(1).Info("Unable to get chain for schedule table", "namespace", ns, "chain", ref.Name, "error", err.Error())
+			continue
+		}
+		if rt := aiv1alpha1.RefName(c.Spec.RoundTableRef); rt != "" {
+			out[c.Name] = rt
 		}
 	}
 	return out
