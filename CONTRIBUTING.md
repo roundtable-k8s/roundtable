@@ -90,6 +90,8 @@ trigger engine against a stub GitHub API, `all` for everything). The `restart` t
 needs the fix from #700 (chain steps stranded by an operator restart); without it
 the spec times out waiting for the step's result to be read. It is not part of
 the default `TIER=core` run.
+After the run, `make e2e` prints a table of passed, failed and skipped scenarios
+per tier with the time each tier took.
 A new tier adds its own label and files without touching core. Plain
 `go test ./...` does not build the e2e package (it needs `-tags=e2e`).
 

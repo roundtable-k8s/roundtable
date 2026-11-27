@@ -93,6 +93,14 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "e2e suite", suiteConfig, reporterConfig)
 }
 
+// The tier summary is printed to stdout so it shows without -ginkgo.v.
+var _ = ReportAfterSuite("tier summary", func(report Report) {
+	rows := summarizeTiers(selectedReports(report.SpecReports))
+	table := formatTierTable(rows)
+	_, _ = fmt.Fprint(GinkgoWriter, table)
+	_, _ = fmt.Fprint(os.Stdout, table)
+})
+
 var _ = BeforeSuite(func() {
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
