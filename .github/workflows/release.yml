@@ -28,7 +28,10 @@ jobs:
       - name: Run tests
         run: |
           make setup-envtest
-          KUBEBUILDER_ASSETS=$(make -s print-envtest-assets) go test ./... -coverprofile cover.out
+          # Assign first: a failed print-envtest-assets must fail this step,
+          # not run the tests without envtest assets.
+          ENVTEST_ASSETS=$(make -s print-envtest-assets)
+          KUBEBUILDER_ASSETS="${ENVTEST_ASSETS}" go test ./... -coverprofile cover.out
 
       - uses: docker/setup-buildx-action@v4
 

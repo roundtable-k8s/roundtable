@@ -58,6 +58,11 @@ jobs:
       - name: Generate CRD Manifests
         run: make manifests
 
+      # make manifests writes config/crd/bases, config/rbac and config/webhook.
+      # A marker change that was not regenerated must fail here, not pass silently.
+      - name: Check generated config is committed
+        run: git diff --exit-code -- config/
+
       - name: Vet
         run: go vet ./...
 
