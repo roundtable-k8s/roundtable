@@ -113,7 +113,8 @@ Without waiting for the cron (works while the Trigger is suspended; see
 [`docs/triggers.md`](../../../docs/triggers.md)):
 
 ```bash
-GW=http://roundtable-operator-gateway.roundtable.svc:8080
+# <fullname> is the Helm release's full name, for example roundtable-roundtable-operator
+GW=http://<fullname>-gateway.roundtable.svc
 AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
 curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/run"
 
@@ -131,10 +132,17 @@ curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs?limit=5" | j
 kubectl -n roundtable get trigger nightly-digest -o jsonpath='{.status.recentFirings[0]}'
 ```
 
-`runs` lists each firing with its `outcome` and the task ID in `run`; the
-task's result is the knight's answer, ending in the last line `file` printed.
-(`GET .../runs/{run}` does not serve knight-target results yet; use the task
-ID with `GET /v1/tasks/<id>` on the gateway or the dashboard.) The digest
+`runs` lists each firing with its `outcome` and the run ID in `run` (for a
+knight target, the task ID); the result is the knight's answer, ending in the
+last line `file` printed. Fetch it with the schedule's run endpoint:
+
+```bash
+run=$(curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs?limit=1" | jq -r '[.runs[] | select(.run != "")][0].run')
+curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs/$run" | jq -r '.task.output'
+```
+
+The same answer is at `GET /v1/tasks/<id>` on the gateway, with the task ID as
+`<id>`. The digest
 itself is in the knight's `$DIGEST_DIR` (default `/data/digests`, on its
 persistent volume) as `<namespace>-<date>.json` and `.md`.
 

@@ -119,8 +119,9 @@ May:
 - Read the cluster through the `view` ClusterRole: `get`, `list` and `watch`
   on most namespaced resources, so it can run `kubectl get`, `describe`,
   `logs` and read events.
-- Talk to NATS, its model provider and the hosts in `spec.egress.allowedHosts`
-  (tool downloads at start).
+- Talk to NATS, its model provider and the Kubernetes API (the baseline). The
+  manifest sets no `spec.egress`, so there are no extra hosts; `kubectl` and
+  `stern` come from `spec.tools.nix` and need no egress at pod start.
 - Write a finding as the chain's output.
 
 May not:
@@ -128,7 +129,8 @@ May not:
 - Change anything in the cluster: `view` has no write verbs, and no `exec`.
 - Read Secrets: `view` excludes them. Nodes and cluster-scoped objects are
   limited to what `view` grants; widen with your own ClusterRole if you want it.
-- Reach any other host: egress is default-deny with the allowlist above.
+- Reach any other host: egress is default-deny, and the baseline above is all
+  it gets.
 - Apply its own suggested fix. A human does that.
 
 Alert labels and annotations come from outside the knight, so the knight's
