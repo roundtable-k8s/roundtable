@@ -489,6 +489,21 @@ sum by (mission) (increase(roundtable_mission_cost_usd_total{billing!="subscript
 sum by (chain, step) (increase(roundtable_chain_step_tokens_total{type="output"}[1d]))
 ```
 
+The same totals show in `kubectl get`. Chains have a **Cost** column from
+`status.costUSD`, and missions from `status.totalCost` (the `Cost` printer
+column, shown by default next to `Phase` and `Age`):
+
+```sh
+kubectl -n roundtable get chains
+kubectl -n roundtable get missions
+```
+
+The Cost cell stays empty (or `0.0000` on a mission) until a step has
+finished. For subscription-billed
+knights it is the same notional amount as above. `-o wide` adds the
+lower-priority columns (`Table`, `Message`, and `Objective` on missions). For
+the per-chain breakdown of a mission, read `status.chainStatuses[]`.
+
 ## Privacy
 
 **Captured by default** (decision 15). Prompts, system instructions and
