@@ -301,6 +301,10 @@ const (
 	// phase stays Suspended; only the Available reason changes.
 	ReasonKnightWaking = "Waking"
 
+	// ReasonKnightWakeTimeout indicates a Waking knight's pod did not become
+	// ready within the wake timeout (phase Degraded).
+	ReasonKnightWakeTimeout = "WakeTimeout"
+
 	// ReasonScaledObjectReady indicates the KEDA ScaledObject is rendered.
 	ReasonScaledObjectReady = "ScaledObjectReady"
 
