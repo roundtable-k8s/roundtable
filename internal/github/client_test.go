@@ -235,6 +235,8 @@ func TestListMergeGroupRunsStopsAtMaxPages(t *testing.T) {
 	srv := pagedServer(t, 100*(maxPages+3), func(items []map[string]any) any {
 		return map[string]any{"workflow_runs": items}
 	}, &pages)
+	counter := metrics.GithubPaginationTruncatedTotal.WithLabelValues("list_merge_group_runs")
+	before := testutil.ToFloat64(counter)
 	runs, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r")
 	if err != nil {
 		t.Fatal(err)
@@ -242,8 +244,8 @@ func TestListMergeGroupRunsStopsAtMaxPages(t *testing.T) {
 	if len(pages) != maxPages || len(runs) != maxPages*100 {
 		t.Fatalf("pages=%v runs=%d", pages, len(runs))
 	}
-	if got := testutil.ToFloat64(metrics.GithubPaginationTruncatedTotal.WithLabelValues("list_merge_group_runs")); got != 1 {
-		t.Fatalf("truncated counter = %v, want 1", got)
+	if got := testutil.ToFloat64(counter) - before; got != 1 {
+		t.Fatalf("truncated counter delta = %v, want 1", got)
 	}
 }
 
@@ -347,6 +349,31 @@ func TestJobLogErrorOmitsSignedURL(t *testing.T) {
 	}
 }
 
+// createdSince returns the time a created qualifier ">=<time>" names, failing
+// the test if the qualifier has another shape.
+func createdSince(t *testing.T, query string) time.Time {
+	t.Helper()
+	raw, ok := strings.CutPrefix(query, ">=")
+	if !ok {
+		t.Fatalf("created = %q, want a >= qualifier", query)
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		t.Fatalf("created = %q: %v", query, err)
+	}
+	return at
+}
+
+func TestMergeGroupCreatedFilterIsTimestampGranular(t *testing.T) {
+	now := time.Date(2026, 11, 27, 7, 30, 15, 0, time.UTC)
+	if got, want := mergeGroupCreatedFilter(now, mergeGroupWindow), ">=2026-11-26T07:30:15Z"; got != want {
+		t.Fatalf("filter = %q, want %q", got, want)
+	}
+	if got, want := mergeGroupCreatedFilter(now, MergeGroupFailureWindow), ">=2026-11-24T07:30:15Z"; got != want {
+		t.Fatalf("failure filter = %q, want %q", got, want)
+	}
+}
+
 func TestListMergeGroupRunsSendsCreatedFilter(t *testing.T) {
 	var query string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -357,9 +384,23 @@ func TestListMergeGroupRunsSendsCreatedFilter(t *testing.T) {
 	if _, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r"); err != nil {
 		t.Fatal(err)
 	}
-	want := ">=" + time.Now().Add(-mergeGroupWindow).UTC().Format("2006-01-02")
-	if query != want && query != ">="+time.Now().UTC().Add(-mergeGroupWindow).Format("2006-01-02") {
-		t.Fatalf("created = %q, want %q", query, want)
+	if d := time.Since(createdSince(t, query)) - mergeGroupWindow; d < -time.Minute || d > time.Minute {
+		t.Fatalf("created = %q, want about %v ago", query, mergeGroupWindow)
+	}
+}
+
+func TestListMergeGroupRunsWithinUsesWindow(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("created")
+		_, _ = io.WriteString(w, `{"workflow_runs":[]}`)
+	}))
+	defer srv.Close()
+	if _, err := NewClient(srv.URL, "tok").ListMergeGroupRunsWithin(context.Background(), "o/r", MergeGroupFailureWindow); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(createdSince(t, query)) - MergeGroupFailureWindow; d < -time.Minute || d > time.Minute {
+		t.Fatalf("created = %q, want about %v ago", query, MergeGroupFailureWindow)
 	}
 }
 

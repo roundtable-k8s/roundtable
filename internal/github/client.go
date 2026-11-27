@@ -140,7 +140,7 @@ func paginate[T any](call string, fetch func(gh.ListOptions) ([]T, *gh.Response,
 			// The cap is reached with more pages left: say so, the rest of
 			// the result set is not read.
 			metrics.GithubPaginationTruncatedTotal.WithLabelValues(call).Inc()
-			logf.Log.WithName("github").Info("pagination truncated at page cap; later results are not read", "call", call, "maxPages", maxPages)
+			logf.Log.WithName("github").V(1).Info("pagination truncated at page cap; later results are not read", "call", call, "maxPages", maxPages)
 			break
 		}
 		opt.Page = resp.NextPage
@@ -719,16 +719,30 @@ type WorkflowRun struct {
 // so one day of runs is enough and normally fits on one page.
 const mergeGroupWindow = 24 * time.Hour
 
-func mergeGroupCreatedFilter(now time.Time) string {
-	return ">=" + now.Add(-mergeGroupWindow).UTC().Format("2006-01-02")
+// MergeGroupFailureWindow is how far back the failed-job read looks for the
+// merge_group run of a queue failure that is being fixed. A fix can land well
+// after the attempt that failed, so this is wider than mergeGroupWindow.
+const MergeGroupFailureWindow = 72 * time.Hour
+
+// mergeGroupCreatedFilter builds the created qualifier for runs created at or
+// after now minus window. The timestamp is second-granular, so the read covers
+// exactly the requested window.
+func mergeGroupCreatedFilter(now time.Time, window time.Duration) string {
+	return ">=" + now.Add(-window).UTC().Format(time.RFC3339)
 }
 
 // ListMergeGroupRuns returns the merge_group workflow runs of repo, newest
-// first, created within mergeGroupWindow, following up to maxPages pages (500
-// runs) so a busy merge queue cannot hide an older failed run on page 2+. The
-// cap also bounds how long a huge history can stall a reconcile; runs beyond it
-// are not seen (counted by roundtable_github_pagination_truncated_total).
+// first, created within mergeGroupWindow. See ListMergeGroupRunsWithin.
 func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]WorkflowRun, error) {
+	return c.ListMergeGroupRunsWithin(ctx, repo, mergeGroupWindow)
+}
+
+// ListMergeGroupRunsWithin returns the merge_group workflow runs of repo, newest
+// first, created within window, following up to maxPages pages (500 runs) so a
+// busy merge queue cannot hide an older failed run on page 2+. The cap also
+// bounds how long a huge history can stall a reconcile; runs beyond it are not
+// seen (counted by roundtable_github_pagination_truncated_total).
+func (c *Client) ListMergeGroupRunsWithin(ctx context.Context, repo string, window time.Duration) ([]WorkflowRun, error) {
 	g, err := c.api()
 	if err != nil {
 		return nil, err
@@ -738,7 +752,7 @@ func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]Workflo
 		return nil, err
 	}
 	raw, err := paginate("list_merge_group_runs", func(lo gh.ListOptions) ([]*gh.WorkflowRun, *gh.Response, error) {
-		res, resp, err := g.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, &gh.ListWorkflowRunsOptions{Event: "merge_group", Created: mergeGroupCreatedFilter(time.Now()), ListOptions: lo})
+		res, resp, err := g.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, &gh.ListWorkflowRunsOptions{Event: "merge_group", Created: mergeGroupCreatedFilter(time.Now(), window), ListOptions: lo})
 		if res == nil {
 			return nil, resp, err
 		}
