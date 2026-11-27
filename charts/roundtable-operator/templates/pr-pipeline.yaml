@@ -139,6 +139,11 @@ spec:
 {{- if has "deep" $models }}
            - "deep"{{ if eq $default "deep" }} (the default){{ end }}: design-heavy, cross-cutting or risky work.
 {{- end }}
+{{- range $models }}
+{{- if not (has . (list "cheap" "fast" "deep")) }}
+           - "{{ . }}"{{ if eq $default . }} (the default){{ end }}: a custom tier; use it when the issue fits it.
+{{- end }}
+{{- end }}
            Record why in "reason", naming the tier and the criteria that decided it.
         4. If the issue is too large for one reviewable PR, split it: create
            sub-issues in the same repo (gh issue create, body starting
