@@ -521,6 +521,27 @@ func TestStopAllContextNoWatchers(t *testing.T) {
 	}
 }
 
+func TestStopAllContextTimesOut(t *testing.T) {
+	m := NewManager(logr.Discard())
+	// A watcher whose loop ignores cancellation: stop blocks on wg.Wait.
+	w := &watcher{cancel: func() {}}
+	release := make(chan struct{})
+	w.wg.Add(1)
+	go func() { defer w.wg.Done(); <-release }()
+	t.Cleanup(func() { close(release) })
+	m.watchers["k"] = w
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := m.StopAllContext(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("StopAllContext took %s, want ~50ms", d)
+	}
+}
+
 func TestTraceIDFromHeaders(t *testing.T) {
 	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
 	for name, tc := range map[string]struct{ tp, want string }{

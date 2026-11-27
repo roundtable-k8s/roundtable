@@ -42,11 +42,16 @@ import (
 	// Register custom Prometheus metrics
 	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -419,7 +424,8 @@ func main() {
 		}
 	}()
 	// Dead-letter watchers (#396), started per RoundTable by its controller.
-	// Deferred after the provider so they stop before the connection closes.
+	// Stopped explicitly after mgr.Start returns (StopAllContext below, bounded
+	// by shutdownTimeout), before the deferred NATS provider Close runs.
 	deadLetters := deadletter.NewManager(ctrl.Log.WithName("dead-letter"))
 
 	defaultImage := os.Getenv("DEFAULT_KNIGHT_IMAGE")
@@ -588,14 +594,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Log once when this pod wins the lease (the channel never closes without
-	// leader election, where the manager is the leader from the start).
-	go func() {
-		<-mgr.Elected()
-		setupLog.Info("Acquired the leader lease; controllers starting",
-			"leaseDuration", leTimings.LeaseDuration.String(),
-			"identity", os.Getenv("HOSTNAME"))
-	}()
+	if enableLeaderElection {
+		logLeaseHolder(restConfig, leTimings)
+		// Log once when this pod wins the lease; Elected() closes at once
+		// when leader election is off, so only wait for it when it is on.
+		go func() {
+			<-mgr.Elected()
+			setupLog.Info("Acquired the leader lease; controllers starting",
+				"leaseDuration", leTimings.LeaseDuration.String(),
+				"identity", os.Getenv("HOSTNAME"))
+		}()
+	} else {
+		setupLog.Info("Leader election disabled; controllers starting")
+	}
 
 	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
@@ -627,7 +638,61 @@ func main() {
 // shutdownTimeout bounds all work after the manager stops (watcher stop,
 // telemetry flush), so the process exits inside the pod's termination grace
 // period after the lease has been released.
+//
+// The manager's own graceful shutdown (draining runnables, releasing the
+// lease) happens first, bounded by managerShutdownTimeout.
 const shutdownTimeout = 5 * time.Second
+
+// managerShutdownTimeout is ctrl.Options.GracefulShutdownTimeout. With the
+// 5s shutdownTimeout for post-manager work it totals 9s, below the chart's
+// terminationGracePeriodSeconds of 10s.
+const managerShutdownTimeout = 4 * time.Second
+
+// leaseReadTimeout bounds the best-effort start-up read of the Lease.
+const leaseReadTimeout = 3 * time.Second
+
+// logLeaseHolder logs the current Lease holderIdentity and leaderTransitions
+// so the start-up log shows whether the previous holder released the lease
+// (empty holder) or this pod must wait it out. Best effort: any error is
+// logged and ignored.
+func logLeaseHolder(cfg *rest.Config, t leaderElectionTimings) {
+	nsBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		setupLog.Info("Lease holder unknown: namespace not detected", "error", err.Error())
+		return
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		setupLog.Info("Lease holder unknown: client setup failed", "error", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), leaseReadTimeout)
+	defer cancel()
+	l, err := cs.CoordinationV1().Leases(strings.TrimSpace(string(nsBytes))).Get(ctx, leaderElectionID, metav1.GetOptions{})
+	logLeaseState(l, err, t)
+}
+
+// logLeaseState logs the outcome of the Lease read; it never fails.
+func logLeaseState(l *coordinationv1.Lease, err error, t leaderElectionTimings) {
+	if err != nil {
+		setupLog.Info("Lease not readable; continuing", "error", err.Error())
+		return
+	}
+	holder := ""
+	if l.Spec.HolderIdentity != nil {
+		holder = *l.Spec.HolderIdentity
+	}
+	var transitions int32
+	if l.Spec.LeaseTransitions != nil {
+		transitions = *l.Spec.LeaseTransitions
+	}
+	setupLog.Info("Leader lease state at start-up",
+		"holderIdentity", holder, "released", holder == "",
+		"leaderTransitions", transitions,
+		"leaseDuration", t.LeaseDuration.String())
+}
+
+const leaderElectionID = "dcc66784.roundtable.io"
 
 // managerOptions builds the manager options. LeaderElectionReleaseOnCancel is
 // on: after mgr.Start returns, main only does work bounded by shutdownTimeout
@@ -645,7 +710,8 @@ func managerOptions(s *runtime.Scheme, metrics metricsserver.Options, webhooks w
 		WebhookServer:                 webhooks,
 		HealthProbeBindAddress:        probeAddr,
 		LeaderElection:                leaderElect,
-		LeaderElectionID:              "dcc66784.roundtable.io",
+		LeaderElectionID:              leaderElectionID,
+		GracefulShutdownTimeout:       ptr.To(managerShutdownTimeout),
 		LeaderElectionReleaseOnCancel: true,
 		LeaseDuration:                 &t.LeaseDuration,
 		RenewDeadline:                 &t.RenewDeadline,

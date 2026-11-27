@@ -67,3 +67,15 @@ func TestManagerOptionsReleaseOnCancel(t *testing.T) {
 		t.Errorf("shutdownTimeout %s must stay under terminationGracePeriodSeconds (10s)", shutdownTimeout)
 	}
 }
+
+func TestManagerOptionsGracefulShutdownBelowGracePeriod(t *testing.T) {
+	o := managerOptions(scheme, metricsserver.Options{}, nil, ":0", true,
+		leaderElectionTimings{LeaseDuration: 15 * time.Second, RenewDeadline: 10 * time.Second, RetryPeriod: 2 * time.Second})
+	if o.GracefulShutdownTimeout == nil || *o.GracefulShutdownTimeout != managerShutdownTimeout {
+		t.Fatalf("GracefulShutdownTimeout = %v, want %s", o.GracefulShutdownTimeout, managerShutdownTimeout)
+	}
+	// terminationGracePeriodSeconds is 10 in the chart.
+	if managerShutdownTimeout+shutdownTimeout >= 10*time.Second {
+		t.Fatalf("shutdown budget %s must stay below the 10s pod grace period", managerShutdownTimeout+shutdownTimeout)
+	}
+}
