@@ -131,6 +131,24 @@ func githubEventItem(ev TriggerEvent) (githubItem, error) {
 	return item, nil
 }
 
+// githubRepoListed reports whether repo is one of src.Repositories, comparing
+// owner/name case-insensitively (GitHub names are).
+func githubRepoListed(src *aiv1alpha1.TriggerGitHubSource, repo string) bool {
+	if src == nil {
+		return false
+	}
+	repo = strings.TrimSpace(repo)
+	return slices.ContainsFunc(src.Repositories, func(r string) bool {
+		return strings.EqualFold(strings.TrimSpace(r), repo)
+	})
+}
+
+// githubRepoNotListedReason is the skip reason of an event for a repository
+// the Trigger does not list.
+func githubRepoNotListedReason(repo string) string {
+	return fmt.Sprintf("repository %s is not in source.github.repositories", repo)
+}
+
 // githubClient builds a client with the Trigger's RoundTable token.
 func (r *TriggerReconciler) githubClient(ctx context.Context, trg *aiv1alpha1.Trigger) (*github.Client, error) {
 	rtName := aiv1alpha1.RefName(trg.Spec.RoundTableRef)
@@ -154,6 +172,9 @@ func (r *TriggerReconciler) githubClient(ctx context.Context, trg *aiv1alpha1.Tr
 // AnnotationTriggerClaimed), then remove labels.
 func (r *TriggerReconciler) claimGitHub(ctx context.Context, trg *aiv1alpha1.Trigger, ev TriggerEvent, item githubItem, run *aiv1alpha1.Chain) error {
 	claim := trg.Spec.Source.GitHub.Claim
+	if !githubRepoListed(trg.Spec.Source.GitHub, item.Repo) {
+		return errors.New(githubRepoNotListedReason(item.Repo))
+	}
 	gh, err := r.githubClient(ctx, trg)
 	if err != nil {
 		return err
@@ -400,7 +421,7 @@ func pendingGitHubClaim(trg *aiv1alpha1.Trigger, ev TriggerEvent) *githubItem {
 		return nil
 	}
 	item, err := githubEventItem(ev)
-	if err != nil || !claimPending(src.Claim, item.Labels) {
+	if err != nil || !githubRepoListed(src, item.Repo) || !claimPending(src.Claim, item.Labels) {
 		return nil
 	}
 	return &item

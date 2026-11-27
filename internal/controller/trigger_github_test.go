@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -414,6 +415,26 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(after).To(Equal(labelCalls))
 	})
 
+	It("skips an event for a repository the Trigger does not list", func() {
+		gh.add(&triggerGitHubItem{number: 1, title: "Fix the widget", author: "alice", labels: []string{"rt:ready"}})
+		githubTrigger("listed", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.Claim = &aiv1alpha1.TriggerGitHubClaim{AddLabels: []string{"rt:in-progress"}, RemoveLabels: []string{"rt:ready"}}
+		})
+		subject := natspkg.GitHubEventSubject(prefix, ns, "listed")
+		Expect(cli.PublishJSON(subject, map[string]any{
+			"repo": "other/repo", "number": 7, "title": "Forged", "labels": []string{"rt:ready"},
+		})).To(Succeed())
+		Eventually(func(g Gomega) {
+			st := getTrigger("listed").Status
+			g.Expect(st.RecentFirings).To(HaveLen(1))
+			g.Expect(st.RecentFirings[0].Run).To(BeEmpty())
+			g.Expect(st.RecentFirings[0].SkipReason).To(Equal("repository other/repo is not in source.github.repositories"))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+		Expect(runsOf("listed")).To(BeEmpty())
+		_, labelCalls := gh.counts()
+		Expect(labelCalls).To(BeZero())
+	})
+
 	It("starts a finished run again when a claimed item is selected again", func() {
 		labels5 := func() []string {
 			gh.mu.Lock()
@@ -658,3 +679,24 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(t.Spec.Source.GitHub.Query.State).To(Equal(aiv1alpha1.TriggerGitHubStateOpen))
 	})
 })
+
+func TestGithubRepoListed(t *testing.T) {
+	src := &aiv1alpha1.TriggerGitHubSource{Repositories: []string{"acme/app", " Acme/Widgets "}}
+	for _, tc := range []struct {
+		src  *aiv1alpha1.TriggerGitHubSource
+		repo string
+		want bool
+	}{
+		{src, "acme/app", true},
+		{src, "ACME/App", true},
+		{src, "acme/widgets", true},
+		{src, "other/repo", false},
+		{src, "acme/app2", false},
+		{src, "", false},
+		{nil, "acme/app", false},
+	} {
+		if got := githubRepoListed(tc.src, tc.repo); got != tc.want {
+			t.Errorf("githubRepoListed(%q) = %v, want %v", tc.repo, got, tc.want)
+		}
+	}
+}
