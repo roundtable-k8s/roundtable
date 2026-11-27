@@ -7,7 +7,7 @@ set -euo pipefail
 
 HELM="${HELM:-helm}"
 chart="$(cd "$(dirname "$0")/.." && pwd)/charts/roundtable-operator"
-render() { "$HELM" template "$@" "$chart"; }
+render() { "$HELM" template "$@" "$chart" --namespace roundtable; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 has() { grep -q -- "$2" <<<"$1" || fail "$3"; }
 lacks() { ! grep -q -- "$2" <<<"$1" || fail "$3"; }
@@ -48,7 +48,7 @@ data:
   notes: |
 {{ include "notes" . | indent 4 }}
 CM
-notes() { "$HELM" template "$@" "$tmp/chart" --show-only templates/notes-cm.yaml; }
+notes() { "$HELM" template "$@" "$tmp/chart" --namespace roundtable --show-only templates/notes-cm.yaml; }
 n="$(notes roundtable-operator)"
 has "$n" 'svc/roundtable-operator-gateway 8081:80' "NOTES lacks gateway Service"
 has "$n" 'secret roundtable-operator-gateway-token ' "NOTES lacks token Secret"
