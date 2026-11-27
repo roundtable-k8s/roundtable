@@ -68,7 +68,9 @@ type IdempotencyEntry struct {
 	Fingerprint string `json:"fingerprint"`
 	// CreatedAt lets a replay tell an entry whose first call crashed before
 	// storing the task from one still being started. Zero on old entries.
-	CreatedAt time.Time `json:"createdAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	// Revision is the KV revision the entry was read at; never stored.
+	Revision uint64 `json:"-"`
 }
 
 // TaskRecord is what the gateway stores per invoked task (NATS KV) and
