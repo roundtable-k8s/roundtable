@@ -129,6 +129,7 @@ func (r *KnightReconciler) reconcileNixTools(ctx context.Context, knight *aiv1al
 		for _, f := range knight.Spec.Tools.Flakes {
 			if err := aiv1alpha1.ValidateFlakeRefDir(f.Ref); err != nil {
 				r.Recorder.Event(knight, corev1.EventTypeWarning, "InvalidFlakeRef", err.Error())
+				r.setToolsImageCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonInvalidFlakeRef, err.Error())
 				return 0, fmt.Errorf("spec.tools.flakes: %w", err)
 			}
 		}

@@ -76,7 +76,8 @@ const (
 	// ConditionKnightToolsImageReady reports whether the tools image for the
 	// current spec.tools is published. Only set on knights with Nix tools.
 	// Status=False means the pod rollout is held on its current template
-	// (ToolsImageBuilding) or the build failed (ToolsImageBuildFailed); fix
+	// (ToolsImageBuilding), the build failed (ToolsImageBuildFailed) or a
+	// flake ref is invalid (InvalidFlakeRef); fix
 	// spec.tools or the builder and the operator retries.
 	ConditionKnightToolsImageReady = "ToolsImageReady"
 
@@ -320,6 +321,10 @@ const (
 	// ReasonToolsImageBuildFailed indicates the tools image build Job failed;
 	// the pod is not rolled.
 	ReasonToolsImageBuildFailed = "ToolsImageBuildFailed"
+
+	// ReasonInvalidFlakeRef indicates a spec.tools.flakes ref is invalid (it
+	// bypassed admission validation); no tools image is built until fixed.
+	ReasonInvalidFlakeRef = "InvalidFlakeRef"
 
 	// ReasonToolsImagePublished indicates the tools image is published.
 	ReasonToolsImagePublished = "ToolsImagePublished"

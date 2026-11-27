@@ -39,6 +39,7 @@ Add `-o wide` to `get knights` or `-o yaml` to read the full condition messages.
 | `Isolated=False`, reason `IsolationDisabled` | No RuntimeClass or no egress policy applies: the install turned a default off, or the table sets `runtimeClassName: ""` | Intended on a cluster without gVisor; otherwise re-enable the chart default ([runtime isolation](runtime-isolation.md#the-isolated-condition)) |
 | `ToolsImageReady=False`, reason `ToolsImageBuilding` | The Job that builds the knight's Nix tools image is running | Wait; `kubectl -n <ns> get jobs,pods` shows the builder |
 | `ToolsImageReady=False`, reason `ToolsImageBuildFailed` | The tools image build Job failed | `kubectl -n <ns> logs job/<job>` for the build error (bad flake ref or package name); fix `spec.tools` |
+| `ToolsImageReady=False`, reason `InvalidFlakeRef` | A `spec.tools.flakes` ref is invalid (it bypassed admission) | Fix the ref in `spec.tools.flakes`; the message names the problem |
 | Warning event `ToolsImageNotConfigured` | `spec.tools.nix` or `spec.tools.flakes` is set but the operator has no tools image repository (chart value `toolsImage.repository`); the Nix tools are not installed | Set `toolsImage.repository` in the chart, or drop `spec.tools` |
 
 ## Tasks do not reach a knight
