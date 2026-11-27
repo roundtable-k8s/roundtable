@@ -147,7 +147,7 @@ func TestRegisterEgressIndexes(t *testing.T) {
 
 func TestRememberHostNetPodKeepsRecentOnOverflow(t *testing.T) {
 	r := &KnightReconciler{}
-	for i := 0; i < hostNetPodCacheMax+1; i++ {
+	for i := range hostNetPodCacheMax + 1 {
 		r.rememberHostNetPod(types.UID(fmt.Sprintf("uid-%d", i)), true)
 	}
 	_, oldest := r.hostNetPods.Load(types.UID("uid-0"))
