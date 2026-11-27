@@ -202,6 +202,8 @@ The one exception is the tools-image builder Job (`toolsImage.*`), which runs a 
 
 ### Dashboard
 
+See [dashboard.md](dashboard.md) for the pages, access and authentication.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `dashboard.enabled` | bool | `true` | Deploy the Round Table dashboard |
