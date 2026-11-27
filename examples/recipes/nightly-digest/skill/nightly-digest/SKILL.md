@@ -52,7 +52,7 @@ the validation lives in `file` so it cannot be skipped.
 ## If it does not work
 
 If `collect` or `file` still fails after a few attempts, or `kubectl` is
-refused, stop. End your answer with a last line `Outcome: failed <short
-reason>`, and do not write the `nightly-digest: ok` line. The last line
-decides whether the scheduled run is recorded as failed, so a prose
-apology above it is recorded as a success.
+refused, stop. End your answer with a last line
+`Outcome: failed <short reason>`, and do not write the `nightly-digest: ok`
+line. The last line decides whether the scheduled run is recorded as failed,
+so a prose apology above it is recorded as a success.

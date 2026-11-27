@@ -94,8 +94,7 @@ Ready. Next (see docs/getting-started.md):
   kubectl --context $CTX -n $NAMESPACE wait knight/arthur --for=jsonpath='{.status.phase}'=Ready --timeout=300s
   kubectl --context $CTX apply -f examples/quickstart/chain.yaml
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-dashboard 8080:80
-Ask the knight through the gateway (docs/gateway.md), after a port-forward of
-svc/$RELEASE-gateway to 8081 in another terminal:
+Ask the knight through the gateway (docs/gateway.md), from another terminal:
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-gateway 8081:80
   TOKEN=\$(kubectl --context $CTX -n $NAMESPACE get secret $RELEASE-gateway-token -o jsonpath='{.data.token}' | base64 -d)
   curl -s -X POST localhost:8081/v1/knights/arthur/invoke -H "Authorization: Bearer \$TOKEN" -H 'Content-Type: application/json' -d '{"task":"In one sentence, what is a Kubernetes operator?","timeoutSeconds":120}'

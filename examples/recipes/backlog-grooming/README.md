@@ -108,7 +108,8 @@ May not (prompt policy, bounded by the token's scope):
 - Touch an issue labelled `humanLabel`.
 - File more than `maxIssuesPerRun` per run, or any while `maxOpenGroomed`
   groomed issues are open.
-- Edit, comment on or close an existing issue.
+- Edit, comment on or close an existing issue. The token's `Issues: write`
+  scope technically also allows closing issues, which the prompt forbids.
 - Change anything in the cluster or push code: no cluster permissions, and a
   token without contents access.
 
