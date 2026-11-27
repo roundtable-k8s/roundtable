@@ -1,0 +1,84 @@
+# Shared memory for a table's knights: one ReadWriteMany claim, set once in
+# the RoundTable's defaults.memory. Each knight gets /memory/<knight>
+# read-write and /memory read-only, so it writes its own notes and reads the
+# others'. See docs/memory.md.
+#
+# The claim must exist before the knights start and must be ReadWriteMany on
+# a storage class that supports it (CephFS, NFS, Longhorn RWX).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fleet-memory
+  namespace: roundtable
+spec:
+  accessModes:
+    - ReadWriteMany
+  # storageClassName: <a class in your cluster that supports ReadWriteMany>
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: memory-fleet
+  namespace: roundtable
+spec:
+  description: "Two knights sharing a memory claim"
+
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    subjectPrefix: memory-fleet
+    tasksStream: memory_fleet_tasks
+    resultsStream: memory_fleet_results
+    createStreams: true
+    streamRetention: WorkQueue
+
+  defaults:
+    model: claude-sonnet-4-20250514
+    concurrency: 2
+    taskTimeoutSeconds: 300
+    # Inherited by every knight of the table that does not set its own
+    # spec.memory. The operator mounts this claim read-only at /memory and
+    # the knight's own sub-directory read-write at /memory/<knight>.
+    memory:
+      existingClaim: fleet-memory
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: researcher
+  namespace: roundtable
+  labels:
+    # Links the knight to the table, so it inherits defaults.memory.
+    ai.roundtable.io/round-table: memory-fleet
+spec:
+  domain: research
+  model: claude-sonnet-4-20250514
+  skills:
+    - general
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    stream: memory_fleet_tasks
+    resultsStream: memory_fleet_results
+    subjects:
+      - "memory-fleet.tasks.research.>"
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: writer
+  namespace: roundtable
+  labels:
+    ai.roundtable.io/round-table: memory-fleet
+spec:
+  domain: writing
+  model: claude-sonnet-4-20250514
+  skills:
+    - general
+  nats:
+    url: nats://nats.roundtable.svc:4222
+    stream: memory_fleet_tasks
+    resultsStream: memory_fleet_results
+    subjects:
+      - "memory-fleet.tasks.writing.>"
