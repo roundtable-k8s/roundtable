@@ -39,9 +39,19 @@ spec:
         {{ .Steps.research.Output }}
 
     # Variant: open a pull request instead of writing a vault file. Replace the
-    # archive step above with a step on a knight that has a repository token,
-    # whose task commits the summary to a docs repo and runs `gh pr create`
-    # ("Closes #<n>" only when an issue is involved). See docs/pr-pipeline.md.
+    # archive step above with this one, on a knight that has a repository
+    # token ("Closes #<n>" only when an issue is involved). See
+    # docs/pr-pipeline.md.
+    # - name: archive
+    #   knightRef: {name: <knight-with-repo-token>}
+    #   dependsOn: [research]
+    #   timeoutSeconds: 900
+    #   task: |
+    #     Write a short markdown summary of the research below, commit it to
+    #     docs/research/{{ .Date }}-{{ .Chain }}.md in <owner>/<docs-repo> on a
+    #     new branch, and open a pull request with `gh pr create`.
+    #
+    #     {{ .Steps.research.Output }}
 
 ---
 apiVersion: ai.roundtable.io/v1alpha1

@@ -4,6 +4,7 @@
 # Service's /v1 API. No hosted provider key is set, so nothing leaves the
 # cluster. Egress stays default-deny: the in-cluster model Service is reached
 # through allowedServices (its pods, on the Service port), not allowedHosts.
+# Needs a pi-knight image: local models are not supported on claude-knight.
 # See the runtime's local-model docs in roundtable-k8s/knights
 # (packages/pi-knight/docs/LOCAL-MODELS.md).
 apiVersion: ai.roundtable.io/v1alpha1
@@ -19,6 +20,12 @@ spec:
   env:
     - name: KNIGHT_MODEL_BASE_URL
       value: http://ollama.ollama.svc.cluster.local:11434/v1
+    # Set to what Ollama really serves (num_ctx / OLLAMA_CONTEXT_LENGTH must be
+    # at least this); raise the request timeout for cold model loads.
+    - name: MODEL_CONTEXT_WINDOW
+      value: "32768"
+    - name: MODEL_REQUEST_TIMEOUT_MS
+      value: "1200000"
   nats:
     url: nats://nats.database.svc:4222
     stream: fleet_a_tasks

@@ -53,7 +53,7 @@ spec:
 
     - name: file
       dependsOn: [survey]
-      when: '!steps.survey.output.contains("CANDIDATES: none")'
+      when: 'steps.survey.output.matches("(?m)^CANDIDATES: [1-9]")'
       knightRef: {name: groomer}
       timeoutSeconds: 900
       task: |

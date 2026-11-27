@@ -17,7 +17,7 @@ Alertmanager --POST--> gateway /v1/hooks/roundtable/homelab-alerts
 | [`knight.yaml`](knight.yaml) | The `homelab-triage` Knight, a ServiceAccount and a binding to the built-in `view` ClusterRole |
 | [`chain.yaml`](chain.yaml) | The `cluster-triage` Chain: `gather` then `finding` |
 | [`trigger.yaml`](trigger.yaml) | The token Secret and the webhook Trigger (input template, `dedupeKey`) |
-| [`alertmanager-receiver.yaml`](alertmanager-receiver.yaml) | The Alertmanager route and receiver to merge into your config |
+| [`alertmanager-receiver.yaml.example`](alertmanager-receiver.yaml.example) | The Alertmanager route and receiver to merge into your config (not a Kubernetes object: do not `kubectl apply` it) |
 
 ## Before you start
 
@@ -61,7 +61,7 @@ delivery.
 
 Mount the same token into Alertmanager's pod (copy the Secret into its
 namespace first; Secrets do not cross namespaces) and merge
-[`alertmanager-receiver.yaml`](alertmanager-receiver.yaml) into its config.
+[`alertmanager-receiver.yaml.example`](alertmanager-receiver.yaml.example) into its config.
 The receiver's essential part:
 
 ```yaml
@@ -87,9 +87,9 @@ comes with M6):
 ```bash
 TOKEN=$(kubectl -n roundtable get secret homelab-alerts-hook -o jsonpath='{.data.token}' | base64 -d)
 kubectl -n roundtable run curl --rm -it --restart=Never --image=curlimages/curl --env TOKEN="$TOKEN" -- \
-  curl -sS -X POST http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/homelab-alerts \
-    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"status":"firing","groupKey":"g1","commonLabels":{"alertname":"KubePodCrashLooping","severity":"warning","namespace":"media"},"commonAnnotations":{"summary":"Pod media/plex is crash looping"},"alerts":[{"status":"firing","fingerprint":"abc123","labels":{"alertname":"KubePodCrashLooping","pod":"plex-0"}}]}'
+  sh -c 'curl -sS -X POST http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/homelab-alerts \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "$0"' '{"status":"firing","groupKey":"g1","commonLabels":{"alertname":"KubePodCrashLooping","severity":"warning","namespace":"media"},"commonAnnotations":{"summary":"Pod media/plex is crash looping"},"alerts":[{"status":"firing","fingerprint":"abc123","labels":{"alertname":"KubePodCrashLooping","pod":"plex-0"}}]}'
 # {"subject":"fleet-a.events.webhook.roundtable.homelab-alerts","stream":"fleet_a_tasks_EVENTS","seq":42}
 ```
 

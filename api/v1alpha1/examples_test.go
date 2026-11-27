@@ -186,6 +186,10 @@ func TestBacklogGroomingRecipe(t *testing.T) {
 		t.Errorf("file step must be gated with when on survey output, got %q", steps["file"].When)
 	}
 
+	if w := steps["file"].When; !strings.Contains(w, `matches("(?m)^CANDIDATES: [1-9]")`) {
+		t.Errorf("file step must run only on an explicit candidate count, got %q", w)
+	}
+
 	var trig Trigger
 	tdata, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
 	if err != nil {
@@ -248,7 +252,7 @@ func TestOllamaKnightExample(t *testing.T) {
 		}
 	}
 	if !strings.HasPrefix(baseURL, "http://") || !strings.HasSuffix(baseURL, "/v1") {
-		t.Errorf("KNIGHT_MODEL_BASE_URL = %q, want http(s) URL ending in /v1", baseURL)
+		t.Errorf("KNIGHT_MODEL_BASE_URL = %q, want http:// URL ending in /v1", baseURL)
 	}
 	if knight.Spec.Egress == nil || len(knight.Spec.Egress.AllowedServices) == 0 {
 		t.Fatal("egress.allowedServices must name the model Service")
@@ -311,6 +315,62 @@ func TestRecipeClaudeAliasesNameClaudeKnightImage(t *testing.T) {
 			}
 			if !isClaudeKnight(image) {
 				t.Errorf("%s/%s: knight %s has Claude alias model %q but image %q is not claude-knight", dir, o.file, o.name, k.Spec.Model, image)
+			}
+		}
+	}
+}
+
+// TestHomelabWatchRecipeFiles pins that the recipe is safe to apply as
+// written: the placeholder token is below the gateway's 16-character minimum
+// and no .yaml/.yml/.json file in the directory is a non-Kubernetes snippet
+// that kubectl apply -f <dir> would fail on.
+func TestHomelabWatchRecipeFiles(t *testing.T) {
+	dir := "../../examples/recipes/homelab-watch"
+	data, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for doc := range strings.SplitSeq(string(data), "\n---\n") {
+		var sec struct {
+			Kind       string            `json:"kind"`
+			StringData map[string]string `json:"stringData"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &sec); err != nil {
+			t.Fatal(err)
+		}
+		if sec.Kind != "Secret" {
+			continue
+		}
+		if tok := sec.StringData["token"]; len(tok) >= 16 {
+			t.Errorf("placeholder token %q is %d chars, a valid gateway credential", tok, len(tok))
+		}
+	}
+	// kubectl apply -f <dir> loads every .yaml/.yml/.json file, so each one
+	// must be a Kubernetes object.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		switch filepath.Ext(e.Name()) {
+		case ".yaml", ".yml", ".json":
+		default:
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for doc := range strings.SplitSeq(string(b), "\n---\n") {
+			var obj struct {
+				APIVersion string `json:"apiVersion"`
+				Kind       string `json:"kind"`
+			}
+			if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+				t.Fatalf("%s: %v", e.Name(), err)
+			}
+			if obj.APIVersion == "" || obj.Kind == "" {
+				t.Errorf("%s is not a Kubernetes object (no apiVersion/kind); kubectl apply -f <dir> would fail: rename it to *.yaml.example", e.Name())
 			}
 		}
 	}
