@@ -60,7 +60,7 @@ func TestReconcile_RequeueCarriesExplicitPriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fixture must reach the step poll, got error: %v", err)
 	}
-	if res.RequeueAfter <= 0 && !res.Requeue { //nolint:staticcheck
+	if res.RequeueAfter <= 0 {
 		t.Fatalf("fixture must requeue to poll the in-flight step, got %+v", res)
 	}
 	if res.Priority == nil || *res.Priority != requeuePriority {
@@ -82,7 +82,6 @@ func TestReconcile_NoRequeueLeavesPriorityUnset(t *testing.T) {
 func TestResetRequeuePriority(t *testing.T) {
 	for name, res := range map[string]ctrl.Result{
 		"RequeueAfter": {RequeueAfter: 5},
-		"Requeue":      {Requeue: true}, //nolint:staticcheck
 	} {
 		got, _ := resetRequeuePriority(res, nil)
 		if got.Priority == nil || *got.Priority != requeuePriority {

@@ -255,7 +255,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// The poller wrote the status meanwhile: recompute from a fresh
 			// read instead of reporting an error.
 			logf.FromContext(ctx).V(1).Info("Status changed concurrently, reconciling again")
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		return ctrl.Result{}, err
 	}

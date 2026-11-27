@@ -500,7 +500,7 @@ var _ = Describe("Trigger GitHub source", func() {
 		r.Client = cc
 		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conflict"}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeTrue()) //nolint:staticcheck // the reconciler requeues this way
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(cc.conflicts).To(BeNumerically(">", 0))
 	})
 

@@ -99,7 +99,7 @@ func (r *MissionReconciler) admitMission(ctx context.Context, mission *aiv1alpha
 			Condition(aiv1alpha1.ConditionMissionAdmitted, aiv1alpha1.ReasonTableAtMissionLimit, msg, metav1.ConditionFalse).
 			Apply(ctx, r.Client); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, true, nil
+				return ctrl.Result{RequeueAfter: RequeueFast}, true, nil
 			}
 			return ctrl.Result{}, true, err
 		}
