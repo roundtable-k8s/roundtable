@@ -167,8 +167,17 @@ func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1
 		return nil, err
 	}
 	if !metav1.IsControlledBy(trg, chain) {
-		r.event(chain, corev1.EventTypeWarning, "ScheduleTriggerConflict",
-			"Trigger %s exists and is not controlled by this Chain; spec.schedule is not run. Rename or delete that Trigger", name)
+		// Warn once per Chain generation: reconciles that follow without a
+		// spec change would only repeat the event.
+		if last, ok := r.conflictWarned.Load(chain.UID); !ok || last != chain.Generation {
+			r.conflictWarned.Store(chain.UID, chain.Generation)
+			r.event(chain, corev1.EventTypeWarning, "ScheduleTriggerConflict",
+				"Trigger %s exists and is not controlled by this Chain; spec.schedule is not run. Rename or delete that Trigger", name)
+		}
+		return nil, nil
+	}
+	r.conflictWarned.Delete(chain.UID)
+	if !trg.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
 	if equality.Semantic.DeepEqual(trg.Spec, want) && trg.Labels[labelManagedBy] == triggerManagedBy {

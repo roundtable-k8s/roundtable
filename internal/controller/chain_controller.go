@@ -69,6 +69,10 @@ type ChainReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
+	// conflictWarned holds, per Chain UID, the generation a
+	// ScheduleTriggerConflict event was last recorded for.
+	conflictWarned sync.Map
+
 	NATS   *natspkg.Provider
 	Notify *notify.Notifier
 	// DefaultKnightImage is the operator's DEFAULT_KNIGHT_IMAGE. It is used to

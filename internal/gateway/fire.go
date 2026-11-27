@@ -43,6 +43,12 @@ const maxFireBody = 4 << 10
 // namespace.
 const TriggerServiceAccountPrefix = "trigger-"
 
+// TriggerServiceAccountName is the ServiceAccount a schedule Trigger's
+// CronJob runs as. The controller renders it and authorizeFire accepts it.
+func TriggerServiceAccountName(trigger string) string {
+	return TriggerServiceAccountPrefix + trigger
+}
+
 // FireRequest is the optional body of POST /v1/triggers/{namespace}/{name}/fire.
 type FireRequest struct {
 	// ScheduledTime is the schedule time this firing is for (the CronJob's
@@ -92,7 +98,7 @@ func authorizeFire(ctx context.Context, namespace, name string) error {
 	case CallerToken:
 		return nil
 	case CallerServiceAccount:
-		if c.Name == namespace+"/"+TriggerServiceAccountPrefix+name {
+		if c.Name == namespace+"/"+TriggerServiceAccountName(name) {
 			return nil
 		}
 	}

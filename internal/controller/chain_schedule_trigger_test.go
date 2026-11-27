@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +238,24 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(getTrigger().Spec.Source.Schedule.Cron).To(Equal("0 7 * * 1-5"))
 	})
 
+	It("does not update a schedule Trigger that is being deleted", func() {
+		create()
+		trg := getTrigger()
+		trg.Finalizers = []string{"test.roundtable/hold"}
+		Expect(k8sClient.Update(ctx, trg)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, trg)).To(Succeed())
+
+		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Schedule = "30 6 * * *" })
+		reconcileN(2)
+		got := getTrigger()
+		Expect(got.DeletionTimestamp.IsZero()).To(BeFalse())
+		Expect(got.Spec.Source.Schedule.Cron).To(Equal("0 7 * * 1-5"))
+
+		// Release it so AfterEach sees it gone.
+		got.Finalizers = nil
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+	})
+
 	It("deletes the Trigger when spec.schedule is cleared", func() {
 		create()
 		Expect(triggerGone()).To(BeFalse())
@@ -296,7 +315,18 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(trg.OwnerReferences).To(BeEmpty())
 		Expect(trg.Spec.Source.Schedule.Cron).To(Equal("0 12 * * *"))
 		Expect(trg.Spec.Target.ChainRef.Name).To(Equal("other"))
-		Expect(events()).To(ContainElement(ContainSubstring("ScheduleTriggerConflict")))
+		// create() reconciled three times; the clash is reported once.
+		conflicts := func(evs []string) (n int) {
+			for _, e := range evs {
+				if strings.Contains(e, "ScheduleTriggerConflict") {
+					n++
+				}
+			}
+			return n
+		}
+		Expect(conflicts(events())).To(Equal(1))
+		reconcileN(2)
+		Expect(conflicts(events())).To(BeZero())
 		Expect(r.cronEntries).NotTo(HaveKey(nn.String()))
 
 		// Clearing the schedule, switching to inprocess or deleting the Chain

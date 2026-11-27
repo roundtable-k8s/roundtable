@@ -1322,7 +1322,7 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// turns ScheduleHealthy False.
 		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 			name := obj.GetLabels()[aiv1alpha1.LabelTrigger]
-			if name == "" || obj.GetLabels()["app.kubernetes.io/managed-by"] != triggerManagedBy {
+			if name == "" || obj.GetLabels()[labelManagedBy] != triggerManagedBy {
 				return nil
 			}
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
