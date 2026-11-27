@@ -56,6 +56,13 @@ neg="$(mktemp)"; trap 'rm -f "$neg"' EXIT
 jq '.panels[0].targets[0].datasource.uid = "abc123"' "$chart/dashboards/fleet-overview.json" >"$neg"
 bad_ds "$neg" || fail "negative test: literal datasource uid not detected"
 
+# A text panel without targets and a row with nested panels must not break the
+# expression walk, and a nested panel's expression must still be seen.
+jq '.panels += [{"type":"text","title":"t"},{"type":"row","title":"r","panels":[{"type":"timeseries","targets":[{"expr":"NESTED_EXPR"}]}]}]' \
+  "$chart/dashboards/fleet-overview.json" >"$neg"
+[ "$(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr // empty' "$neg" | grep -c NESTED_EXPR)" = 1 ] ||
+  fail "negative test: nested row panel expression not found"
+
 for f in "$chart"/dashboards/*.json; do
   jq empty "$f" || fail "$f is not valid JSON"
   jq -e '[.templating.list[].name] | contains(["datasource","namespace","table"])' "$f" >/dev/null ||
@@ -65,7 +72,7 @@ for f in "$chart"/dashboards/*.json; do
   # Every defined variable must be referenced by at least one panel expression.
   for v in $(jq -r '.templating.list[].name' "$f"); do
     [ "$v" = datasource ] && continue
-    jq -e --arg v "$v" '[.panels[].targets[].expr | select(contains("$" + $v))] | length > 0' "$f" >/dev/null ||
+    jq -e --arg v "$v" '[.. | objects | select(has("targets")) | .targets[]?.expr // empty | select(contains("$" + $v))] | length > 0' "$f" >/dev/null ||
       fail "$f: variable \$$v is not used by any panel"
   done
   while IFS= read -r expr; do
@@ -81,6 +88,6 @@ for f in "$chart"/dashboards/*.json; do
       *'table=~"$table"'*) ;;
       *) fail "$f: expression does not filter on \$table: $expr" ;;
     esac
-  done < <(jq -r '.panels[].targets[].expr' "$f")
+  done < <(jq -r '.. | objects | select(has("targets")) | .targets[]?.expr // empty' "$f")
 done
 echo OK

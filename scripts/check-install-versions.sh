@@ -43,7 +43,7 @@ done
 # next patch for ^0.0.x.
 range_comment() { sed -nE "s/.*\`?\^($ver_re) means (>=$ver_re <$ver_re).*/\1 \2/p" "$1" | head -n1; }
 want_range() {
-  local maj min pat
+  local maj min pat up
   IFS=. read -r maj min pat <<<"$1"
   if [ "$maj" -gt 0 ]; then up="$((maj + 1)).0.0"
   elif [ "$min" -gt 0 ]; then up="0.$((min + 1)).0"
