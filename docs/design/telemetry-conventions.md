@@ -171,7 +171,7 @@ Used as defined by OpenTelemetry:
 
 **Pinned version.** Written against the OpenTelemetry GenAI semantic conventions
 as of 2026-11, release v0.1.0 of `open-telemetry/semantic-conventions-genai`
-(commit `81b5d438519f868a186bff088d9de24aefdb2f6b`, status: *Development*). They moved to
+(commit `d0e74ba6c48bcc4ded473b1828a8212f06b23753`, status: *Development*). They moved to
 `open-telemetry/semantic-conventions-genai` in 2026. Implementations record the
 semconv version they follow in code, and a component upgrades by following the
 upstream changelog. Renames are handled as they have been before, for example
