@@ -167,6 +167,12 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 			_ = k8sClient.Update(ctx, c)
 			_ = k8sClient.Delete(ctx, c)
 		}
+		// Release any test finalizer first, so a failed expectation in a spec
+		// cannot leave the Trigger stuck in deletion.
+		if t := (&aiv1alpha1.Trigger{}); k8sClient.Get(ctx, trgNN, t) == nil && len(t.Finalizers) > 0 {
+			t.Finalizers = nil
+			_ = k8sClient.Update(ctx, t)
+		}
 		_ = k8sClient.Delete(ctx, &aiv1alpha1.Trigger{ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: namespace}})
 		Eventually(triggerGone).Should(BeTrue())
 		if r.cron != nil {
@@ -251,15 +257,6 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		trg := getTrigger()
 		trg.Finalizers = []string{"test.roundtable/hold"}
 		Expect(k8sClient.Update(ctx, trg)).To(Succeed())
-		// Release the finalizer even if an expectation fails, so AfterEach
-		// sees the Trigger gone.
-		DeferCleanup(func() {
-			t := &aiv1alpha1.Trigger{}
-			if err := k8sClient.Get(ctx, trgNN, t); err == nil {
-				t.Finalizers = nil
-				_ = k8sClient.Update(ctx, t)
-			}
-		})
 		Expect(k8sClient.Delete(ctx, trg)).To(Succeed())
 
 		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Schedule = "30 6 * * *" })
@@ -334,7 +331,9 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		reconcileN(2)
 		Expect(conflicts(events())).To(BeZero())
 		Expect(r.cronEntries).NotTo(HaveKey(nn.String()))
-		Expect(r.conflictWarned.Load(nn)).To(Equal(any(getChain().Generation)))
+		last, ok := r.conflictWarned.Load(nn)
+		Expect(ok).To(BeTrue())
+		Expect(last).To(Equal(getChain().Generation))
 
 		// A generation bump re-emits the warning once; a repeat does not.
 		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Input = "changed" })
@@ -353,7 +352,7 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		reconcileN(1)
 		Expect(triggerGone()).To(BeFalse())
 		// ...and each of those forgets the recorded warning.
-		_, ok := r.conflictWarned.Load(nn)
+		_, ok = r.conflictWarned.Load(nn)
 		Expect(ok).To(BeFalse())
 	})
 
