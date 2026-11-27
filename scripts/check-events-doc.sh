@@ -8,7 +8,9 @@
 # is a variable or constant must carry a marker comment on the line directly
 # above it, naming every reason it can emit:
 #   // event-reasons: ReasonA ReasonB
-# A call with neither fails the check.
+# A call with neither fails the check. Each marker reason must also appear as a
+# quoted string (a Reason constant) in the non-test Go sources under api/ and
+# internal/, so a marker cannot name a reason the code no longer defines.
 #
 # Usage: scripts/check-events-doc.sh
 set -euo pipefail
@@ -47,11 +49,31 @@ printf '%s\n' \
 [ "$(extract "$neg" | sed "s#$neg#F#" | paste -sd'|' -)" = "Literal|MarkA|MarkB|UNMARKED F:4" ] \
   || fail "negative test: extraction mishandled"
 
+# marker_reasons <file>...: one marker-named reason per line.
+marker_reasons() {
+  sed -nE 's/.*\/\/ event-reasons:[ \t]*//p' "$@" | tr -s ' \t' '\n\n' | sed '/^$/d'
+}
+# defined <dir>... : reads reasons on stdin, prints those with no quoted-string
+# definition in a non-test Go file under the dirs.
+undefined() {
+  local r
+  while IFS= read -r r; do
+    grep -rqF --include='*.go' --exclude='*_test.go' "\"$r\"" "$@" || echo "$r"
+  done
+}
+negd="$(mktemp -d)"; trap 'rm -f "$neg"; rm -rf "$negd"' EXIT
+printf '%s\n' 'const A = "KnownReason"' >"$negd/a.go"
+[ "$(printf '%s\n' KnownReason GoneReason | undefined "$negd" | paste -sd, -)" = "GoneReason" ] \
+  || fail "negative test: undefined marker reason not detected"
+
 mapfile -t files < <(find "$root/internal" -name '*.go' ! -name '*_test.go' | sort)
 out="$(extract "${files[@]}")"
 unmarked="$(grep '^UNMARKED ' <<<"$out" | sed "s#UNMARKED $root/#  #" || true)"
 [ -z "$unmarked" ] || fail "Warning event with a non-literal reason and no '// event-reasons:' marker:
 $unmarked"
+mapfile -t mfiles < <(grep -rl --include='*.go' 'event-reasons:' "$root/internal" || true)
+stalemark="$(marker_reasons "${mfiles[@]}" | sort -u | undefined "$root/api" "$root/internal" | paste -sd' ' -)"
+[ -z "$stalemark" ] || fail "'// event-reasons:' markers name reasons that no Go source defines as a string: $stalemark"
 code="$(sort -u <<<"$out" | sed '/^$/d')"
 [ -n "$code" ] || fail "no Warning event reasons found in the Go sources"
 

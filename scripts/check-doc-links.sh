@@ -13,16 +13,18 @@ fail=0
 # spans, then prints inline ](target) links and reference-style definitions.
 links() {
   local text
-  text="$(awk '/^[ \t]*(```|~~~)/{c=!c; next} !c' "$1" | sed -E 's/`+[^`]*`+//g')"
+  text="$(awk '/^[ \t]*(```|~~~)/{c=!c; next} !c' "$1" | sed -E 's/``([^`]|`[^`])*``//g; s/`+[^`]*`+//g')"
   { grep -oE '\]\([^)]+\)' <<<"$text" | sed -E 's/^\]\(//; s/\)$//' || true
-    grep -E '^ {0,3}\[[^]]+\]:[ \t]*[^ \t]' <<<"$text" | sed -E 's/^ {0,3}\[[^]]+\]:[ \t]*//' || true
+    grep -E '^ {0,3}\[[^]^][^]]*\]:[ \t]*[^ \t]' <<<"$text" | sed -E 's/^ {0,3}\[[^]^][^]]*\]:[ \t]*//' || true
   }
 }
 
-# Self-test: a link in a code span is ignored, reference definitions are found.
+# Self-test: a link in a code span (single or double backtick, even one holding
+# a backtick) is ignored, reference definitions are found, footnote definitions
+# ([^1]: text) are not links.
 st="$(mktemp)"; trap 'rm -f "$st"' EXIT
-printf '%s\n' 'use `[x](code-span.md)` and [y](real.md)' '' '[ref]: ref-target.md "title"' >"$st"
-[ "$(links "$st" | paste -sd, -)" = "real.md,ref-target.md \"title\"" ] || { echo "FAIL: link extraction self-test"; exit 1; }
+printf '%s\n' 'use `[x](code-span.md)` and [y](real.md)' 'use ``[a`b](nested.md)`` and [z](kept.md)' '' '[^1]: footnote text' '[ref]: ref-target.md "title"' >"$st"
+[ "$(links "$st" | paste -sd, -)" = "real.md,kept.md,ref-target.md \"title\"" ] || { echo "FAIL: link extraction self-test"; exit 1; }
 
 while IFS= read -r -d '' f; do
   dir=$(dirname "$f")
