@@ -74,3 +74,6 @@ Work through this in order:
    [task contract](knight-task-contract.md#delivery-and-failure).
 6. **Still nothing?** `kubectl -n <ns> logs deploy/<knight> -c app` and
    `kubectl -n <ns> get events --sort-by=.lastTimestamp`.
+
+Warning events by reason (what each one means and what to do) are listed in
+[events](events.md).

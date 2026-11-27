@@ -430,6 +430,7 @@ func (r *KnightReconciler) setScalingConditions(k *aiv1alpha1.Knight, plan scali
 		}
 		prev := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightAutoscaled)
 		if cond.Status == metav1.ConditionFalse && (prev == nil || prev.Reason != cond.Reason) && r.Recorder != nil {
+			// event-reasons: UnsupportedRuntime KEDAUnavailable
 			r.Recorder.Event(k, corev1.EventTypeWarning, cond.Reason, cond.Message)
 		}
 		meta.SetStatusCondition(&k.Status.Conditions, cond)

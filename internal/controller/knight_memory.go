@@ -116,6 +116,7 @@ func (r *KnightReconciler) setMemoryCondition(knight *aiv1alpha1.Knight, pvc *co
 			"class that supports ReadWriteMany and recreate the PVC", pvc.Name, pvc.Status.AccessModes)
 		prev := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightMemoryShared)
 		if (prev == nil || prev.Reason != cond.Reason) && r.Recorder != nil {
+			// event-reasons: MemoryNotRWX
 			r.Recorder.Event(knight, corev1.EventTypeWarning, cond.Reason, cond.Message)
 		}
 	}
