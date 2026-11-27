@@ -260,8 +260,8 @@ sequenceDiagram
     TC->>TC: create a Mission
   else target.knight
     TC->>G: Invoke (idempotency key)
-    G->>T: publish TaskPayload on prefix.tasks.domain.knight
     G->>G: task record in roundtable_gateway_tasks
+    G->>T: publish TaskPayload on prefix.tasks.domain.knight
     T-->>K: pull via Knight-consumer
   end
   TC->>TC: record the firing in status.recentFirings

@@ -733,7 +733,9 @@ gateway's job.
 For a claude-knight image the operator renders them into `MCP_SERVERS_JSON`
 (`{"mcpServers":{"<name>":{"type":"http"|"sse","url":...}}}`). If `spec.env`
 already sets `MCP_SERVERS_JSON`, the user's entries are kept and the operator's
-are added (on a server-name clash the user's server wins).
+are added (on a server-name clash the user's server wins). If that variable is
+set via `valueFrom`, it cannot be merged and none of the operator's servers are
+added.
 `CLAUDE_DISALLOWED_TOOLS` in `spec.env` is the user's own variable and is passed
 through untouched. `spec.mcpServers[].toolFilter` was removed in chart 0.24.0:
 delete it from every manifest that embeds a Knight spec before upgrading: Knight
@@ -794,8 +796,20 @@ no headers are rendered.
 - **Egress.** The server's host must be on the knight's `spec.egress`
   allowlist (see [egress](egress.md)).
 - **Rotation** works like any other knight credential: update the referenced
-  Secret, then restart the knight (`kubectl rollout restart deployment/<knight>`);
-  env vars are read at pod start.
+  Secret, then restart the knight; env vars are read at pod start. For a
+  Deployment knight use `kubectl rollout restart deployment/<knight>`. A
+  `runtime: sandbox` knight has no Deployment: the Secret change does not touch
+  the `Sandbox`, so set the Knight's `spec.suspend` to `true` and then back to
+  `false`. Suspend keeps the `Sandbox` and its volumes; resuming starts a new
+  pod from the current template, which reads the new value. Do not delete the
+  `Sandbox`: it holds the knight's volumes.
+- **A user `MCP_SERVERS_JSON` set via `valueFrom`** (Secret, ConfigMap or field
+  reference in `spec.env`) cannot be merged at build time. The operator leaves
+  it exactly as set and adds none of its `spec.mcpServers` servers (the
+  `MCP_<SERVER>_<HEADER>` env vars are still added, but nothing references them); the knight then has only the
+  servers in that value. A literal `value` is merged instead, with the user's
+  servers winning on a name clash. `CLAUDE_DISALLOWED_TOOLS` is the user's own
+  variable and is never touched by the operator.
 - The value is visible to anything running in the knight container (as every
   pod credential is), including the agent's shell.
 
