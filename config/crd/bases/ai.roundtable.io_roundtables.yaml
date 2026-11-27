@@ -1589,6 +1589,20 @@ spec:
                             format: int32
                             minimum: 1
                             type: integer
+                          schedule:
+                            description: |-
+                              schedule takes a snapshot on a standard five-field cron schedule, e.g.
+                              "0 3 * * *", in addition to the on-demand annotation. After an outage
+                              only the latest missed tick is snapshotted. A new knight does not
+                              snapshot until its first tick. An unparsable value is reported on the
+                              WorkspaceSnapshots condition (SnapshotFailed) and nothing is scheduled.
+                            maxLength: 256
+                            type: string
+                          timeZone:
+                            description: timeZone is the IANA time zone schedule is
+                              evaluated in. Defaults to UTC.
+                            maxLength: 64
+                            type: string
                         type: object
                     type: object
                     x-kubernetes-validations:
@@ -4125,6 +4139,20 @@ spec:
                               format: int32
                               minimum: 1
                               type: integer
+                            schedule:
+                              description: |-
+                                schedule takes a snapshot on a standard five-field cron schedule, e.g.
+                                "0 3 * * *", in addition to the on-demand annotation. After an outage
+                                only the latest missed tick is snapshotted. A new knight does not
+                                snapshot until its first tick. An unparsable value is reported on the
+                                WorkspaceSnapshots condition (SnapshotFailed) and nothing is scheduled.
+                              maxLength: 256
+                              type: string
+                            timeZone:
+                              description: timeZone is the IANA time zone schedule
+                                is evaluated in. Defaults to UTC.
+                              maxLength: 64
+                              type: string
                           type: object
                       type: object
                       x-kubernetes-validations:

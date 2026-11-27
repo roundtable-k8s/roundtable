@@ -487,6 +487,20 @@ type WorkspaceSnapshots struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Keep *int32 `json:"keep,omitempty"`
+
+	// schedule takes a snapshot on a standard five-field cron schedule, e.g.
+	// "0 3 * * *", in addition to the on-demand annotation. After an outage
+	// only the latest missed tick is snapshotted. A new knight does not
+	// snapshot until its first tick. An unparsable value is reported on the
+	// WorkspaceSnapshots condition (SnapshotFailed) and nothing is scheduled.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// timeZone is the IANA time zone schedule is evaluated in. Defaults to UTC.
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	TimeZone string `json:"timeZone,omitempty"`
 }
 
 // KnightWorkspaceStatus reports the state of the workspace.
@@ -495,6 +509,11 @@ type KnightWorkspaceStatus struct {
 	// annotation that was handled.
 	// +optional
 	LastSnapshotRequest string `json:"lastSnapshotRequest,omitempty"`
+
+	// lastScheduledSnapshot is the cron tick of the last scheduled snapshot
+	// (spec.workspace.snapshots.schedule).
+	// +optional
+	LastScheduledSnapshot *metav1.Time `json:"lastScheduledSnapshot,omitempty"`
 
 	// snapshots lists the knight's workspace VolumeSnapshots, oldest first.
 	// +listType=atomic

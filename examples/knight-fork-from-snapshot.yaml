@@ -29,3 +29,9 @@ spec:
     size: 2Gi
     # Name of a VolumeSnapshot of galahad's workspace, in this namespace.
     fromSnapshot: galahad-ws-1767225600
+    # Take a snapshot of this workspace every night at 03:00 (UTC unless
+    # timeZone is set), keeping the newest 7. See docs/workspace-snapshots.md.
+    # snapshots:
+    #   schedule: "0 3 * * *"
+    #   timeZone: Europe/Berlin
+    #   keep: 7
