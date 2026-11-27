@@ -34,6 +34,8 @@ done
   --set image.tag=1234567 >/dev/null || fail "fractional values rejected"
 "$HELM" template rt "$chart" --set alerts.gatewayErrorRatio=abc >/dev/null 2>&1 \
   && fail "alerts.gatewayErrorRatio=abc was accepted"
+"$HELM" template rt "$chart" --set-string alerts.gatewayMinRequests=abc >/dev/null 2>&1 \
+  && fail "alerts.gatewayMinRequests=abc (string) was accepted"
 
 err="$("$HELM" template rt "$chart" --set gateway.replicas=abc 2>&1)" && fail "gateway.replicas=abc was accepted"
 grep -q 'gateway.replicas' <<<"$err" || fail "error does not name gateway.replicas: $err"

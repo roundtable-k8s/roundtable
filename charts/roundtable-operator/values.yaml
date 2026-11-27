@@ -363,7 +363,11 @@ dashboard:
     claimName: "roundtable-vault"
   # Pod securityContext (runAsNonRoot and the RuntimeDefault seccomp profile
   # are always set). When the vault is mounted and fsGroup is not set here, it
-  # defaults to runAsGroup so the pod can read the vault volume.
+  # defaults to runAsGroup so the pod can read the vault volume; that chart-
+  # defaulted fsGroup also sets fsGroupChangePolicy: OnRootMismatch so the vault
+  # is not recursively chgrped on every start. Many CSI drivers skip fsGroup on
+  # RWX volumes; the reliable way to read mode-600 vault files is runAsUser: 1000
+  # and runAsGroup: 1000 (the owner of the files).
   podSecurityContext:
     runAsUser: 65532
     runAsGroup: 65532

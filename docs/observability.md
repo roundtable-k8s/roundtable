@@ -500,8 +500,8 @@ kubectl -n roundtable get chains
 kubectl -n roundtable get missions
 ```
 
-The Cost cell stays empty until a finished step has reported a cost above 0,
-so a chain whose finished steps all reported cost 0 shows nothing. A mission
+A chain's Cost cell stays empty until a finished step has reported a cost
+above 0, so a chain whose finished steps all reported cost 0 shows nothing. A mission
 shows `0.0000` only when it has `costBudgetUSD`; without a budget its cell
 stays empty until a chain reports a cost above 0. For subscription-billed
 knights it is the same notional amount as above. `-o wide` adds the

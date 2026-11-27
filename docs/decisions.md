@@ -282,7 +282,7 @@ merlin does what the external session's 30-minute check does. Purpose: less cont
 ### 32. M6 stays parked: the API is not exposed publicly for a long while
 *2026-11-26, given by the owner on #238. Status: Parked. Refines decision 6. Affects #234, #235, #236, #237, #238.*
 
-Nothing that publishes the gateway outside the cluster is built now. The owner's words, from [the owner's comment on #238](https://github.com/roundtable-k8s/roundtable/issues/238#issuecomment-7198762116): "M6 stays parked. The owner does not want the API exposed publicly for a long while."
+Nothing that publishes the gateway outside the cluster is built now. The owner's words, from [their comment on #238](https://github.com/roundtable-k8s/roundtable/issues/238#issuecomment-7198762116): "M6 stays parked. The owner does not want the API exposed publicly for a long while."
 
 - #235 (connector profile), #236 (publishing the connector), #237 (origin provenance) and the epic #238 carry the `parked` label and stay in the M6 milestone. They come back only when the owner asks for public exposure.
 - Before anyone builds #235, check whether Envoy AI Gateway or Cloudflare Access already provides the per-tool authorisation and rate limits (decision 30).
