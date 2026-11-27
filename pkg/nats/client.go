@@ -379,8 +379,7 @@ func (c *JetStreamClient) CreateStream(ctx context.Context, config StreamConfig)
 	if _, err := js.Stream(ctx, config.Name); err == nil {
 		return nil
 	}
-	_, err = c.createStream(ctx, js, config)
-	return err
+	return c.createStream(ctx, js, config)
 }
 
 // EnsureStream creates the stream when missing, otherwise makes its MaxAge
@@ -396,15 +395,14 @@ func (c *JetStreamClient) EnsureStream(ctx context.Context, config StreamConfig)
 		if !errors.Is(err, jetstream.ErrStreamNotFound) {
 			return false, fmt.Errorf("failed to get stream %s: %w", config.Name, err)
 		}
-		_, err = c.createStream(ctx, js, config)
-		return false, err
+		return false, c.createStream(ctx, js, config)
 	}
 	return c.applyMaxAge(ctx, js, stream, config.MaxAge)
 }
 
 func (c *JetStreamClient) createStream(
 	ctx context.Context, js jetstream.JetStream, config StreamConfig,
-) (jetstream.Stream, error) {
+) error {
 	streamConfig := jetstream.StreamConfig{
 		Name:      config.Name,
 		Subjects:  config.Subjects,
@@ -421,13 +419,12 @@ func (c *JetStreamClient) createStream(
 		streamConfig.Discard = config.Discard.ToNATS()
 	}
 
-	st, err := js.CreateStream(ctx, streamConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stream %s: %w", config.Name, err)
+	if _, err := js.CreateStream(ctx, streamConfig); err != nil {
+		return fmt.Errorf("failed to create stream %s: %w", config.Name, err)
 	}
 
 	c.log.Info("Created JetStream stream", "name", config.Name, "retention", config.Retention)
-	return st, nil
+	return nil
 }
 
 // EnsureStreamMaxAge updates the stream's MaxAge when it differs from maxAge.
