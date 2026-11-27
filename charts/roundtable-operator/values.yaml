@@ -508,6 +508,12 @@ gateway:
   scheduleRuns:
     enabled: true
     resultRetention: 720h
+  # POST /v1/knights/<name>/snapshot, which takes a workspace snapshot of a
+  # knight (docs/workspace-snapshots.md) by setting its ai.roundtable.io/snapshot
+  # annotation. When enabled, the gateway may get and patch Knights in its
+  # namespace and allowedNamespaces. Listing snapshots needs no extra RBAC.
+  knightSnapshots:
+    enabled: true
   # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see
   # docs/triggers.md). Outside the bearer-token auth: each delivery must carry
   # the Trigger's own bearer token or HMAC signature, from a Secret in the

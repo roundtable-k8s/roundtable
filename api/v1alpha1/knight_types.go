@@ -475,6 +475,10 @@ type KnightWorkspace struct {
 // a VolumeSnapshot of the knight's workspace PVC. The value is arbitrary.
 const AnnotationKnightSnapshot = "ai.roundtable.io/snapshot"
 
+// AnnotationKnightSnapshotCaller records who set AnnotationKnightSnapshot
+// through the gateway. The controller ignores it.
+const AnnotationKnightSnapshotCaller = "ai.roundtable.io/snapshot-caller"
+
 // WorkspaceSnapshots configures workspace VolumeSnapshots.
 type WorkspaceSnapshots struct {
 	// className is the VolumeSnapshotClass. Empty uses the cluster default.

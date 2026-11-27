@@ -714,6 +714,14 @@
             }
           }
         },
+        "knightSnapshots": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
         "scheduleRuns": {
           "type": "object",
           "properties": {

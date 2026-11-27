@@ -103,6 +103,9 @@ type Service struct {
 	// run now) Triggers with a schedule source (and reads Chains, for their
 	// RoundTable). nil disables the schedule endpoints.
 	Schedules client.Client
+	// Knights patches Knights (the snapshot annotation). nil disables
+	// POST /v1/knights/{name}/snapshot and the snapshot_knight tool.
+	Knights client.Client
 	// Hooks reads webhook and schedule Triggers, their RoundTables and the
 	// webhook Triggers' labelled credential Secrets. nil disables
 	// POST /v1/hooks/{namespace}/{trigger} and

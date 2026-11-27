@@ -7,6 +7,7 @@
 {{- $saAuth := $gw.serviceAccountAuth | default dict }}
 {{- $schedules := $gw.schedules | default dict }}
 {{- $scheduleRuns := $gw.scheduleRuns | default dict }}
+{{- $knightSnapshots := $gw.knightSnapshots | default dict }}
 {{- $secret := include "roundtable-operator.gatewayTokenSecret" . }}
 {{- if not $gw.auth.existingSecret }}
 {{- /* No Secret supplied: generate a token once and keep it across upgrades. */}}
@@ -43,7 +44,8 @@ metadata:
 ---
 # Read-only: the gateway looks up Knights, their RoundTables and Chains.
 # Tasks go over NATS. The only objects it writes are Missions, run copies
-# of opted-in Chains and schedule Triggers (below).
+# of opted-in Chains, schedule Triggers and the snapshot annotation of
+# Knights (below).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -114,6 +116,7 @@ subjects:
 {{- $writes := list }}
 {{- if $missions.enabled }}{{ $writes = append $writes (dict "suffix" "missions" "resource" "missions" "what" "Missions" "verbs" (list "get" "list" "watch" "create" "delete")) }}{{ end }}
 {{- if $schedules.enabled }}{{ $writes = append $writes (dict "suffix" "schedules" "resource" "triggers" "what" "Schedule Triggers (POST/PUT/DELETE /v1/schedules)" "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete")) }}{{ end }}
+{{- if $knightSnapshots.enabled }}{{ $writes = append $writes (dict "suffix" "snapshots" "resource" "knights" "what" "Knight annotations (patch sets ai.roundtable.io/snapshot, POST /v1/knights/{name}/snapshot)" "verbs" (list "get" "patch")) }}{{ end }}
 {{- if $runs.enabled }}{{ $writes = append $writes (dict "suffix" "runs" "resource" "chains" "what" "Run copies of Chains labelled ai.roundtable.io/invokable=true (delete cleans up expired copies, patch cancels a run)" "verbs" (list "get" "list" "watch" "create" "patch" "delete")) }}{{ end }}
 {{- range $w := $writes }}
 {{- if has "*" ($gw.allowedNamespaces | default list) }}
@@ -314,6 +317,7 @@ spec:
             - --max-streams={{ if kindIs "invalid" $gw.maxStreams }}64{{ else }}{{ $gw.maxStreams }}{{ end }}
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
+            - --knight-snapshots={{ $knightSnapshots.enabled | default false }}
             - --schedule-runs={{ $scheduleRuns.enabled | default false }}
             - --schedule-result-retention={{ $scheduleRuns.resultRetention | default "720h" }}
             - --token-file=/var/run/secrets/roundtable/gateway/token

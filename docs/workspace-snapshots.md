@@ -165,6 +165,12 @@ An existing PVC is kept: to get a restored workspace, create a new knight (a for
 - The fork is an independent knight: it shares nothing with the source afterwards, and
   needs its own NATS subjects.
 
+## Through the gateway
+
+`POST /v1/knights/{name}/snapshot` (MCP: `snapshot_knight`) sets the annotation for you and
+`GET /v1/knights/{name}/snapshots` (MCP: `list_knight_snapshots`) lists the snapshots and the
+`WorkspaceSnapshots` condition. See [Knight snapshots](gateway.md#knight-snapshots).
+
 ## Where each name comes from
 
 | Name | Defined in |
