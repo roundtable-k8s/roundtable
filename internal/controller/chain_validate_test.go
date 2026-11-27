@@ -59,7 +59,7 @@ func TestValidateAndRejectSpec(t *testing.T) {
 				c.Spec.Schedule = "not a cron expression"
 			},
 			wantReason: aiv1alpha1.ReasonInvalidSchedule,
-			wantPhase:  aiv1alpha1.ChainPhasePending,
+			wantPhase:  aiv1alpha1.ChainPhaseIdle,
 		},
 		{
 			name: "invalid time zone is an invalid schedule",
@@ -68,7 +68,7 @@ func TestValidateAndRejectSpec(t *testing.T) {
 				c.Spec.TimeZone = "Local"
 			},
 			wantReason: aiv1alpha1.ReasonInvalidSchedule,
-			wantPhase:  aiv1alpha1.ChainPhasePending,
+			wantPhase:  aiv1alpha1.ChainPhaseIdle,
 		},
 		{
 			name:       "a valid spec returns no reason",
@@ -86,7 +86,7 @@ func TestValidateAndRejectSpec(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "validate-chain", Namespace: "default", Generation: 3},
 				Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef("tbl")},
 				Status: aiv1alpha1.ChainStatus{
-					Phase:           aiv1alpha1.ChainPhasePending,
+					Phase:           aiv1alpha1.ChainPhaseIdle,
 					NextScheduledAt: &staleNext,
 				},
 			}
@@ -95,6 +95,10 @@ func TestValidateAndRejectSpec(t *testing.T) {
 				WithStatusSubresource(&aiv1alpha1.Chain{}).Build()
 			r := &ChainReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
 			ctx := context.Background()
+			// Reconcile works on the object it read, with its resourceVersion.
+			if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "validate-chain"}, chain); err != nil {
+				t.Fatal(err)
+			}
 
 			reason, message, verr := r.validateSpec(ctx, chain)
 			if reason != tc.wantReason {
