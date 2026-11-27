@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1000,6 +1001,99 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(gh.labels(repo, 592)).To(ConsistOf("needs-human"))
 			Expect(gh.commentsOn(repo, 592)[1]).To(ContainSubstring("`merge`: step timed out"))
 			Expect(handled(name)).To(BeTrue())
+		})
+
+		// #777: a run that failed on a timeout while its PR is open is not
+		// handed to a human.
+		failWith := func(n int, stepErr string) string {
+			gh.add(repo, n, "Fix", "body", "rt:ready")
+			reconcileOnce()
+			chains := pickupChains()
+			Expect(chains).To(HaveLen(1))
+			c := &chains[0]
+			c.Status.Phase = aiv1alpha1.ChainPhaseFailed
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "implement", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: stepErr},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+			return c.Name
+		}
+		openPR := func(n int, draft bool, labels ...string) {
+			gh.addPR(repo, 70+n, fmt.Sprintf("rt/%d-fix", n), labels...)
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			p := &gh.pulls[repo][len(gh.pulls[repo])-1]
+			p.HTMLURL = fmt.Sprintf("https://github.com/%s/pull/%d", repo, p.Number)
+			p.Draft = draft
+		}
+
+		It("links the open PR of a timed-out run instead of labelling needs-human", func() {
+			name := failWith(777, "step timed out after 3600s")
+			openPR(777, false)
+			tick()
+			Expect(gh.labels(repo, 777)).To(BeEmpty())
+			comments := gh.commentsOn(repo, 777)
+			Expect(comments).To(HaveLen(2))
+			Expect(comments[1]).To(ContainSubstring("https://github.com/" + repo + "/pull/847"))
+			Expect(comments[1]).To(ContainSubstring("`implement`: step timed out"))
+			Expect(handled(name)).To(BeTrue())
+			events := r.Recorder.(*record.FakeRecorder).Events
+			var got []string
+			for len(events) > 0 {
+				got = append(got, <-events)
+			}
+			Expect(got).To(ContainElement(ContainSubstring("FailedRunHasOpenPR")))
+			Expect(slices.DeleteFunc(got, func(e string) bool { return !strings.Contains(e, "FailedRunHasOpenPR") })).To(HaveLen(2)) // RoundTable and Chain
+		})
+
+		It("matches the PR by a Closes #N body when the branch differs", func() {
+			name := failWith(778, "step timed out after 3600s")
+			gh.addPR(repo, 90, "feature/other")
+			gh.mu.Lock()
+			gh.pulls[repo][0].Body = "Fixes things.\n\nCloses #778"
+			gh.mu.Unlock()
+			tick()
+			Expect(gh.labels(repo, 778)).To(BeEmpty())
+			Expect(gh.commentsOn(repo, 778)).To(HaveLen(2))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("labels needs-human when the rt/<issue>- PR is in another repo", func() {
+			failWith(784, "step timed out after 3600s")
+			gh.addPR("acme/other", 91, "rt/784-fix")
+			tick()
+			Expect(gh.labels(repo, 784)).To(ConsistOf("needs-human"))
+		})
+
+		It("labels needs-human when the PR of a timed-out run is a draft", func() {
+			name := failWith(779, "step timed out after 3600s")
+			openPR(779, true)
+			tick()
+			Expect(gh.labels(repo, 779)).To(ConsistOf("needs-human"))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("labels needs-human when the PR of a timed-out run carries needs-human", func() {
+			failWith(783, "step timed out after 3600s")
+			openPR(783, false, "needs-human")
+			tick()
+			Expect(gh.labels(repo, 783)).To(ConsistOf("needs-human"))
+		})
+
+		It("labels needs-human when a run failed without a timeout although its PR is open", func() {
+			failWith(780, "knight returned garbage")
+			openPR(780, false)
+			tick()
+			Expect(gh.labels(repo, 780)).To(ConsistOf("needs-human"))
+		})
+
+		It("labels needs-human when a timed-out run has no PR", func() {
+			failWith(781, "step timed out after 3600s")
+			gh.addPR(repo, 99, "rt/782-other")
+			tick()
+			Expect(gh.labels(repo, 781)).To(ConsistOf("needs-human"))
 		})
 
 		It("retries on the next poll when GitHub fails, and keeps the chain until handled", func() {

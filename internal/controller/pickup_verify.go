@@ -321,7 +321,21 @@ func (r *IssuePickupReconciler) handBackFailed(ctx context.Context, gh *github.C
 		return fmt.Errorf("get %s#%d: %w", repo, issue, err)
 	}
 	if gi.State == issueStateOpen && gi.HasLabel(labels.inProgress) {
-		if err := r.labelFailedIssue(ctx, gh, rt, c, repo, issue, labels); err != nil {
+		// #777: a run that only failed on timeouts while its PR is open
+		// continues through the PR checks and the merge queue; it is not
+		// handed to a human.
+		var pr *github.PullRequest
+		if onlyTimeoutFailures(c) {
+			if pr, err = findOpenIssuePR(ctx, gh, repo, issue, labels.needsHuman); err != nil {
+				return fmt.Errorf("list open pull requests of %s: %w", repo, err)
+			}
+		}
+		if pr != nil {
+			err = r.linkOpenPR(ctx, gh, rt, c, repo, issue, pr, labels)
+		} else {
+			err = r.labelFailedIssue(ctx, gh, rt, c, repo, issue, labels)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -353,5 +367,68 @@ func (r *IssuePickupReconciler) labelFailedIssue(ctx context.Context, gh *github
 	}
 	logf.FromContext(ctx).Info("Handed failed chain's issue back to a human", "chain", c.Name, "repo", repo, "issue", issue)
 	r.Recorder.Eventf(rt, corev1.EventTypeWarning, "ChainFailedNeedsHuman", "%s#%d: chain %s failed", repo, issue, c.Name)
+	return nil
+}
+
+// onlyTimeoutFailures reports whether the run has failed steps and every one
+// of them failed on a timeout.
+func onlyTimeoutFailures(c *aiv1alpha1.Chain) bool {
+	failed := false
+	for _, ss := range c.Status.StepStatuses {
+		if ss.Phase != aiv1alpha1.ChainStepPhaseFailed {
+			continue
+		}
+		if !isTimeoutError(ss.Error) {
+			return false
+		}
+		failed = true
+	}
+	return failed
+}
+
+// findOpenIssuePR returns the open, non-draft pull request of an issue that
+// does not carry the needs-human label, or nil. A PR belongs to the issue when
+// its branch starts with "rt/<issue>-" or its body contains "Closes #<issue>"
+// (docs/pr-pipeline.md).
+func findOpenIssuePR(ctx context.Context, gh *github.Client, repo string, issue int, needsHuman string) (*github.PullRequest, error) {
+	pulls, err := gh.ListOpenPulls(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	prefix := fmt.Sprintf("rt/%d-", issue)
+	closes := regexp.MustCompile(fmt.Sprintf(`(?i)\bcloses\s+#%d\b`, issue))
+	for i := range pulls {
+		p := &pulls[i]
+		if p.Draft || p.HasLabel(needsHuman) {
+			continue
+		}
+		if strings.HasPrefix(p.Head.Ref, prefix) || closes.MatchString(p.Body) {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
+// linkOpenPR comments the failed steps with the PR link and removes the
+// in-progress label, leaving the PR to its checks and the merge queue.
+func (r *IssuePickupReconciler) linkOpenPR(ctx context.Context, gh *github.Client, rt *aiv1alpha1.RoundTable,
+	c *aiv1alpha1.Chain, repo string, issue int, pr *github.PullRequest, labels pickupLabelSet) error {
+	url := pr.HTMLURL
+	if url == "" {
+		url = fmt.Sprintf("https://github.com/%s/pull/%d", repo, pr.Number)
+	}
+	body := fmt.Sprintf("Chain `%s` (run `%s`) failed:\n\n- %s\n\n"+
+		"The run failed on a timeout, the PR %s is open and continues through checks and the merge queue.",
+		c.Name, c.Status.LastRunTrigger, chainFailureSummary(c), url)
+	if err := gh.Comment(ctx, repo, issue, body); err != nil {
+		return err
+	}
+	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
+		return err
+	}
+	logf.FromContext(ctx).Info("Failed chain's issue has an open PR, not handed to a human", "chain", c.Name, "repo", repo, "issue", issue, "pr", pr.Number)
+	msg := fmt.Sprintf("%s#%d: chain %s failed on a timeout, PR %s is open", repo, issue, c.Name, url)
+	r.Recorder.Event(rt, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
+	r.Recorder.Event(c, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
 	return nil
 }
