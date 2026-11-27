@@ -47,13 +47,16 @@ func openAPIService(t *testing.T, missions, runs, hooks bool, schedules ...bool)
 	if hooks {
 		svc.Hooks = k8s
 	}
-	if missions && runs && hooks {
-		svc.Knights = k8s
-	}
 	if len(schedules) > 0 && schedules[0] {
 		svc.ScheduleReader = k8s
 		svc.Schedules = k8s
 	}
+	return svc
+}
+
+// withKnights serves the snapshot routes (svc.Knights) on top of openAPIService.
+func withKnights(svc *Service) *Service {
+	svc.Knights = fake.NewClientBuilder().Build()
 	return svc
 }
 
@@ -89,7 +92,7 @@ func roundTrip(t *testing.T, svc *Service) map[string]any {
 }
 
 func TestOpenAPIRoutesInSync(t *testing.T) {
-	svc := openAPIService(t, true, true, true, true)
+	svc := withKnights(openAPIService(t, true, true, true, true))
 	routes := svc.routes()
 	served := make([]string, 0, len(routes))
 	for _, rt := range routes {
@@ -129,11 +132,17 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 			t.Errorf("%s missing from the document", p)
 		}
 	}
-	on := roundTrip(t, openAPIService(t, true, true, true, true))
+	on := roundTrip(t, withKnights(openAPIService(t, true, true, true, true)))
 	for _, p := range []string{"/v1/missions", "/v1/chains", "/v1/runs", "/v1/hooks", "/v1/schedules", "/v1/triggers"} {
 		if !has(on, p) {
 			t.Errorf("%s missing although its feature is enabled", p)
 		}
+	}
+	if !has(roundTrip(t, withKnights(openAPIService(t, false, false, false))), "/v1/knights/{name}/snapshot") {
+		t.Error("snapshot route missing with only knights enabled")
+	}
+	if has(roundTrip(t, openAPIService(t, true, true, true)), "/v1/knights/{name}/snapshot") {
+		t.Error("snapshot route documented without knights")
 	}
 	if has(roundTrip(t, openAPIService(t, true, false, false)), "/v1/runs") {
 		t.Error("runs documented with only missions enabled")

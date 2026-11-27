@@ -317,3 +317,80 @@ func TestSnapshotMCPTools(t *testing.T) {
 		t.Fatalf("list_knight_snapshots: %v %+v", err, res)
 	}
 }
+
+func TestRequestSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		snaps []string
+		want  string
+	}{
+		{"newest", []string{"k-ws-1", "k-ws-2"}, "k-ws-2"},
+		{"scheduled last is skipped", []string{"k-ws-1", "k-ws-sched-9"}, "k-ws-1"},
+		{"expected name wins", []string{"k-ws-5", "k-ws-6"}, "k-ws-5"},
+		{"only scheduled", []string{"k-ws-sched-9"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var snaps []SnapshotInfo
+			for _, n := range tc.snaps {
+				snaps = append(snaps, SnapshotInfo{Name: n})
+			}
+			expected := "k-ws-2"
+			if tc.name == "expected name wins" {
+				expected = "k-ws-5"
+			}
+			sn, ok := requestSnapshot(snaps, expected)
+			if (tc.want != "") != ok || sn.Name != tc.want {
+				t.Errorf("got %q, %v; want %q", sn.Name, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestWaitSnapshotEnds(t *testing.T) {
+	const req = "1000000000000"
+	for _, tc := range []struct {
+		name      string
+		status    func(k *aiv1alpha1.Knight)
+		wantReady bool
+		wantSnap  string
+		early     bool
+	}{
+		{"scheduled snapshot not reported", func(k *aiv1alpha1.Knight) {
+			k.Status.Workspace = &aiv1alpha1.KnightWorkspaceStatus{LastSnapshotRequest: req,
+				Snapshots: []aiv1alpha1.WorkspaceSnapshotStatus{
+					{Name: "fresh-ws-1", ReadyToUse: true}, {Name: "fresh-ws-sched-2", ReadyToUse: true}}}
+		}, true, "fresh-ws-1", true},
+		{"failed condition ends the wait", func(k *aiv1alpha1.Knight) {
+			meta.SetStatusCondition(&k.Status.Conditions, metav1.Condition{
+				Type: aiv1alpha1.ConditionKnightWorkspaceSnapshots, Status: metav1.ConditionFalse,
+				Reason: aiv1alpha1.ReasonSnapshotFailed, Message: "boom"})
+		}, false, "", true},
+		{"newer request ends the wait", func(k *aiv1alpha1.Knight) {
+			k.Status.Workspace = &aiv1alpha1.KnightWorkspaceStatus{LastSnapshotRequest: "2000000000000"}
+		}, false, "", true},
+		{"older request keeps waiting", func(k *aiv1alpha1.Knight) {
+			k.Status.Workspace = &aiv1alpha1.KnightWorkspaceStatus{LastSnapshotRequest: "5"}
+		}, false, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSnapEnv(t, true)
+			k := e.knight(t, "fresh")
+			tc.status(k)
+			if err := e.k8s.Status().Update(t.Context(), k); err != nil {
+				t.Fatal(err)
+			}
+			out := &SnapshotRequest{Knight: "fresh", Namespace: testNS, Request: req}
+			start := time.Now()
+			if err := e.svc.waitSnapshot(t.Context(), out, 600*time.Millisecond); err != nil {
+				t.Fatal(err)
+			}
+			if out.Ready != tc.wantReady || (tc.wantSnap != "") != (out.Snapshot != nil) ||
+				(out.Snapshot != nil && out.Snapshot.Name != tc.wantSnap) {
+				t.Errorf("ready=%v snapshot=%v", out.Ready, out.Snapshot)
+			}
+			if early := time.Since(start) < 400*time.Millisecond; early != tc.early {
+				t.Errorf("ended early = %v, want %v (%s)", early, tc.early, time.Since(start))
+			}
+		})
+	}
+}

@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -83,6 +85,43 @@ type SnapshotRequest struct {
 	Ready     bool               `json:"ready,omitempty"`
 	Snapshot  *SnapshotInfo      `json:"snapshot,omitempty"`
 	Condition *SnapshotCondition `json:"condition,omitempty"`
+}
+
+// scheduledSnapshotMarker is in the name of snapshots the controller takes on
+// the knight's snapshot schedule (<knight>-ws-sched-<unix seconds>).
+const scheduledSnapshotMarker = "-ws-sched-"
+
+// requestSnapshot picks the snapshot a request took: the one named
+// expectedName, else the newest that is not a scheduled one (a scheduled
+// snapshot can be created in the same reconcile and be listed last).
+func requestSnapshot(snaps []SnapshotInfo, expectedName string) (SnapshotInfo, bool) {
+	for _, sn := range snaps {
+		if sn.Name == expectedName {
+			return sn, true
+		}
+	}
+	for i := len(snaps) - 1; i >= 0; i-- {
+		if !strings.Contains(snaps[i].Name, scheduledSnapshotMarker) {
+			return snaps[i], true
+		}
+	}
+	return SnapshotInfo{}, false
+}
+
+// snapshotWaitEnded reports whether the wait for request can stop before the
+// timeout without a snapshot: a newer request replaced it, or the
+// WorkspaceSnapshots condition went False/SnapshotFailed after it was made.
+func snapshotWaitEnded(view *KnightSnapshots, k *aiv1alpha1.Knight, request string) bool {
+	reqNanos, err := strconv.ParseInt(request, 10, 64)
+	if err != nil {
+		return false
+	}
+	if last, err := strconv.ParseInt(view.LastSnapshotRequest, 10, 64); err == nil && last > reqNanos {
+		return true
+	}
+	c := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == aiv1alpha1.ReasonSnapshotFailed &&
+		c.LastTransitionTime.Time.UnixNano() >= reqNanos
 }
 
 func knightSnapshots(k *aiv1alpha1.Knight) *KnightSnapshots {
@@ -211,15 +250,17 @@ func (s *Service) waitSnapshot(ctx context.Context, out *SnapshotRequest, wait t
 		}
 		view := knightSnapshots(k)
 		out.Condition = view.Condition
-		// The newest snapshot is the last one listed; once the request is
-		// handled it is the one this request took.
-		if view.LastSnapshotRequest == out.Request && len(view.Snapshots) > 0 {
-			sn := view.Snapshots[len(view.Snapshots)-1]
-			out.Snapshot = &sn
-			if sn.ReadyToUse {
-				out.Ready = true
-				return nil
+		if view.LastSnapshotRequest == out.Request {
+			if sn, ok := requestSnapshot(view.Snapshots, out.ExpectedName); ok {
+				out.Snapshot = &sn
+				if sn.ReadyToUse {
+					out.Ready = true
+					return nil
+				}
 			}
+		}
+		if snapshotWaitEnded(view, k, out.Request) {
+			return nil
 		}
 		select {
 		case <-wctx.Done():
