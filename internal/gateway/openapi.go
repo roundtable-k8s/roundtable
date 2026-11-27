@@ -633,13 +633,13 @@ var openAPISchemas = obj{
 		}),
 		"managedBy": obj{"type": "string", "enum": []any{"git", "api", "other"}, "description": "Who owns the Trigger."},
 	}),
-	"ScheduleRequest": object([]string{"spec"}, obj{
+	"ScheduleRequest": object([]string{specKey}, obj{
 		"name": str("Trigger name; required on POST."), "namespace": str("Defaults to the gateway's namespace on POST; must match the path on PUT."),
-		"spec": obj{"type": "object", "description": "The Trigger's spec; spec.source.schedule is required and no other source may be set."},
+		specKey: obj{"type": "object", "description": "The Trigger's spec; spec.source.schedule is required and no other source may be set."},
 	}),
-	"ScheduleRecord": object([]string{"name", "namespace", "managedBy", "createdAt", "spec"}, obj{
+	"ScheduleRecord": object([]string{"name", "namespace", "managedBy", "createdAt", specKey}, obj{
 		"name": str(""), "namespace": str(""), "managedBy": str("git, api or other."), "caller": str(""),
-		"createdAt": obj{"type": "string", "format": "date-time"}, "spec": obj{"type": "object"},
+		"createdAt": obj{"type": "string", "format": "date-time"}, specKey: obj{"type": "object"},
 	}),
 	"ScheduleState": object([]string{"name", "namespace", "suspended"}, scheduleStateProps),
 	"ScheduleRunNow": object([]string{"schedule", "namespace", "target", "key", "state"}, obj{
@@ -710,6 +710,9 @@ var scheduleStateProps = obj{
 	"name": str(""), "namespace": str(""), "suspended": boolean("Effective suspension after the change."),
 	"suspendedBy": str("spec, annotation or spec,annotation."), "message": str("Set when a resume left the schedule suspended."),
 }
+
+// specKey is the Trigger spec property of the schedule schemas.
+const specKey = "spec"
 
 func scheduleActionOp(summary, description string) obj {
 	return obj{
