@@ -53,6 +53,9 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	@for f in config/crd/bases/*.yaml; do \
+		[ "$$(basename "$$f")" = kustomization.yaml ] || cp "$$f" charts/roundtable-operator/crds/; \
+	done
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -92,12 +95,14 @@ vet: ## Run go vet against code.
 
 .PHONY: update-agent-sandbox-crds
 update-agent-sandbox-crds: ## Re-download the agent-sandbox CRDs ($(AGENT_SANDBOX_VERSION)) used by the sandbox envtest.
-	@mkdir -p test/crds/agent-sandbox
-	@for f in $(AGENT_SANDBOX_CRD_FILES); do \
+	@set -e; mkdir -p test/crds/agent-sandbox; \
+	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	for f in $(AGENT_SANDBOX_CRD_FILES); do \
 		echo "Downloading $$f ($(AGENT_SANDBOX_VERSION))"; \
-		curl -fsSL -o "test/crds/agent-sandbox/$$f" \
-			"https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/$(AGENT_SANDBOX_VERSION)/k8s/crds/$$f" || exit 1; \
-	done
+		curl -fsSL -o "$$tmp/$$f" \
+			"https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/$(AGENT_SANDBOX_VERSION)/k8s/crds/$$f"; \
+	done; \
+	for f in $(AGENT_SANDBOX_CRD_FILES); do mv -f "$$tmp/$$f" "test/crds/agent-sandbox/$$f"; done
 
 .PHONY: test
 test: manifests generate fmt vet $(if $(KUBEBUILDER_ASSETS),,setup-envtest) ## Run tests (uses KUBEBUILDER_ASSETS when set, e.g. by `nix develop`).
@@ -170,6 +175,7 @@ e2e-tiers: ## List the e2e tiers and what each one proves.
 # Fails before any cluster is created when TIER is not a tier or "all".
 .PHONY: check-e2e-tier
 check-e2e-tier:
+	@case "$(TIER)" in *[[:space:]]*) echo "TIER must be a single value, got \"$(TIER)\"; valid: all $(E2E_TIERS)" >&2; exit 2 ;; esac
 	@case " all $(E2E_TIERS) " in *" $(TIER) "*) ;; *) echo "unknown TIER \"$(TIER)\"; valid: all $(E2E_TIERS)" >&2; exit 2 ;; esac
 
 .PHONY: e2e
@@ -177,7 +183,7 @@ e2e: check-e2e-tier setup-test-e2e manifests generate fmt vet ## Run the e2e tes
 	@status=0; \
 	echo "+ TIER=$(TIER) KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v"; \
 	TIER=$(TIER) KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v || status=$$?; \
-	$(MAKE) cleanup-test-e2e; \
+	$(KIND) delete cluster --name $(KIND_CLUSTER); \
 	exit $$status
 
 .PHONY: test-e2e
@@ -213,6 +219,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 .PHONY: helm-check
 helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml and the values schema) and check examples/chain-pr-pipeline.yaml equals its rendered PR pipeline.
+	diff -rq -x kustomization.yaml config/crd/bases charts/roundtable-operator/crds
 	HELM="$(HELM)" scripts/check-pr-pipeline-example.sh
 	HELM="$(HELM)" scripts/check-dashboard-rbac.sh
 	HELM="$(HELM)" scripts/check-operator-rbac.sh
@@ -419,14 +426,16 @@ install-golangci-lint-from-source:
 # non-zero exit and printing the attempt number. Guards against transient
 # network errors (sum.golang.org stream errors, 503s from download hosts).
 # $1 - command (shell snippet)
+# It runs in a subshell, so giving up is a plain non-zero status the caller can
+# handle with `|| { ... }` (a bare `exit` would end the whole recipe line).
 define retry
-n=1; until $(1); do \
+( n=1; until $(1); do \
 	rc=$$?; \
 	[ $$n -lt 3 ] || { echo "Attempt $$n/3 failed (exit $$rc); giving up" >&2; exit $$rc; }; \
 	echo "Attempt $$n/3 failed (exit $$rc); retrying in 5s..." >&2; \
 	n=$$((n+1)); sleep 5; \
 	echo "Attempt $$n/3..."; \
-done
+done )
 endef
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
