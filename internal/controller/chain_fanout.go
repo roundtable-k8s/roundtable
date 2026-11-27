@@ -482,23 +482,21 @@ func (r *ChainReconciler) reconcileFanOut(ctx context.Context, nc natsConfig, ch
 		}
 		var errMsg, output string
 		done := false
-		if msg := taskDeadlineError(chain, spec, it.StartedAt, it.PickedUpAt); msg != "" {
-			errMsg, done = msg, true
-		} else {
-			result, err := r.pollResult(ctx, nc, chain.Name, fmt.Sprintf("%s-%d", ss.Name, idx), it.TaskID)
-			if err != nil {
-				log.Error(err, "Failed to poll item result", "item", idx)
-				continue
-			}
-			if result == nil {
-				continue
-			}
+		// A published result wins over the deadline (#776).
+		result, err := r.pollResult(ctx, nc, chain.Name, fmt.Sprintf("%s-%d", ss.Name, idx), it.TaskID)
+		if err != nil {
+			log.Error(err, "Failed to poll item result", "item", idx)
+			result = nil
+		}
+		if result != nil {
 			done = true
 			r.recordUsage(ctx, chain, ss, spec.KnightRef.Name, result)
 			errMsg, output = result.GetError(), result.GetOutput()
 			if errMsg == "" && isEmptyStepOutput(output) {
 				errMsg = errEmptyOutput
 			}
+		} else if msg := taskDeadlineError(chain, spec, it.StartedAt, it.PickedUpAt); msg != "" {
+			errMsg, done = msg, true
 		}
 		if !done {
 			continue

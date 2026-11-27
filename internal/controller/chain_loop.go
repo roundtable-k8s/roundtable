@@ -630,17 +630,13 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 	var errMsg, output string
 	var structured natspkg.Structured
 	var res *natspkg.TaskResult
-	if msg := taskDeadlineError(chain, timing, bs.StartedAt, bs.PickedUpAt); msg != "" {
-		errMsg = msg
-	} else {
-		result, err := r.pollResult(ctx, nc, chain.Name, spec.Name+"-"+bs.Name, bs.TaskID)
-		if err != nil {
-			log.Error(err, "Failed to poll loop body result")
-			return
-		}
-		if result == nil {
-			return
-		}
+	// A published result wins over the deadline (#776).
+	result, err := r.pollResult(ctx, nc, chain.Name, spec.Name+"-"+bs.Name, bs.TaskID)
+	if err != nil {
+		log.Error(err, "Failed to poll loop body result")
+		result = nil
+	}
+	if result != nil {
 		res = result
 		if result.Model != "" {
 			bs.Model = result.Model
@@ -651,6 +647,10 @@ func (r *ChainReconciler) collectBodyTask(ctx context.Context, nc natsConfig, ch
 		if errMsg == "" && isEmptyStepOutput(output) {
 			errMsg = errEmptyOutput
 		}
+	} else if msg := taskDeadlineError(chain, timing, bs.StartedAt, bs.PickedUpAt); msg != "" {
+		errMsg = msg
+	} else {
+		return
 	}
 	now := metav1.Now()
 	bs.CompletedAt = &now
