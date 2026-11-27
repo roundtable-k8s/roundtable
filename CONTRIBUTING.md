@@ -81,15 +81,14 @@ available replica. The cluster is deleted afterwards, also on failure.
 
 Scenarios are gated by Ginkgo labels, one per tier; `TIER` picks the tier
 (`core` by default). `make e2e-tiers` lists every tier and what it proves, and
-`make e2e TIER=<typo>` fails at once with the valid tiers, before any cluster
-is created. `all` runs everything. The `restart` tier
-needs the fix from #700 (chain steps stranded by an operator restart); without it
-the spec times out waiting for the step's result to be read. It is not part of
-the default `TIER=core` run.
-After the run, `make e2e` prints a table of passed, failed and skipped scenarios
-per tier with the time each tier took.
-A new tier adds its own label and files without touching core. Plain
-`go test ./...` does not build the e2e package (it needs `-tags=e2e`).
+`make e2e TIER=<typo>` fails at once with the valid tiers, before any cluster is
+created. `all` runs everything. The `restart` tier needs the fix from #700
+(chain steps stranded by an operator restart); without it the spec times out
+waiting for the step's result to be read. It is not part of the default
+`TIER=core` run. After the run, `make e2e` prints a table of passed, failed and
+skipped scenarios per tier with the time each tier took. A new tier adds its own
+label and files without touching core. Plain `go test ./...` does not build the
+e2e package (it needs `-tags=e2e`).
 
 
 ### Helm Chart
