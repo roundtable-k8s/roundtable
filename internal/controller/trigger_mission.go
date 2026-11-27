@@ -83,6 +83,28 @@ func missionRequest(trg *aiv1alpha1.Trigger, objective, criteria string) gateway
 	return req
 }
 
+// checkMissionRefs reports the first chain or planner knight a mission target
+// names that does not exist; an empty reason means they all do.
+func (r *TriggerReconciler) checkMissionRefs(ctx context.Context, trg *aiv1alpha1.Trigger) (reason, msg string, err error) {
+	mt := trg.Spec.Target.Mission
+	for _, c := range mt.Chains {
+		err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: c.Name}, &aiv1alpha1.Chain{})
+		if apierrors.IsNotFound(err) {
+			return aiv1alpha1.ReasonTriggerTargetNotFound, fmt.Sprintf("Chain %q not found", c.Name), nil
+		} else if err != nil {
+			return "", "", err
+		}
+	}
+	if mt.MetaMission != nil && !*mt.MetaMission || mt.Planner == nil || mt.Planner.Knight == "" {
+		return "", "", nil
+	}
+	err = r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: mt.Planner.Knight}, &aiv1alpha1.Knight{})
+	if apierrors.IsNotFound(err) {
+		return aiv1alpha1.ReasonTriggerTargetNotFound, fmt.Sprintf("planner Knight %q not found", mt.Planner.Knight), nil
+	}
+	return "", "", err
+}
+
 // missionFiring is what fire hands fireMission.
 type missionFiring struct {
 	nn     types.NamespacedName
@@ -241,7 +263,7 @@ func (r *TriggerReconciler) fireMission(ctx context.Context, f missionFiring) (t
 		return f.skip(triggerHandled, "%s", why)
 	}
 
-	svc := gateway.NewService(r.knightResolver(), nil, gateway.Options{AllowedNamespaces: []string{"*"}},
+	svc := gateway.NewService(r.knightResolver(), nil, gateway.Options{AllowedNamespaces: []string{"*"}, Missions: r.Missions},
 		logf.Log.WithName("trigger-missions"))
 	m, err := svc.BuildMission(ctx, trg.Namespace, missionRequest(trg, objective, criteria))
 	switch {

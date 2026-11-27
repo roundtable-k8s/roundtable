@@ -1831,6 +1831,76 @@ var _ = Describe("Trigger controller", func() {
 			Expect(getTrigger("mt-bad").Status.RecentFirings[0].SkipReason).To(ContainSubstring("costBudgetUSD"))
 		})
 
+		It("refuses a budget over the operator's configured cap, not the built-in default", func() {
+			r.Missions = gateway.MissionOptions{MaxBudgetUSD: 1}
+			t := scheduleMissionTrigger("mt-cap", nil) // budget 2.50, under the default cap of 10
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("mt-cap")
+			fireSchedule("mt-cap", due, "")
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-cap").Status.RecentFirings }, "10s").Should(HaveLen(1))
+			Expect(missionsOf("mt-cap")).To(BeEmpty())
+			Expect(getTrigger("mt-cap").Status.RecentFirings[0].SkipReason).To(ContainSubstring("exceeds the gateway maximum 1"))
+		})
+
+		It("is not Ready when a mission chain or the planner knight is missing", func() {
+			notReady := func(name, want string) {
+				t := getTrigger(name)
+				clock = nextFive(t.CreationTimestamp.Time).Add(time.Second)
+				reconcileTrigger(name)
+				cond := meta.FindStatusCondition(getTrigger(name).Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerTargetNotFound))
+				Expect(cond.Message).To(ContainSubstring(want))
+			}
+			scheduleMissionTrigger("mt-nochain", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.Mission.Planner = nil
+				s.Target.Mission.Chains = []aiv1alpha1.TriggerMissionChain{{Name: "no-such-chain"}}
+			})
+			notReady("mt-nochain", `Chain "no-such-chain" not found`)
+			scheduleMissionTrigger("mt-noplanner", func(s *aiv1alpha1.TriggerSpec) {
+				s.Target.Mission.Planner.Knight = "no-such-knight"
+			})
+			notReady("mt-noplanner", `planner Knight "no-such-knight" not found`)
+		})
+
+		It("counts failed and lost mission runs in roundtable_trigger_runs_finished_total", func() {
+			t := scheduleMissionTrigger("mt-fin", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("mt-fin")
+			for i := range 2 {
+				at := due.Add(time.Duration(i) * 5 * time.Minute)
+				clock = at.Add(time.Second)
+				fireSchedule("mt-fin", at, "")
+				Eventually(func() []aiv1alpha1.Mission { return missionsOf("mt-fin") }, "10s").Should(HaveLen(i + 1))
+				Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("mt-fin").Status.RecentFirings }).Should(HaveLen(i + 1))
+				// Finish each one before the next firing (default concurrency).
+				if i == 0 {
+					ms := missionsOf("mt-fin")
+					meta.SetStatusCondition(&ms[0].Status.Conditions, metav1.Condition{
+						Type: aiv1alpha1.ConditionMissionComplete, Status: metav1.ConditionTrue,
+						Reason: aiv1alpha1.ReasonMissionChainFailed,
+					})
+					setPhase(&ms[0], aiv1alpha1.MissionPhaseFailed)
+					reconcileTrigger("mt-fin")
+				}
+			}
+			Expect(finishedRuns("mt-fin", "failed")).To(Equal(1.0))
+
+			// The second Mission is deleted before its outcome is read.
+			for _, m := range missionsOf("mt-fin") {
+				if m.Status.Phase != aiv1alpha1.MissionPhaseFailed {
+					Expect(k8sClient.Delete(ctx, &m)).To(Succeed())
+				}
+			}
+			Eventually(func() float64 {
+				reconcileTrigger("mt-fin")
+				return finishedRuns("mt-fin", "lost")
+			}, "10s").Should(Equal(1.0))
+			Expect(finishedRuns("mt-fin", "failed")).To(Equal(1.0))
+		})
+
 		It("skips a firing over the table's maxMissions with the reason", func() {
 			rt := &aiv1alpha1.RoundTable{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
