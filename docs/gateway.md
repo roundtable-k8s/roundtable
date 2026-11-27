@@ -17,7 +17,8 @@ The chart names the gateway Service `<fullname>-gateway`. It listens on port 80
 callers in the cluster use `http://<fullname>-gateway.roundtable.svc` with no port.
 
 `<fullname>` is the chart's `roundtable-operator.fullname`: `fullnameOverride` if
-set; otherwise the release name when it already contains `roundtable-operator`
+set; otherwise, with `nameOverride` taking the place of `roundtable-operator` below,
+the release name when it already contains `roundtable-operator`
 (release `roundtable-operator` gives `roundtable-operator`); otherwise
 `<release>-roundtable-operator` (release `roundtable` gives
 `roundtable-roundtable-operator`). To find the Service:

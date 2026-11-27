@@ -162,7 +162,7 @@ Alertmanager's namespace):
 receivers:
   - name: roundtable
     webhook_configs:
-      - url: http://$FULLNAME-gateway.roundtable.svc/v1/hooks/roundtable/alerts
+      - url: http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/alerts
         send_resolved: true
         http_config:
           authorization:
@@ -182,7 +182,7 @@ metadata:
   namespace: flux-system
 spec:
   type: generic-hmac
-  address: http://$FULLNAME-gateway.roundtable.svc/v1/hooks/roundtable/flux-failures
+  address: http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/flux-failures
   secretRef:
     name: roundtable-hook-hmac      # key "token"
 ---
