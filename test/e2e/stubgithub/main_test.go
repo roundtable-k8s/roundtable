@@ -66,10 +66,11 @@ func seed(t *testing.T, srv *httptest.Server, labels ...string) int {
 type repoView struct {
 	Labels []string `json:"labels"`
 	Issues []struct {
-		Number   int      `json:"number"`
-		State    string   `json:"state"`
-		Labels   []string `json:"labels"`
-		Comments []string `json:"comments"`
+		Number    int      `json:"number"`
+		State     string   `json:"state"`
+		Assignees []string `json:"assignees"`
+		Labels    []string `json:"labels"`
+		Comments  []string `json:"comments"`
 	} `json:"issues"`
 }
 
@@ -145,6 +146,9 @@ func TestClientClaimFlow(t *testing.T) {
 		t.Fatalf("state issues = %+v", v.Issues)
 	}
 	is := v.Issues[0]
+	if !reflect.DeepEqual(is.Assignees, []string{"octocat"}) {
+		t.Errorf("assignees = %v, want [octocat]", is.Assignees)
+	}
 	if !reflect.DeepEqual(is.Labels, []string{"in-progress"}) {
 		t.Errorf("labels = %v, want [in-progress]", is.Labels)
 	}
@@ -169,6 +173,56 @@ func TestClientEnsureLabel(t *testing.T) {
 	}
 	if v := readState(t, srv); !reflect.DeepEqual(v.Labels, []string{"ready"}) {
 		t.Errorf("repo labels = %v, want [ready]", v.Labels)
+	}
+}
+
+// TestEnsureLabelCreatesRepo covers the label route on a repository nobody has
+// seeded yet: the first /repos/ call creates it, so EnsureLabel succeeds.
+func TestEnsureLabelCreatesRepo(t *testing.T) {
+	srv := newTestServer(t)
+	c := github.NewClient(srv.URL, "test-token")
+
+	created, err := c.EnsureLabel(context.Background(), "acme/fresh", "ready", "0e8a16", "ready")
+	if err != nil || !created {
+		t.Fatalf("EnsureLabel on unseeded repo = %v, %v; want true, nil", created, err)
+	}
+	resp, err := http.Get(srv.URL + "/_stub/state?repo=acme/fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("state status = %d, want 200 for the created repo", resp.StatusCode)
+	}
+	var v repoView
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(v.Labels, []string{"ready"}) || len(v.Issues) != 0 {
+		t.Errorf("state = %+v, want label [ready] and no issues", v)
+	}
+}
+
+// TestSeededIssueSerialisesAssignees checks the raw JSON: a seeded issue has an
+// empty assignees array, not null, as GitHub returns it.
+func TestSeededIssueSerialisesAssignees(t *testing.T) {
+	srv := newTestServer(t)
+	num := seed(t, srv)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/repos/"+testRepo+"/issues/"+strconv.Itoa(num), nil)
+	req.Header.Set("Authorization", "token test-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var raw struct {
+		Assignees json.RawMessage `json:"assignees"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if string(raw.Assignees) != "[]" {
+		t.Errorf("assignees = %s, want []", raw.Assignees)
 	}
 }
 
@@ -199,7 +253,6 @@ func TestRawRoutesAndStatuses(t *testing.T) {
 	}{
 		{"no auth on repos route", http.MethodGet, "/repos/acme/widgets/issues", false, "", http.StatusUnauthorized},
 		{"unknown route", http.MethodGet, "/repos/acme/widgets/milestones", true, "", http.StatusNotFound},
-		{"unknown repo", http.MethodGet, "/repos/acme/nope/issues", true, "", http.StatusNotFound},
 		{"bad issue number", http.MethodGet, "/repos/acme/widgets/issues/abc", true, "", http.StatusNotFound},
 		{"comment without body", http.MethodPost,
 			"/repos/acme/widgets/issues/" + strconv.Itoa(num) + "/comments", true, `{}`,

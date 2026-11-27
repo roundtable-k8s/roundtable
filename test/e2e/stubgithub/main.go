@@ -123,13 +123,14 @@ func (r *repoState) ensureLabel(name string) {
 func (s *stub) newIssue(repoName, title, body string, labels []string) *issue {
 	r := s.repo(repoName, true)
 	iss := &issue{
-		Number:  r.nextNum,
-		Title:   title,
-		Body:    body,
-		State:   "open",
-		HTMLURL: fmt.Sprintf("https://github.com/%s/issues/%d", repoName, r.nextNum),
-		User:    user{Login: "stub-user"},
-		Labels:  []labelRef{},
+		Number:    r.nextNum,
+		Title:     title,
+		Body:      body,
+		State:     "open",
+		HTMLURL:   fmt.Sprintf("https://github.com/%s/issues/%d", repoName, r.nextNum),
+		User:      user{Login: "stub-user"},
+		Labels:    []labelRef{},
+		Assignees: []user{},
 	}
 	r.nextNum++
 	r.issues[iss.Number] = iss
@@ -147,6 +148,29 @@ func (s *stub) newIssue(repoName, title, body string, labels []string) *issue {
 // passing silently. The /_stub/ control routes need none.
 func handler() http.Handler {
 	s := newStub()
+	routes := s.routes()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/repos/") {
+			if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+				writeMessage(w, http.StatusUnauthorized, "Requires authentication")
+				return
+			}
+			// The first /repos/{owner}/{repo} call that names a repository
+			// creates it, so EnsureLabel works before any issue is seeded.
+			if parts := strings.SplitN(r.URL.Path, "/", 5); len(parts) >= 4 && parts[2] != "" && parts[3] != "" {
+				s.mu.Lock()
+				s.repo(parts[2]+"/"+parts[3], true)
+				s.mu.Unlock()
+			}
+		}
+		routes.ServeHTTP(w, r)
+	})
+}
+
+// routes registers the stub's routes on a mux. It does not check auth or create
+// repositories; handler does both before a request reaches the mux.
+func (s *stub) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues", s.listIssues)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/{number}", s.getIssue)
@@ -160,14 +184,7 @@ func handler() http.Handler {
 	mux.HandleFunc("POST /_stub/issues", s.seedIssue)
 	mux.HandleFunc("GET /_stub/state", s.state)
 	mux.HandleFunc("/", notFound)
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/repos/") && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
-			writeMessage(w, http.StatusUnauthorized, "Requires authentication")
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	return mux
 }
 
 // notFound answers an unknown route with a JSON 404 and logs it, so a route the
@@ -396,11 +413,12 @@ func (s *stub) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type issueState struct {
-		Number   int      `json:"number"`
-		Title    string   `json:"title"`
-		State    string   `json:"state"`
-		Labels   []string `json:"labels"`
-		Comments []string `json:"comments"`
+		Number    int      `json:"number"`
+		Title     string   `json:"title"`
+		State     string   `json:"state"`
+		Assignees []string `json:"assignees"`
+		Labels    []string `json:"labels"`
+		Comments  []string `json:"comments"`
 	}
 	type repoStateView struct {
 		Repo   string       `json:"repo"`
@@ -413,7 +431,11 @@ func (s *stub) state(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(view.Labels)
 	for _, iss := range sortedIssues(repo) {
-		is := issueState{Number: iss.Number, Title: iss.Title, State: iss.State, Labels: []string{}, Comments: []string{}}
+		is := issueState{Number: iss.Number, Title: iss.Title, State: iss.State,
+			Assignees: []string{}, Labels: []string{}, Comments: []string{}}
+		for _, a := range iss.Assignees {
+			is.Assignees = append(is.Assignees, a.Login)
+		}
 		for _, l := range iss.Labels {
 			is.Labels = append(is.Labels, l.Name)
 		}
