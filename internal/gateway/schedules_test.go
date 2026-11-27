@@ -394,10 +394,26 @@ func TestScheduleViewConcurrencyAndSuspension(t *testing.T) {
 		t.Errorf("suspended = %v by %q, want true by annotation", v.Suspended, v.SuspendedBy)
 	}
 
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
 	if m["suspended"] != true || m["suspendedBy"] != "annotation" || m["startingDeadlineSeconds"] != float64(300) {
 		t.Errorf("json = %s", b)
+	}
+
+	// spec.suspend alone, and with the annotation.
+	tr = scheduleTrigger(testNS, "c", "* * * * *", "digest")
+	tr.Spec.Suspend = true
+	if v = scheduleView(tr, nil, nil); !v.Suspended || v.SuspendedBy != "spec" {
+		t.Errorf("spec: suspended = %v by %q", v.Suspended, v.SuspendedBy)
+	}
+	tr.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "true"}
+	if v = scheduleView(tr, nil, nil); !v.Suspended || v.SuspendedBy != "spec,annotation" {
+		t.Errorf("spec+annotation: suspended = %v by %q", v.Suspended, v.SuspendedBy)
 	}
 }

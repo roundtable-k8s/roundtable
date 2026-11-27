@@ -54,17 +54,6 @@ func Handler(svc *Service, auth *TokenAuth) http.Handler {
 			api.HandleFunc(rt.pattern, rt.handler)
 		}
 	}
-	if svc.SchedulesEnabled() {
-		api.HandleFunc("GET /v1/schedules", svc.handleListSchedules)
-		api.HandleFunc("GET /v1/schedules/{namespace}/{name}", svc.handleGetSchedule)
-		api.HandleFunc("GET /v1/schedules/{namespace}/{name}/manifest", svc.handleScheduleManifest)
-		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/suspend", svc.handleSuspendSchedule)
-		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/resume", svc.handleResumeSchedule)
-		api.HandleFunc("POST /v1/schedules/{namespace}/{name}/run", svc.handleRunSchedule)
-		api.HandleFunc("POST /v1/schedules", svc.handleCreateSchedule)
-		api.HandleFunc("PUT /v1/schedules/{namespace}/{name}", svc.handleReplaceSchedule)
-		api.HandleFunc("DELETE /v1/schedules/{namespace}/{name}", svc.handleDeleteSchedule)
-	}
 	api.Handle("/mcp", MCPHandler(svc))
 	mux.Handle("/", auth.Wrap(api))
 	return instrument(mux, svc.Log)
@@ -122,6 +111,15 @@ func (s *Service) routes() []route {
 	}
 	if s.SchedulesEnabled() {
 		rs = append(rs,
+			route{pattern: "GET /v1/schedules", handler: s.handleListSchedules},
+			route{pattern: "POST /v1/schedules", handler: s.handleCreateSchedule},
+			route{pattern: "GET /v1/schedules/{namespace}/{name}", handler: s.handleGetSchedule},
+			route{pattern: "PUT /v1/schedules/{namespace}/{name}", handler: s.handleReplaceSchedule},
+			route{pattern: "DELETE /v1/schedules/{namespace}/{name}", handler: s.handleDeleteSchedule},
+			route{pattern: "GET /v1/schedules/{namespace}/{name}/manifest", handler: s.handleScheduleManifest},
+			route{pattern: "POST /v1/schedules/{namespace}/{name}/suspend", handler: s.handleSuspendSchedule},
+			route{pattern: "POST /v1/schedules/{namespace}/{name}/resume", handler: s.handleResumeSchedule},
+			route{pattern: "POST /v1/schedules/{namespace}/{name}/run", handler: s.handleRunSchedule},
 			route{pattern: "GET /v1/schedules/{namespace}/{name}/next", handler: s.handleScheduleNext},
 			route{pattern: "GET /v1/schedules/preview", handler: s.handleSchedulePreview},
 		)

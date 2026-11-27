@@ -93,13 +93,14 @@ type ScheduleRunNow struct {
 
 // patchSchedule applies mutate to the schedule's annotations with a merge
 // patch guarded by its resourceVersion, re-reading it on conflicts. mutate
-// returns false when nothing needs to change.
+// returns false when nothing needs to change. The bool result reports
+// whether a patch was written.
 func (s *Service) patchSchedule(ctx context.Context, namespace, name string,
-	mutate func(*aiv1alpha1.Trigger) (bool, error)) (*aiv1alpha1.Trigger, error) {
+	mutate func(*aiv1alpha1.Trigger) (bool, error)) (*aiv1alpha1.Trigger, bool, error) {
 	for attempt := 0; ; attempt++ {
 		trg, err := s.fetchSchedule(ctx, namespace, name)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		patch := client.MergeFromWithOptions(trg.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		if trg.Annotations == nil {
@@ -107,17 +108,17 @@ func (s *Service) patchSchedule(ctx context.Context, namespace, name string,
 		}
 		changed, err := mutate(trg)
 		if err != nil || !changed {
-			return trg, err
+			return trg, false, err
 		}
 		err = s.Schedules.Patch(ctx, trg, patch)
 		if err == nil {
-			return trg, nil
+			return trg, true, nil
 		}
 		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, trg.Namespace, name)
+			return nil, false, fmt.Errorf("%w: schedule %s/%s", ErrNotFound, trg.Namespace, name)
 		}
 		if !apierrors.IsConflict(err) || attempt >= schedulePatchRetries {
-			return nil, k8sError("patch schedule", err)
+			return nil, false, k8sError("patch schedule", err)
 		}
 	}
 }
@@ -136,8 +137,14 @@ func callerOr(ctx context.Context) string {
 
 // SuspendSchedule sets the suspended annotation (its value is the caller).
 func (s *Service) SuspendSchedule(ctx context.Context, namespace, name string) (*ScheduleState, error) {
+	st, _, err := s.suspendSchedule(ctx, namespace, name)
+	return st, err
+}
+
+// suspendSchedule is SuspendSchedule that also reports whether it patched.
+func (s *Service) suspendSchedule(ctx context.Context, namespace, name string) (*ScheduleState, bool, error) {
 	caller := callerOr(ctx)
-	trg, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
+	trg, changed, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
 		if t.SuspendedByAnnotation() {
 			return false, nil
 		}
@@ -145,17 +152,23 @@ func (s *Service) SuspendSchedule(ctx context.Context, namespace, name string) (
 		return true, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s.Log.Info("Suspended schedule", "namespace", trg.Namespace, "schedule", trg.Name, "caller", caller)
-	return scheduleState(trg), nil
+	return scheduleState(trg), changed, nil
 }
 
 // ResumeSchedule removes the suspended annotation. It does not touch
 // spec.suspend: a schedule suspended in its spec stays suspended, and the
 // answer says so.
 func (s *Service) ResumeSchedule(ctx context.Context, namespace, name string) (*ScheduleState, error) {
-	trg, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
+	st, _, err := s.resumeSchedule(ctx, namespace, name)
+	return st, err
+}
+
+// resumeSchedule is ResumeSchedule that also reports whether it patched.
+func (s *Service) resumeSchedule(ctx context.Context, namespace, name string) (*ScheduleState, bool, error) {
+	trg, changed, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
 		if _, ok := t.Annotations[aiv1alpha1.AnnotationTriggerSuspended]; !ok {
 			return false, nil
 		}
@@ -163,14 +176,14 @@ func (s *Service) ResumeSchedule(ctx context.Context, namespace, name string) (*
 		return true, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s.Log.Info("Resumed schedule", "namespace", trg.Namespace, "schedule", trg.Name, "caller", callerOr(ctx))
 	st := scheduleState(trg)
 	if trg.Spec.Suspend {
 		st.Message = "spec.suspend is still true: the schedule stays suspended until spec.suspend is cleared where the Trigger is defined"
 	}
-	return st, nil
+	return st, changed, nil
 }
 
 // TableSchedulesRequest is the body of POST /v1/schedules/suspend and /resume.
@@ -215,37 +228,25 @@ func (s *Service) changeTableSchedules(ctx context.Context, req TableSchedulesRe
 	}
 	out := &TableSchedulesResult{Changed: []*ScheduleState{}, Unchanged: []*ScheduleState{}, Failed: []ScheduleFailure{}}
 	for _, v := range list {
-		// A schedule counts as changed when the annotation flips, which is
-		// what the single-schedule functions patch on.
-		had, err := s.hasSuspendAnnotation(ctx, v.Namespace, v.Name)
-		if err != nil {
-			out.Failed = append(out.Failed, ScheduleFailure{Name: v.Name, Error: err.Error()})
-			continue
-		}
+		// A schedule counts as changed when the annotation was patched.
 		var st *ScheduleState
+		var changed bool
+		var err error
 		if suspend {
-			st, err = s.SuspendSchedule(ctx, v.Namespace, v.Name)
+			st, changed, err = s.suspendSchedule(ctx, v.Namespace, v.Name)
 		} else {
-			st, err = s.ResumeSchedule(ctx, v.Namespace, v.Name)
+			st, changed, err = s.resumeSchedule(ctx, v.Namespace, v.Name)
 		}
 		switch {
 		case err != nil:
 			out.Failed = append(out.Failed, ScheduleFailure{Name: v.Name, Error: err.Error()})
-		case had == suspend:
-			out.Unchanged = append(out.Unchanged, st)
-		default:
+		case changed:
 			out.Changed = append(out.Changed, st)
+		default:
+			out.Unchanged = append(out.Unchanged, st)
 		}
 	}
 	return out, nil
-}
-
-func (s *Service) hasSuspendAnnotation(ctx context.Context, namespace, name string) (bool, error) {
-	trg, err := s.fetchSchedule(ctx, namespace, name)
-	if err != nil {
-		return false, err
-	}
-	return trg.SuspendedByAnnotation(), nil
 }
 
 // RunSchedule asks the trigger controller to fire the schedule once now (the
@@ -259,7 +260,7 @@ func (s *Service) RunSchedule(ctx context.Context, namespace, name string) (*Sch
 	caller := callerOr(ctx)
 	id := newRunNowID(s.now())
 	var chain, target string
-	trg, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
+	trg, _, err := s.patchSchedule(ctx, namespace, name, func(t *aiv1alpha1.Trigger) (bool, error) {
 		if prev := t.Annotations[aiv1alpha1.AnnotationTriggerRunNow]; prev != "" {
 			return false, &ConflictError{State: ScheduleRunPending,
 				Reason: fmt.Sprintf("schedule %s/%s already has a run-now request (%s) waiting for the operator; retry shortly", t.Namespace, t.Name, prev)}

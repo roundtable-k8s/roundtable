@@ -529,7 +529,7 @@ func scheduleAPIError(op string, err error) error {
 				}
 			}
 			if field == "" {
-				field = "spec"
+				field = specKey
 			}
 			return &FieldError{Field: field, Message: strings.Join(msgs, "; ")}
 		}

@@ -69,7 +69,7 @@ type NextRunsInput struct {
 // (UTC when empty) strictly after now. A bad expression or zone wraps
 // ErrUnprocessable and carries the parser's message; count outside 1..50
 // wraps ErrInvalid.
-func nextFireTimes(expr, tz string, count int, now time.Time) (*ScheduleNextRuns, error) {
+func nextFireTimes(expr, tz string, count int, now time.Time, fields *strings.Replacer) (*ScheduleNextRuns, error) {
 	if count < 1 || count > maxNextCount {
 		return nil, fmt.Errorf("%w: count: must be between 1 and %d", ErrInvalid, maxNextCount)
 	}
@@ -78,18 +78,18 @@ func nextFireTimes(expr, tz string, count int, now time.Time) (*ScheduleNextRuns
 		tz = defaultScheduleTimeZone
 	}
 	if err := validateTimeZone(tz); err != nil {
-		return nil, unprocessable(err)
+		return nil, unprocessable(err, fields)
 	}
 	if err := validateCron(expr, tz); err != nil {
-		return nil, unprocessable(err)
+		return nil, unprocessable(err, fields)
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return nil, unprocessable(err)
+		return nil, unprocessable(err, fields)
 	}
 	sched, err := cron.ParseStandard("CRON_TZ=" + tz + " " + expr)
 	if err != nil {
-		return nil, unprocessable(err)
+		return nil, unprocessable(err, fields)
 	}
 	out := &ScheduleNextRuns{Cron: expr, TimeZone: tz, Times: make([]ScheduleFireTime, 0, count)}
 	t := now
@@ -103,13 +103,25 @@ func nextFireTimes(expr, tz string, count int, now time.Time) (*ScheduleNextRuns
 	return out, nil
 }
 
-// unprocessable turns a validation error into a 422, keeping its message.
-func unprocessable(err error) error {
+// previewFields renames the CRD fields the shared validators name to the
+// query parameters (and MCP inputs) a preview caller sent.
+var previewFields = strings.NewReplacer(
+	"spec.source.schedule.timeZone", "timeZone",
+	"spec.source.schedule.cron", "cron",
+)
+
+// unprocessable turns a validation error into a 422, keeping its message;
+// fields, when set, rewrites the field names in it.
+func unprocessable(err error, fields *strings.Replacer) error {
+	msg := err.Error()
 	var fe *FieldError
 	if errors.As(err, &fe) {
-		return fmt.Errorf("%w: %s: %s", ErrUnprocessable, fe.Field, fe.Message)
+		msg = fe.Field + ": " + fe.Message
 	}
-	return fmt.Errorf("%w: %v", ErrUnprocessable, err)
+	if fields != nil {
+		msg = fields.Replace(msg)
+	}
+	return fmt.Errorf("%w: %s", ErrUnprocessable, msg)
 }
 
 // ScheduleNext returns the next count fire times of a stored schedule, from
@@ -120,7 +132,7 @@ func (s *Service) ScheduleNext(ctx context.Context, namespace, name string, coun
 		return nil, err
 	}
 	src := t.Spec.Source.Schedule
-	out, err := nextFireTimes(src.Cron, src.TimeZone, count, s.now())
+	out, err := nextFireTimes(src.Cron, src.TimeZone, count, s.now(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +143,7 @@ func (s *Service) ScheduleNext(ctx context.Context, namespace, name string, coun
 // SchedulePreview returns the next count fire times of an expression that need
 // not exist as a schedule yet.
 func (s *Service) SchedulePreview(expr, tz string, count int) (*ScheduleNextRuns, error) {
-	return nextFireTimes(expr, tz, count, s.now())
+	return nextFireTimes(expr, tz, count, s.now(), previewFields)
 }
 
 // queryCount parses the optional count query parameter.
