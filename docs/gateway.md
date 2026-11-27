@@ -817,7 +817,8 @@ replayed, as for tasks.
 - `issue=owner/repo#12` keeps the runs of that picked-up issue.
 
 Every record carries `source`, `ageSeconds` (since creation), `runningSeconds`
-(while `Running`) and, for pickup runs, `issue: {repo, number}`. `chain` falls
+(while `Running`) and, for runs that carry the pickup annotations (pickup
+runs and GitHub-source Trigger runs), `issue: {repo, number}`. `chain` falls
 back to the `ai.roundtable.io/run-template` annotation for runs that are not
 gateway runs. Get and events work for runs of every source; cancel only for
 gateway runs. The `list_runs` MCP tool takes the same filters.

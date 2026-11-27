@@ -97,6 +97,11 @@ func boolean(desc string) obj { return obj{"type": "boolean", "description": des
 
 func array(items obj) obj { return obj{"type": "array", "items": items} }
 
+func withDescription(o obj, desc string) obj {
+	o["description"] = desc
+	return o
+}
+
 func object(required []string, props obj) obj {
 	o := obj{"type": "object", "properties": props, "additionalProperties": false}
 	if len(required) > 0 {
@@ -553,7 +558,8 @@ var openAPISchemas = obj{
 		"source":         str("What started the run: gateway, trigger or pickup."),
 		"ageSeconds":     obj{"type": "integer", "description": "Seconds since the run was created."},
 		"runningSeconds": obj{"type": "integer", "description": "Seconds since the run started, while Running."},
-		"issue":          object([]string{"repo", "number"}, obj{"repo": str("owner/name"), "number": obj{"type": "integer"}}),
+		"issue": withDescription(object([]string{"repo", "number"}, obj{"repo": str("owner/name"), "number": obj{"type": "integer"}}),
+			"Set on runs that carry the pickup repo/issue annotations, whatever their source: pickup runs and GitHub-source Trigger runs."),
 	}),
 	"ScheduleNextRuns": object([]string{"cron", "timeZone", "times"}, obj{
 		"namespace": str("Schedule namespace (omitted by the preview)."), "name": str("Schedule name (omitted by the preview)."),

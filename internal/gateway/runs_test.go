@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
@@ -780,5 +781,38 @@ func TestListRunsAllSources(t *testing.T) {
 	resp, out = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/a-trigger/cancel", testToken, nil)
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(fmt.Sprint(out["error"]), "only gateway runs") {
 		t.Errorf("cancel trigger run: %d %v", resp.StatusCode, out)
+	}
+}
+
+func TestListRunsAllSendsLabelSelector(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = aiv1alpha1.AddToScheme(scheme)
+	run := templateChain("r-pickup", true)
+	run.Labels[chainrun.LabelRunSource] = chainrun.SourcePickup
+	odd := templateChain("odd", true)
+	odd.Labels[chainrun.LabelRunSource] = "mystery"
+	var selectors []string
+	k8s := interceptor.NewClient(fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(templateChain("plain", true), run, odd).Build(), interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			lo := &client.ListOptions{}
+			lo.ApplyOptions(opts)
+			if lo.LabelSelector != nil {
+				selectors = append(selectors, lo.LabelSelector.String())
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	svc := NewService(&Resolver{Client: k8s}, nil, Options{Namespace: testNS}, logr.Discard())
+	svc.Runs = k8s
+	got, err := svc.ListRuns(t.Context(), RunFilter{Source: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Run != "r-pickup" {
+		t.Errorf("runs = %v", got)
+	}
+	if len(selectors) != 1 || selectors[0] != chainrun.LabelRunSource {
+		t.Errorf("label selectors = %v, want [%s]", selectors, chainrun.LabelRunSource)
 	}
 }

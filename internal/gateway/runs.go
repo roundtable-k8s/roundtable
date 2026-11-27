@@ -511,7 +511,9 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	}
 	var list aiv1alpha1.ChainList
 	opts := []client.ListOption{client.InNamespace(ns)}
-	if source != sourceAll {
+	if source == sourceAll {
+		opts = append(opts, client.HasLabels{chainrun.LabelRunSource})
+	} else {
 		opts = append(opts, client.MatchingLabels{chainrun.LabelRunSource: source})
 	}
 	if err := s.Runs.List(ctx, &list, opts...); err != nil {
@@ -531,6 +533,8 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	})
 	out := make([]*RunRecord, 0, min(len(items), limit))
 	for i := range items {
+		// The label selector keeps unlabelled Chains out; isRun still drops a
+		// Chain whose label value is not a known run source.
 		if source == sourceAll && !isRun(&items[i]) {
 			continue
 		}
