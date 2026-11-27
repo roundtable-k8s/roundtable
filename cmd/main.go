@@ -671,12 +671,17 @@ const managerShutdownTimeout = 4 * time.Second
 // leaseReadTimeout bounds the best-effort start-up read of the Lease.
 const leaseReadTimeout = 3 * time.Second
 
+// serviceAccountNamespaceFile is where the pod's namespace is mounted. The
+// manager's leader election reads the same file when LeaderElectionNamespace
+// is unset, so the Lease read here must stay in step with it.
+const serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 // logLeaseHolder logs the current Lease holderIdentity and leaderTransitions
 // so the start-up log shows whether the previous holder released the lease
 // (empty holder) or this pod must wait it out. Best effort: any error is
 // logged and ignored.
 func logLeaseHolder(cfg *rest.Config, t leaderElectionTimings) {
-	nsBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	nsBytes, err := os.ReadFile(serviceAccountNamespaceFile)
 	if err != nil {
 		setupLog.Info("Lease holder unknown: namespace not detected", "error", err.Error())
 		return

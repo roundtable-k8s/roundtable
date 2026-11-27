@@ -1272,6 +1272,23 @@ var _ = Describe("Trigger controller", func() {
 			reconcileTrigger("runnow-late")
 			Expect(runsOf("runnow-late")).To(HaveLen(1))
 			Expect(getTrigger("runnow-late").Status.RecentFirings[0].SkipReason).To(BeEmpty())
+
+			// runNow stamps ev.Time with the clock, so it is never late; call
+			// fire directly with an old ev.Time and a manual firing so the
+			// test fails if the deadline check ignores manual.
+			old := TriggerEvent{Time: t.CreationTimestamp.Add(-5 * time.Hour), Headers: map[string]string{}}
+			_, err := r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "runnow-late"}, old,
+				aiv1alpha1.TriggerRunNowKey("req-old"), "", &triggerManualFiring{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runsOf("runnow-late")).To(HaveLen(2))
+			Expect(getTrigger("runnow-late").Status.RecentFirings[0].SkipReason).To(BeEmpty())
+
+			// The same stale event as a schedule firing is skipped.
+			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "runnow-late"}, old,
+				old.Time.Format(time.RFC3339), "", nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runsOf("runnow-late")).To(HaveLen(2))
+			Expect(getTrigger("runnow-late").Status.RecentFirings[0].SkipReason).To(ContainSubstring("startingDeadlineSeconds"))
 		})
 
 		It("records a skipped firing and clears a run-now request for a missing Chain", func() {
@@ -1729,9 +1746,34 @@ var _ = Describe("Trigger controller", func() {
 
 			fireNow("kt-norecord", due)
 			Expect(finishedRuns("kt-norecord", "failed")).To(Equal(0.0))
+			var fired int
 			for _, ev := range drainEvents() {
 				Expect(ev).NotTo(ContainSubstring("TaskFailed"))
+				if strings.Contains(ev, "Normal Fired") {
+					fired++
+				}
 			}
+			Expect(fired).To(Equal(1), "the send path emits one Normal Fired Event")
+		})
+
+		It("dedupes a late redelivery of a slot already sent instead of re-sending or skipping it as missed", func() {
+			hour := int64(3600)
+			got := tasks()
+			t := scheduleKnightTrigger("kt-redeliver", func(s *aiv1alpha1.TriggerSpec) {
+				s.Source.Schedule.StartingDeadlineSeconds = &hour
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			reconcileTrigger("kt-redeliver")
+			fireNow("kt-redeliver", due)
+			Eventually(func() int { return len(got()) }, "10s").Should(Equal(1))
+
+			// Redelivered two hours later, past the deadline: already sent.
+			clock = due.Add(2 * time.Hour)
+			fireAt("kt-redeliver", due)
+			Consistently(func() int { return len(got()) }, "200ms").Should(Equal(1))
+			skipped := getTrigger("kt-redeliver").Status.RecentFirings[0]
+			Expect(skipped.SkipReason).To(ContainSubstring("duplicate dedupe key"))
+			Expect(skipped.SkipReason).NotTo(ContainSubstring("startingDeadlineSeconds"))
 		})
 
 		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
