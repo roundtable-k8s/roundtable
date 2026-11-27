@@ -63,9 +63,6 @@ var _ = Describe("Trigger", Ordered, Label(tierTrigger), func() {
 	}
 
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(3 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", triggerRelease, "charts/roundtable-operator",
 			"-n", triggerNamespace, "--create-namespace", "-f", triggerValues, "--set", "fullnameOverride="+triggerOperator, "--wait", "--timeout", "5m"))

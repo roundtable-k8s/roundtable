@@ -107,9 +107,6 @@ var _ = Describe("Schedule", Ordered, Label(tierSchedule), func() {
 	}
 
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(3 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart with the gateway on")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", scheduleRelease, "charts/roundtable-operator",
 			"-n", scheduleNamespace, "--create-namespace", "-f", gatewayValues,

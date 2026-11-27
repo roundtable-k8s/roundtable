@@ -62,9 +62,6 @@ var _ = Describe("Lost task", Ordered, Label(tierLost), func() {
 	)
 
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(3 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart with the local image")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", lostRelease, "charts/roundtable-operator",
 			"-n", lostNamespace, "--create-namespace", "-f", lostValues, "--wait", "--timeout", "5m"))

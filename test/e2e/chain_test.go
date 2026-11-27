@@ -58,9 +58,6 @@ var _ = Describe("Chain engine", Ordered, Label(tierChain), func() {
 	}
 
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(3 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", chainRelease, "charts/roundtable-operator",
 			"-n", chainNamespace, "--create-namespace", "-f", chainValues, "--wait", "--timeout", "5m"))
