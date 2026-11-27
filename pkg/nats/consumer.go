@@ -27,11 +27,13 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// The knight task consumer settings. They are copied from the runtimes'
-// subscribe() in roundtable-k8s/knights packages/core/src/nats/index.ts
-// (desiredConfig, ACK_WAIT_MS). Until the runtimes only bind to the consumer,
-// both sides create it, so these values must stay identical to theirs or the
-// two would keep rewriting each other's consumer.
+// The knight task consumer settings. The source of truth is the knights'
+// golden fixture pkg/nats/contract/testdata/consumer.knight-tasks.json (synced
+// from roundtable-k8s/knights packages/core/contract/fixtures by
+// `make contract-sync`); TestKnightTaskConsumerMatchesFixture fails if these
+// values drift from it. Until the runtimes only bind to the consumer, both
+// sides create it, so these values must stay identical to theirs or the two
+// would keep rewriting each other's consumer.
 const (
 	// KnightTaskAckWait is the heartbeat window (ACK_WAIT_MS), not the task
 	// timeout: a running task sends an in-progress ack well within it.

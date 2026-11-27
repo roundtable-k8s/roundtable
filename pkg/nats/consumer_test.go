@@ -19,7 +19,11 @@ package nats
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +42,51 @@ func TestKnightTaskConsumerConfig(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("KnightTaskConsumerConfig = %+v, want %+v", got, want)
+	}
+}
+
+// TestKnightTaskConsumerMatchesFixture builds the consumer from the knights'
+// golden fixture's filter subjects and compares every setting with the fixture.
+// The durable name is compared case-insensitively: the fixture was generated
+// from the lowercase knight name "galahad", while the operator (like the pod's
+// KNIGHT_NAME) uses the capitalized one, so only the case of the name part can
+// differ.
+func TestKnightTaskConsumerMatchesFixture(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(contractDir, "testdata", "consumer.knight-tasks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		DurableName    string                  `json:"durable_name"`
+		FilterSubjects []string                `json:"filter_subjects"`
+		AckPolicy      jetstream.AckPolicy     `json:"ack_policy"`
+		DeliverPolicy  jetstream.DeliverPolicy `json:"deliver_policy"`
+		MaxDeliver     int                     `json:"max_deliver"`
+		AckWait        int64                   `json:"ack_wait"`
+	}
+	if err := json.Unmarshal(data, &fx); err != nil {
+		t.Fatal(err)
+	}
+	const knight = "galahad"
+	got := KnightTaskConsumerConfig(knight, fx.FilterSubjects)
+
+	if !strings.EqualFold(got.Durable, fx.DurableName) {
+		t.Errorf("durable name = %q, fixture %q", got.Durable, fx.DurableName)
+	}
+	if !slices.Equal(got.FilterSubjects, fx.FilterSubjects) {
+		t.Errorf("filter subjects = %v, fixture %v", got.FilterSubjects, fx.FilterSubjects)
+	}
+	if got.AckPolicy != fx.AckPolicy {
+		t.Errorf("ack policy = %v, fixture %v", got.AckPolicy, fx.AckPolicy)
+	}
+	if got.DeliverPolicy != fx.DeliverPolicy {
+		t.Errorf("deliver policy = %v, fixture %v", got.DeliverPolicy, fx.DeliverPolicy)
+	}
+	if got.MaxDeliver != fx.MaxDeliver {
+		t.Errorf("max deliver = %d, fixture %d", got.MaxDeliver, fx.MaxDeliver)
+	}
+	if got.AckWait != time.Duration(fx.AckWait) {
+		t.Errorf("ack wait = %v, fixture %v", got.AckWait, time.Duration(fx.AckWait))
 	}
 }
 
