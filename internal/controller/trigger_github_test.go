@@ -18,8 +18,8 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -47,7 +47,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -238,6 +237,29 @@ func (f *triggerFakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		item.labels = slices.Delete(item.labels, i, i+1)
 	}
 	_, _ = w.Write([]byte(`[]`))
+}
+
+// conflictStatusClient answers every Trigger status patch with a conflict.
+type conflictStatusClient struct {
+	client.Client
+	conflicts int
+}
+
+func (c *conflictStatusClient) Status() client.SubResourceWriter {
+	return conflictStatusWriter{SubResourceWriter: c.Client.Status(), c: c}
+}
+
+type conflictStatusWriter struct {
+	client.SubResourceWriter
+	c *conflictStatusClient
+}
+
+func (w conflictStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if _, ok := obj.(*aiv1alpha1.Trigger); ok {
+		w.c.conflicts++
+		return apierrors.NewConflict(schema.GroupResource{Group: aiv1alpha1.GroupVersion.Group, Resource: "triggers"}, obj.GetName(), errors.New("the object has been modified"))
+	}
+	return w.SubResourceWriter.Patch(ctx, obj, patch, opts...)
 }
 
 var _ = Describe("Trigger GitHub source", func() {
@@ -474,20 +496,12 @@ var _ = Describe("Trigger GitHub source", func() {
 
 	It("requeues instead of failing when the status patch conflicts", func() {
 		githubTrigger("conflict", nil)
-		conflicts := 0
-		r.Client = interceptor.NewClient(k8sClient, interceptor.Funcs{
-			SubResourcePatch: func(ctx context.Context, c client.Client, sub string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-				if _, ok := obj.(*aiv1alpha1.Trigger); ok && sub == "status" {
-					conflicts++
-					return apierrors.NewConflict(schema.GroupResource{Group: aiv1alpha1.GroupVersion.Group, Resource: "triggers"}, obj.GetName(), errors.New("the object has been modified"))
-				}
-				return c.SubResource(sub).Patch(ctx, obj, patch, opts...)
-			},
-		})
+		cc := &conflictStatusClient{Client: k8sClient}
+		r.Client = cc
 		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conflict"}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Requeue).To(BeTrue()) //nolint:staticcheck // the reconciler requeues this way
-		Expect(conflicts).To(BeNumerically(">", 0))
+		Expect(cc.conflicts).To(BeNumerically(">", 0))
 	})
 
 	It("skips an event for a repository the Trigger does not list", func() {
