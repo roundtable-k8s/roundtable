@@ -303,6 +303,8 @@ The chart's CRDs are synced only at release, so a chart-installed CRD may lag
 the operator image: a newer field such as `spec.issuePickup.postRun: chain` is
 silently pruned until the next release ships the CRD. Apply the CRDs from the
 same revision as the operator (`make install`) before relying on a new field.
+With Helm, `helm upgrade` never upgrades the CRDs in the chart's `crds/`
+directory, so apply them first (see [install.md](install.md#5-upgrading-and-crds)).
 
 ## Post-run checks: builtin or chain
 

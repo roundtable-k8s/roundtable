@@ -79,6 +79,9 @@ spec:
 - Catch-up: after an operator outage only the **latest** missed tick is snapshotted (one
   snapshot, not one per missed tick). `status.workspace.lastScheduledSnapshot` records the
   last tick taken. A lost status write cannot duplicate a tick's snapshot.
+  The catch-up looks back at most one year from now: a tick older than that is
+  never caught up, which bounds the search for a per-minute schedule on a
+  long-idle Knight.
 - The operator evaluates the expression on each reconcile and requeues at the next tick;
   there is no CronJob or timer per Knight.
 - An unparsable `schedule` or `timeZone` is reported on the `WorkspaceSnapshots` condition
