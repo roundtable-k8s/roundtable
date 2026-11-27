@@ -464,6 +464,8 @@ type TriggerGitHubClaim struct {
 	// assignees are GitHub logins assigned to the item. GitHub ignores
 	// logins that cannot be assigned.
 	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=39
 	// +listType=set
 	// +optional
 	Assignees []string `json:"assignees,omitempty"`

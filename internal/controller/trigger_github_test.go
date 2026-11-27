@@ -441,6 +441,19 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(after).To(Equal(labelCalls))
 	})
 
+	It("skips an event whose payload has no valid item", func() {
+		githubTrigger("malformed", nil)
+		subject := natspkg.GitHubEventSubject(prefix, ns, "malformed")
+		Expect(cli.PublishJSON(subject, map[string]any{"title": "Forged"})).To(Succeed())
+		Eventually(func(g Gomega) {
+			st := getTrigger("malformed").Status
+			g.Expect(st.RecentFirings).To(HaveLen(1))
+			g.Expect(st.RecentFirings[0].Run).To(BeEmpty())
+			g.Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("github event has no valid item"))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+		Expect(runsOf("malformed")).To(BeEmpty())
+	})
+
 	It("skips an event for a repository the Trigger does not list", func() {
 		gh.add(&triggerGitHubItem{number: 1, title: "Fix the widget", author: "alice", labels: []string{"rt:ready"}})
 		githubTrigger("listed", func(s *aiv1alpha1.TriggerSpec) {

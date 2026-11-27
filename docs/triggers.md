@@ -315,8 +315,9 @@ queue rejection, `mergeGroupSha`.
 
 The message also carries a `Roundtable-Event-Key: <owner/name>#<number>`
 header (`<owner/name>#<number>@<kind>:<head sha>` with a state selector), the
-default dedupe key. `.Event.Subject` is the Trigger's subject and
-`.Event.Time` when the item was published.
+default dedupe key. `.Event.Subject` is the Trigger's subject. The poller
+renders `dedupeKey` before publishing, so `.Event.Time` is not available to a
+GitHub source's `dedupeKey`: keep it data-only (`.Event.Data`, `.Event.Subject`).
 
 ### Polling
 
@@ -447,7 +448,9 @@ merge queue rejection. `.Event.Data` then also has:
 | `mergeGroupSha` | the rejected merge group's commit (`merge-queue` only) |
 
 The event key is `<owner/name>#<number>@<failureKind>:<headSha>` (plus
-`:<mergeGroupSha>` for `merge-queue`), so one failure fires once and a new
+`:<mergeGroupSha>` for `merge-queue`). The `ci` key has no check names, so
+a second check failing on the same commit does not fire again (the retired
+builtin keyed on the names too). One failure fires once and a new
 push (or merge queue attempt) can fire again. A pull request has **one run**,
 `<chain>-<trigger>-<hash of owner/name#number>`, started again for each new
 failure once it finished; while it is active the pull request is left alone

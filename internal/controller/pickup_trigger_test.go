@@ -430,7 +430,7 @@ var _ = Describe("IssuePickup trigger engine helpers", func() {
 		rt := &aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: "ns"}}
 		spec := pickupTriggerSpec(rt, &aiv1alpha1.IssuePickupSpec{Repos: []string{"a/b"}, ChainRef: corev1.LocalObjectReference{Name: "pr"}})
 		Expect(validateGitHubSource(spec.Source.GitHub)).To(Succeed())
-		ev, err := githubEvent(githubItem{Repo: "a/b", Number: 1234567}, "s", time.Now())
+		ev, err := githubEvent(githubItem{Repo: "a/b", Number: 1234567}, "s")
 		Expect(err).NotTo(HaveOccurred())
 		data := triggerTemplateData{Event: ev, Run: triggerRunRef{Name: "pr-b-1234567", ID: "42"}, Reason: "labelled `needs-human`"}
 		in, err := renderTriggerTemplate("input", spec.Input, data)
