@@ -245,6 +245,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml and the v
 	HELM="$(HELM)" scripts/check-isolation-env.sh
 	HELM="$(HELM)" scripts/check-minimal-values.sh
 	HELM="$(HELM)" scripts/check-values-schema.sh
+	HELM="$(HELM)" scripts/check-dev-chart-version.sh
 	HELM="$(HELM)" scripts/check-quickstart-values.sh
 	HELM="$(HELM)" scripts/check-planner.sh
 	HELM="$(HELM)" scripts/check-arsenal-values.sh

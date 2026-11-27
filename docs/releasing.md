@@ -13,8 +13,8 @@
 
 ## Main-branch builds
 
-Every push to main publishes the chart as a pre-release, `X.Y.Z-dev.<short sha>`, with `appVersion` set to the commit SHA. It never touches a released version.
+Every push to main publishes the chart as a pre-release, `X.Y.Z-dev.g<short sha>` (the `g` keeps an all-digit SHA such as `0954706` from becoming an invalid SemVer identifier), with `appVersion` set to the commit SHA. It never touches a released version.
 
 ## After the release
 
-Bump `version` in `charts/roundtable-operator/Chart.yaml` to the next version (e.g. `0.25.0` to `0.26.0`) in a PR, so main builds publish as `0.26.0-dev.*`. Installs that pin image tags and the chart digest themselves (such as dapper-cluster) keep working unchanged.
+Bump `version` in `charts/roundtable-operator/Chart.yaml` to the next version (e.g. `0.25.0` to `0.26.0`) in a PR, so main builds publish as `0.26.0-dev.g*`. Installs that pin image tags and the chart digest themselves (such as dapper-cluster) keep working unchanged.
