@@ -704,7 +704,8 @@ included). The call waits up to 10 seconds for that and returns the run record
 (**200** once the run is `Failed`, else **202** with a `Location` to poll).
 
 - A finished run is a **409** (`{"error": "...", "state": "<phase>"}`).
-- A Chain the gateway didn't start is a **404**.
+- A run started by a Trigger or by issue pickup is a **403**: only gateway runs can be cancelled.
+- A Chain that is not a run copy is a **404**.
 - A task a knight already picked up is not recalled: the knight finishes or
   times out and its result is ignored.
 
@@ -740,10 +741,21 @@ read from the Chain every second or two, so a step that starts and finishes
 between two reads is reported only as its latest phase. Activity is not
 replayed, as for tasks.
 
-### `GET /v1/runs?namespace=&chain=&phase=&limit=`
+### `GET /v1/runs?namespace=&chain=&phase=&source=&active=&issue=&limit=`
 
-`{"runs": [...]}`: gateway-started runs, newest first, without `steps` and
+`{"runs": [...]}`: runs newest first, without `steps` and
 `output` (get one run for those). `limit` defaults to 20, at most 200.
+
+- `source=gateway|trigger|pickup|all` picks which runs are listed; the default
+  `gateway` lists the runs started through the gateway, as before.
+- `active=true` keeps runs that are `Running` or `Pending`.
+- `issue=owner/repo#12` keeps the runs of that picked-up issue.
+
+Every record carries `source`, `ageSeconds` (since creation), `runningSeconds`
+(while `Running`) and, for pickup runs, `issue: {repo, number}`. `chain` falls
+back to the `ai.roundtable.io/run-template` annotation for runs that are not
+gateway runs. Get and events work for runs of every source; cancel only for
+gateway runs. The `list_runs` MCP tool takes the same filters.
 
 ### Waits longer than 10 minutes
 

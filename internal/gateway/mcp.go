@@ -434,7 +434,7 @@ func addRunTools(s *mcp.Server, svc *Service) {
 	})
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_runs",
-		Description: "List chain runs started through this gateway, newest first.",
+		Description: "List chain runs, newest first: those started through this gateway by default, or set source (trigger, pickup, all), active and issue to see what the pipelines are doing. Records carry source, ageSeconds and, for pickup runs, the issue.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RunFilter) (*mcp.CallToolResult, ListRunsOutput, error) {
 		runs, err := svc.ListRuns(ctx, in)

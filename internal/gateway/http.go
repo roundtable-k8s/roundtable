@@ -398,7 +398,16 @@ func writeRun(w http.ResponseWriter, rec *RunRecord) {
 
 func (s *Service) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := RunFilter{Namespace: q.Get("namespace"), Chain: q.Get("chain"), Phase: q.Get("phase")}
+	f := RunFilter{Namespace: q.Get("namespace"), Chain: q.Get("chain"), Phase: q.Get("phase"),
+		Source: q.Get("source"), Issue: q.Get("issue")}
+	if v := q.Get("active"); v != "" {
+		active, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, fmt.Errorf("%w: active must be true or false", ErrInvalid))
+			return
+		}
+		f.Active = active
+	}
 	limit, err := queryInt(r, "limit")
 	if err != nil {
 		writeError(w, err)
