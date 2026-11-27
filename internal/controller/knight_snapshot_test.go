@@ -259,7 +259,7 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 })
 
 var _ = Describe("Knight workspace from a snapshot (#341)", func() {
-	newSnapshot := func(name string, ready bool, restoreSize int64) {
+	newSnapshot := func(name string, ready bool, restoreSize any) {
 		vs := &unstructured.Unstructured{}
 		vs.SetGroupVersionKind(rtruntime.VolumeSnapshotGVK)
 		vs.SetName(name)
@@ -324,6 +324,33 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 		defer deleteKnight(k2)
 		reconcileKnight(fork(), k2)
 		pvc, err = getPVC("fork-small")
+		Expect(err).NotTo(HaveOccurred())
+		got = pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		Expect(got.Cmp(resource.MustParse("3Gi"))).To(Equal(0))
+	})
+
+	// An external-snapshotter may report status.restoreSize as a Quantity
+	// string; the int64 byte count is only the usual shape (#511).
+	It("reads status.restoreSize given as a Quantity string", func() {
+		newSnapshot("fork-src-qty", true, "5Gi")
+		k := forkKnight("fork-qty", "fork-src-qty", "1Gi")
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+		reconcileKnight(fork(), k)
+
+		pvc, err := getPVC("fork-qty")
+		Expect(err).NotTo(HaveOccurred())
+		got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		Expect(got.Cmp(resource.MustParse("5Gi"))).To(Equal(0), "got %s", got.String())
+		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonRestoredFromSnapshot))
+
+		// spec.workspace.size still wins when it is larger.
+		newSnapshot("fork-src-qty-small", true, "1Gi")
+		k2 := forkKnight("fork-qty-small", "fork-src-qty-small", "3Gi")
+		Expect(k8sClient.Create(ctx, k2)).To(Succeed())
+		defer deleteKnight(k2)
+		reconcileKnight(fork(), k2)
+		pvc, err = getPVC("fork-qty-small")
 		Expect(err).NotTo(HaveOccurred())
 		got = pvc.Spec.Resources.Requests[corev1.ResourceStorage]
 		Expect(got.Cmp(resource.MustParse("3Gi"))).To(Equal(0))

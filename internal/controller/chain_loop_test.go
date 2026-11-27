@@ -563,6 +563,26 @@ var _ = Describe("Chain when conditions and loops", func() {
 		Expect(loop.Loop.Iteration).To(BeEquivalentTo(2))
 		Expect(loop.Loop.Steps).To(HaveLen(2), "status keeps one entry per body step")
 		Expect(len(loop.Loop.Steps[1].Output)).To(BeNumerically("<", 4200))
+		// loop.history keeps one entry per finished body task, in order (#413).
+		type histKey struct {
+			Round int32
+			Step  string
+			Phase aiv1alpha1.ChainStepPhase
+		}
+		var hist []histKey
+		for _, h := range loop.Loop.History {
+			hist = append(hist, histKey{h.Round, h.Step, h.Phase})
+			Expect(h.TaskID).NotTo(BeEmpty())
+			Expect(h.StartedAt).NotTo(BeNil())
+			Expect(h.FinishedAt).NotTo(BeNil())
+		}
+		Expect(hist).To(Equal([]histKey{
+			{1, "fix", aiv1alpha1.ChainStepPhaseSucceeded},
+			{1, "rereview", aiv1alpha1.ChainStepPhaseSucceeded},
+			{2, "fix", aiv1alpha1.ChainStepPhaseSucceeded},
+			{2, "rereview", aiv1alpha1.ChainStepPhaseSucceeded},
+		}))
+		Expect(loop.Loop.History[0].OutputSummary).To(Equal("pushed tests"))
 		Expect(status(c, "escalate").Phase).To(Equal(aiv1alpha1.ChainStepPhaseSkipped))
 		Expect(tasksFor("merge")).To(HaveLen(1))
 		Expect(tasksFor("escalate")).To(BeEmpty())

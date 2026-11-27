@@ -207,3 +207,46 @@ func TestApplyTableDefaultsArsenals(t *testing.T) {
 		assert.Empty(t, k.Spec.Arsenals)
 	})
 }
+
+// inheritTable must copy the table's egress, not alias it: the knight's
+// in-memory spec is mutated later (isolation settings, status), and one
+// knight's change must not leak into the table or its siblings (#444).
+func TestInheritTableEgressIsACopy(t *testing.T) {
+	tableEgress := &aiv1alpha1.KnightEgress{
+		AllowedHosts:    []aiv1alpha1.EgressHostEntry{aiv1alpha1.NewEgressHostEntry("api.example.com")},
+		AllowedPorts:    []int32{443},
+		AllowedServices: []aiv1alpha1.EgressService{{Name: "svc", Namespace: "ns"}},
+	}
+	rt := &aiv1alpha1.RoundTable{Spec: aiv1alpha1.RoundTableSpec{
+		Defaults: &aiv1alpha1.RoundTableDefaults{Egress: tableEgress},
+	}}
+
+	t.Run("knight without egress gets a deep copy", func(t *testing.T) {
+		k := isolationTestKnight()
+		k.Spec.Egress = nil
+		inheritTable(k, rt)
+
+		require.NotNil(t, k.Spec.Egress)
+		assert.Equal(t, tableEgress, k.Spec.Egress)
+		assert.NotSame(t, tableEgress, k.Spec.Egress)
+
+		k.Spec.Egress.AllowedPorts[0] = 8443
+		k.Spec.Egress.AllowedServices[0].Name = "changed"
+		assert.Equal(t, []int32{443}, tableEgress.AllowedPorts)
+		assert.Equal(t, "svc", tableEgress.AllowedServices[0].Name)
+	})
+	t.Run("two knights do not share one egress object", func(t *testing.T) {
+		a, b := isolationTestKnight(), isolationTestKnight()
+		a.Spec.Egress, b.Spec.Egress = nil, nil
+		inheritTable(a, rt)
+		inheritTable(b, rt)
+		assert.NotSame(t, a.Spec.Egress, b.Spec.Egress)
+	})
+	t.Run("knight egress wins", func(t *testing.T) {
+		own := &aiv1alpha1.KnightEgress{AllowedPorts: []int32{22}}
+		k := isolationTestKnight()
+		k.Spec.Egress = own
+		inheritTable(k, rt)
+		assert.Same(t, own, k.Spec.Egress)
+	})
+}
