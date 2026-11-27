@@ -60,6 +60,7 @@ const (
 	tierTrigger = "trigger"
 	tierLost    = "lost"
 	tierRestart = "restart"
+	tierGateway = "gateway"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -105,7 +106,7 @@ var _ = BeforeSuite(func() {
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the stub LLM image into Kind")
 	}
 
-	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) {
+	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) || tierSelected(tierGateway) {
 		buildStubKnightImage()
 	}
 
