@@ -259,9 +259,6 @@ func (f *fanoutFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	f.seq++
 	return f.seq, nil
 }
-func (f *fanoutFakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return f.seq, nil
-}
 func (f *fanoutFakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return f.seq, nil
 }

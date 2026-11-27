@@ -17,7 +17,10 @@ limitations under the License.
 package nats
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"math"
 
 	"github.com/roundtable-k8s/roundtable/pkg/nats/contract"
 )
@@ -31,15 +34,43 @@ import (
 // schema property has no field here or a golden fixture does not survive a
 // decode and re-encode through these types.
 
+// Refusal is the reason a knight refused a task (TaskResult.Refused). It
+// marshals as a string; it decodes a string, true (RefusedUnspecified), and
+// false or null (empty), so a runtime that sends a boolean flag does not make
+// the whole TaskResult fail to decode.
+type Refusal string
+
+// UnmarshalJSON accepts a string, a boolean or null.
+func (r *Refusal) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	switch string(b) {
+	case "null", "false":
+		*r = ""
+		return nil
+	case "true":
+		*r = RefusedUnspecified
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("refused: want a string, boolean or null: %w", err)
+	}
+	*r = Refusal(s)
+	return nil
+}
+
 // Refusal reasons a knight may report in TaskResult.Refused.
 const (
+	// RefusedUnspecified: the knight sent refused: true without a reason. A
+	// plain refusal, not a quota one.
+	RefusedUnspecified Refusal = "refused"
 	// RefusedCredits: the provider account is out of credits (pi-knight, e.g.
 	// OpenRouter 402). Does not reset on its own; the operator treats it as a
 	// plain failure.
-	RefusedCredits = string(contract.TaskResultRefusedCredits)
+	RefusedCredits = Refusal(contract.TaskResultRefusedCredits)
 	// RefusedQuota: a plan quota window is used up (claude-knight). Resets
 	// later; the operator defers the step like UsageLimited (#321).
-	RefusedQuota = string(contract.TaskResultRefusedQuota)
+	RefusedQuota = Refusal(contract.TaskResultRefusedQuota)
 )
 
 // Transient failure reasons a knight may report in TaskResult.TransientReason.
@@ -111,6 +142,34 @@ type TokenUsage struct {
 	Output     int64 `json:"output,omitempty"`
 	CacheRead  int64 `json:"cacheRead,omitempty"`
 	CacheWrite int64 `json:"cacheWrite,omitempty"`
+}
+
+// UnmarshalJSON accepts any JSON number for each count (the contract allows
+// a fractional one) and rounds it down, so a fractional count does not fail
+// the whole TaskResult decode.
+func (t *TokenUsage) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Input      *float64 `json:"input"`
+		Output     *float64 `json:"output"`
+		CacheRead  *float64 `json:"cacheRead"`
+		CacheWrite *float64 `json:"cacheWrite"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	floor := func(f *float64) int64 {
+		if f == nil || math.IsNaN(*f) {
+			return 0
+		}
+		return int64(math.Floor(*f))
+	}
+	*t = TokenUsage{
+		Input:      floor(raw.Input),
+		Output:     floor(raw.Output),
+		CacheRead:  floor(raw.CacheRead),
+		CacheWrite: floor(raw.CacheWrite),
+	}
+	return nil
 }
 
 // TaskResult is the JSON payload received from NATS for a completed task
@@ -218,7 +277,7 @@ type TaskResult struct {
 	// Refused names why the knight refused the task before running it
 	// (optional): RefusedCredits or RefusedQuota. RefusedQuota is handled
 	// like UsageLimited; RefusedCredits is a plain failure.
-	Refused string `json:"refused,omitempty"`
+	Refused Refusal `json:"refused,omitempty"`
 }
 
 // QuotaRefused reports whether the knight refused the task because a plan

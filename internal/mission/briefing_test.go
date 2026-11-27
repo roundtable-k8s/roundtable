@@ -83,9 +83,6 @@ func (f *fakeNATS) KVGet(context.Context, string, string) ([]byte, error) {
 }
 func (f *fakeNATS) KVDelete(context.Context, string, string) error   { return nil }
 func (f *fakeNATS) KVKeys(context.Context, string) ([]string, error) { return nil, nil }
-func (f *fakeNATS) ConsumerAckFloor(context.Context, string, string) (uint64, error) {
-	return 0, nil
-}
 func (f *fakeNATS) ConsumerDeliveredSeq(context.Context, string, string) (uint64, error) {
 	return 0, nil
 }

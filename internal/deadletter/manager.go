@@ -283,22 +283,33 @@ func ensureBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyVal
 
 func ensureConsumer(ctx context.Context, js jetstream.JetStream, cfg TableConfig) error {
 	stream := AdvisoriesStreamName(cfg.TasksStream)
-	_, err := js.Consumer(ctx, stream, ConsumerName)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
-		return fmt.Errorf("dead-letter consumer info: %w", err)
-	}
-	if _, err := js.CreateConsumer(ctx, stream, jetstream.ConsumerConfig{
+	want := jetstream.ConsumerConfig{
 		Durable:       ConsumerName,
 		Description:   "Round Table operator: turns max-deliveries advisories into dead-letter entries",
 		DeliverPolicy: jetstream.DeliverAllPolicy,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       consumerAckWait,
 		MaxDeliver:    -1,
-	}); err != nil {
-		return fmt.Errorf("dead-letter consumer: %w", err)
+	}
+	cons, err := js.Consumer(ctx, stream, ConsumerName)
+	if errors.Is(err, jetstream.ErrConsumerNotFound) {
+		if _, err := js.CreateConsumer(ctx, stream, want); err != nil {
+			return fmt.Errorf("dead-letter consumer: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("dead-letter consumer info: %w", err)
+	}
+	// Fix config drift, as ensureStream does: an older operator may have
+	// created the consumer with other values.
+	have := cons.CachedInfo().Config
+	if have.AckWait == want.AckWait && have.MaxDeliver == want.MaxDeliver {
+		return nil
+	}
+	have.AckWait, have.MaxDeliver = want.AckWait, want.MaxDeliver
+	if _, err := js.UpdateConsumer(ctx, stream, have); err != nil {
+		return fmt.Errorf("dead-letter consumer update: %w", err)
 	}
 	return nil
 }

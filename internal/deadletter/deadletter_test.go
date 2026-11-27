@@ -438,6 +438,30 @@ func TestEnsureIsIdempotentAndUpdatesMaxAge(t *testing.T) {
 	}
 }
 
+func TestEnsureConsumerFixesDrift(t *testing.T) {
+	e := newEnv(t)
+	stream := AdvisoriesStreamName(testTasks)
+	cons, err := e.js.Consumer(context.Background(), stream, ConsumerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := cons.CachedInfo().Config
+	cfg.AckWait, cfg.MaxDeliver = time.Hour, 3
+	if _, err := e.js.UpdateConsumer(context.Background(), stream, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureConsumer(context.Background(), e.js, e.cfg); err != nil {
+		t.Fatal(err)
+	}
+	info, err := e.consumerInfo(stream, ConsumerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Config.AckWait != consumerAckWait || info.Config.MaxDeliver != -1 {
+		t.Fatalf("consumer config after ensure = AckWait %v MaxDeliver %d", info.Config.AckWait, info.Config.MaxDeliver)
+	}
+}
+
 func TestResultClassification(t *testing.T) {
 	f := false
 	cases := []struct {
@@ -447,10 +471,10 @@ func TestResultClassification(t *testing.T) {
 		{result{TaskResult: natspkg.TaskResult{Success: &f, Error: "boom"}}, ReasonFailed},
 		{result{TaskResult: natspkg.TaskResult{Success: &f, Lost: true}}, ReasonLost},
 		{result{TaskResult: natspkg.TaskResult{Success: &f, UsageLimited: true}}, ReasonUsageLimited},
-		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"quota"`)}, ReasonUsageLimited},
-		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"credits"`)}, ReasonRefused},
-		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`"policy"`)}, ReasonRefused},
-		{result{TaskResult: natspkg.TaskResult{Success: &f}, Refused: json.RawMessage(`false`)}, ReasonFailed},
+		{result{TaskResult: natspkg.TaskResult{Success: &f, Refused: natspkg.RefusedQuota}}, ReasonUsageLimited},
+		{result{TaskResult: natspkg.TaskResult{Success: &f, Refused: natspkg.RefusedCredits}}, ReasonRefused},
+		{result{TaskResult: natspkg.TaskResult{Success: &f, Refused: "policy"}}, ReasonRefused},
+		{result{TaskResult: natspkg.TaskResult{Success: &f, Refused: ""}}, ReasonFailed},
 		{result{TaskResult: natspkg.TaskResult{Success: &f, Error: "Task timed out after 120s"}}, ReasonTimeout},
 	}
 	for i, c := range cases {
