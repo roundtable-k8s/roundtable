@@ -293,7 +293,7 @@ func TestSnapshotMCPTools(t *testing.T) {
 	e := newSnapEnv(t, true)
 	ctx := t.Context()
 	cs := connectMCP(ctx, t, e.server.URL)
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 	tools, err := cs.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
