@@ -975,8 +975,19 @@ func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1
 		key := holdKey(trg.Namespace, trg.Name, repo)
 		labels := prometheus.Labels{"namespace": trg.Namespace, "trigger": trg.Name, "repository": repo}
 		if unknown[repo] {
-			if v, ok := r.holdSince.Load(key); ok {
-				lines = append(lines, fmt.Sprintf("%s: pull requests could not be listed, held for %s", repo, holdAge(now.Sub(v.(time.Time)))))
+			// After an operator restart holdSince is empty: resume the hold
+			// from the condition, as for a listed repository below, so a
+			// failed first listing keeps the repository in the message.
+			since, ok := r.holdSince.Load(key)
+			if !ok {
+				if c := meta.FindStatusCondition(trg.Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld); c != nil && c.Status == metav1.ConditionTrue && c.LastTransitionTime.Time.Before(now) && conditionNamesRepository(c.Message, repo) {
+					since, _ = r.holdSince.LoadOrStore(key, c.LastTransitionTime.Time)
+					metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels).Set(float64(since.(time.Time).Unix()))
+					ok = true
+				}
+			}
+			if ok {
+				lines = append(lines, fmt.Sprintf("%s: pull requests could not be listed, held for %s", repo, holdAge(now.Sub(since.(time.Time)))))
 			}
 			continue
 		}

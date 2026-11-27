@@ -77,6 +77,8 @@ type triggerFakeGitHub struct {
 	lists, labelCalls int
 	// failLabels makes label writes fail with 500.
 	failLabels bool
+	// failPulls makes pull request listings fail with 500.
+	failPulls bool
 	// rateLimitReset, when set, answers list requests with a primary rate
 	// limit error resetting then.
 	rateLimitReset time.Time
@@ -130,6 +132,11 @@ func (f *triggerFakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if pm := triggerPullsRoute.FindStringSubmatch(req.URL.EscapedPath()); pm != nil && req.Method == http.MethodGet {
+		if f.failPulls {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"boom"}`))
+			return
+		}
 		repo, _ := url.PathUnescape(pm[1])
 		out := []map[string]any{}
 		for _, it := range f.items[repo] {
@@ -505,7 +512,6 @@ var _ = Describe("Trigger GitHub source", func() {
 	})
 
 	It("skips an event for a repository the Trigger does not list", func() {
-		gh.add(&triggerGitHubItem{number: 1, title: "Fix the widget", author: "alice", labels: []string{"rt:ready"}})
 		githubTrigger("listed", func(s *aiv1alpha1.TriggerSpec) {
 			s.Source.GitHub.Claim = &aiv1alpha1.TriggerGitHubClaim{AddLabels: []string{"rt:in-progress"}, RemoveLabels: []string{"rt:ready"}}
 		})
@@ -720,6 +726,46 @@ var _ = Describe("Trigger GitHub source", func() {
 		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.Repositories = []string{"acme/other"} })
 		poll("held2")
 		cleared()
+	})
+
+	It("keeps a held repository named when its first listing after a restart fails", func() {
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("restart", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "restart") })
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("restart").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		labels := prometheus.Labels{"namespace": ns, "trigger": "restart", "repository": repo}
+
+		poll("restart")
+		before := heldCond()
+		Expect(before).NotTo(BeNil())
+		Expect(before.Status).To(Equal(metav1.ConditionTrue))
+		transition := before.LastTransitionTime
+		started := clock.Unix()
+
+		// The operator restarts: no hold start in memory or on the gauges.
+		r.clearRepositoryHolds(ns, "restart")
+		clock = clock.Add(30 * time.Minute)
+		gh.mu.Lock()
+		gh.failPulls = true
+		gh.mu.Unlock()
+		DeferCleanup(func() {
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			gh.failPulls = false
+		})
+		poll("restart")
+
+		c := heldCond()
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerBreakingPullRequest))
+		Expect(c.Message).To(ContainSubstring(repo + ": pull requests could not be listed, held for 30m0s"))
+		Expect(c.LastTransitionTime).To(Equal(transition))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
 	})
 
 	It("starts a second held repository's hold when it becomes held, not at the first one's start", func() {
