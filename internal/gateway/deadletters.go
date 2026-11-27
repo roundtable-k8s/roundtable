@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*D
 			(f.Reason != "" && string(r.Reason) != f.Reason) ||
 			(f.State != "" && string(r.State) != f.State)
 	})
-	slices.SortFunc(recs, func(a, b DeadLetterRecord) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	slices.SortFunc(recs, func(a, b DeadLetterRecord) int { return deadLetteredTime(b).Compare(deadLetteredTime(a)) })
 	total := len(recs)
 	if len(recs) > limit {
 		recs = recs[:limit]
@@ -120,6 +121,18 @@ func (s *Service) ListDeadLetters(ctx context.Context, f DeadLetterFilter) ([]*D
 	}
 	return out, total, nil
 }
+
+// deadLetteredTime is when the entry was dead-lettered, falling back to the
+// last update for records written before DeadLetteredAt existed.
+func deadLetteredTime(r DeadLetterRecord) time.Time {
+	if !r.DeadLetteredAt.IsZero() {
+		return r.DeadLetteredAt
+	}
+	return r.UpdatedAt
+}
+
+// retrySuffix matches the "-r<N>" a retry appends to a task ID.
+var retrySuffix = regexp.MustCompile(`-r\d+$`)
 
 // GetDeadLetter returns one entry including its original task payload.
 func (s *Service) GetDeadLetter(ctx context.Context, taskID, table string) (*DeadLetterView, error) {
@@ -213,8 +226,16 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 		return nil, fmt.Errorf("%w: knight %s/%s is suspended", ErrUnavailable, ns, knightName)
 	}
 
+	if e.Table != "" && t.RoundTable != e.Table {
+		return nil, fmt.Errorf("%w: knight %s/%s belongs to RoundTable %q, dead letter %s to %q",
+			ErrInvalid, ns, knightName, t.RoundTable, req.TaskID, e.Table)
+	}
+
 	attempt := max(e.Attempt, 1) + 1
-	newID := fmt.Sprintf("%s-r%d", e.TaskID, attempt)
+	// RetryOf holds the previous attempt's ID, not the original, so always
+	// strip the trailing -rN from the task ID to avoid nesting (t-r2-r4).
+	base := retrySuffix.ReplaceAllString(e.TaskID, "")
+	newID := fmt.Sprintf("%s-r%d", base, attempt)
 	if !taskIDPattern.MatchString(newID) {
 		return nil, fmt.Errorf("%w: retry task id %q is not a valid task id", ErrUnprocessable, newID)
 	}
@@ -222,7 +243,7 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 	payload.TaskID = newID
 	payload.Attempt = attempt
 	payload.RetryOf = e.TaskID
-	payload.PreviousFailure = truncateUTF8(e.Error, maxPreviousFailureBytes)
+	payload.PreviousFailure = truncateUTF8(previousFailure(e), maxPreviousFailureBytes)
 	if payload.RunID == "" {
 		payload.RunID = string(uuid.NewUUID())
 	}
@@ -281,6 +302,19 @@ func (s *Service) findDeadLetterByKey(ctx context.Context, key string) (*DeadLet
 		}
 	}
 	return nil, ErrNotFound
+}
+
+// previousFailure is the failure text handed to the retried task. Lost tasks
+// often carry no error, so say what is known instead of nothing.
+func previousFailure(e *deadletter.Entry) string {
+	if e.Error != "" {
+		return e.Error
+	}
+	reason := string(e.Reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	return fmt.Sprintf("previous attempt was dead-lettered (reason: %s) without an error message; it may have left partial work", reason)
 }
 
 // truncateUTF8 cuts s to at most n bytes without splitting a character.

@@ -111,6 +111,10 @@ type Record struct {
 	Attempt   int       `json:"attempt"`
 	Subject   string    `json:"subject"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// DeadLetteredAt is when the task was dead-lettered; unlike UpdatedAt it
+	// does not move when the entry is retried or resolved. Zero on records
+	// written before the field existed.
+	DeadLetteredAt time.Time `json:"deadLetteredAt,omitzero"`
 	// RetriedAs is the task ID the retry API published (state retried).
 	RetriedAs string `json:"retriedAs,omitempty"`
 }
