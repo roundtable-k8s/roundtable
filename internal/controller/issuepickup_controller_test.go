@@ -969,7 +969,7 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
 			Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
 			Expect(c.Status.RunsFailed).To(BeZero())
-			Expect(c.Status.RunsCompleted).To(Equal(int32(1)))
+			Expect(c.Status.RunsCompleted).To(Equal(int64(1)))
 			merge := c.Status.StepStatuses[1]
 			Expect(merge.Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
 			Expect(merge.Reason).To(Equal(stepReasonQueuedAtTimeout))
