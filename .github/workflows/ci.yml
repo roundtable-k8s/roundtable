@@ -134,15 +134,15 @@ jobs:
       - name: Generate code
         run: make generate manifests
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -172,9 +172,7 @@ jobs:
           cache: true
 
       - name: Generate CRD Manifests
-        run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
-          controller-gen crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+        run: make manifests
 
       - name: Copy CRDs into chart
         run: |
