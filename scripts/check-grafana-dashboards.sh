@@ -62,6 +62,12 @@ for f in "$chart"/dashboards/*.json; do
     fail "$f lacks datasource/namespace/table variables"
   jq -e '.templating.list[] | select(.name=="table") | .multi' "$f" >/dev/null || fail "$f: table must be multi-select"
   bad_ds "$f" && fail "$f hard-codes a datasource"
+  # Every defined variable must be referenced by at least one panel expression.
+  for v in $(jq -r '.templating.list[].name' "$f"); do
+    [ "$v" = datasource ] && continue
+    jq -e --arg v "$v" '[.panels[].targets[].expr | select(contains("$" + $v))] | length > 0' "$f" >/dev/null ||
+      fail "$f: variable \$$v is not used by any panel"
+  done
   while IFS= read -r expr; do
     for m in $(grep -oE '\b(roundtable|kube|keda)_[a-z_]+' <<<"$expr"); do
       grep -qw "$m" <<<"$known" || fail "$f: unknown metric $m in: $expr"
