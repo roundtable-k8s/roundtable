@@ -310,7 +310,7 @@ match it with `prPipeline.postRun`.
 | | `builtin` (default) | `chain` |
 |---|---|---|
 | Merge verification | operator: parses the `PRs:` and `Verdict:` lines, posts a missing review, queues an open ship-it PR, hands problems back | `verify` step: `rt-verify` |
-| Failed run | operator: needs-human, comment naming the failed steps, in-progress removed | `handback` step: `rt-handback` |
+| Failed run | operator: needs-human, comment naming the failed steps, in-progress removed (if every failed step timed out and the issue has an open non-draft PR, the PR is linked instead of needs-human) | `handback` step: `rt-handback` |
 | Split parent | operator: closes it once every sub-issue is completed (polls) | `close_parent` step: `rt-close-parent` |
 | Operator after a run | all of the above | only releases the issue (below) |
 | Chart | `prPipeline.postRun: builtin` | `prPipeline.postRun: chain` ([`examples/chain-pr-pipeline-postrun.yaml`](../examples/chain-pr-pipeline-postrun.yaml)) |
@@ -367,8 +367,11 @@ finished run it also releases the issue if the run left it open with
 
 - the issue already has `needs-human` (escalate, verify or handback labelled
   it): `rt:in-progress` is removed;
-- the run did not succeed (Failed, e.g. `handback` itself failed, or
-  PartiallySucceeded): `needs-human`, a comment naming the failed steps, and
+- every failed step timed out and the issue has an open, non-draft PR (an
+  `rt/<issue>-` branch or `Closes #<issue>` body, not labelled `needs-human`):
+  a comment linking the PR and `rt:in-progress` removed, no `needs-human`;
+- otherwise, if the run did not succeed (Failed, e.g. `handback` itself
+  failed, or PartiallySucceeded): `needs-human`, a comment naming the failed steps, and
   `rt:in-progress` removed;
 - the run succeeded: nothing. The queued PRs close the issue when they merge,
   and `close_parent` settled a split parent.

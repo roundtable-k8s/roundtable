@@ -1049,13 +1049,22 @@ var _ = Describe("IssuePickup controller", func() {
 		})
 
 		It("matches the PR by a Closes #N body when the branch differs", func() {
-			failWith(778, "step timed out after 3600s")
+			name := failWith(778, "step timed out after 3600s")
 			gh.addPR(repo, 90, "feature/other")
 			gh.mu.Lock()
 			gh.pulls[repo][0].Body = "Fixes things.\n\nCloses #778"
 			gh.mu.Unlock()
 			tick()
 			Expect(gh.labels(repo, 778)).To(BeEmpty())
+			Expect(gh.commentsOn(repo, 778)).To(HaveLen(2))
+			Expect(handled(name)).To(BeTrue())
+		})
+
+		It("labels needs-human when the rt/<issue>- PR is in another repo", func() {
+			failWith(784, "step timed out after 3600s")
+			gh.addPR("acme/other", 91, "rt/784-fix")
+			tick()
+			Expect(gh.labels(repo, 784)).To(ConsistOf("needs-human"))
 		})
 
 		It("labels needs-human when the PR of a timed-out run is a draft", func() {
