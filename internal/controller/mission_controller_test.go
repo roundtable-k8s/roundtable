@@ -1114,6 +1114,27 @@ var _ = Describe("Mission Controller", func() {
 			Expect(missionGone()).To(BeTrue())
 		})
 
+		It("deletes the streams of a retained mission whose cleanup kept them", func() {
+			// The Cleanup phase keeps the streams for cleanupPolicy Retain but
+			// still marks CleanupComplete; deleting the Mission must remove them.
+			m := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, m)).To(Succeed())
+			m.Spec.CleanupPolicy = "Retain"
+			Expect(k8sClient.Update(ctx, m)).To(Succeed())
+
+			startDeletion("rt_msn_tasks", "rt_msn_results", metav1.Condition{
+				Type:    aiv1alpha1.ConditionCleanupComplete,
+				Status:  metav1.ConditionTrue,
+				Reason:  aiv1alpha1.ReasonCleanupComplete,
+				Message: "Mission cleanup completed",
+			})
+
+			_, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rec.deletedStreams()).To(ConsistOf("rt_msn_tasks", "rt_msn_results", "rt_msn_tasks_EVENTS"))
+			Expect(missionGone()).To(BeTrue())
+		})
+
 		It("treats an already-missing stream as deleted", func() {
 			rec.streamErr = func(name string) error {
 				return fmt.Errorf("stream %s: %w", name, jetstream.ErrStreamNotFound)
