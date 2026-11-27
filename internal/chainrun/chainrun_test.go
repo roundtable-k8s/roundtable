@@ -18,6 +18,7 @@ package chainrun
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,35 @@ func TestName(t *testing.T) {
 	}
 	if got := Name("base"); got != "base" {
 		t.Fatal(got)
+	}
+}
+
+var dnsName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+
+func TestNameEmptyLastPart(t *testing.T) {
+	cases := []struct {
+		name  string
+		base  string
+		parts []string
+		want  string
+	}{
+		{"empty last part drops separator", "pr-pipeline", []string{"mid", ""}, "pr-pipeline-mid"},
+		{"unsafe-only last part drops separator", "pr-pipeline", []string{"!!!"}, "pr-pipeline"},
+		{"empty base falls back to hash of last part", "", []string{"!!!"}, KeyHash("!!!")},
+		{"empty base and empty last part hash the empty part", "", []string{""}, KeyHash("")},
+		{"no parts and empty base", "", nil, ""},
+	}
+	for _, tc := range cases {
+		got := Name(tc.base, tc.parts...)
+		if got != tc.want {
+			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+		if got != "" && (!dnsName.MatchString(got) || len(got) > 253) {
+			t.Fatalf("%s: invalid name %q", tc.name, got)
+		}
+	}
+	if Name("", "!!!") == Name("", "???") {
+		t.Fatal("different unsafe last parts collided on an empty name")
 	}
 }
 
