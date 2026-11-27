@@ -192,6 +192,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml and the v
 	HELM="$(HELM)" scripts/check-leader-election.sh
 	HELM="$(HELM)" scripts/check-mission-ttl.sh
 	HELM="$(HELM)" scripts/check-pod-scheduling.sh
+	HELM="$(HELM)" scripts/check-helm-test.sh
 	HELM="$(HELM)" scripts/check-image-tag.sh
 	HELM="$(HELM)" scripts/check-networkpolicy.sh
 	HELM="$(HELM)" scripts/check-metrics.sh
