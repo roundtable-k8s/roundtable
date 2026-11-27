@@ -41,6 +41,7 @@ const (
 	chainManifests = "test/e2e/testdata/chain.yaml"
 	chainName      = "engine"
 	chainKnight    = "stub"
+	chainRunID     = "run-1"
 )
 
 var _ = Describe("Chain engine", Ordered, Label(tierChain), func() {
@@ -100,12 +101,20 @@ var _ = Describe("Chain engine", Ordered, Label(tierChain), func() {
 			g.Expect(out).To(Equal("Ready"))
 		}, 5*time.Minute).Should(Succeed())
 
+		By("starting a run with the run annotation (an untriggered Chain stays Idle)")
+		_, err := utils.Run(exec.Command("kubectl", "annotate", "chain", chainName, "-n", chainNamespace,
+			"--overwrite", "ai.roundtable.io/run="+chainRunID))
+		Expect(err).NotTo(HaveOccurred())
+
 		By("waiting for the run to succeed")
 		Eventually(func(g Gomega) {
-			out, err := kget("chain", chainName, "-o", "jsonpath={.status.phase}")
+			out, err := kget("chain", chainName, "-o", "jsonpath={.status.lastRunTrigger}|{.status.phase}")
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(out).NotTo(Equal("Failed"), "chain run failed")
-			g.Expect(out).To(Equal("Succeeded"))
+			f := strings.Split(out, "|")
+			g.Expect(f).To(HaveLen(2))
+			g.Expect(f[0]).To(Equal(chainRunID))
+			g.Expect(f[1]).NotTo(Equal("Failed"), "chain run failed")
+			g.Expect(f[1]).To(Equal("Succeeded"))
 		}, 5*time.Minute).Should(Succeed())
 	})
 
@@ -129,7 +138,7 @@ var _ = Describe("Chain engine", Ordered, Label(tierChain), func() {
 		Expect(stepField("fan", "phase")).To(Equal("Succeeded"))
 		Expect(stepField("fan", "fanOut.total")).To(Equal("2"))
 		Expect(stepField("fan", "fanOut.succeeded")).To(Equal("2"))
-		Expect(stepField("fan", "fanOut.failed")).To(Equal("0"))
+		Expect(stepField("fan", "fanOut.itemPhases")).To(Equal("SS"))
 		out := stepField("fan", "output")
 		Expect(out).To(ContainSubstring("Fan-out item: alpha"))
 		Expect(out).To(ContainSubstring("Fan-out item: beta"))
