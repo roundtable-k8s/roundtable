@@ -322,8 +322,8 @@ func TestRecipeClaudeAliasesNameClaudeKnightImage(t *testing.T) {
 
 // TestHomelabWatchRecipeFiles pins that the recipe is safe to apply as
 // written: the placeholder token is below the gateway's 16-character minimum
-// and the non-Kubernetes Alertmanager snippet is not a .yaml file that
-// kubectl apply -f <dir> would pick up.
+// and no .yaml/.yml/.json file in the directory is a non-Kubernetes snippet
+// that kubectl apply -f <dir> would fail on.
 func TestHomelabWatchRecipeFiles(t *testing.T) {
 	dir := "../../examples/recipes/homelab-watch"
 	data, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
@@ -345,7 +345,33 @@ func TestHomelabWatchRecipeFiles(t *testing.T) {
 			t.Errorf("placeholder token %q is %d chars, a valid gateway credential", tok, len(tok))
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "alertmanager-receiver.yaml")); err == nil {
-		t.Error("alertmanager-receiver.yaml is not a Kubernetes object: name it *.example.yaml")
+	// kubectl apply -f <dir> loads every .yaml/.yml/.json file, so each one
+	// must be a Kubernetes object.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		switch filepath.Ext(e.Name()) {
+		case ".yaml", ".yml", ".json":
+		default:
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, doc := range strings.Split(string(b), "\n---\n") {
+			var obj struct {
+				APIVersion string `json:"apiVersion"`
+				Kind       string `json:"kind"`
+			}
+			if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+				t.Fatalf("%s: %v", e.Name(), err)
+			}
+			if obj.APIVersion == "" || obj.Kind == "" {
+				t.Errorf("%s is not a Kubernetes object (no apiVersion/kind); kubectl apply -f <dir> would fail: rename it to *.yaml.example", e.Name())
+			}
+		}
 	}
 }

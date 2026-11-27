@@ -17,7 +17,7 @@ Alertmanager --POST--> gateway /v1/hooks/roundtable/homelab-alerts
 | [`knight.yaml`](knight.yaml) | The `homelab-triage` Knight, a ServiceAccount and a binding to the built-in `view` ClusterRole |
 | [`chain.yaml`](chain.yaml) | The `cluster-triage` Chain: `gather` then `finding` |
 | [`trigger.yaml`](trigger.yaml) | The token Secret and the webhook Trigger (input template, `dedupeKey`) |
-| [`alertmanager-receiver.example.yaml`](alertmanager-receiver.example.yaml) | The Alertmanager route and receiver to merge into your config (not a Kubernetes object: do not `kubectl apply` it) |
+| [`alertmanager-receiver.yaml.example`](alertmanager-receiver.yaml.example) | The Alertmanager route and receiver to merge into your config (not a Kubernetes object: do not `kubectl apply` it) |
 
 ## Before you start
 
@@ -61,7 +61,7 @@ delivery.
 
 Mount the same token into Alertmanager's pod (copy the Secret into its
 namespace first; Secrets do not cross namespaces) and merge
-[`alertmanager-receiver.example.yaml`](alertmanager-receiver.example.yaml) into its config.
+[`alertmanager-receiver.yaml.example`](alertmanager-receiver.yaml.example) into its config.
 The receiver's essential part:
 
 ```yaml
