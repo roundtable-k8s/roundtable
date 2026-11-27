@@ -6,6 +6,7 @@
   `alerts.labels` is merged under the defaults: a user `severity` wins.
 */ -}}
 {{- $ns := .Release.Namespace }}
+{{- $operatorJob := .Values.alerts.operatorJob | default (printf "%s-metrics" (include "roundtable-operator.fullname" .)) }}
 {{- $labels := merge (deepCopy .Values.alerts.labels) (dict "severity" "warning") }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -158,7 +159,7 @@ spec:
           expr: |
             sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code=~"5.."}[15m]))
               / sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) > {{ .Values.alerts.gatewayErrorRatio }}
-              and on (namespace, table, route) sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) >= 20
+              and on (namespace, table, route) sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) >= {{ .Values.alerts.gatewayMinRequests }}
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}
@@ -254,7 +255,7 @@ spec:
               Controller {{`{{ $labels.controller }}`}} has been failing reconciles at {{`{{ $value | humanize }}`}} per second for 15m;
               check the operator log for the failing resource.
           expr: |
-            sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="{{ $ns }}"}[10m])) > 0
+            sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="{{ $ns }}", job="{{ $operatorJob }}"}[10m])) > 0
           for: 15m
           labels:
             {{- toYaml $labels | nindent 12 }}
