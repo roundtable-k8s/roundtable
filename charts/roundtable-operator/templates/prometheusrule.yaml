@@ -121,8 +121,12 @@ spec:
             summary: >-
               Tools image build Job {{`{{ $labels.job_name }}`}} in namespace {{`{{ $labels.namespace }}`}} failed;
               the knight's pod rollout is held until the image builds.
+              kube_job_failed stays true until the failed Job's 1h TTL deletes it, so the alert is
+              suppressed (unless) while any Job of the same knight (the job_name prefix) reports a
+              succeeded build, and resolves as soon as a later build succeeds.
           expr: |
-            max by (namespace, job_name) (kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}) > 0
+            max by (namespace, job_name, knight) (label_replace(kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}, "knight", "$1", "job_name", "(.+)-toolsimg-.+")) > 0
+              unless on (namespace, knight) max by (namespace, knight) (label_replace(kube_job_status_succeeded{job_name=~".+-toolsimg-.+"}, "knight", "$1", "job_name", "(.+)-toolsimg-.+") > 0)
           labels:
             {{- toYaml $labels | nindent 12 }}
         - alert: KnightNotIsolated
@@ -138,10 +142,11 @@ spec:
           annotations:
             summary: >-
               Table {{`{{ $labels.table }}`}}: {{`{{ $value | humanizePercentage }}`}} of chain runs failed in the last hour,
-              above {{ .Values.alerts.chainFailureRatio }}.
+              above {{ .Values.alerts.chainFailureRatio }} (tables with fewer than {{ .Values.alerts.chainMinRuns }} runs are ignored).
           expr: |
             sum by (table) (increase(roundtable_chain_runs_total{status="failed"}[1h]))
               / sum by (table) (increase(roundtable_chain_runs_total[1h])) > {{ .Values.alerts.chainFailureRatio }}
+              and on (table) sum by (table) (increase(roundtable_chain_runs_total[1h])) >= {{ .Values.alerts.chainMinRuns }}
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}

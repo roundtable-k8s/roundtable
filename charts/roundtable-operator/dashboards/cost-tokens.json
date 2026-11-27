@@ -199,7 +199,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (table) (increase(roundtable_chain_step_cost_usd_total{table=~\"$table\"}[$__range]))",
+          "expr": "sum by (table) (increase(roundtable_chain_step_cost_usd_total{table=~\"$table\"}[24h]))",
           "legendFormat": "{{table}} (step cost counters)"
         }
       ],

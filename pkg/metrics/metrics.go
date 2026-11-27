@@ -207,13 +207,13 @@ var TriggerRunsFinishedTotal = prometheus.NewCounterVec(
 )
 
 // TriggerLastFiredTimestampSeconds is the Unix time a Trigger last started a
-// run. Labels: table, trigger.
+// run. Labels: namespace, table, trigger.
 var TriggerLastFiredTimestampSeconds = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "roundtable_trigger_last_fired_timestamp_seconds",
-		Help: "Unix time of the Trigger's last started run, by table and trigger",
+		Help: "Unix time of the Trigger's last started run, by namespace, table and trigger",
 	},
-	[]string{"table", "trigger"},
+	[]string{"namespace", "table", "trigger"},
 )
 
 // TriggerGitHubHeldItems is the number of items a github-source Trigger held

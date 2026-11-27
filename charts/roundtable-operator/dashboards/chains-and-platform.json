@@ -32,7 +32,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(roundtable_knight_wake_seconds_bucket, namespace)",
+          "query": "label_values(roundtable_chain_runs_total, namespace)",
           "refId": "namespace"
         },
         "refresh": 2,
@@ -91,7 +91,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status) (increase(roundtable_chain_runs_total{table=~\"$table\"}[1h]))",
+          "expr": "sum by (status) (increase(roundtable_chain_runs_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
           "legendFormat": "{{status}}"
         }
       ],

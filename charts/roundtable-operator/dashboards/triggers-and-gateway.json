@@ -52,7 +52,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values({__name__=~\"roundtable_knights|roundtable_gateway_requests_total\"}, table)",
+          "query": "label_values({__name__=~\"roundtable_knights|roundtable_gateway_requests_total|roundtable_trigger_firings_total\"}, table)",
           "refId": "table"
         },
         "refresh": 2,

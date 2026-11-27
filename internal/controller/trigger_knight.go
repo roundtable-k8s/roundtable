@@ -221,7 +221,7 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	if err := r.recordFiring(ctx, f.nn, firing, func(st *aiv1alpha1.TriggerStatus) {
 		at := metav1.NewTime(f.now)
 		st.LastFiredAt = &at
-		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(f.table, trg.Name).Set(float64(f.now.Unix()))
+		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, f.table, trg.Name).Set(float64(f.now.Unix()))
 		if !rec.Done() && !slices.Contains(st.ActiveRuns, rec.TaskID) {
 			st.ActiveRuns = append(st.ActiveRuns, rec.TaskID)
 		}

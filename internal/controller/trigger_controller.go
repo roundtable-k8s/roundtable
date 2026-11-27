@@ -139,7 +139,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if apierrors.IsNotFound(err) {
 			r.consumers.stop(req.String())
 			r.pollers.stop(req.String())
-			deleteTriggerLastFired(req.Name)
+			deleteTriggerLastFired(req.Namespace, req.Name)
 			r.clearRepositoryHolds(req.Namespace, req.Name)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -1085,7 +1085,7 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	if err := r.recordFiring(ctx, nn, firing, func(st *aiv1alpha1.TriggerStatus) {
 		at := metav1.NewTime(now)
 		st.LastFiredAt = &at
-		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(table, trg.Name).Set(float64(now.Unix()))
+		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, table, trg.Name).Set(float64(now.Unix()))
 		if !slices.Contains(st.ActiveRuns, name) {
 			st.ActiveRuns = append(st.ActiveRuns, name)
 		}
@@ -1111,8 +1111,8 @@ const noTableLabel = "none"
 // deleteTriggerLastFired drops a deleted Trigger's last-fired gauge series, so
 // an alert on its age does not fire forever. The counter is left alone: a
 // counter series that stops growing is normal.
-func deleteTriggerLastFired(trigger string) {
-	metrics.TriggerLastFiredTimestampSeconds.DeletePartialMatch(prometheus.Labels{"trigger": trigger})
+func deleteTriggerLastFired(namespace, trigger string) {
+	metrics.TriggerLastFiredTimestampSeconds.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "trigger": trigger})
 }
 
 // Outcomes of roundtable_trigger_firings_total.

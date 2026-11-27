@@ -341,7 +341,7 @@ All operator metrics follow the `roundtable_*` scheme and, except the per-knight
 | `roundtable_dead_letters_open` | gauge | `table`, `knight` |
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` (`started`, `deduped`, `skipped`, `error`) |
 | `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` (`succeeded`, `failed`, `lost`) |
-| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
+| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `namespace`, `table`, `trigger` |
 | `roundtable_trigger_github_held_items` | gauge | `namespace`, `trigger`, `repository` |
 | `roundtable_trigger_github_hold_started_timestamp_seconds` | gauge | `namespace`, `trigger`, `repository` |
 

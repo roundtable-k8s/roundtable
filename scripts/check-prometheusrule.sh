@@ -77,7 +77,11 @@ grep -q '< time() - 1200$' <<<"$sched" || fail "scheduleMissedSeconds not applie
 grep -q '> 0.5$' <<<"$(render --set alerts.enabled=true "${api[@]}")" || fail "default chainFailureRatio not 0.5"
 tuned="$(render --set alerts.enabled=true "${api[@]}" --set alerts.chainFailureRatio=0.2 --set alerts.deadLettersOpenMinutes=30)"
 grep -q '> 0.2$' <<<"$tuned" || fail "chainFailureRatio not applied"
-grep -q 'for: 30m' <<<"$tuned" || fail "deadLettersOpenMinutes not applied"
+grep -q 'for: 30m' <<<"$(grep -A12 'alert: RoundtableDeadLettersOpen$' <<<"$tuned")" || fail "deadLettersOpenMinutes not applied"
+grep -q 'for: 15m' <<<"$(grep -A12 'alert: RoundtableDeadLettersOpen$' <<<"$on")" || fail "default deadLettersOpenMinutes not 15m"
+chainmin="$(render --set alerts.enabled=true "${api[@]}" --set alerts.chainMinRuns=8)"
+grep -q 'and on (table) sum by (table) (increase(roundtable_chain_runs_total\[1h\])) >= 8$' <<<"$chainmin" || fail "chainMinRuns not applied"
+grep -q 'unless on (namespace, knight)' <<<"$on" || fail "tools image build alert does not reset on a later success"
 ! grep -E 'sum by \(' <<<"$on" | grep -E 'roundtable_(dead|knight_isolated|chain_runs)' | grep -qv 'table' \
   || fail "a platform aggregation drops table"
 
