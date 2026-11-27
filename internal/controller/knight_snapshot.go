@@ -122,7 +122,7 @@ func workspaceClaimName(knight *aiv1alpha1.Knight) string {
 func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1alpha1.Knight) (time.Duration, error) {
 	value, requested := knight.Annotations[aiv1alpha1.AnnotationKnightSnapshot]
 
-	if !r.SnapshotsEnabled && !r.snapshotsLate() && !(requested && r.snapshotsAvailable(ctx)) {
+	if !r.SnapshotsEnabled && !r.snapshotsLate() && (!requested || !r.snapshotsAvailable(ctx)) {
 		if requested {
 			r.setSnapshotCondition(knight, metav1.ConditionFalse, aiv1alpha1.ReasonSnapshotAPIUnavailable,
 				snapshotAPIMissingMessage)
