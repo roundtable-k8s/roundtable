@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -298,8 +299,8 @@ func TestGetAndListRuns(t *testing.T) {
 	e := newRunEnv(t, Options{}, true)
 	e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{})
 
-	// Chains the gateway didn't start are not runs.
-	for _, path := range []string{"/v1/runs/" + testNS + "/digest", "/v1/runs/" + testNS + "/digest-pickup-1", "/v1/runs/" + testNS + "/nope"} {
+	// Chains that are not run copies are not runs.
+	for _, path := range []string{"/v1/runs/" + testNS + "/digest", "/v1/runs/" + testNS + "/nope"} {
 		if resp, out := e.do(t, http.MethodGet, path, testToken, nil); resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s: %d %v", path, resp.StatusCode, out)
 		}
@@ -587,8 +588,13 @@ func TestCancelRun(t *testing.T) {
 		t.Fatalf("cancel finished: %d %v", resp.StatusCode, out)
 	}
 
-	// Chains the gateway didn't start, and unknown runs, are 404.
-	for _, name := range []string{"digest-pickup-1", "digest", "nope"} {
+	// A run another source started is refused, not hidden.
+	resp, out = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/digest-pickup-1/cancel", testToken, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("cancel pickup run: %d %v, want 403", resp.StatusCode, out)
+	}
+	// Chains that are not runs, and unknown runs, are 404.
+	for _, name := range []string{"digest", "nope"} {
 		resp, _ = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/"+name+"/cancel", testToken, nil)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("cancel %s: %d, want 404", name, resp.StatusCode)
@@ -695,5 +701,84 @@ func TestCancelResultFailedForAnotherReason(t *testing.T) {
 	rec.Steps[0].Error = "cancelled: by user"
 	if text := cancelResult(rec).Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "was cancelled: by user") {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestListRunsAllSources(t *testing.T) {
+	created := time.Now().Add(-90 * time.Second)
+	started := metav1.NewTime(time.Now().Add(-30 * time.Second))
+	mk := func(name, source string, ann map[string]string, phase aiv1alpha1.ChainPhase) *aiv1alpha1.Chain {
+		c := templateChain(name, false)
+		c.Labels[chainrun.LabelRunSource] = source
+		c.Annotations = ann
+		c.CreationTimestamp = metav1.NewTime(created)
+		c.Status.Phase = phase
+		if phase == aiv1alpha1.ChainPhaseRunning {
+			c.Status.StartedAt = &started
+		}
+		return c
+	}
+	e := newRunEnv(t, Options{}, true,
+		mk("a-trigger", chainrun.SourceTrigger, map[string]string{aiv1alpha1.AnnotationRunTemplate: "nightly"}, aiv1alpha1.ChainPhaseRunning),
+		mk("b-pickup", chainrun.SourcePickup, map[string]string{aiv1alpha1.AnnotationRunTemplate: "fix",
+			aiv1alpha1.AnnotationPickupRepo: "o/r", aiv1alpha1.AnnotationPickupIssue: "12"}, aiv1alpha1.ChainPhaseRunning),
+		mk("c-done", chainrun.SourcePickup, map[string]string{aiv1alpha1.AnnotationPickupRepo: "o/r",
+			aiv1alpha1.AnnotationPickupIssue: "13"}, aiv1alpha1.ChainPhaseSucceeded),
+	)
+	e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{})
+
+	list := func(q string) []map[string]any {
+		t.Helper()
+		resp, out := e.do(t, http.MethodGet, "/v1/runs"+q, testToken, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list %s: %d %v", q, resp.StatusCode, out)
+		}
+		raw := out["runs"].([]any)
+		runs := make([]map[string]any, 0, len(raw))
+		for _, r := range raw {
+			runs = append(runs, r.(map[string]any))
+		}
+		return runs
+	}
+	if got := list(""); len(got) != 1 || got[0]["source"] != "gateway" || got[0]["chain"] != "digest" {
+		t.Errorf("default list: %v", got)
+	}
+	// digest-pickup-1 from newRunEnv is a pickup run too: 3 pickup + trigger + gateway.
+	if got := list("?source=all"); len(got) != 5 {
+		t.Errorf("source=all: %d runs, want 5", len(got))
+	}
+	if got := list("?source=trigger"); len(got) != 1 || got[0]["chain"] != "nightly" {
+		t.Errorf("source=trigger: %v", got)
+	}
+	active := list("?source=all&active=true")
+	if len(active) != 4 { // two running + the pending gateway and fixture runs
+		t.Errorf("active: %d runs: %v", len(active), active)
+	}
+	for _, r := range list("?source=all&phase=Running") {
+		if age := r["ageSeconds"].(float64); age < 89 || age > 100 {
+			t.Errorf("ageSeconds %v", age)
+		}
+		if run := r["runningSeconds"].(float64); run < 29 || run > 40 {
+			t.Errorf("runningSeconds %v", run)
+		}
+	}
+	got := list("?source=all&issue=o/r%2312")
+	if len(got) != 1 || got[0]["run"] != "b-pickup" || got[0]["chain"] != "fix" ||
+		got[0]["issue"].(map[string]any)["number"] != float64(12) {
+		t.Errorf("issue filter: %v", got)
+	}
+	for _, q := range []string{"?source=bogus", "?issue=nope", "?active=maybe"} {
+		if resp, _ := e.do(t, http.MethodGet, "/v1/runs"+q, testToken, nil); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", q, resp.StatusCode)
+		}
+	}
+
+	resp, out := e.do(t, http.MethodGet, "/v1/runs/"+testNS+"/a-trigger", testToken, nil)
+	if resp.StatusCode != http.StatusAccepted || out["source"] != "trigger" {
+		t.Errorf("get trigger run: %d %v", resp.StatusCode, out)
+	}
+	resp, out = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/a-trigger/cancel", testToken, nil)
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(fmt.Sprint(out["error"]), "only gateway runs") {
+		t.Errorf("cancel trigger run: %d %v", resp.StatusCode, out)
 	}
 }

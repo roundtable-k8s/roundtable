@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,9 @@ const (
 	// runPhasePending is the phase of a run the chain controller hasn't
 	// started yet.
 	runPhasePending = "Pending"
+
+	// sourceAll is the list filter value that matches runs of every source.
+	sourceAll = "all"
 
 	// labelTrue is the value of an opt-in label.
 	labelTrue = "true"
@@ -123,6 +127,20 @@ type RunRecord struct {
 	// TraceID is the trace of the run (the Chain's status.traceID); omitted
 	// when the run has none or the value is not a valid trace ID.
 	TraceID string `json:"traceId,omitempty"`
+	// Source is what started the run: gateway, trigger or pickup.
+	Source string `json:"source,omitempty"`
+	// AgeSeconds is the time since the run was created.
+	AgeSeconds *int64 `json:"ageSeconds,omitempty"`
+	// RunningSeconds is the time since the run started, while it is Running.
+	RunningSeconds *int64 `json:"runningSeconds,omitempty"`
+	// Issue is the issue a pickup run belongs to.
+	Issue *RunIssue `json:"issue,omitempty"`
+}
+
+// RunIssue is the issue an issue-pickup run works on.
+type RunIssue struct {
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
 }
 
 // validTraceID returns id when it is a W3C trace ID (32 lowercase hex digits,
@@ -164,6 +182,9 @@ type RunFilter struct {
 	Chain     string `json:"chain,omitempty" jsonschema:"only runs of this chain"`
 	Phase     string `json:"phase,omitempty" jsonschema:"only runs in this phase, e.g. Running, Succeeded or Failed"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return (default 20, max 200)"`
+	Source    string `json:"source,omitempty" jsonschema:"which runs: gateway (default), trigger, pickup or all"`
+	Active    bool   `json:"active,omitempty" jsonschema:"only runs that are Running or Pending"`
+	Issue     string `json:"issue,omitempty" jsonschema:"only runs of this picked-up issue, as owner/repo#number"`
 }
 
 // RunsEnabled reports whether the chain-run endpoints are served.
@@ -177,6 +198,41 @@ func invokable(c *aiv1alpha1.Chain) bool {
 	return c.Labels[aiv1alpha1.LabelInvokable] == labelTrue &&
 		c.Labels[chainrun.LabelRunSource] == "" &&
 		c.Spec.MissionRef == nil
+}
+
+// isRun reports whether a Chain is a run copy of any source.
+func isRun(c *aiv1alpha1.Chain) bool {
+	switch c.Labels[chainrun.LabelRunSource] {
+	case chainrun.SourceGateway, chainrun.SourceTrigger, chainrun.SourcePickup:
+		return true
+	}
+	return false
+}
+
+// record is runRecord plus the time-relative fields.
+func (s *Service) record(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
+	r := runRecord(c, withSteps)
+	now := s.now()
+	age := max(int64(now.Sub(r.CreatedAt)/time.Second), 0)
+	r.AgeSeconds = &age
+	if r.Phase == string(aiv1alpha1.ChainPhaseRunning) && r.StartedAt != nil {
+		run := max(int64(now.Sub(*r.StartedAt)/time.Second), 0)
+		r.RunningSeconds = &run
+	}
+	return r
+}
+
+// parseIssue parses owner/repo#number.
+func parseIssue(v string) (repo string, n int, err error) {
+	i := strings.LastIndex(v, "#")
+	if i > 0 {
+		n, err = strconv.Atoi(v[i+1:])
+		repo = v[:i]
+	}
+	if i <= 0 || err != nil || n <= 0 || strings.Count(repo, "/") != 1 {
+		return "", 0, fmt.Errorf("%w: issue must be owner/repo#number", ErrInvalid)
+	}
+	return repo, n, nil
 }
 
 // isGatewayRun reports whether a Chain is a run copy this gateway started.
@@ -300,7 +356,7 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if wait > 0 {
 		return s.pollRun(ctx, ns, run.Name, wait)
 	}
-	return runRecord(run, true), nil
+	return s.record(run, true), nil
 }
 
 // replayRun returns the run an earlier request with the same key started.
@@ -313,7 +369,7 @@ func (s *Service) replayRun(ctx context.Context, ns, name string, wait time.Dura
 	} else {
 		var c *aiv1alpha1.Chain
 		if c, err = s.fetchRun(ctx, ns, name); err == nil {
-			rec = runRecord(c, true)
+			rec = s.record(c, true)
 		}
 	}
 	if err != nil {
@@ -368,7 +424,7 @@ func (s *Service) GetRun(ctx context.Context, namespace, name string, waitSecond
 	if err != nil {
 		return nil, err
 	}
-	return runRecord(c, true), nil
+	return s.record(c, true), nil
 }
 
 // CancelRunRequest is the optional body of POST /v1/runs/{namespace}/{run}/cancel.
@@ -404,6 +460,10 @@ func (s *Service) cancelRun(ctx context.Context, namespace, name, reason string,
 	if err != nil {
 		return nil, err
 	}
+	if !isGatewayRun(c) {
+		return nil, fmt.Errorf("%w: run %s/%s was started by %s, only gateway runs can be cancelled",
+			ErrForbidden, ns, name, c.Labels[chainrun.LabelRunSource])
+	}
 	if runDone(c) {
 		return nil, &ConflictError{State: string(c.Status.Phase),
 			Reason: fmt.Sprintf("run %s/%s is already %s", ns, name, c.Status.Phase)}
@@ -424,7 +484,7 @@ func (s *Service) cancelRun(ctx context.Context, namespace, name, reason string,
 	return s.waitRun(ctx, ns, name, min(cancelWait, s.Opts.MaxTimeout))
 }
 
-// ListRuns lists gateway-started runs in a namespace, newest first, without
+// ListRuns lists runs of the filter's source (default gateway) in a namespace, newest first, without
 // step details (get one run for those).
 func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, error) {
 	if !s.RunsEnabled() {
@@ -434,9 +494,27 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	if err != nil {
 		return nil, err
 	}
+	source := strings.ToLower(f.Source)
+	switch source {
+	case "":
+		source = chainrun.SourceGateway
+	case chainrun.SourceGateway, chainrun.SourceTrigger, chainrun.SourcePickup, sourceAll:
+	default:
+		return nil, fmt.Errorf("%w: source must be gateway, trigger, pickup or all", ErrInvalid)
+	}
+	var issueRepo string
+	var issueNum int
+	if f.Issue != "" {
+		if issueRepo, issueNum, err = parseIssue(f.Issue); err != nil {
+			return nil, err
+		}
+	}
 	var list aiv1alpha1.ChainList
-	if err := s.Runs.List(ctx, &list, client.InNamespace(ns),
-		client.MatchingLabels{chainrun.LabelRunSource: chainrun.SourceGateway}); err != nil {
+	opts := []client.ListOption{client.InNamespace(ns)}
+	if source != sourceAll {
+		opts = append(opts, client.MatchingLabels{chainrun.LabelRunSource: source})
+	}
+	if err := s.Runs.List(ctx, &list, opts...); err != nil {
 		return nil, k8sError("list chain runs", err)
 	}
 	limit := f.Limit
@@ -453,8 +531,17 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	})
 	out := make([]*RunRecord, 0, min(len(items), limit))
 	for i := range items {
-		r := runRecord(&items[i], false)
+		if source == sourceAll && !isRun(&items[i]) {
+			continue
+		}
+		r := s.record(&items[i], false)
 		if (f.Chain != "" && r.Chain != f.Chain) || (f.Phase != "" && !strings.EqualFold(r.Phase, f.Phase)) {
+			continue
+		}
+		if f.Active && r.Phase != string(aiv1alpha1.ChainPhaseRunning) && r.Phase != runPhasePending {
+			continue
+		}
+		if f.Issue != "" && (r.Issue == nil || r.Issue.Repo != issueRepo || r.Issue.Number != issueNum) {
 			continue
 		}
 		out = append(out, r)
@@ -494,14 +581,14 @@ func (s *Service) pollRun(ctx context.Context, ns, name string, wait time.Durati
 			return nil, err
 		}
 		if runDone(c) {
-			return runRecord(c, true), nil
+			return s.record(c, true), nil
 		}
 		select {
 		case <-wctx.Done():
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			return runRecord(c, true), nil
+			return s.record(c, true), nil
 		case <-tick.C:
 		}
 	}
@@ -534,7 +621,7 @@ func (s *Service) fetchChain(ctx context.Context, ns, name string) (*aiv1alpha1.
 	return c, nil
 }
 
-// fetchRun reads a run copy; Chains the gateway didn't start are 404.
+// fetchRun reads a run copy of any source; Chains that are not run copies are 404.
 func (s *Service) fetchRun(ctx context.Context, ns, name string) (*aiv1alpha1.Chain, error) {
 	c, err := s.fetchChain(ctx, ns, name)
 	if err != nil {
@@ -543,7 +630,7 @@ func (s *Service) fetchRun(ctx context.Context, ns, name string) (*aiv1alpha1.Ch
 		}
 		return nil, err
 	}
-	if !isGatewayRun(c) {
+	if !isRun(c) {
 		return nil, fmt.Errorf("%w: run %s/%s", ErrNotFound, ns, name)
 	}
 	return c, nil
@@ -554,7 +641,8 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 	st := &c.Status
 	r := &RunRecord{
 		Run:         c.Name,
-		Chain:       c.Annotations[annotationRunOf],
+		Chain:       runChainName(c),
+		Source:      c.Labels[chainrun.LabelRunSource],
 		Namespace:   c.Namespace,
 		Phase:       string(st.Phase),
 		Caller:      c.Annotations[aiv1alpha1.AnnotationCaller],
@@ -563,6 +651,11 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 		StartedAt:   timePtr(st.StartedAt),
 		CompletedAt: timePtr(st.CompletedAt),
 		TraceID:     validTraceID(st.TraceID),
+	}
+	if repo := c.Annotations[aiv1alpha1.AnnotationPickupRepo]; repo != "" {
+		if n, err := strconv.Atoi(c.Annotations[aiv1alpha1.AnnotationPickupIssue]); err == nil {
+			r.Issue = &RunIssue{Repo: repo, Number: n}
+		}
 	}
 	if r.Phase == "" || (chainrun.Active(c) && st.Phase != aiv1alpha1.ChainPhaseRunning) {
 		// The run hasn't started: any status is from before it.
@@ -594,6 +687,15 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 		}
 	}
 	return r
+}
+
+// runChainName is the template Chain of a run: the gateway's run-of
+// annotation, else the run-template annotation every source sets.
+func runChainName(c *aiv1alpha1.Chain) string {
+	if v := c.Annotations[annotationRunOf]; v != "" {
+		return v
+	}
+	return c.Annotations[aiv1alpha1.AnnotationRunTemplate]
 }
 
 // finalStep returns the one step no other step depends on, or "" if there

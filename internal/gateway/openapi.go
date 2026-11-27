@@ -287,6 +287,9 @@ var openAPIOperations = map[string]obj{
 		queryParam("namespace", "Namespace to list; omit for the default."),
 		queryParam("chain", "Only runs of this chain."),
 		queryParam("phase", "Only runs in this phase, e.g. Running, Succeeded or Failed."),
+		queryParam("source", "Which runs: gateway (default), trigger, pickup or all."),
+		queryParam("active", "true: only runs that are Running or Pending."),
+		queryParam("issue", "Only runs of this picked-up issue, as owner/repo#number."),
 		queryInteger("limit", "Maximum number of runs (default 20, max 200).")),
 	"GET /v1/runs/{namespace}/{run}": {
 		"summary": "Get a chain run", "tags": []any{"runs"},
@@ -485,6 +488,10 @@ var openAPISchemas = obj{
 			"name": str(""), "phase": str(""), "error": str(""), "output": str(""), "outputTruncated": boolean(""),
 		})),
 		"output": str(""), "outputTruncated": boolean(""),
+		"source":         str("What started the run: gateway, trigger or pickup."),
+		"ageSeconds":     obj{"type": "integer", "description": "Seconds since the run was created."},
+		"runningSeconds": obj{"type": "integer", "description": "Seconds since the run started, while Running."},
+		"issue":          object([]string{"repo", "number"}, obj{"repo": str("owner/name"), "number": obj{"type": "integer"}}),
 	}),
 	"ScheduleRun": object([]string{"time", "outcome", "resultAvailable"}, obj{
 		"run":  str("Run to fetch the result with; empty for a skipped firing."),
