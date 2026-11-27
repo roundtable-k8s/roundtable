@@ -878,6 +878,33 @@ RoundTable. Each schedule:
 
 One schedule, as above. **404** if it does not exist or is not a schedule.
 
+### `GET /v1/schedules/{namespace}/{name}/next?count=`
+
+The next `count` fire times (default 5, max 50; outside 1 to 50 is a **400**)
+of the stored cron, evaluated in the schedule's `timeZone`:
+
+```json
+{"namespace": "roundtable", "name": "morning-digest", "cron": "0 7 * * 1-5",
+ "timeZone": "Europe/Berlin", "suspended": true,
+ "times": [{"time": "2026-03-30T05:00:00Z", "local": "2026-03-30T07:00:00+02:00"}]}
+```
+
+`time` is RFC 3339 in UTC, `local` the same instant in the time zone (so a
+DST change shows in the offset). A suspended schedule still answers, with
+`suspended: true`. **404** if it does not exist or is not a schedule. The list
+is cron ticks only: skip rules (concurrency policy, starting deadline) are not
+applied.
+
+### `GET /v1/schedules/preview?cron=&timeZone=&count=`
+
+The same list for an expression that does not exist yet, to check it before
+`POST /v1/schedules`. `timeZone` defaults to UTC. An invalid cron or time zone
+is a **422** with the parser's message.
+
+```sh
+curl -s -H "$AUTH" "$GW/v1/schedules/preview?cron=0+7+*+*+1-5&timeZone=Europe/Berlin&count=3"
+```
+
 ### `GET /v1/schedules/{namespace}/{name}/manifest`
 
 The Trigger as YAML (`Content-Type: application/yaml`), ready to commit to
@@ -1290,6 +1317,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
 | `list_schedules` | `namespace?`, `table?` | `{schedules: [...]}`: the same list as `GET /v1/schedules` |
 | `get_schedule` | `name`, `namespace?` | The schedule projection |
+| `schedule_next_runs` | `name`, `namespace?` or `cron`, `timeZone?`; `count?` | The same as `GET .../next` or `GET /v1/schedules/preview`: the next fire times (cron ticks only) |
 | `suspend_schedule` | `name`, `namespace?` | The schedule's suspension state. Allowed on Git-managed schedules (it sets an annotation, not the spec) |
 | `resume_schedule` | `name`, `namespace?` | The suspension state; a schedule suspended in its spec stays suspended and the message says so |
 | `run_schedule` | `name`, `namespace?` | Fires the schedule once now (also while suspended, also Git-managed) and waits briefly for the operator: state `started`, `pending` or `skipped`. A skipped firing is a tool error |

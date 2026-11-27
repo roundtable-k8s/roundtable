@@ -317,6 +317,21 @@ var openAPIOperations = map[string]obj{
 				"content": obj{"application/json": obj{"schema": schemaRef("Run")}}},
 		}, "400", "401", "403", "404", "409", "503"),
 	},
+	"GET /v1/schedules/{namespace}/{name}/next": {
+		"summary": "Next fire times of a schedule", "tags": []any{"schedules"},
+		"description": "The next `count` cron ticks of the stored cron in the schedule's time zone. A suspended schedule still answers, with `suspended: true`. Lists cron ticks only: skip rules (concurrency policy, deadlines) are not applied.",
+		"parameters": []any{pathParam("namespace", "Schedule namespace."), pathParam("name", "Schedule name."),
+			obj{"name": "count", "in": "query", "description": "How many fire times (default 5, max 50).", "schema": obj{"type": "integer", "minimum": 1, "maximum": 50}}},
+		"responses": errs(obj{"200": jsonResp("OK", schemaRef("ScheduleNextRuns"))}, "400", "401", "403", "404", "503"),
+	},
+	"GET /v1/schedules/preview": {
+		"summary": "Preview the fire times of a cron expression", "tags": []any{"schedules"},
+		"description": "The next `count` ticks of an expression that does not exist as a schedule yet. An invalid cron or time zone is a 422 with the parser's message. Lists cron ticks only.",
+		"parameters": []any{queryParam("cron", "Five-field cron expression or @ descriptor."),
+			queryParam("timeZone", "IANA time zone; default UTC."),
+			obj{"name": "count", "in": "query", "description": "How many fire times (default 5, max 50).", "schema": obj{"type": "integer", "minimum": 1, "maximum": 50}}},
+		"responses": errs(obj{"200": jsonResp("OK", schemaRef("ScheduleNextRuns"))}, "400", "401", "403", "422", "503"),
+	},
 	"GET /v1/schedules/{namespace}/{name}/runs": {
 		"summary": "List a schedule's runs, newest first", "tags": []any{"schedules"},
 		"description": "Firings with their time, outcome (skips with their reason), duration and cost when known, and the run to fetch the result with. History goes back as far as results are retained (gateway.scheduleRuns.resultRetention).",
@@ -483,6 +498,15 @@ var openAPISchemas = obj{
 			"name": str(""), "phase": str(""), "error": str(""), "output": str(""), "outputTruncated": boolean(""),
 		})),
 		"output": str(""), "outputTruncated": boolean(""),
+	}),
+	"ScheduleNextRuns": object([]string{"cron", "timeZone", "times"}, obj{
+		"namespace": str("Schedule namespace (omitted by the preview)."), "name": str("Schedule name (omitted by the preview)."),
+		"cron": str(""), "timeZone": str("IANA zone the cron is evaluated in."),
+		"suspended": boolean("The schedule is suspended; it still answers."),
+		"times": array(object([]string{"time", "local"}, obj{
+			"time":  obj{"type": "string", "format": "date-time", "description": "The tick in UTC."},
+			"local": str("The same instant in the time zone, RFC 3339."),
+		})),
 	}),
 	"ScheduleRun": object([]string{"time", "outcome", "resultAvailable"}, obj{
 		"run":  str("Run to fetch the result with; empty for a skipped firing."),

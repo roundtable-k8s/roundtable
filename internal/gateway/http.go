@@ -116,6 +116,12 @@ func (s *Service) routes() []route {
 			route{pattern: "POST /v1/runs/{namespace}/{run}/cancel", handler: s.handleCancelRun},
 		)
 	}
+	if s.SchedulesEnabled() {
+		rs = append(rs,
+			route{pattern: "GET /v1/schedules/{namespace}/{name}/next", handler: s.handleScheduleNext},
+			route{pattern: "GET /v1/schedules/preview", handler: s.handleSchedulePreview},
+		)
+	}
 	if s.ScheduleRunsEnabled() {
 		rs = append(rs,
 			route{pattern: "GET /v1/schedules/{namespace}/{name}/runs", handler: s.handleScheduleRuns},

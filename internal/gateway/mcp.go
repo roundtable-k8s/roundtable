@@ -251,6 +251,28 @@ func addScheduleTools(s *mcp.Server, svc *Service) {
 		return nil, v, err
 	})
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "schedule_next_runs",
+		Description: "List the next fire times of a schedule ({namespace, name}) or of a cron expression that does not exist yet " +
+			"({cron, timeZone}), in UTC and in the time zone. Cron ticks only: skip rules are not applied. Count defaults to 5, max 50.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in NextRunsInput) (*mcp.CallToolResult, *ScheduleNextRuns, error) {
+		count := in.Count
+		if count == 0 {
+			count = defaultNextCount
+		}
+		switch {
+		case in.Name != "" && in.Cron != "":
+			return nil, nil, fmt.Errorf("%w: give either name or cron, not both", ErrInvalid)
+		case in.Name != "":
+			out, err := svc.ScheduleNext(ctx, in.Namespace, in.Name, count)
+			return nil, out, err
+		case in.Cron != "":
+			out, err := svc.SchedulePreview(in.Cron, in.TimeZone, count)
+			return nil, out, err
+		}
+		return nil, nil, fmt.Errorf("%w: give name (and namespace) or cron (and timeZone)", ErrInvalid)
+	})
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "suspend_schedule",
 		Description: "Suspend a schedule so it stops firing. Allowed on Git-managed schedules too: it only sets an annotation, " +
 			"not the spec. Undo with resume_schedule.",

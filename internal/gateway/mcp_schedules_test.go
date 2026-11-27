@@ -62,7 +62,7 @@ func mcpToolNames(ctx context.Context, t *testing.T, cs *mcp.ClientSession) map[
 func TestMCPScheduleToolsListedOnlyWhenEnabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	schedTools := []string{"list_schedules", "get_schedule", "suspend_schedule", "resume_schedule", "run_schedule"}
+	schedTools := []string{"list_schedules", "get_schedule", "schedule_next_runs", "suspend_schedule", "resume_schedule", "run_schedule"}
 	runTools := []string{"list_schedule_runs", "get_schedule_run"}
 
 	off := mcpToolNames(ctx, t, connectMCP(ctx, t, newActionEnv(t, false).server.URL))

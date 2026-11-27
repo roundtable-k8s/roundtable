@@ -49,6 +49,7 @@ func openAPIService(t *testing.T, missions, runs, hooks bool, schedules ...bool)
 	}
 	if len(schedules) > 0 && schedules[0] {
 		svc.ScheduleReader = k8s
+		svc.Schedules = k8s
 	}
 	return svc
 }
