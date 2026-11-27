@@ -47,9 +47,8 @@ The quickstart Knight loads this Secret through `spec.envFrom`.
 ## 3. Apply a RoundTable, a Knight and a Chain
 
 ```bash
-kubectl apply -f examples/quickstart/roundtable.yaml
-kubectl apply -f examples/quickstart/knight.yaml
-kubectl -n roundtable get knights -w   # wait for READY true, then Ctrl-C
+kubectl apply -f examples/quickstart/roundtable.yaml -f examples/quickstart/knight.yaml
+kubectl -n roundtable wait knight/arthur --for=jsonpath='{.status.phase}'=Ready --timeout=300s
 ```
 
 - [`roundtable.yaml`](../examples/quickstart/roundtable.yaml): one RoundTable pointing at the in-cluster NATS (`nats://nats.roundtable.svc:4222`); `createStreams: true` makes the operator create its JetStream streams.
@@ -102,10 +101,11 @@ curl -s -X POST localhost:8081/v1/knights/arthur/invoke \
 ```
 
 A `200` response is the finished task record. The answer is in `output` and the
-task ID in `taskId` (`status` is `succeeded`, or `failed` with an `error`):
+task ID in `taskId` (`status` is `succeeded`, or `failed` with an `error`). The values in
+this example are illustrative; your `taskId` and `output` will differ:
 
 ```json
-{"taskId": "invoke-arthur-…", "knight": "arthur", "status": "succeeded", "output": "…"}
+{"taskId": "invoke-arthur-4f2a9c", "knight": "arthur", "status": "succeeded", "output": "A Kubernetes operator is a controller that watches custom resources and reconciles the cluster toward their desired state."}
 ```
 
 A `202` means the knight is still running when the wait ended. Poll the task with the
@@ -133,12 +133,9 @@ needs nothing else: see [dependencies.md](dependencies.md) for the optional add-
 
 ### Running a chain by hand
 
-Annotate the Chain with `ai.roundtable.io/run` — any value works, and it starts a **new run**
-(new `runId`, all steps reset) whenever the value differs from `status.lastRunTrigger`:
-
-```bash
-kubectl annotate chain hello-chain -n roundtable ai.roundtable.io/run="$(date +%s)" --overwrite
-```
+Annotate the Chain with `ai.roundtable.io/run`, using the command in [step 4](#4-run-the-chain).
+Any value works, and it starts a **new run** (new `runId`, all steps reset) whenever the value
+differs from `status.lastRunTrigger`:
 
 Re-applying the same value never re-triggers. If a run is still in flight the trigger waits
 and fires when it finishes. Changing `spec.input` never resumes an old run either; it resets
@@ -167,7 +164,7 @@ picked up. The overall chain `timeout` still counts from the start of the run.
 ## What's Next?
 
 - [Example Manifests](../examples/) — Real-world Knight, Chain, Mission examples
-- [Recipes](../examples/recipes/) — Complete fleets to copy: incident triage, personal fleet, dev factory, backlog grooming, nightly digest
+- [Recipes](../examples/recipes/) — Complete fleets to copy: alert triage (`homelab-watch`), personal fleet, dev factory, backlog grooming, nightly digest
 - [Documentation index](README.md) — every page, grouped by what you want to do
 - [Helm Values Reference](helm-values.md) — Full configuration options
 - [Architecture Overview](ARCHITECTURE.md) — How it all works under the hood

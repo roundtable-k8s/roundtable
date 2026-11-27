@@ -90,7 +90,9 @@ cat <<DONE
 Ready. Next (see docs/getting-started.md):
   kubectl --context $CTX -n $NAMESPACE create secret generic llm-api-keys \\
     --from-literal=ANTHROPIC_API_KEY=<your key>
-  kubectl --context $CTX apply -f examples/quickstart/
+  kubectl --context $CTX apply -f examples/quickstart/roundtable.yaml -f examples/quickstart/knight.yaml
+  kubectl --context $CTX -n $NAMESPACE wait knight/arthur --for=jsonpath='{.status.phase}'=Ready --timeout=300s
+  kubectl --context $CTX apply -f examples/quickstart/chain.yaml
   kubectl --context $CTX -n $NAMESPACE port-forward svc/$RELEASE-dashboard 8080:80
 Ask the knight through the gateway (docs/gateway.md), after a port-forward of
 svc/$RELEASE-gateway to 8081 in another terminal:
