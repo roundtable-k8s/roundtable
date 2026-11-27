@@ -742,6 +742,7 @@ type TriggerConcurrency struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.source.github)",message="target.knight is not supported with source.github: use target.chainRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.input) || size(self.input) == 0",message="spec.input is for target.chainRef: put a knight's text in target.knight.task"
 // +kubebuilder:validation:XValidation:rule="!has(self.target.knight) || !has(self.concurrency) || !has(self.concurrency.policy) || self.concurrency.policy != 'Replace'",message="concurrency.policy Replace is not supported with target.knight: a sent task cannot be withdrawn"
+// +kubebuilder:validation:XValidation:rule="!has(self.when) || has(self.source.nats) || has(self.source.webhook)",message="when is only supported with source.nats or source.webhook"
 type TriggerSpec struct {
 	// source is where events come from.
 	// +required
@@ -769,6 +770,18 @@ type TriggerSpec struct {
 	// schedule, and "<owner/name>#<number>" for github.
 	// +optional
 	DedupeKey string `json:"dedupeKey,omitempty"`
+
+	// when is a CEL expression over the event that must be true for the event
+	// to fire; only for source.nats and source.webhook. Variables: event
+	// (subject, data: the payload parsed as JSON or the raw string, headers:
+	// map of header name to value, time: RFC 3339) and trigger (name,
+	// namespace). An event for which it is false is acknowledged and starts
+	// nothing, and is not recorded in status. An evaluation error (for
+	// example a missing key: guard with has()) rejects the event like a
+	// failing input template. run-now skips it. Empty fires on every event.
+	// +kubebuilder:validation:MaxLength=4096
+	// +optional
+	When string `json:"when,omitempty"`
 
 	// concurrency bounds how many runs are active at once.
 	// +optional

@@ -57,12 +57,18 @@ func chainCELEnv() (*cel.Env, error) {
 			cel.Variable("maxIterations", cel.IntType),
 			cel.Variable("body", cel.MapType(cel.StringType, cel.DynType)),
 			ext.Strings(),
-			cel.Function("json",
-				cel.Overload("json_string_dyn", []*cel.Type{cel.StringType}, cel.DynType,
-					cel.UnaryBinding(celParseJSON))),
+			celJSONFunction(),
 		)
 	})
 	return celEnv, errCELEnv
+}
+
+// celJSONFunction declares json(string), shared by every CEL environment of
+// the operator (chain conditions, trigger when).
+func celJSONFunction() cel.EnvOption {
+	return cel.Function("json",
+		cel.Overload("json_string_dyn", []*cel.Type{cel.StringType}, cel.DynType,
+			cel.UnaryBinding(celParseJSON)))
 }
 
 // celParseJSON implements json(string): it parses a JSON document (tolerating

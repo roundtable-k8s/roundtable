@@ -470,6 +470,11 @@ func (r *TriggerReconciler) reconcileSource(ctx context.Context, trg *aiv1alpha1
 	if err := aiv1alpha1.ValidateConcurrency(&trg.Spec); err != nil {
 		return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "%v", err)
 	}
+	if trg.Spec.When != "" {
+		if _, err := compileTriggerWhen(trg.Spec.When); err != nil {
+			return notReady(aiv1alpha1.ReasonTriggerInvalidSpec, "when: %v", err)
+		}
+	}
 	switch target := trg.Spec.Target; {
 	case target.Knight != nil:
 		if _, err := parseTriggerTemplate("task", target.Knight.Task); err != nil {
@@ -823,6 +828,18 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		// status is not churned by events the Trigger never wanted.
 		return triggerHandled, nil
 	}
+	var whenErr error
+	if manual == nil && trg.Spec.When != "" {
+		ok, err := evalTriggerWhen(trg, ev)
+		switch {
+		case err != nil:
+			whenErr = err
+		case !ok:
+			// Filtered out like eventType: not recorded, not counted.
+			logf.FromContext(ctx).V(1).Info("event filtered by spec.when", "trigger", nn.String())
+			return triggerHandled, nil
+		}
+	}
 	now := r.now()
 	firing := aiv1alpha1.TriggerFiring{Time: metav1.NewTime(now)}
 	table := r.triggerTable(ctx, trg)
@@ -856,6 +873,10 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 				firing.SkipReason, ev.Time.UTC().Format(time.RFC3339))
 		}
 		return outcome, nil
+	}
+
+	if whenErr != nil {
+		return skip(triggerTerm, "when: %v", whenErr)
 	}
 
 	var item *githubItem
