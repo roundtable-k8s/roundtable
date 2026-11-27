@@ -338,7 +338,8 @@ connection. The first call publishes the task and stores the key (scoped to
 namespace and knight) next to the task record; a repeat publishes nothing and
 returns the original task with the response header `Idempotent-Replay: true`.
 Like the first call, a repeat of a task that is still running waits up to
-`timeoutSeconds` for the result (**200**), else answers **202**. A repeat with a different
+`timeoutSeconds` for the result (**200**), else answers **202**. That wait counts against
+`maxInFlight`, so a repeat answers **429** when no slot is free. A repeat with a different
 `task`, `model` or `runId` is a **422**. The key lives as long as the task
 record (`gateway.taskTTL`); a call that fails before publishing releases it.
 If the first call crashed after storing the key but before storing the task, a

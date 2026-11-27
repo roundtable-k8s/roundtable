@@ -615,6 +615,11 @@ The events stream is the one of `roundTableRef`, else of the target Chain's
 `roundTableRef`, else of the target knight's RoundTable, else of the
 RoundTable named `default`.
 
+A late schedule firing whose target Chain is missing, or whose target knight is
+not Ready, is retried before it is skipped: the `startingDeadlineSeconds` check
+runs only once the firing can be sent, so it is skipped then if it is still
+late (it used to be dropped at once).
+
 Requirements:
 
 - The gateway is enabled with ServiceAccount auth
