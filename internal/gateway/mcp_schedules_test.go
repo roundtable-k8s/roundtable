@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,13 +143,13 @@ func TestMCPSchedules(t *testing.T) {
 }
 
 func mcpText(res *mcp.CallToolResult) string {
-	var out string
+	var out strings.Builder
 	for _, c := range res.Content {
 		if tc, ok := c.(*mcp.TextContent); ok {
-			out += tc.Text
+			out.WriteString(tc.Text)
 		}
 	}
-	return out
+	return out.String()
 }
 
 func TestMCPScheduleRuns(t *testing.T) {
