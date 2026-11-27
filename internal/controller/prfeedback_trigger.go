@@ -313,6 +313,9 @@ func (r *PRFeedbackReconciler) patchEngineStatus(ctx context.Context, rt *aiv1al
 	if prFeedbackEngine(rt.Spec.PRFeedback) == aiv1alpha1.PRFeedbackEngineTrigger {
 		st.ActiveRun = ""
 		st.LastError = ""
+		// The builtin engine's per-PR records are stale once the trigger
+		// engine owns feedback: nothing prunes or updates them any more.
+		st.PullRequests = nil
 		if triggerErr != nil {
 			st.LastError = truncateUTF8(triggerErr.Error(), 1024)
 		}

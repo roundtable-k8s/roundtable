@@ -231,8 +231,16 @@ func (r *IssuePickupReconciler) verifyMerge(ctx context.Context, gh *github.Clie
 			problems = append(problems, fmt.Sprintf("%s is labelled `%s`", ref, labels.needsHuman))
 		case onGH != verdictShipIt:
 			problems = append(problems, fmt.Sprintf("%s has no ship-it verdict (newest verdict: %s); not queued", ref, onGH))
-		case pr.AutoMerge != nil:
+		case pr.Queued():
 		default:
+			// Only now ask GraphQL whether the PR is already in a merge
+			// queue (auto_merge stays null there); saves a call otherwise.
+			if err := gh.LoadMergeQueueState(ctx, pr); err != nil {
+				return fmt.Errorf("merge queue state of %s: %w", ref, err)
+			}
+			if pr.Queued() {
+				continue
+			}
 			if err := gh.EnableAutoMerge(ctx, pr.NodeID); err != nil {
 				problems = append(problems, fmt.Sprintf("%s is open and could not be queued: %v", ref, err))
 			} else {

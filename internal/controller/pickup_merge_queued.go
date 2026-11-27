@@ -44,7 +44,9 @@ const stepReasonQueuedAtTimeout = "QueuedAtTimeout"
 
 // isTimeoutError reports whether a step error is a timeout: the operator's
 // "step timed out after Ns" or a knight's own time limit. It matches the
-// dead-letter stream's timeout classification.
+// dead-letter stream's timeout classification. Keep in step with the verify
+// step's CEL `when` in charts/roundtable-operator/templates/pr-pipeline.yaml,
+// which matches the same two substrings.
 func isTimeoutError(err string) bool {
 	e := strings.ToLower(err)
 	return strings.Contains(e, "timed out") || strings.Contains(e, "timeout")
@@ -68,7 +70,7 @@ func timedOutMergeStep(c *aiv1alpha1.Chain) *aiv1alpha1.ChainStepStatus {
 }
 
 // ghPRState maps a PR as GitHub shows it to the merge step's structured
-// shape: merged, queued (open with auto-merge on, not a draft) or its state.
+// shape: merged, queued (open with auto-merge on or in a merge queue, not a draft) or its state.
 func ghPRState(ref prRef, pr *github.PullRequest) natspkg.PRRef {
 	out := natspkg.PRRef{Repo: ref.repo, Number: ref.number, URL: pr.HTMLURL, Action: pr.State}
 	if out.URL == "" {
@@ -77,7 +79,7 @@ func ghPRState(ref prRef, pr *github.PullRequest) natspkg.PRRef {
 	switch {
 	case pr.Merged:
 		out.Action = natspkg.PRActionMerged
-	case pr.State != prStateClosed && !pr.Draft && pr.AutoMerge != nil:
+	case pr.State != prStateClosed && !pr.Draft && pr.Queued():
 		out.Action = natspkg.PRActionQueued
 	}
 	return out
@@ -153,6 +155,9 @@ func (r *IssuePickupReconciler) recoverQueuedMerge(ctx context.Context, gh *gith
 		pr, err := gh.GetPull(ctx, ref.repo, ref.number)
 		if err != nil {
 			return false, fmt.Errorf("get %s: %w", ref, err)
+		}
+		if err := gh.LoadMergeQueueState(ctx, pr); err != nil {
+			return false, fmt.Errorf("merge queue state of %s: %w", ref, err)
 		}
 		prs = append(prs, ghPRState(ref, pr))
 	}

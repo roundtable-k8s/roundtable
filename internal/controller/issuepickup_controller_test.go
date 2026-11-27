@@ -67,6 +67,8 @@ type fakeGitHub struct {
 	// autoMerged: node IDs auto-merge was enabled for; failAutoMerge makes it fail.
 	autoMerged    []string
 	failAutoMerge bool
+	// inMergeQueue: node IDs ("repo#n") GraphQL reports as in a merge queue.
+	inMergeQueue map[string]bool
 	// reviews: "repo#n" -> review bodies on the PR (oldest first).
 	reviews map[string][]string
 }
@@ -174,9 +176,15 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	if req.URL.Path == "/graphql" {
 		var body struct {
+			Query     string              `json:"query"`
 			Variables struct{ ID string } `json:"variables"`
 		}
 		_ = json.NewDecoder(req.Body).Decode(&body)
+		if !strings.Contains(body.Query, "enablePullRequestAutoMerge") {
+			// Read-only merge-queue state query.
+			_, _ = fmt.Fprintf(w, `{"data":{"node":{"isInMergeQueue":%t}}}`, f.inMergeQueue[body.Variables.ID])
+			return
+		}
 		if f.failAutoMerge {
 			_, _ = w.Write([]byte(`{"errors":[{"message":"Pull request is in clean status"}]}`))
 			return
@@ -753,6 +761,18 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(gh.reviews["acme/widgets#7"][0]).To(ContainSubstring("Verdict: needs changes"))
 			Expect(gh.autoMerged).To(BeEmpty())
 			Expect(gh.labels(repo, 301)).To(ContainElement("needs-human"))
+		})
+
+		It("accepts a PR in the merge queue (auto_merge null) without enabling auto-merge", func() {
+			gh.setPR(github.PullRequest{State: "open"})
+			gh.mu.Lock()
+			gh.inMergeQueue = map[string]bool{"acme/widgets#7": true}
+			gh.mu.Unlock()
+			name := start()
+			tick()
+			Expect(gh.autoMerged).To(BeEmpty())
+			Expect(gh.labels(repo, 301)).NotTo(ContainElement("needs-human"))
+			Expect(verified(name)).To(BeTrue())
 		})
 
 		It("accepts merged and already-queued PRs untouched", func() {

@@ -61,12 +61,13 @@ func TestQueuedCountsAsDone(t *testing.T) {
 		action string
 		landed bool
 	}{
-		"queued":             {[]github.PullRequest{queued}, natspkg.PRActionQueued, true},
-		"merged":             {[]github.PullRequest{{State: "closed", Merged: true}}, natspkg.PRActionMerged, true},
-		"open, not queued":   {[]github.PullRequest{{State: "open"}}, "open", false},
-		"closed unmerged":    {[]github.PullRequest{{State: "closed"}}, "closed", false},
-		"draft with auto":    {[]github.PullRequest{{State: "open", Draft: true, AutoMerge: &struct{}{}}}, "open", false},
-		"one of two missing": {[]github.PullRequest{queued, {State: "open"}}, natspkg.PRActionQueued, false},
+		"queued":                          {[]github.PullRequest{queued}, natspkg.PRActionQueued, true},
+		"in merge queue, auto_merge null": {[]github.PullRequest{{State: "open", InMergeQueue: true}}, natspkg.PRActionQueued, true},
+		"merged":                          {[]github.PullRequest{{State: "closed", Merged: true}}, natspkg.PRActionMerged, true},
+		"open, not queued":                {[]github.PullRequest{{State: "open"}}, "open", false},
+		"closed unmerged":                 {[]github.PullRequest{{State: "closed"}}, "closed", false},
+		"draft with auto":                 {[]github.PullRequest{{State: "open", Draft: true, AutoMerge: &struct{}{}}}, "open", false},
+		"one of two missing":              {[]github.PullRequest{queued, {State: "open"}}, natspkg.PRActionQueued, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

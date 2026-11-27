@@ -442,9 +442,13 @@ type PullRequest struct {
 	NodeID string `json:"node_id"`
 	// AutoMerge is set while auto-merge is enabled (queued).
 	AutoMerge *struct{} `json:"auto_merge"`
-	User      User      `json:"user"`
-	Labels    []Label   `json:"labels"`
-	Head      struct {
+	// InMergeQueue is set by LoadMergeQueueState when GraphQL shows the pull
+	// request in a merge queue. REST auto_merge can be null for a PR placed
+	// straight into a queue, so it alone does not tell queued from open.
+	InMergeQueue bool    `json:"-"`
+	User         User    `json:"user"`
+	Labels       []Label `json:"labels"`
+	Head         struct {
 		SHA string `json:"sha"`
 		Ref string `json:"ref"`
 	} `json:"head"`
@@ -452,6 +456,10 @@ type PullRequest struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
 }
+
+// Queued reports whether the pull request waits to merge: auto-merge is on
+// (REST) or it is in a merge queue (GraphQL, see LoadMergeQueueState).
+func (p *PullRequest) Queued() bool { return p.AutoMerge != nil || p.InMergeQueue }
 
 // HasLabel reports whether the pull request carries label name
 // (case-insensitive).
@@ -573,6 +581,53 @@ func (c *Client) EnableAutoMerge(ctx context.Context, nodeID string) error {
 	}
 	if len(out.Errors) > 0 {
 		return fmt.Errorf("enable auto-merge: %s", out.Errors[0].Message)
+	}
+	return nil
+}
+
+// LoadMergeQueueState asks GraphQL (isInMergeQueue / mergeQueueEntry) whether
+// an open pull request is in a merge queue and records it in pr.InMergeQueue.
+// It is a no-op (no call) for a merged, closed or draft PR, one already
+// showing auto_merge, or one without a node ID. A GraphQL error is returned
+// to the caller: in the verify pass it fails the pass, which is retried on the
+// next poll.
+func (c *Client) LoadMergeQueueState(ctx context.Context, pr *PullRequest) error {
+	if pr.AutoMerge != nil || pr.Merged || pr.State == "closed" || pr.Draft || pr.NodeID == "" {
+		return nil
+	}
+	g, err := c.api()
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"query":     "query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue mergeQueueEntry { id } } } }",
+		"variables": map[string]string{"id": pr.NodeID},
+	}
+	req, err := g.NewRequest(ctx, http.MethodPost, "graphql", body)
+	if err != nil {
+		return err
+	}
+	var out struct {
+		Data struct {
+			Node *struct {
+				IsInMergeQueue  bool `json:"isInMergeQueue"`
+				MergeQueueEntry *struct {
+					ID string `json:"id"`
+				} `json:"mergeQueueEntry"`
+			} `json:"node"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if _, err := g.Do(req, &out); err != nil {
+		return err
+	}
+	if len(out.Errors) > 0 {
+		return fmt.Errorf("merge queue state: %s", out.Errors[0].Message)
+	}
+	if n := out.Data.Node; n != nil {
+		pr.InMergeQueue = n.IsInMergeQueue || n.MergeQueueEntry != nil
 	}
 	return nil
 }
