@@ -22,6 +22,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -35,8 +36,15 @@ import (
 // cluster; `make test` runs it (the package is otherwise excluded from it).
 // It parses e2e_suite_test.go as text, so it does not need the e2e build tag.
 func TestE2ETiers(t *testing.T) {
-	fromGo := tierConstants(t, filepath.Join(".", "e2e_suite_test.go"))
-	fromMake := makeTiers(t, filepath.Join("..", "..", "Makefile"))
+	// Resolve paths from this file, not the working directory: the e2e specs
+	// (utils.Run) chdir to the project root, and this test runs after them.
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate tiers_test.go")
+	}
+	dir := filepath.Dir(self)
+	fromGo := tierConstants(t, filepath.Join(dir, "e2e_suite_test.go"))
+	fromMake := makeTiers(t, filepath.Join(dir, "..", "..", "Makefile"))
 
 	for _, tier := range fromGo {
 		if !slices.Contains(fromMake, tier) {
