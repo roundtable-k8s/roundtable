@@ -6,7 +6,7 @@ metadata:
   namespace: roundtable
 spec:
   nats:
-    url: nats://nats.roundtable.svc:4222
+    url: nats://nats.database.svc:4222
     subjectPrefix: fleet-a
     tasksStream: fleet_a_tasks
     resultsStream: fleet_a_results

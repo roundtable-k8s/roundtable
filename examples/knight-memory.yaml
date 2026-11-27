@@ -27,7 +27,7 @@ spec:
   description: "Two knights sharing a memory claim"
 
   nats:
-    url: nats://nats.roundtable.svc:4222
+    url: nats://nats.database.svc:4222
     subjectPrefix: memory-fleet
     tasksStream: memory_fleet_tasks
     resultsStream: memory_fleet_results
@@ -58,7 +58,7 @@ spec:
   skills:
     - general
   nats:
-    url: nats://nats.roundtable.svc:4222
+    url: nats://nats.database.svc:4222
     stream: memory_fleet_tasks
     resultsStream: memory_fleet_results
     subjects:
@@ -77,7 +77,7 @@ spec:
   skills:
     - general
   nats:
-    url: nats://nats.roundtable.svc:4222
+    url: nats://nats.database.svc:4222
     stream: memory_fleet_tasks
     resultsStream: memory_fleet_results
     subjects:

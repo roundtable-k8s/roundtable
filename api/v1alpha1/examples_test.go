@@ -32,11 +32,11 @@ import (
 )
 
 // acceptedExampleNATSURLs is the set of spec.nats.url values an example may
-// use: the quickstart's in-cluster NATS (namespace roundtable) and the
-// namespace "database" of the author's cluster used by the other examples.
-// The two disagree on purpose until the owner picks one (see
-// examples/README.md, "Adapting the examples"). A new author-specific value
-// must not slip in: extend this set only deliberately.
+// use: the quickstart's in-cluster NATS (namespace roundtable, used by
+// examples/quickstart and examples/dev) and the namespace "database" of the
+// author's cluster used by the other examples (see examples/README.md,
+// "Adapting the examples"). A new author-specific value must not slip in:
+// extend this set only deliberately.
 var acceptedExampleNATSURLs = []string{
 	"nats://nats.roundtable.svc:4222",
 	"nats://nats.database.svc:4222",

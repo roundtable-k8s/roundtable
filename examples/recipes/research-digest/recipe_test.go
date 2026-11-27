@@ -3,12 +3,16 @@
 package researchdigest
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 )
 
@@ -21,7 +25,10 @@ func TestManifestsParse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		docs := bytes.Split(data, []byte("\n---\n"))
+		docs, err := splitDocuments(data)
+		if err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
 		if len(docs) != len(kinds) {
 			t.Fatalf("%s: %d documents, want %d", file, len(docs), len(kinds))
 		}
@@ -79,7 +86,11 @@ func TestKnightLabelMatchesTrigger(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := yaml.Unmarshal(bytes.Split(data, []byte("\n---\n"))[docIdx], out); err != nil {
+		docs, err := splitDocuments(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(docs[docIdx], out); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -138,5 +149,47 @@ func TestKnightIsolation(t *testing.T) {
 	}
 	if knight.Spec.ServiceAccountName != "" {
 		t.Errorf("serviceAccountName %q: the knight must have no cluster access", knight.Spec.ServiceAccountName)
+	}
+}
+
+// splitDocuments splits a multi-document YAML file into its non-empty
+// documents. It accepts a leading "---" and "--- # comment" separators, and
+// skips blank and comment-only documents, so the count is the number of objects.
+func splitDocuments(data []byte) ([][]byte, error) {
+	r := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+	var docs [][]byte
+	for {
+		doc, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			return docs, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hasContent(doc) {
+			docs = append(docs, doc)
+		}
+	}
+}
+
+func hasContent(doc []byte) bool {
+	for _, line := range strings.Split(string(doc), "\n") {
+		if l := strings.TrimSpace(line); l != "" && !strings.HasPrefix(l, "#") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSplitDocuments pins the leading "---", comment separator and
+// comment-only document cases.
+func TestSplitDocuments(t *testing.T) {
+	in := "---\n# header\nkind: A\n--- # second\n\n---\n# only a comment\n---\nkind: B\n"
+	docs, err := splitDocuments([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("got %d documents, want 2: %q", len(docs), docs)
 	}
 }
