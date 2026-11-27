@@ -220,6 +220,14 @@ spec:
                           rule: (has(self.addLabels) && size(self.addLabels) > 0)
                             || (has(self.removeLabels) && size(self.removeLabels)
                             > 0)
+                      fairShare:
+                        description: |-
+                          fairShare shares the Trigger's total concurrency.maxActive slots across
+                          its repositories: candidates are visited round-robin, one per
+                          repository per pass (each repository keeping its own order), instead of
+                          repository by repository, so one busy repository cannot fill every slot
+                          while another waits. Default false.
+                        type: boolean
                       holdWhilePullRequestLabeled:
                         description: |-
                           holdWhilePullRequestLabeled holds a repository while it has an open

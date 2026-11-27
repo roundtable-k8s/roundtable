@@ -202,6 +202,7 @@ engine.
 | `intervalSeconds` | `300` | Seconds between polls (60–86400) |
 | `maxActive` | `2` | Unfinished pickup Chains for the table |
 | `maxActivePerRepo` | `1` | Unfinished pickup Chains per repo |
+| `fairShare` | `false` | Share `maxActive` across the repos round-robin (one issue per repo per pass) so one busy repo cannot take every slot; `trigger` engine only |
 | `ttlSecondsAfterFinished` | `604800` | Delete finished pickup Chains after this long; `0` keeps them |
 | `suspend` | `false` | Stop polling |
 | `engine` | `builtin` | `builtin` or `trigger`, see [Engines](#engines) |
