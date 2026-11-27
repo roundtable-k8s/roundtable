@@ -212,6 +212,7 @@ helm-check: helm ## Lint the Helm chart (also with values-minimal.yaml and the v
 	HELM="$(HELM)" scripts/check-values-schema.sh
 	HELM="$(HELM)" scripts/check-quickstart-values.sh
 	HELM="$(HELM)" scripts/check-planner.sh
+	HELM="$(HELM)" scripts/check-arsenal-values.sh
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration

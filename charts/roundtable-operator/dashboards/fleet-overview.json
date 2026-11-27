@@ -280,7 +280,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Queue depth by knight",
-      "description": "Pending tasks (JetStream consumer lag) per knight, from KEDA's keda_scaler_metrics_value for the nats-jetstream scaler. Needs KEDA's metrics scraped. Only knights with a ScaledObject (maxReplicas > 1 or scale-to-zero) appear; others have no series. Pending counts tasks not yet delivered to a pod; tasks a pod is already running are ack-pending and not included. Not filtered by table (ScaledObjects carry no table label).",
+      "description": "Pending tasks (JetStream consumer lag) per knight, from KEDA's keda_scaler_metrics_value for the nats-jetstream scaler. Needs KEDA's metrics scraped. Only knights with a ScaledObject (maxReplicas > 1 or scale-to-zero) appear; others have no series. Pending counts tasks not yet delivered to a pod; tasks a pod is already running are ack-pending and not included. Not filtered by table (ScaledObjects carry no table label). Metric and label names (keda_scaler_metrics_value, metric, scaledObject, exported_namespace) are KEDA 2.x's; see docs/dependencies.md.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -298,8 +298,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (scaledObject) (keda_scaler_metrics_value{exported_namespace=~\"$namespace\", metric=~\"s[0-9]+-nats-jetstream-.*\"})",
-          "legendFormat": "{{scaledObject}}"
+          "expr": "sum by (exported_namespace, scaledObject) (keda_scaler_metrics_value{exported_namespace=~\"$namespace\", metric=~\"s[0-9]+-nats-jetstream-.*\"})",
+          "legendFormat": "{{exported_namespace}}/{{scaledObject}}"
         }
       ],
       "fieldConfig": {
