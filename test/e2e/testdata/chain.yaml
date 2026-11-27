@@ -1,0 +1,81 @@
+# A table, one stub knight (test/e2e/stubknight, no LLM) and a Chain that
+# exercises the engine for the e2e chain tier: step output feeding the next
+# step, a false `when` and a forEach fan-out over two items.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: e2e-table
+  namespace: roundtable-chain
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: e2e
+    tasksStream: e2e_tasks
+    resultsStream: e2e_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-chain
+  labels:
+    ai.roundtable.io/round-table: e2e-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: e2e_tasks
+    resultsStream: e2e_results
+    subjects:
+      - "e2e.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: engine
+  namespace: roundtable-chain
+spec:
+  roundTableRef: {name: e2e-table}
+  timeoutSeconds: 600
+  input: '["alpha", "beta"]'
+  steps:
+    - name: a
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        First step, marker ALPHA-OUT.
+    - name: b
+      dependsOn: [a]
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Second step quoting: {{ .Steps.a.Output }}
+    - name: c
+      dependsOn: [a]
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      when: 'steps.a.phase == "Failed"'
+      task: |
+        This step must be skipped.
+    - name: fan
+      dependsOn: [a]
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      forEach:
+        from: input
+      task: |
+        Fan-out item: {{ .Item }}

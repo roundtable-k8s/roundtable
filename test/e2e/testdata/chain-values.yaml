@@ -1,0 +1,20 @@
+# Chart values for the e2e chain tier: the operator from the locally built
+# image, with the optional components off.
+fullnameOverride: rt-chain
+image:
+  repository: example.com/roundtable-operator
+  tag: v0.0.1
+  pullPolicy: IfNotPresent
+# kind has no gVisor; the test knight also opts out.
+isolation:
+  runtimeClassName: ""
+  egress:
+    mode: "off"
+missionNetworkPolicy:
+  enabled: false
+dashboard:
+  enabled: false
+gateway:
+  enabled: false
+planner:
+  enabled: false
