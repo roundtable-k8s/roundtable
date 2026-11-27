@@ -22,6 +22,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,12 +39,12 @@ func TestE2ETiers(t *testing.T) {
 	fromMake := makeTiers(t, filepath.Join("..", "..", "Makefile"))
 
 	for _, tier := range fromGo {
-		if !contains(fromMake, tier) {
+		if !slices.Contains(fromMake, tier) {
 			t.Errorf("tier %q has a tier constant in e2e_suite_test.go but is missing from E2E_TIERS in the Makefile", tier)
 		}
 	}
 	for _, tier := range fromMake {
-		if !contains(fromGo, tier) {
+		if !slices.Contains(fromGo, tier) {
 			t.Errorf("tier %q is in E2E_TIERS in the Makefile but has no tier constant in e2e_suite_test.go", tier)
 		}
 	}
@@ -94,7 +95,7 @@ func makeTiers(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if rest, ok := strings.CutPrefix(line, "E2E_TIERS :="); ok {
 			tiers := strings.Fields(rest)
 			sort.Strings(tiers)
@@ -103,13 +104,4 @@ func makeTiers(t *testing.T, path string) []string {
 	}
 	t.Fatalf("%s has no E2E_TIERS assignment", path)
 	return nil
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
