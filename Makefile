@@ -142,7 +142,7 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	esac
 
 # TIER selects the e2e scenarios (Ginkgo labels in test/e2e): core (default),
-# trace, trigger, lost, restart, gateway, chain (engine: step output, when, forEach), github, or all. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
+# trace, trigger, lost, restart, gateway, chain (engine: step output, when, forEach), schedule (create, run now, suspend, delete through the gateway), github, or all. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
 TIER ?= core
 
 .PHONY: e2e
