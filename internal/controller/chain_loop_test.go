@@ -569,7 +569,7 @@ var _ = Describe("Chain when conditions and loops", func() {
 			Step  string
 			Phase aiv1alpha1.ChainStepPhase
 		}
-		var hist []histKey
+		hist := make([]histKey, 0, len(loop.Loop.History))
 		for _, h := range loop.Loop.History {
 			hist = append(hist, histKey{h.Round, h.Step, h.Phase})
 			Expect(h.TaskID).NotTo(BeEmpty())
