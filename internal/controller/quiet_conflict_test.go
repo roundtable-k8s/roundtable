@@ -58,3 +58,36 @@ func TestQuietConflictPassesOtherErrorsThrough(t *testing.T) {
 		t.Fatalf("non-conflict error must pass through, got %v", err)
 	}
 }
+
+// The Knight reconcile wraps its status write the same way: a conflict on
+// the status Update is a quiet requeue, not an error.
+func TestKnightReconcileStatusConflictRequeuesQuietly(t *testing.T) {
+	s := k8sruntime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	k := &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: "kay", Namespace: "default", Finalizers: []string{knightFinalizer}},
+		Spec:       aiv1alpha1.KnightSpec{Suspend: true},
+	}
+	conflicts := 0
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, obj client.Object, _ ...client.SubResourceUpdateOption) error {
+				conflicts++
+				return apierrors.NewConflict(schema.GroupResource{Group: "ai.roundtable.io", Resource: "knights"}, obj.GetName(), nil)
+			},
+		}).Build()
+	r := &KnightReconciler{Client: c, APIReader: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "kay"}})
+	if err != nil {
+		t.Fatalf("conflict must not surface as a reconcile error, got %v", err)
+	}
+	if conflicts == 0 {
+		t.Fatal("status write was never attempted")
+	}
+	if res.RequeueAfter != RequeueFast {
+		t.Fatalf("want RequeueAfter=%v, got %+v", RequeueFast, res)
+	}
+}

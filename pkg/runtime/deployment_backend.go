@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -49,6 +50,9 @@ type PodSpecBuilder func(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.
 // DeploymentBackend implements RuntimeBackend using Kubernetes Deployments.
 // This is the default "always-on" backend where each Knight runs as a Deployment.
 type DeploymentBackend struct {
+	// idleSince remembers when the whenIdle wait for a spec hash started,
+	// keyed by namespace/name, so a gateRollout deferral does not restart it.
+	idleSince sync.Map
 	Client       client.Client
 	Scheme       *runtime.Scheme
 	DefaultImage string
@@ -81,6 +85,12 @@ type DeploymentBackend struct {
 
 	// Now is the clock for the whenIdle maximum wait (nil means time.Now).
 	Now func() time.Time
+}
+
+// idleWait is the remembered start of a whenIdle wait for one spec hash.
+type idleWait struct {
+	hash  string
+	since time.Time
 }
 
 // ErrRolloutDeferred is returned (wrapped) by Reconcile when a changed pod
@@ -236,6 +246,7 @@ func (b *DeploymentBackend) gateIdle(
 		return fmt.Errorf("failed to get deployment: %w", err)
 	}
 	if existing.Spec.Template.Annotations[specHashAnnotation] == desiredHash || isScaledToZero(existing) {
+		b.idleSince.Delete(knight.Namespace + "/" + knight.Name)
 		return nil
 	}
 	if !b.Busy(ctx, knight) {
@@ -249,11 +260,22 @@ func (b *DeploymentBackend) gateIdle(
 	if b.Now != nil {
 		now = b.Now()
 	}
-	waited := time.Duration(0)
-	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending); c != nil &&
-		c.Status == metav1.ConditionTrue && c.Reason == aiv1alpha1.ReasonWaitingForIdle {
-		waited = now.Sub(c.LastTransitionTime.Time)
+	// The wait is counted once per rolled-out hash: a deferral by gateRollout
+	// swaps the RolloutPending reason and resets its LastTransitionTime, so
+	// the start is remembered here and the condition only seeds it (after an
+	// operator restart, or for the first sighting).
+	key := knight.Namespace + "/" + knight.Name
+	since := now
+	if v, ok := b.idleSince.Load(key); ok && v.(idleWait).hash == desiredHash {
+		since = v.(idleWait).since
+	} else {
+		if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending); c != nil &&
+			c.Status == metav1.ConditionTrue && c.Reason == aiv1alpha1.ReasonWaitingForIdle {
+			since = c.LastTransitionTime.Time
+		}
+		b.idleSince.Store(key, idleWait{hash: desiredHash, since: since})
 	}
+	waited := now.Sub(since)
 	if waited >= maxWait {
 		logf.FromContext(ctx).Info("Rolling busy knight: rollout whenIdle maximum wait passed",
 			"knight", knight.Name, "maxWait", maxWait.String())
