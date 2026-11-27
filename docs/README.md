@@ -27,7 +27,7 @@ usually needs them. The [README](../README.md) gives the overview.
 - [Helm values](helm-values.md): the full chart configuration reference.
 - [CRD design](crd-design.md): the Knight, RoundTable, Chain, Mission and Trigger fields.
 - [Knight task contract](knight-task-contract.md): how the operator hands a task to a knight runtime over NATS and what it expects back.
-- [Agent cards](agent-cards.md): the JSON document each knight publishes saying who it is, what it can do and how to reach it.
+- [Agent cards](agent-cards.md): the JSON document each knight publishes saying who it is, what it can do and how to reach it. [How a knight finds another knight](agent-cards.md#how-a-knight-finds-another-knight) covers `find_knights`.
 
 ## How it works
 

@@ -121,6 +121,68 @@ spec:
 fields (`description`, `tags`, `examples`) replace the generated ones; an `id`
 that is not generated adds a skill.
 
+## How a knight finds another knight
+
+Knights read the same cards. The `find_knights` tool lists the other knights
+of the knight's table from them, and `nats_request` takes a knight's name and
+looks up its domain on the card, so a knight can delegate without being told
+the target's domain. The roster is per table: a knight sees only the cards
+under its own `ROUNDTABLE_TABLE`, and never itself.
+
+`find_knights` takes four optional parameters (all from `FindKnightsQuery`):
+
+| Parameter | Type | Matches |
+|---|---|---|
+| `query` | string | Case-insensitive text in the knight name, the card `description`, or a skill's `id` or `description`. A knight that matches only on a skill is listed with just the matching skills. |
+| `domain` | string | Exact match on the card's domain (the Knight's `spec.domain`). |
+| `skill` | string | A skill `id` or one of its `tags`, exact and case-insensitive. Only the matching skills are listed. |
+| `includeSuspended` | boolean | Default `true`. Suspended (scaled to zero) knights are listed with status `suspended`; a task sent to them waits until they wake. `false` drops them. |
+
+With no parameters it lists every other knight. Results are sorted by name.
+Each match gives the name, domain, description, the skills that matched, and a
+status:
+
+- `ready`: the knight has ready replicas (or `phase` is `Ready`).
+- `suspended`: `spec.suspend` is set.
+- `not ready`: neither of the above.
+
+A `live` flag is added when a pod answered a micro service PING for the knight
+within about 300 ms. It is omitted when nobody answered, so its absence means
+"no liveness information", not "not live". The PING is only sent when there is
+at least one match.
+
+The knight reads the roster from a KV watch on the table's keys. Until that
+watch has loaded, and again after it ends (it is restarted with back-off from
+5 s to 60 s), each lookup reads the bucket directly, so results are current
+either way.
+
+An example exchange (plain text, the tool's own output format):
+
+```text
+knight: find_knights {"domain": "security"}
+tool:   1 knight(s) at your table:
+        - galahad (domain: security, ready, live): Security analyst: CVE triage and the daily security brief.
+            - cve-triage: Triage a CVE against the fleet's images.
+
+knight: nats_request {"knight": "galahad", "task": "Is CVE-2026-1234 exploitable in our cluster?"}
+```
+
+Nothing in that exchange passes `domain` to `nats_request`: the domain comes
+from galahad's card. An unknown name is rejected with the valid names at the
+table. Passing `domain` explicitly skips the lookup.
+
+The fields that decide what a knight finds are on the Knight:
+
+- `spec.domain`: the card's domain, used by the `domain` filter and by the task subject.
+- `spec.card.description` (else the first paragraph of `spec.prompt.identity`): the description that `query` matches.
+- `spec.card.tags` and the skills (`spec.skills` categories, the skills a running knight reports, and `spec.card.skills`): what `skill` and `query` match. See [Skills](#skills) and [Overrides](#overrides).
+- `spec.suspend`: the status, and whether `includeSuspended: false` drops the knight.
+
+When there is no roster, `find_knights` answers
+`No roster available: this knight has no agent cards (ROUNDTABLE_TABLE or KNIGHT_CARDS_BUCKET is not set).`
+This happens on older operators that do not set `KNIGHT_CARDS_BUCKET`, or when
+the knight has no table. `nats_request` then needs an explicit `domain`.
+
 ## Watching the roster
 
 ```bash
