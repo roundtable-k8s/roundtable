@@ -6,6 +6,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,8 +20,12 @@ import (
 var _ = Describe("Knight RolloutPending condition", func() {
 	ctx := context.Background()
 	names := []string{"rollgate-a", "rollgate-b"}
+	// Own namespace: the rollout gate counts every knight Deployment in the
+	// namespace, and envtest has no Deployment controller, so other tests'
+	// Deployments in "default" would all look mid-rollout.
+	const ns = "rollout-pending"
 
-	nn := func(n string) types.NamespacedName { return types.NamespacedName{Name: n, Namespace: "default"} }
+	nn := func(n string) types.NamespacedName { return types.NamespacedName{Name: n, Namespace: ns} }
 	pending := func(n string) *metav1.Condition {
 		k := &aiv1alpha1.Knight{}
 		ExpectWithOffset(1, k8sClient.Get(ctx, nn(n), k)).To(Succeed())
@@ -53,9 +59,12 @@ var _ = Describe("Knight RolloutPending condition", func() {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(n)})
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 		}
+		if err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+			Expect(apierrors.IsAlreadyExists(err)).To(BeTrue())
+		}
 		for _, n := range names {
 			k := &aiv1alpha1.Knight{
-				ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: ns},
 				Spec: aiv1alpha1.KnightSpec{
 					Domain: "security", Skills: []string{"security"}, Image: "example.com/knight:v1",
 					NATS: aiv1alpha1.KnightNATS{
