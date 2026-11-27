@@ -1257,6 +1257,13 @@ var _ = Describe("Trigger controller", func() {
 			})
 		})
 
+		// fireAt handles a schedule firing for time at directly, as the
+		// Trigger's message loop does.
+		fireAt := func(name string, at time.Time) {
+			_, err := r.fire(ctx, types.NamespacedName{Namespace: ns, Name: name},
+				TriggerEvent{Time: at, Headers: map[string]string{}}, at.Format(time.RFC3339), "", nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+		}
 		knightTarget := func(task string) aiv1alpha1.TriggerTarget {
 			return aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: knightName, Task: task}}
 		}
@@ -1365,9 +1372,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(rec.Done()).To(BeFalse())
 
 			// Firing the same schedule time again sends nothing.
-			_, err = r.fire(ctx, types.NamespacedName{Namespace: ns, Name: "kt-cron"},
-				TriggerEvent{Time: due, Headers: map[string]string{}}, due.Format(time.RFC3339), "", nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+			fireAt("kt-cron", due)
 			Consistently(func() []natspkg.TaskPayload { return got() }, "200ms").Should(HaveLen(1))
 			Expect(getTrigger("kt-cron").Status.RecentFirings[0].SkipReason).To(ContainSubstring("duplicate dedupe key"))
 
@@ -1583,9 +1588,7 @@ var _ = Describe("Trigger controller", func() {
 		}
 		fireNow := func(name string, at time.Time) {
 			clock = at.Add(time.Second)
-			_, err := r.fire(ctx, types.NamespacedName{Namespace: ns, Name: name},
-				TriggerEvent{Time: at, Headers: map[string]string{}}, at.Format(time.RFC3339), "", nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+			fireAt(name, at)
 		}
 		drainEvents := func() []string {
 			rec := r.Recorder.(*record.FakeRecorder)
