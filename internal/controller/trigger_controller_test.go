@@ -929,9 +929,9 @@ var _ = Describe("Trigger controller", func() {
 
 			// Redelivered two hours later, past the deadline: the run exists.
 			clock = due.Add(2 * time.Hour)
-			fireSchedule("redeliver", due, "redeliver")
+			fireSchedule("redeliver", due, "redeliver-again")
 			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("redeliver").Status.RecentFirings }, 10*time.Second).Should(HaveLen(2))
-			skipped := getTrigger("redeliver").Status.RecentFirings[1]
+			skipped := getTrigger("redeliver").Status.RecentFirings[0]
 			Expect(skipped.SkipReason).To(ContainSubstring("duplicate dedupe key"))
 			Expect(skipped.SkipReason).NotTo(ContainSubstring("startingDeadlineSeconds"))
 			Expect(runsOf("redeliver")).To(HaveLen(1))
