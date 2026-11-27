@@ -53,7 +53,7 @@ printf '%s\n' \
 marker_reasons() {
   sed -nE 's/.*\/\/ event-reasons:[ \t]*//p' "$@" | tr -s ' \t' '\n\n' | sed '/^$/d'
 }
-# defined <dir>... : reads reasons on stdin, prints those with no quoted-string
+# undefined <dir>... : reads reasons on stdin, prints those with no quoted-string
 # definition in a non-test Go file under the dirs.
 undefined() {
   local r

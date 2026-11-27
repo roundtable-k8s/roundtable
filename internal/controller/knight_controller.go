@@ -1347,6 +1347,10 @@ func (r *KnightReconciler) setMCPHeadersCondition(ctx context.Context, knight *a
 	return len(missing) > 0 || len(unreadable) > 0
 }
 
+// eventReasonMaxDeliverIgnored is the Warning event reason for the deprecated,
+// ignored spec.nats.maxDeliver.
+const eventReasonMaxDeliverIgnored = "MaxDeliverIgnored"
+
 // setDeprecatedFieldsCondition reports deprecated spec fields. It sets
 // DeprecatedFieldsUsed=True when spec.nats.maxDeliver is above 1 (ignored:
 // tasks run at most once). One Warning event (MaxDeliverIgnored) is recorded
@@ -1356,7 +1360,7 @@ func (r *KnightReconciler) setDeprecatedFieldsCondition(knight *aiv1alpha1.Knigh
 	type deprecated struct{ reason, msg string }
 	var used []deprecated
 	if md := knight.Spec.NATS.MaxDeliver; md > 1 { //nolint:staticcheck // reading the deprecated field to report it
-		used = append(used, deprecated{"MaxDeliverIgnored", fmt.Sprintf(
+		used = append(used, deprecated{eventReasonMaxDeliverIgnored, fmt.Sprintf(
 			"spec.nats.maxDeliver=%d is deprecated and ignored: knights always run a task at most once; lost and failed tasks go to the dead-letter stream and are retried by hand", md)})
 	}
 	if len(used) == 0 {
