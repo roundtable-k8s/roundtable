@@ -525,6 +525,11 @@ gateway:
   # namespace and allowedNamespaces. Off by default (it is a write verb on
   # Knights): the route then answers 403 and the snapshot_knight MCP tool is
   # not listed. Listing snapshots needs no extra RBAC and is always served.
+  # A ValidatingAdmissionPolicy (<release>-gateway-snapshots, rendered with
+  # it) denies any update by the gateway ServiceAccount that changes more than
+  # the ai.roundtable.io/snapshot and ai.roundtable.io/snapshot-caller
+  # annotations; it needs Kubernetes 1.30+ and the chart fails to render
+  # without it.
   knightSnapshots:
     enabled: false
   # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see

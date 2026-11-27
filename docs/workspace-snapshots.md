@@ -172,7 +172,9 @@ An existing PVC is kept: to get a restored workspace, create a new knight (a for
 
 `POST /v1/knights/{name}/snapshot` (MCP: `snapshot_knight`) sets the annotation for you and
 `GET /v1/knights/{name}/snapshots` (MCP: `list_knight_snapshots`) lists the snapshots and the
-`WorkspaceSnapshots` condition. See [Knight snapshots](gateway.md#knight-snapshots).
+`WorkspaceSnapshots` condition. The gateway's `patch` on Knights is limited to the snapshot
+annotations by a `ValidatingAdmissionPolicy` the chart ships with it (Kubernetes 1.30+).
+See [Knight snapshots](gateway.md#knight-snapshots).
 
 Requesting a snapshot through the gateway needs the chart value
 `gateway.knightSnapshots.enabled=true` (default `false`), which gives the gateway
@@ -186,6 +188,7 @@ works either way, and the annotation can still be set with `kubectl`.
 |---|---|
 | `spec.workspace.snapshots` (`className`, `keep`), `spec.workspace.fromSnapshot`, `status.workspace` (`lastSnapshotRequest`, `snapshots[]`), `ai.roundtable.io/snapshot` | `api/v1alpha1/knight_types.go` |
 | Conditions `WorkspaceSnapshots`, `WorkspaceReady` and their reasons | `api/v1alpha1/conditions.go` |
+| ValidatingAdmissionPolicy `<release>-gateway-snapshots` limiting the gateway's Knight patch | `charts/roundtable-operator/templates/gateway.yaml` |
 | Snapshot creation, naming, labels `roundtable.io/knight` and `roundtable.io/snapshot-request`, retention, default `keep` of 3 | `internal/controller/knight_snapshot.go` |
 | PVC creation from the snapshot, readiness check, size | `internal/controller/knight_controller.go`, `internal/controller/knight_workspace_restore.go` |
 | API detection | `pkg/runtime/snapshot_detect.go`, `cmd/main.go` |

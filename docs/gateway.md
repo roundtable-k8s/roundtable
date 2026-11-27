@@ -500,6 +500,17 @@ an `error` saying the gateway was installed without
 `gateway.knightSnapshots.enabled=true`, and the `snapshot_knight` MCP tool is not
 listed. Listing snapshots is always served.
 
+The patch is narrowed by a `ValidatingAdmissionPolicy` and binding named
+`<release>-gateway-snapshots` that the chart renders with it. It matches updates
+of Knights by the gateway ServiceAccount, in the namespaces the patch Role covers
+(all of them when `allowedNamespaces` holds `"*"`), and denies the update unless
+`spec`, labels, finalizers, owner references and every annotation other than
+`ai.roundtable.io/snapshot` and `ai.roundtable.io/snapshot-caller` are unchanged.
+The gateway has no RBAC on the status subresource. `ValidatingAdmissionPolicy`
+(`admissionregistration.k8s.io/v1`) is GA since Kubernetes 1.30; on an older
+cluster the chart fails to render with snapshots enabled instead of granting the
+patch unguarded. A denied request answers with the policy name in the error.
+
 #### `GET /v1/knights/{name}/snapshots?namespace=`
 
 `{knight, namespace, lastSnapshotRequest, snapshots: [{name, createdAt, readyToUse}], condition}`:
