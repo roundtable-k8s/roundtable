@@ -17,7 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -38,8 +40,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -233,6 +237,29 @@ func (f *triggerFakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		item.labels = slices.Delete(item.labels, i, i+1)
 	}
 	_, _ = w.Write([]byte(`[]`))
+}
+
+// conflictStatusClient answers every Trigger status patch with a conflict.
+type conflictStatusClient struct {
+	client.Client
+	conflicts int
+}
+
+func (c *conflictStatusClient) Status() client.SubResourceWriter {
+	return conflictStatusWriter{SubResourceWriter: c.Client.Status(), c: c}
+}
+
+type conflictStatusWriter struct {
+	client.SubResourceWriter
+	c *conflictStatusClient
+}
+
+func (w conflictStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if _, ok := obj.(*aiv1alpha1.Trigger); ok {
+		w.c.conflicts++
+		return apierrors.NewConflict(schema.GroupResource{Group: aiv1alpha1.GroupVersion.Group, Resource: "triggers"}, obj.GetName(), errors.New("the object has been modified"))
+	}
+	return w.SubResourceWriter.Patch(ctx, obj, patch, opts...)
 }
 
 var _ = Describe("Trigger GitHub source", func() {
@@ -439,6 +466,42 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(getTrigger("ready").Status.RecentFirings).To(HaveLen(1))
 		_, after := gh.counts()
 		Expect(after).To(Equal(labelCalls))
+	})
+
+	It("skips an event whose payload has no valid item", func() {
+		githubTrigger("malformed", nil)
+		subject := natspkg.GitHubEventSubject(prefix, ns, "malformed")
+		Expect(cli.PublishJSON(subject, map[string]any{"title": "Forged"})).To(Succeed())
+		Eventually(func(g Gomega) {
+			st := getTrigger("malformed").Status
+			g.Expect(st.RecentFirings).To(HaveLen(1))
+			g.Expect(st.RecentFirings[0].Run).To(BeEmpty())
+			g.Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("github event has no valid item"))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+		Expect(runsOf("malformed")).To(BeEmpty())
+	})
+
+	It("fires a run-now request, which carries no github item", func() {
+		githubTrigger("runnow", nil)
+		t := getTrigger("runnow")
+		t.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-1"}
+		Expect(k8sClient.Update(ctx, t)).To(Succeed())
+		reconcileTrigger("runnow")
+		Expect(runsOf("runnow")).To(HaveLen(1))
+		st := getTrigger("runnow").Status
+		Expect(st.RecentFirings).To(HaveLen(1))
+		Expect(st.RecentFirings[0].SkipReason).To(BeEmpty())
+		Expect(getTrigger("runnow").Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+	})
+
+	It("requeues instead of failing when the status patch conflicts", func() {
+		githubTrigger("conflict", nil)
+		cc := &conflictStatusClient{Client: k8sClient}
+		r.Client = cc
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conflict"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Requeue).To(BeTrue()) //nolint:staticcheck // the reconciler requeues this way
+		Expect(cc.conflicts).To(BeNumerically(">", 0))
 	})
 
 	It("skips an event for a repository the Trigger does not list", func() {

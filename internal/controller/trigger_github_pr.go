@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -183,6 +184,9 @@ func listGitHubPRFailures(ctx context.Context, gh *github.Client, src *aiv1alpha
 		state := &GitHubPRState{HeadSHA: pr.Head.SHA, FailedChecks: []githubFailedCheck{}}
 		// The list endpoint has no mergeable_state: read the pull request.
 		full, err := gh.GetPull(ctx, repo, pr.Number)
+		if _, limited := github.RateLimited(err); limited {
+			return nil, rate, nil, err
+		}
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s#%d merge state: %v", repo, pr.Number, err))
 		} else {
@@ -194,6 +198,9 @@ func listGitHubPRFailures(ctx context.Context, gh *github.Client, src *aiv1alpha
 		default:
 			if src.Checks != "" {
 				checks, err := gh.ListCheckRuns(ctx, repo, pr.Head.SHA)
+				if _, limited := github.RateLimited(err); limited {
+					return nil, rate, nil, err
+				}
 				if err != nil {
 					problems = append(problems, fmt.Sprintf("%s#%d check runs: %v", repo, pr.Number, err))
 					continue
@@ -331,13 +338,25 @@ func (r *TriggerReconciler) handBackExhausted(ctx context.Context, gh *github.Cl
 	if err := applyHandBack(ctx, gh, *hb, "onMaxRuns.comment", data, c.item, &c.issue); err != nil {
 		return err
 	}
-	orig := run.DeepCopy()
-	if run.Annotations == nil {
-		run.Annotations = map[string]string{}
-	}
-	run.Annotations[aiv1alpha1.AnnotationTriggerHandedBack] = truncate(key, triggerKeyAnnotationMax)
-	if err := r.Patch(ctx, run, client.MergeFrom(orig)); err != nil {
-		return fmt.Errorf("record hand-back on run %s: %w", run.Name, err)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cur := &aiv1alpha1.Chain{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(run), cur); err != nil {
+			return err
+		}
+		orig := cur.DeepCopy()
+		if cur.Annotations == nil {
+			cur.Annotations = map[string]string{}
+		}
+		cur.Annotations[aiv1alpha1.AnnotationTriggerHandedBack] = truncate(key, triggerKeyAnnotationMax)
+		if err := r.Patch(ctx, cur, client.MergeFrom(orig)); err != nil {
+			return err
+		}
+		*run = *cur
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("onMaxRuns hand-back already applied to %s, but recording it on run %s failed (the item may be handed back again): %w",
+			c.item.key(), run.Name, err)
 	}
 	return nil
 }

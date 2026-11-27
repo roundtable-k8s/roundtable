@@ -528,7 +528,7 @@ var _ = Describe("GitHub source state selectors", func() {
 		Expect(again[3].eventKey()).To(Equal(items[3].eventKey()))
 
 		By("round-tripping the payload through an event")
-		ev, err := githubEvent(items[2], "s", time.Now())
+		ev, err := githubEvent(items[2], "s")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ev.Headers).To(HaveKeyWithValue(natspkg.EventKeyHeader, "o/r#2@ci:c2"))
 		back, err := githubEventItem(ev)
@@ -603,7 +603,7 @@ var _ = Describe("GitHub source state selectors", func() {
 		item := githubItem{Repo: "o/r", Number: 9, URL: "https://github.com/o/r/pull/9", GitHubPRState: &GitHubPRState{
 			HeadSHA: "s9", FailureKind: failureKindConflict, FailureURL: "https://github.com/o/r/pull/9", FailedChecks: []githubFailedCheck{},
 		}}
-		ev, err := githubEvent(item, "s", time.Now())
+		ev, err := githubEvent(item, "s")
 		Expect(err).NotTo(HaveOccurred())
 		ev.Data = withEventFields(ev.Data, map[string]any{"knight": "k", "runId": "r"})
 		data := triggerTemplateData{Event: ev, Run: triggerRunRef{Attempt: 3}}

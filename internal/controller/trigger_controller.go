@@ -247,6 +247,12 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		patch = client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 	}
 	if err := r.Status().Patch(ctx, latest, patch); err != nil {
+		if apierrors.IsConflict(err) {
+			// The poller wrote the status meanwhile: recompute from a fresh
+			// read instead of reporting an error.
+			logf.FromContext(ctx).V(1).Info("Status changed concurrently, reconciling again")
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	// Count after the patch so a conflict-retried reconcile cannot count a
@@ -854,7 +860,14 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 
 	var item *githubItem
 	if trg.Spec.Source.GitHub != nil {
-		if it, err := githubEventItem(ev); err == nil {
+		it, err := githubEventItem(ev)
+		if err != nil && manual == nil {
+			// The events subject is writable by any NATS client: a payload
+			// without a valid repo/number must not start a run. A run-now
+			// carries no payload and fires without an item.
+			return skip(triggerHandled, "github event has no valid item: %v", err)
+		}
+		if err == nil {
 			item = &it
 		}
 	}

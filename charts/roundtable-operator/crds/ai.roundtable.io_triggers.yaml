@@ -193,6 +193,8 @@ spec:
                               assignees are GitHub logins assigned to the item. GitHub ignores
                               logins that cannot be assigned.
                             items:
+                              maxLength: 39
+                              minLength: 1
                               type: string
                             maxItems: 10
                             type: array

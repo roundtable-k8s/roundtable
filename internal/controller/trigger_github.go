@@ -590,7 +590,7 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 		for _, cand := range candidates {
 			matched++
 			item := cand.item
-			ev, err := githubEvent(item, subject, now)
+			ev, err := githubEvent(item, subject)
 			if err != nil {
 				failed++
 				problems = append(problems, fmt.Sprintf("%s: %v", item.key(), err))
@@ -733,7 +733,7 @@ func githubKindNoun(kind aiv1alpha1.TriggerGitHubKind) string {
 
 // githubEvent is the event the consumer will see for item, so the poller can
 // render the templates exactly as fire will.
-func githubEvent(item githubItem, subject string, now time.Time) (TriggerEvent, error) {
+func githubEvent(item githubItem, subject string) (TriggerEvent, error) {
 	payload, err := json.Marshal(item)
 	if err != nil {
 		return TriggerEvent{}, err
@@ -742,7 +742,6 @@ func githubEvent(item githubItem, subject string, now time.Time) (TriggerEvent, 
 		Subject: subject,
 		Data:    eventData(payload),
 		Headers: map[string]string{natspkg.EventKeyHeader: item.eventKey()},
-		Time:    now,
 	}, nil
 }
 
