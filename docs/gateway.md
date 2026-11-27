@@ -474,10 +474,17 @@ Optional body: `{"force": true, "namespace": "...", "table": "..."}`.
 | `409` | The entry isn't `open` (body has the current `state`), or it belongs to a chain: rerun the chain or let its `retryPolicy` handle it. `force` retries the chain step on its own; the chain doesn't continue. |
 | `422` | The entry has no original task payload. |
 
-### `GET /v1/knights?namespace=`
+### `GET /v1/knights?namespace=&load=`
 
 Lists knights with their name, domain, model, agent runtime, phase, readiness
 and whether they are suspended.
+
+With `load=true` each knight also carries `queue: {pending, inFlight}`: tasks
+queued for it and tasks it has taken but not yet answered, read from its
+durable NATS consumer (so work started by chains counts too). A knight whose
+consumer does not exist yet reports zeros. If NATS cannot be read for a knight,
+its `queue` is left out and the error is logged. Without `load` NATS is not
+called and the response is unchanged.
 
 ### Knight snapshots
 
@@ -1414,7 +1421,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 
 | Tool | Input | Returns |
 |------|-------|---------|
-| `list_knights` | `namespace?` | `{knights: [...]}` |
+| `list_knights` | `namespace?`, `load?` | `{knights: [...]}` |
 | `invoke_knight` | `knight`, `task`, `runId?`, `model?`, `timeoutSeconds?`, `namespace?` | Text content is the knight's output. Structured content is the task record. A failed task is returned as a tool error; a plan-quota refusal starts with `usage limited:`. A pending task returns a note to call `get_task`. |
 | `get_task` | `taskId` | The task record (same text/error conventions) |
 | `list_tasks` | `knight?`, `runId?`, `status?`, `limit?` | `{tasks: [...]}` |

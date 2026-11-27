@@ -75,6 +75,31 @@ func (r *Resolver) Knights(ctx context.Context, namespace string) ([]aiv1alpha1.
 	return list.Items, nil
 }
 
+// TasksStream returns the stream the knight's tasks land in: its
+// spec.nats.stream, else the TasksStream of its RoundTable (label, legacy
+// label, then "default"). Empty when neither names one.
+func (r *Resolver) TasksStream(ctx context.Context, k *aiv1alpha1.Knight) (string, error) {
+	if k.Spec.NATS.Stream != "" {
+		return k.Spec.NATS.Stream, nil
+	}
+	candidates := []string{k.Labels[aiv1alpha1.LabelRoundTable], k.Labels[knightpkg.LegacyTableLabel], defaultTableName}
+	for _, name := range candidates {
+		if name == "" {
+			continue
+		}
+		rt := &aiv1alpha1.RoundTable{}
+		err := r.Client.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: name}, rt)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("get RoundTable %s/%s: %w", k.Namespace, name, err)
+		}
+		return rt.Spec.NATS.TasksStream, nil
+	}
+	return "", nil
+}
+
 // resolve finds the knight's RoundTable: the ai.roundtable.io/round-table
 // label, then the legacy ai.roundtable.io/table label, then a RoundTable named
 // "default". Without one, the subject prefix and results stream come from the
