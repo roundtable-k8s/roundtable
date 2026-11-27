@@ -44,9 +44,9 @@ jobs:
     if: ${{ !cancelled() && needs.queue-tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -79,9 +79,14 @@ jobs:
   helm-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Full history and tags: scripts/check-install-versions.sh checks that
+      # pinned versions name an existing tag, which needs tags in the clone.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -97,9 +102,9 @@ jobs:
     if: ${{ !cancelled() && needs.queue-tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -119,9 +124,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -159,9 +164,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -194,7 +199,7 @@ jobs:
           sed -i "s/^appVersion:.*/appVersion: \"${{ github.sha }}\"/" charts/roundtable-operator/Chart.yaml
           cat charts/roundtable-operator/Chart.yaml
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
