@@ -501,7 +501,7 @@ var openAPISchemas = obj{
 		"task": object([]string{"run", "knight", "status", "createdAt"}, obj{
 			"run": str("Task ID."), "knight": str(""), "status": str("pending, succeeded or failed."),
 			"output": str(""), "error": str(""), "model": str(""), "verdict": str(""),
-			"traceId":     str("Trace ID from the task record; omitted when empty."),
+			"traceId":     str("Trace ID from the task record; omitted when empty or invalid."),
 			"prs":         array(obj{"type": "object"}),
 			"createdAt":   obj{"type": "string", "format": "date-time"},
 			"completedAt": obj{"type": "string", "format": "date-time"},

@@ -567,7 +567,7 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 	if r.Phase == "" || (chainrun.Active(c) && st.Phase != aiv1alpha1.ChainPhaseRunning) {
 		// The run hasn't started: any status is from before it.
 		r.Phase = runPhasePending
-		r.StartedAt, r.CompletedAt = nil, nil
+		r.StartedAt, r.CompletedAt, r.TraceID = nil, nil, ""
 	} else {
 		r.RunID = st.RunID
 	}

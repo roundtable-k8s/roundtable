@@ -284,7 +284,7 @@ func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trig
 // without a loaded record is left as it was.
 func fillKnightUsage(runs []*ScheduleRun, recs map[string]*TaskRecord) {
 	for _, r := range runs {
-		if !strings.HasPrefix(r.Run, TaskIDPrefix) || (r.DurationSeconds != nil || r.CostUSD != "") && r.TraceID != "" {
+		if !strings.HasPrefix(r.Run, TaskIDPrefix) {
 			continue
 		}
 		rec := recs[r.Run]

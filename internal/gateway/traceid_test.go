@@ -34,6 +34,7 @@ func TestTraceIDOnRecords(t *testing.T) {
 	}{"set": {testTraceID, testTraceID}, "empty": {"", ""}, "invalid": {"not-a-trace-id", ""}} {
 		t.Run(name, func(t *testing.T) {
 			c := &aiv1alpha1.Chain{}
+			c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
 			c.Status.TraceID = tc.in
 			if got := runRecord(c, false).TraceID; got != tc.want {
 				t.Errorf("runRecord TraceID = %q, want %q", got, tc.want)
@@ -54,5 +55,25 @@ func TestTraceIDOnRecords(t *testing.T) {
 				t.Errorf("JSON %s: traceId present = %v", b, has)
 			}
 		})
+	}
+}
+
+// A pending run's status is left over from the previous run, so its trace ID
+// must not be shown.
+func TestTraceIDPendingRunOmitted(t *testing.T) {
+	c := &aiv1alpha1.Chain{}
+	c.Annotations = map[string]string{aiv1alpha1.AnnotationChainRun: "new"}
+	c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+	c.Status.LastRunTrigger = "old"
+	c.Status.TraceID = testTraceID
+	r := runRecord(c, false)
+	if r.Phase != runPhasePending {
+		t.Fatalf("phase = %q, want pending", r.Phase)
+	}
+	if r.TraceID != "" {
+		t.Errorf("pending run TraceID = %q, want empty", r.TraceID)
+	}
+	if got := chainScheduleRun(c).TraceID; got != "" {
+		t.Errorf("pending chainScheduleRun TraceID = %q, want empty", got)
 	}
 }
