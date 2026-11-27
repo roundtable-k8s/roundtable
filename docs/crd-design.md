@@ -799,17 +799,17 @@ no headers are rendered.
   Secret, then restart the knight; env vars are read at pod start. For a
   Deployment knight use `kubectl rollout restart deployment/<knight>`. A
   `runtime: sandbox` knight has no Deployment: the Secret change does not touch
-  the `Sandbox`, so delete the knight's pod (or the `Sandbox`, which the
-  operator recreates on its next reconcile) to start a new pod that reads the
-  new value.
+  the `Sandbox`, so set the Knight's `spec.suspend` to `true` and then back to
+  `false`. Suspend keeps the `Sandbox` and its volumes; resuming starts a new
+  pod from the current template, which reads the new value. Do not delete the
+  `Sandbox`: it holds the knight's volumes.
 - **A user `MCP_SERVERS_JSON` set via `valueFrom`** (Secret, ConfigMap or field
   reference in `spec.env`) cannot be merged at build time. The operator leaves
   it exactly as set and adds none of its `spec.mcpServers` servers (the
   `MCP_<SERVER>_<HEADER>` env vars are still added, but nothing references them); the knight then has only the
   servers in that value. A literal `value` is merged instead, with the user's
   servers winning on a name clash. `CLAUDE_DISALLOWED_TOOLS` is the user's own
-  variable and is never touched by the operator; extend it through
-  `$(CLAUDE_DISALLOWED_TOOLS)` expansion in a later `spec.env` entry.
+  variable and is never touched by the operator.
 - The value is visible to anything running in the knight container (as every
   pod credential is), including the agent's shell.
 

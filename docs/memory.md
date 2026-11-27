@@ -42,7 +42,7 @@ else. The operator enforces this with mounts where it can (see
 
 | Mount | Does it enforce "write only your own"? |
 |-------|----------------------------------------|
-| `/vault` | **Yes**, while `readOnly` is true (the default for a knight with `writablePaths`). The base is read-only and only the knight's `writablePaths` are mounted read-write. Writes anywhere else fail with a read-only filesystem error. With `vault.readOnly: false` the **whole vault is writable** and `writablePaths` enforces nothing. |
+| `/vault` | **Yes**, while `readOnly` is true (the default). The base is read-only and only the knight's `writablePaths` are mounted read-write. Writes anywhere else fail with a read-only filesystem error. With `vault.readOnly: false` the **whole vault is writable** and `writablePaths` enforces nothing. |
 | `/memory` | **Yes** for a shared `existingClaim`: only `/memory/<knight>` is read-write; the rest is read-only. A per-knight claim is mounted only at `/memory/<knight>`, so other knights' files are not visible to it at all. |
 | `/shared` | **No.** Every knight can write everywhere. Keep to the convention by prompt, not by mount. The path is `/shared` unless `RoundTable.spec.sharedWorkspace.mountPath` overrides it. |
 | `/data` | Not applicable: it is private to the knight. |
