@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -315,6 +316,24 @@ func TestDisabledTablePlannerFallsBackToRoleLabel(t *testing.T) {
 	}
 }
 
+// TestEnabledTablePlannerIsWaitedFor is the control for the disabled test
+// above: the same fixture with the planner enabled (not disabled) does not
+// fall back to the role-labelled knight, it waits for the table's own planner.
+func TestEnabledTablePlannerIsWaitedFor(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", nil), plannerTestTable("b", nil),
+		tablePlanner("b"),
+		roleKnight("planner", nil),
+	)
+
+	m := reconcilePlanning(t, c)
+
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "" {
+		t.Fatalf("knightRef = %q, want unset while the table's planner is created", got)
+	}
+}
+
 // TestOtherTablesPlannerIsNeverUsed: a mission whose table has no planner
 // fails rather than borrowing another table's.
 func TestOtherTablesPlannerIsNeverUsed(t *testing.T) {
@@ -352,5 +371,55 @@ func TestWakesOnTask(t *testing.T) {
 	k.Spec.Lifecycle = nil
 	if wakesOnTask(k) {
 		t.Error("a knight without suspendPolicy auto does not wake")
+	}
+}
+
+// TestPlanningFailureMessageIsBounded: a huge planner error must not push the
+// Complete condition message over the API limit; the event is bounded too.
+func TestPlanningFailureMessageIsBounded(t *testing.T) {
+	m := plannerTestMission(nil)
+	m.Status.PlanningResult = &aiv1alpha1.PlanningResult{Error: strings.Repeat("x", 40000)}
+	c := plannerTestClient(m)
+	rec := record.NewFakeRecorder(5)
+	p := &Planner{Client: c, Recorder: rec}
+	got := &aiv1alpha1.Mission{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "m", Namespace: "default"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ReconcilePlanning(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "m", Namespace: "default"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != aiv1alpha1.MissionPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", got.Status.Phase)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != aiv1alpha1.ReasonMissionFailed {
+		t.Fatalf("Complete condition = %+v", cond)
+	}
+	if n := len([]rune(cond.Message)); n > len("Planning failed: ")+MaxPlanErrorMessage {
+		t.Errorf("condition message has %d chars, want <= %d", n, len("Planning failed: ")+MaxPlanErrorMessage)
+	}
+	if !strings.HasSuffix(cond.Message, "...") {
+		t.Error("truncated message should end with ...")
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.HasPrefix(ev, "Warning Failed Planning failed:") {
+			t.Errorf("event = %.60s", ev)
+		}
+	default:
+		t.Error("no Warning event recorded")
+	}
+}
+
+func TestTruncateMessage(t *testing.T) {
+	if got := TruncateMessage("short", 10); got != "short" {
+		t.Errorf("got %q", got)
+	}
+	if got := TruncateMessage("héllo wörld", 8); got != "héllo..." {
+		t.Errorf("got %q", got)
 	}
 }

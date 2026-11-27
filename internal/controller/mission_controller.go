@@ -809,9 +809,29 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 	if mission.Spec.RetainResults && mission.Status.ResultsRef == nil {
 		if err := r.Cleaner.StoreResultsToKV(ctx, mission); err != nil {
 			log.Error(err, "Failed to store results to NATS KV")
-			// Continue with cleanup even if this fails — set the key anyway
-			// to prevent infinite retry loop
-			missionpkg.SetResultsRef(mission, missionpkg.ResultsBucketName(), missionpkg.ResultsKey(mission))
+			// Continue with cleanup. resultsRef stays unset: it would point at an
+			// entry that was never written. Cleanup runs once, so there is no retry.
+			msg := boundMessage("Failed to store results to NATS KV: " + err.Error())
+			// Cleanup can retry this step; warn once, not on every retry.
+			alreadyReported := meta.IsStatusConditionFalse(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained)
+			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
+				Type:               aiv1alpha1.ConditionMissionResultsRetained,
+				Status:             metav1.ConditionFalse,
+				Reason:             aiv1alpha1.ReasonResultsStoreFailed,
+				Message:            msg,
+				ObservedGeneration: mission.Generation,
+			})
+			if !alreadyReported {
+				r.Recorder.Event(mission, corev1.EventTypeWarning, "ResultsNotRetained", msg)
+			}
+		} else {
+			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
+				Type:               aiv1alpha1.ConditionMissionResultsRetained,
+				Status:             metav1.ConditionTrue,
+				Reason:             aiv1alpha1.ReasonResultsStored,
+				Message:            "Results stored in NATS KV",
+				ObservedGeneration: mission.Generation,
+			})
 		}
 	}
 
@@ -976,3 +996,9 @@ func (r *MissionReconciler) failedChainsMessage(ctx context.Context, mission *ai
 	}
 	return "Mission chains failed: " + strings.Join(failed, "; ")
 }
+
+// maxConditionMessage bounds error text embedded in condition messages
+// (the API limit is 32768 characters).
+const maxConditionMessage = 1000
+
+func boundMessage(s string) string { return missionpkg.TruncateMessage(s, maxConditionMessage) }

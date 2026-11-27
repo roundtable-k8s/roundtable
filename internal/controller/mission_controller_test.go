@@ -386,7 +386,7 @@ var _ = Describe("Mission Controller", func() {
 
 			r := newReconciler()
 			r.TracerProvider = sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(telemetry.NewIDGenerator()))
-			for range 3 {
+			for range 2 {
 				// Later cycles may error on the missing RoundTable; only the log matters.
 				_, _ = r.Reconcile(logCtx, reconcile.Request{NamespacedName: missionNN})
 			}
@@ -776,15 +776,17 @@ var _ = Describe("Mission Controller", func() {
 				return k8sClient.Status().Update(ctx, missionChain)
 			}, "5s", "500ms").Should(Succeed())
 
-			// Wait for completion and cleanup — without NATS, KV store fails gracefully
-			// but ResultsConfigMap is still set (to prevent infinite retry)
-			// Check both phase transition AND ResultsConfigMap in one Eventually
-			Eventually(func() string {
+			// Wait for cleanup — without NATS the KV store fails: resultsRef stays
+			// unset and ResultsRetained=False says why.
+			mission := &aiv1alpha1.Mission{}
+			Eventually(func() *metav1.Condition {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
-				mission := &aiv1alpha1.Mission{}
 				_ = k8sClient.Get(ctx, missionNN, mission)
-				return mission.Status.ResultsConfigMap
-			}, "15s", "500ms").ShouldNot(BeEmpty())
+				return meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained)
+			}, "15s", "500ms").ShouldNot(BeNil())
+			Expect(meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained).Status).To(Equal(metav1.ConditionFalse))
+			Expect(mission.Status.ResultsRef).To(BeNil())
+			Expect(mission.Status.ResultsConfigMap).To(BeEmpty())
 		})
 	})
 
@@ -862,7 +864,7 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Assembling — it won't progress further since knight doesn't exist
 			driveToPhase(r, aiv1alpha1.MissionPhaseAssembling, 10, readyOnProvisioning())
 			// A few more reconciles to set KnightsReady condition (stays in Assembling)
-			for range 3 {
+			for range 2 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			}
 
@@ -981,6 +983,49 @@ var _ = Describe("Mission Controller", func() {
 			condition := meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
+		})
+
+	})
+
+	Context("When the mission has a duplicate knight template", func() {
+		AfterEach(func() { deleteMission() })
+
+		It("should fail on a duplicate knight template with a Complete condition and a Warning event", func() {
+			tmpl := aiv1alpha1.MissionKnightTemplate{Name: "dup", Spec: aiv1alpha1.KnightSpec{
+				Domain: "d", Skills: []string{"s"},
+				NATS: aiv1alpha1.KnightNATS{Subjects: []string{"t.>"}},
+			}}
+			createMission(aiv1alpha1.MissionSpec{
+				Objective:       "duplicate templates",
+				KnightTemplates: []aiv1alpha1.MissionKnightTemplate{tmpl, tmpl},
+				TTLSeconds:      3600,
+				TimeoutSeconds:  1800,
+			})
+			r := newReconciler()
+			rec := record.NewFakeRecorder(10)
+			r.Recorder = rec
+
+			// First reconcile sets Pending, the next validates the spec.
+			for range 2 {
+				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			}
+
+			mission := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+			Expect(mission.Status.Phase).To(Equal(aiv1alpha1.MissionPhaseFailed))
+			Expect(mission.Status.Result).To(ContainSubstring("Duplicate knight template name: dup"))
+
+			condition := meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
+
+			var events []string
+			for len(rec.Events) > 0 {
+				events = append(events, <-rec.Events)
+			}
+			Expect(events).To(ContainElement(And(
+				HavePrefix("Warning Failed"), ContainSubstring("Duplicate knight template name"))))
 		})
 	})
 

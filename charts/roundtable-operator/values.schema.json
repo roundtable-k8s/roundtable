@@ -168,7 +168,8 @@
       "type": "object",
       "properties": {
         "resultsTTL": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)$"
         }
       }
     },
