@@ -144,3 +144,35 @@ func TestChainUsageCachedTokens(t *testing.T) {
 		t.Errorf("older knight cacheRead counter = %v", got)
 	}
 }
+
+// A knight reporting negative counts or cost cannot lower the totals: the
+// negative fields add nothing, the positive ones still count.
+func TestChainUsageIgnoresNegativeCounts(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(10)}
+	chain := &aiv1alpha1.Chain{
+		ObjectMeta: metav1.ObjectMeta{Name: "negative-usage"},
+		Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef("tbl-negative")},
+	}
+	chain.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{{Name: "a"}}
+	a := &chain.Status.StepStatuses[0]
+	ctx := context.Background()
+
+	r.recordUsage(ctx, chain, a, "kay", &natspkg.TaskResult{Output: "ok", Cost: 0.25,
+		Tokens: &natspkg.TokenUsage{Input: 100, Output: 10, CacheRead: 1000}})
+	r.recordUsage(ctx, chain, a, "kay", &natspkg.TaskResult{Output: "ok", Cost: -5,
+		Tokens: &natspkg.TokenUsage{Input: -40, Output: 7, CacheRead: -900, CacheWrite: -3}})
+	// Only negative values: nothing to record at all.
+	r.recordUsage(ctx, chain, a, "kay", &natspkg.TaskResult{Output: "ok", Cost: -1,
+		Tokens: &natspkg.TokenUsage{Input: -1}})
+	refreshChainUsage(chain)
+
+	if want := (aiv1alpha1.TokenTotals{Input: 100, Output: 17, CacheRead: 1000}); a.Tokens == nil || *a.Tokens != want {
+		t.Errorf("step tokens = %+v, want %+v", a.Tokens, want)
+	}
+	if a.CostUSD != "0.250000" {
+		t.Errorf("step cost = %q, want 0.250000", a.CostUSD)
+	}
+	if chain.Status.Tokens == nil || *chain.Status.Tokens != *a.Tokens {
+		t.Errorf("chain tokens = %+v, want %+v", chain.Status.Tokens, a.Tokens)
+	}
+}

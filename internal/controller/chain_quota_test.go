@@ -500,6 +500,8 @@ func TestTransientProviderFailure(t *testing.T) {
 		{},
 		{Error: "tests failed: 3 failures"},
 		{Error: "bad output: processed 500 lines"},
+		{Error: "the queue is overloaded, giving up"},
+		{Error: "error 500 in the test"},
 		{Error: "Task refused: Claude plan five_hour window 91% used (resets 2026-11-24T18:00:00.000Z)"},
 		{Error: "Task refused", UsageLimited: true, Transient: true},
 	}
@@ -522,6 +524,11 @@ func TestTransientProviderReason(t *testing.T) {
 		{"flag wins over text", &natspkg.TaskResult{Error: "API Error: 529 Overloaded", Transient: true, TransientReason: "provider_5xx"}, "provider_5xx", true},
 		{"text only overloaded", &natspkg.TaskResult{Error: "API Error: 529 Overloaded"}, "overloaded", true},
 		{"text only 5xx", &natspkg.TaskResult{Error: "HTTP 502 bad gateway"}, "provider_5xx", true},
+		{"text overloaded_error", &natspkg.TaskResult{Error: `{"type":"overloaded_error"}`}, "overloaded", true},
+		{"text 529 status", &natspkg.TaskResult{Error: "status code: 529"}, "overloaded", true},
+		{"bare overloaded word", &natspkg.TaskResult{Error: "the queue is overloaded, giving up"}, "", false},
+		{"bare error 500", &natspkg.TaskResult{Error: "error 500 in the test"}, "", false},
+		{"bare error 529", &natspkg.TaskResult{Error: "error 529 in the test"}, "", false},
 		{"neither", &natspkg.TaskResult{Error: "tests failed", TransientReason: "network"}, "", false},
 		{"nil", nil, "", false},
 	}
