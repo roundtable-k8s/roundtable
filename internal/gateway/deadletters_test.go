@@ -294,7 +294,9 @@ func TestDeadLetterRetryOfRetryID(t *testing.T) {
 		Task: &natspkg.TaskPayload{TaskID: "t-r2", Task: "x"}}, deadletter.StateOpen)
 	add(deadletter.Entry{TaskID: "u-r2", Knight: "reviewer", Reason: deadletter.ReasonFailed, Attempt: 2, RetryOf: "u",
 		Task: &natspkg.TaskPayload{TaskID: "u-r2", Task: "x"}}, deadletter.StateOpen)
-	for in, want := range map[string]string{"t-r2": "t-r3", "u-r2": "u-r3"} {
+	add(deadletter.Entry{TaskID: "v-r3", Knight: "reviewer", Reason: deadletter.ReasonFailed, Attempt: 3, RetryOf: "v-r2",
+		Task: &natspkg.TaskPayload{TaskID: "v-r3", Task: "x"}}, deadletter.StateOpen)
+	for in, want := range map[string]string{"t-r2": "t-r3", "u-r2": "u-r3", "v-r3": "v-r4"} {
 		resp, body := e.do(t, "POST", "/v1/dead-letters/"+in+"/retry", testToken, nil)
 		if resp.StatusCode != http.StatusAccepted || body["taskId"] != want {
 			t.Fatalf("retry %s: %d %v", in, resp.StatusCode, body)

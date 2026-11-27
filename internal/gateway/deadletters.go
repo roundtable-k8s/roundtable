@@ -232,10 +232,9 @@ func (s *Service) RetryDeadLetter(ctx context.Context, req RetryRequest) (*Retry
 	}
 
 	attempt := max(e.Attempt, 1) + 1
-	base := e.RetryOf
-	if base == "" {
-		base = retrySuffix.ReplaceAllString(e.TaskID, "")
-	}
+	// RetryOf holds the previous attempt's ID, not the original, so always
+	// strip the trailing -rN from the task ID to avoid nesting (t-r2-r4).
+	base := retrySuffix.ReplaceAllString(e.TaskID, "")
 	newID := fmt.Sprintf("%s-r%d", base, attempt)
 	if !taskIDPattern.MatchString(newID) {
 		return nil, fmt.Errorf("%w: retry task id %q is not a valid task id", ErrUnprocessable, newID)
