@@ -595,7 +595,35 @@ type KnightLifecycle struct {
 	// +kubebuilder:validation:Maximum=3600
 	// +optional
 	ScaleDownStabilizationSeconds *int32 `json:"scaleDownStabilizationSeconds,omitempty"`
+
+	// rollout controls when a changed pod template is applied to a knight
+	// whose Deployment uses the Recreate strategy (it mounts a ReadWriteOnce
+	// workspace), where rolling deletes the running pod and its in-flight
+	// tasks. immediate (the default when unset) rolls at once. whenIdle holds
+	// the change while the knight's task consumer has queued or in-flight
+	// tasks, for at most rolloutMaxWaitSeconds, then rolls anyway. The wait is
+	// reported as condition RolloutPending reason WaitingForIdle. Ignored for
+	// RollingUpdate knights, which drain the old pod while the new one starts.
+	// +kubebuilder:validation:Enum=immediate;whenIdle
+	// +optional
+	Rollout string `json:"rollout,omitempty"`
+
+	// rolloutMaxWaitSeconds bounds how long rollout whenIdle holds a pod
+	// template change while the knight is busy (default 3600).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
+	RolloutMaxWaitSeconds *int32 `json:"rolloutMaxWaitSeconds,omitempty"`
 }
+
+// Values of KnightLifecycle.Rollout.
+const (
+	RolloutImmediate = "immediate"
+	RolloutWhenIdle  = "whenIdle"
+)
+
+// DefaultRolloutMaxWaitSeconds is the rolloutMaxWaitSeconds default.
+const DefaultRolloutMaxWaitSeconds int32 = 3600
 
 // GitHubConfig configures GitHub credentials for knights.
 type GitHubConfig struct {

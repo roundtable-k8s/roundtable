@@ -357,6 +357,20 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   (`VolumeNotShareable`, message naming the volume and PVC). The strategy is
   updated on the Deployment without rolling the pods. Knights that can run
   more than one pod keep the workspace rule above.
+
+- **Rollout when idle.** A Recreate knight deletes its running pod, and the
+  tasks in it, when its pod template changes. `lifecycle.rollout: whenIdle`
+  (default `immediate`, today's behaviour) holds the change while the knight's
+  consumer has queued or in-flight tasks (`num_pending + num_ack_pending`, the
+  same count the scale-to-zero check reads) and rolls once it is idle, or once
+  `lifecycle.rolloutMaxWaitSeconds` (default 3600, max 86400) have passed. The
+  Deployment keeps its old template meanwhile, and the Knight shows
+  `RolloutPending=True` reason `WaitingForIdle` and is rechecked every 30s;
+  the wait counts from that condition's transition time. If the count cannot
+  be read the knight counts as idle and rolls. New Deployments, unchanged
+  templates, scaled-to-zero knights and RollingUpdate knights (which drain
+  the old pod while the new one starts) are never held. A held knight is not
+  counted against `--max-concurrent-rollouts`.
 - **Tools flakes.** `spec.tools.flakes` refs that use `git+ssh` need matching
   SSH credentials on the tools builder Job; without them the build fails.
 - **Memory.** `spec.memory` adds a persistent memory volume separate from the
