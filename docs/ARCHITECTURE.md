@@ -137,8 +137,13 @@ produce the same config, neither rewrites the other's consumer.
 One Knight resource becomes one Deployment (default) or Sandbox plus its supporting objects. The pod is assembled in `internal/knight/pod_builder.go`; the backend is picked with `spec.runtime`.
 
 ```go
-type RuntimeBackend interface { // pkg/runtime/backend.go
-    Reconcile / Cleanup / IsReady / Suspend / Resume
+// pkg/runtime/backend.go
+type RuntimeBackend interface {
+	Reconcile(ctx context.Context, knight *aiv1alpha1.Knight) error
+	Cleanup(ctx context.Context, knight *aiv1alpha1.Knight) error
+	IsReady(ctx context.Context, knight *aiv1alpha1.Knight) (bool, error)
+	Suspend(ctx context.Context, knight *aiv1alpha1.Knight) error
+	Resume(ctx context.Context, knight *aiv1alpha1.Knight) error
 }
 ```
 
@@ -182,11 +187,12 @@ sequenceDiagram
   participant T as Tasks stream
   participant K as Knight pod
   participant R as Results stream
+  participant G as Gateway / UI
   participant KV as KV chain-outputs
   C->>T: publish TaskPayload on prefix.tasks.domain.knight
   T-->>K: pull via Knight-consumer (explicit ack, max_deliver 1)
   K->>K: LLM call and tool use
-  K-->>C: activity events on prefix.activity.Knight.taskId (core NATS, optional)
+  K-->>G: activity events on prefix.activity.Knight.taskId (core NATS, optional; read by gateway and UI)
   K->>R: publish result on prefix.results.taskId
   K->>T: ack task
   C->>R: ephemeral consumer chain-poll-chain-step, FetchOne
@@ -255,6 +261,16 @@ sequenceDiagram
 ```
 
 Sources: `internal/controller/trigger_cronjob.go` (`desiredTriggerCronJob`), `internal/gateway/fire.go` (`handleFireTrigger`), `internal/controller/trigger_controller.go`, `trigger_knight.go`, `trigger_mission.go`.
+
+## Controller reconciliation
+
+| Controller | Watches | Does |
+|---|---|---|
+| Knight (`knight_controller.go`) | `Knight` | Builds the pod through the `RuntimeBackend`, manages the JetStream consumer, scaling and suspend/resume |
+| RoundTable (`roundtable_controller.go`) | `RoundTable` | Creates the table's JetStream streams and KV buckets, tracks member knights |
+| Chain (`chain_controller.go`) | `Chain` | Dispatches steps as tasks, polls results, stores step outputs |
+| Mission (`mission_controller.go`) | `Mission` | Runs the mission lifecycle below |
+| Trigger (`trigger_controller.go`) | `Trigger` | Fires Chain runs or knight tasks on cron, NATS, webhook or GitHub events |
 
 ## Mission Lifecycle
 

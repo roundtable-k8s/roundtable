@@ -232,7 +232,7 @@ isolation:
 
 # NATS URL given to mission knights when neither the parent RoundTable nor the
 # mission's roundTableTemplate sets one (MISSION_DEFAULT_NATS_URL).
-missionDefaultNatsURL: nats://nats.database.svc.cluster.local:4222
+missionDefaultNatsURL: nats://nats.database.svc:4222
 
 # Egress NetworkPolicy the operator creates for each mission's knights. The NATS
 # rule is derived from the mission's NATS URL (namespace and port); TCP 443 is

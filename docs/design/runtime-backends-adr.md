@@ -72,7 +72,7 @@ is what an agent-sandbox pod runs under, not an alternative to it.
 - A managed, shared default-deny NetworkPolicy per template.
 - The SIG Apps API that other tooling and managed clouds build on.
 
-These are the reason the Sandbox backend stays and gets ported. The condition
+These are the reason the Sandbox backend stays (it was ported in #366). The condition
 "if they add nothing, close the sandbox-controller issues" is not met.
 
 ### What it does not give
@@ -116,8 +116,8 @@ short-lived as possible; injection at egress (#169) is future exploration.
 
 ## Rejected
 
-- **Agent Substrate** (`kagent-dev/substrate`; #165 closed). As of 2026-11 (reasons not re-checked against Substrate's repo), it multiplexes
-  actors onto shared worker pools with suspend to object storage, which is a
+- **Agent Substrate** (`kagent-dev/substrate`; #165 closed). As of 2026-11 (reasons not re-checked
+  against Substrate's repo), it multiplexes actors onto shared worker pools with suspend to object storage, which is a
   different execution model from one long-lived consumer per knight. It adds an
   object-storage dependency and node prerequisites (Talos needed a userns patch),
   is vendor-led rather than SIG-governed, and its main extra, credential

@@ -119,7 +119,7 @@ isolation:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `missionDefaultNatsURL` | string | `nats://nats.database.svc.cluster.local:4222` | Fallback NATS URL for mission knights when neither the parent RoundTable nor `roundTableTemplate.natsURL` sets one (`MISSION_DEFAULT_NATS_URL`) |
+| `missionDefaultNatsURL` | string | `nats://nats.database.svc:4222` | Fallback NATS URL for mission knights when neither the parent RoundTable nor `roundTableTemplate.natsURL` sets one (`MISSION_DEFAULT_NATS_URL`) |
 
 ### Mission NetworkPolicy
 

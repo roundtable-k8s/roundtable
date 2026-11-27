@@ -332,7 +332,7 @@ func TestBuildMissionNetworkPolicy(t *testing.T) {
 	settings := DefaultNetPolSettings()
 	settings.NATSPodLabels = map[string]string{"app.kubernetes.io/name": "nats"}
 	policy, _ := assembler.buildMissionNetworkPolicy(mission, policyName,
-		"nats://nats.database.svc.cluster.local:4222", settings)
+		"nats://nats.database.svc:4222", settings)
 
 	t.Run("metadata", func(t *testing.T) {
 		if policy.Name != policyName {

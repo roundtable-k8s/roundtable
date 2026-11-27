@@ -175,7 +175,7 @@ spec:
       role: scanner
 ```
 
-Missions auto-provision ephemeral knights, create isolated NATS streams, execute the objective, and clean up all resources on completion. Mix ephemeral and existing knights in the same mission.
+Missions auto-provision ephemeral knights, create isolated NATS streams, execute the objective, and clean up all resources on completion. Mix ephemeral and existing knights in the same mission. To keep what a mission produced, see [keeping mission output](docs/keeping-mission-output.md).
 
 **Lifecycle:** `Pending` → `Provisioning` → `Assembling` → `Briefing` → `Active` → `Succeeded/Failed` → `CleaningUp`
 
@@ -227,7 +227,7 @@ captured by default and redacted; turn that off per install or per table.
 | Component | Description | Repo |
 |-----------|-------------|------|
 | **roundtable** | Operator + CRDs + controllers | [roundtable-k8s/roundtable](https://github.com/roundtable-k8s/roundtable) |
-| **pi-knight** | Knight runtime (Node.js agent that consumes NATS tasks) | [roundtable-k8s/pi-knight](https://github.com/roundtable-k8s/pi-knight) |
+| **pi-knight** | Knight runtime (Node.js agent that consumes NATS tasks) | [roundtable-k8s/knights](https://github.com/roundtable-k8s/knights) (monorepo with the pi-knight and claude-knight runtimes) |
 | **roundtable-ui** | Dashboard for fleet monitoring and chain visualization | [roundtable-k8s/roundtable-ui](https://github.com/roundtable-k8s/roundtable-ui) |
 | **arsenal** | Skill repository (git-synced to knights via sidecar) | [roundtable-k8s/arsenal](https://github.com/roundtable-k8s/arsenal) |
 
@@ -268,7 +268,7 @@ make deploy IMG=ghcr.io/roundtable-k8s/roundtable:latest
 
 1. The operator sees the `Knight` CR and creates a Deployment with the pi-knight runtime. Knights run under gVisor (`runsc`) and default-deny egress by default; opting out is explicit on the Knight ([runtime isolation](docs/runtime-isolation.md), [egress allowlists](docs/egress.md))
 2. A git-sync sidecar per arsenal pulls the latest skill definitions (`spec.arsenals`; empty = the default platform arsenal)
-   (an arsenal with `oci` set is instead mounted read-only as an OCI image volume at `/arsenal/<name>`, pinned by digest, with no sidecar — see `examples/knight-arsenal-oci.yaml`)
+   (an arsenal with `oci` set is instead mounted read-only as an OCI image volume at `/arsenal-oci/<name>`, pinned by digest, with no sidecar — see `examples/knight-arsenal-oci.yaml`)
 3. A skill-filter sidecar merges them into `/skills`, per skill, for the categories in `spec.skills` — later arsenals override earlier ones on a `<category>/<skill>` clash. An arsenal may also use the flat Agent Skills layout (`<skill>/SKILL.md` at the arsenal root, no category folder): a category folder is optional, and `spec.skills: [<skill>]` links that directory as `/skills/<skill>/<skill>`
 4. A NATS JetStream consumer is configured with the knight's filter subjects
 5. The knight starts consuming tasks from the stream
@@ -320,7 +320,7 @@ make docker-build docker-push IMG=ghcr.io/roundtable-k8s/roundtable:latest
 Shipped: the operator, Chains, Missions (existing and ephemeral knights), Triggers, the invoke gateway and isolation by default (gVisor, default-deny egress). Open work follows the GitHub milestones:
 
 - [ ] **M6** — Expose the API outside the cluster (auth, Cloudflare, NATS users)
-- [ ] **M7** — Isolated by default + API front door (finishing the sandbox opt-out and gateway work)
+- [ ] **M7** — Isolated by default + API front door
 - [ ] **M8** — Restore the fleet + retire kagent
 - [ ] **M8.5** — Codebase health & DevEx (shared runtime core, typed task contract, operator decomposition)
 - [ ] **M9** — Fleet platform (agent cards and discovery, never-lose-a-task, pluggable memory, triggers and recipes)
