@@ -573,6 +573,33 @@ var _ = Describe("PR feedback watcher", func() {
 		Expect(feedbackChain().Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationChainRun))
 	})
 
+	It("reads the token from spec.prFeedback.tokenSecretRef when spec.github.tokenSecretRef names another Secret (#469)", func() {
+		// The table-wide Secret now holds a token the fake GitHub rejects; only
+		// the watcher's own Secret holds the accepted one.
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "fb-gh-feedback", Namespace: ns},
+			StringData: map[string]string{"pat": "gh-test-token\n"},
+		})).To(Succeed())
+		defer func() {
+			_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "fb-gh-feedback", Namespace: ns}})
+		}()
+		table := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "fb-gh", Namespace: ns}, table)).To(Succeed())
+		table.Data = map[string][]byte{"token": []byte("table-token")}
+		Expect(k8sClient.Update(ctx, table)).To(Succeed())
+
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, rtKey, rt)).To(Succeed())
+		rt.Spec.PRFeedback.TokenSecretRef = &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "fb-gh-feedback"}, Key: "pat"}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+
+		gh.pulls = []map[string]any{fakePull(5, "h1")}
+		gh.checks["h1"] = []map[string]any{fakeCheck(101, "lint", "failure", "2026-11-23T11:00:00Z")}
+		reconcileOnce()
+		Expect(status().LastError).To(BeEmpty())
+		Expect(prRecord(5)).NotTo(BeNil(), "the poll authenticated with the prFeedback token and saw the PR")
+	})
+
 	It("records a missing token as the poll error", func() {
 		Expect(k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "fb-gh", Namespace: ns}})).To(Succeed())
 		reconcileOnce()

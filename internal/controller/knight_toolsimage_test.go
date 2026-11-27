@@ -357,6 +357,27 @@ var _ = Describe("Knight tools image", func() {
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
+	It("rejects a flake ref whose dir escapes the repository, warns InvalidFlakeRef and builds nothing", func() {
+		rec := record.NewFakeRecorder(10)
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		k := newKnight("badflake", nil)
+		k.Spec.Tools = &aiv1alpha1.KnightTools{Flakes: []aiv1alpha1.KnightToolsFlake{
+			{Ref: "github:roundtable-k8s/roundtable/0123456789abcdef0123456789abcdef01234567?dir=../escape", Packages: []string{"jq"}},
+		}}
+
+		requeue, err := r.reconcileNixTools(ctx, k)
+		Expect(err).To(MatchError(ContainSubstring("spec.tools.flakes")))
+		Expect(err).To(MatchError(ContainSubstring("parent-directory")))
+		Expect(requeue).To(BeZero())
+		Expect(rec.Events).To(Receive(And(ContainSubstring("Warning"), ContainSubstring("InvalidFlakeRef"))))
+
+		jobs := &batchv1.JobList{}
+		Expect(k8sClient.List(ctx, jobs, client.InNamespace("default"), client.MatchingLabels{"roundtable.io/purpose": "tools-image-build"})).To(Succeed())
+		for _, j := range jobs.Items {
+			Expect(j.Name).NotTo(HavePrefix("badflake-"))
+		}
+	})
+
 	It("builds a tools image for a knight with Nix tools", func() {
 		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
 		k := newKnight("dinadan", []string{"jq"})
