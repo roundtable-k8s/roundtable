@@ -1108,7 +1108,9 @@ type hostNetPodEntry struct {
 
 // rememberHostNetPod records a pod's immutable host-network flag by UID. When
 // the cache passes hostNetPodCacheMax it drops the oldest half, so recently
-// seen pods stay cached.
+// seen pods stay cached. Eviction follows insertion order, not recency of use
+// (it is not LRU): a cache hit does not refresh an entry, so a long-lived pod
+// can be evicted and costs one extra Pod read.
 func (r *KnightReconciler) rememberHostNetPod(uid types.UID, hostNet bool) {
 	if uid == "" {
 		return
