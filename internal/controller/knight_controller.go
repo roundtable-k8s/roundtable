@@ -366,7 +366,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		log.Error(err, "Failed to reconcile memory PVC")
 	}
 
-	// 2a'. Workspace VolumeSnapshots (annotation-triggered).
+	// 2a'. Workspace VolumeSnapshots (annotation- or schedule-triggered).
 	snapRequeue, err := r.reconcileSnapshots(ctx, knight)
 	if err != nil {
 		reconcileErr = err

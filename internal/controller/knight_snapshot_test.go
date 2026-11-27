@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robfig/cron/v3"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -30,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -226,6 +228,128 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 			status := getKnight(k).Status.Workspace.Snapshots
 			Expect(status).To(HaveLen(2))
 			Expect(status[1].ReadyToUse).To(BeTrue())
+		})
+
+		Describe("schedule", func() {
+			schedKnight := func(name, cronExpr, tz string, keep *int32) *aiv1alpha1.Knight {
+				k := pvcKnight(name, keep)
+				k.Spec.Workspace.Snapshots.Schedule = cronExpr
+				k.Spec.Workspace.Snapshots.TimeZone = tz
+				Expect(k8sClient.Create(ctx, k)).To(Succeed())
+				return k
+			}
+			at := func(r *KnightReconciler, t time.Time) {
+				r.Now = func() time.Time { return t }
+			}
+			reconcileResult := func(r *KnightReconciler, k *aiv1alpha1.Knight) ctrl.Result {
+				res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: k.Name, Namespace: k.Namespace}})
+				Expect(err).NotTo(HaveOccurred())
+				return res
+			}
+			daily := func(tz string) cron.Schedule {
+				s, err := parseCron("0 3 * * *", tz, "tz")
+				Expect(err).NotTo(HaveOccurred())
+				return s
+			}
+
+			It("snapshots once per tick, not before the first tick, and requeues at the next", func() {
+				k := schedKnight("snap-sched", "0 3 * * *", "", nil)
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				created := getKnight(k).CreationTimestamp.Time
+				first := daily("").Next(created)
+
+				at(r, first.Add(-time.Minute))
+				res := reconcileResult(r, k)
+				Expect(snapshotsOf(k)).To(BeEmpty())
+				Expect(res.RequeueAfter).To(Equal(time.Minute))
+
+				at(r, first.Add(time.Second))
+				res = reconcileResult(r, k)
+				snaps := snapshotsOf(k)
+				Expect(snaps).To(HaveLen(1))
+				Expect(snaps[0].GetLabels()[snapshotRequestLabel]).To(Equal(snapshotRequestHash(fmt.Sprintf("schedule-%d", first.Unix()))))
+				Expect(metav1.IsControlledBy(&snaps[0], getKnight(k))).To(BeTrue())
+				Expect(getKnight(k).Status.Workspace.LastScheduledSnapshot.Time.Unix()).To(Equal(first.Unix()))
+				Expect(res.RequeueAfter).To(BeNumerically("~", 24*time.Hour-time.Second, time.Second))
+
+				// Same tick again: nothing new.
+				at(r, first.Add(time.Hour))
+				reconcileResult(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(1))
+
+				// Lost status: the request label still prevents a duplicate.
+				got := getKnight(k)
+				got.Status.Workspace.LastScheduledSnapshot = nil
+				Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+				reconcileResult(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(1))
+			})
+
+			It("takes one snapshot after a gap of several ticks and keeps retention", func() {
+				k := schedKnight("snap-sched-gap", "0 3 * * *", "", new(int32(1)))
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				first := daily("").Next(getKnight(k).CreationTimestamp.Time)
+
+				at(r, first.Add(3*24*time.Hour+time.Hour)) // ticks at first, +1d, +2d, +3d
+				reconcileResult(r, k)
+				snaps := snapshotsOf(k)
+				Expect(snaps).To(HaveLen(1))
+				Expect(getKnight(k).Status.Workspace.LastScheduledSnapshot.Time.Unix()).To(Equal(first.Add(3 * 24 * time.Hour).Unix()))
+
+				markSnapshotsReady(k)
+				at(r, first.Add(4*24*time.Hour+time.Hour))
+				reconcileResult(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(2))
+				markSnapshotsReady(k)
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(1)) // keep=1
+			})
+
+			It("evaluates the schedule in the time zone and keeps the annotation working", func() {
+				k := schedKnight("snap-sched-tz", "0 3 * * *", "Asia/Tokyo", nil)
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				first := daily("Asia/Tokyo").Next(getKnight(k).CreationTimestamp.Time)
+				Expect(first.UTC().Hour()).To(Equal(18)) // 03:00 JST
+
+				at(r, first.Add(-time.Second))
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(BeEmpty())
+
+				annotateSnapshot(k, "manual")
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(1))
+
+				at(r, first.Add(time.Second))
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(2))
+			})
+
+			It("reports an invalid cron and takes nothing", func() {
+				k := schedKnight("snap-sched-bad", "not a cron", "", nil)
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				at(r, time.Now().Add(48*time.Hour))
+				res := reconcileResult(r, k)
+				Expect(res.RequeueAfter).To(BeZero())
+				Expect(snapshotsOf(k)).To(BeEmpty())
+				c := cond(k)
+				Expect(c).NotTo(BeNil())
+				Expect(c.Status).To(Equal(metav1.ConditionFalse))
+				Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotFailed))
+			})
+
+			It("reports an ephemeral workspace", func() {
+				k := scalingKnight("default", "snap-sched-eph", ephemeral)
+				k.Spec.Workspace.Snapshots = &aiv1alpha1.WorkspaceSnapshots{Schedule: "0 3 * * *"}
+				Expect(k8sClient.Create(ctx, k)).To(Succeed())
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				reconcileKnight(r, k)
+				Expect(cond(k).Reason).To(Equal(aiv1alpha1.ReasonWorkspaceNotPersistent))
+			})
 		})
 
 		It("ignores the annotation in ephemeral mode", func() {

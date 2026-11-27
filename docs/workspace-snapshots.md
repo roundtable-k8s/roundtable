@@ -5,7 +5,7 @@ A knight's workspace (`/data`) is a PVC. The operator can take an on-demand CSI
 snapshot. Use it to keep a restore point before risky work, or to fork a knight that has
 built up files and context (`galahad` becomes `galahad-fork`).
 
-Scheduled snapshots are not supported: a snapshot is taken only when you ask for one.
+A snapshot is taken when you ask for one, or on a cron schedule (see [Scheduled snapshots](#scheduled-snapshots)).
 
 ## Requirements
 
@@ -53,6 +53,34 @@ spec:
       className: csi-snapclass   # empty (default): the cluster's default VolumeSnapshotClass
       keep: 5                    # default 3, minimum 1
 ```
+
+## Scheduled snapshots
+
+Set `spec.workspace.snapshots.schedule` to a standard five-field cron expression to take
+snapshots without annotating the Knight by hand:
+
+```yaml
+spec:
+  workspace:
+    snapshots:
+      schedule: "0 3 * * *"
+      timeZone: Europe/Berlin   # IANA name; defaults to UTC
+      keep: 7
+```
+
+- Each tick creates one `VolumeSnapshot`, labelled and owned like an on-demand one, and
+  retention (`keep`) prunes as usual. The on-demand annotation keeps working next to a schedule.
+- A new Knight does not snapshot at once; the first snapshot is at the first tick after it
+  was created.
+- Catch-up: after an operator outage only the **latest** missed tick is snapshotted (one
+  snapshot, not one per missed tick). `status.workspace.lastScheduledSnapshot` records the
+  last tick taken. A lost status write cannot duplicate a tick's snapshot.
+- The operator evaluates the expression on each reconcile and requeues at the next tick;
+  there is no CronJob or timer per Knight.
+- An unparsable `schedule` or `timeZone` is reported on the `WorkspaceSnapshots` condition
+  (`SnapshotFailed`) and nothing is scheduled. As with on-demand requests, a schedule on an
+  ephemeral workspace or without the snapshot API reports `WorkspaceNotPersistent` /
+  `SnapshotAPIUnavailable`.
 
 ## Read the snapshots
 
