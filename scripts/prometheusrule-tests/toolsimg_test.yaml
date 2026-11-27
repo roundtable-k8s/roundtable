@@ -1,0 +1,53 @@
+# promtool test rules for RoundtableToolsImageBuildFailed.
+# Run by scripts/check-prometheusrule.sh, which copies this file next to the
+# rendered rules.yaml; rule_files is resolved relative to this file.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # An older tools image build succeeded, then a newer one failed: the alert fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_created{namespace="rtns", job_name="rt-alpha-toolsimg-old"}'
+        values: '1000x10'
+      - series: 'kube_job_status_succeeded{namespace="rtns", job_name="rt-alpha-toolsimg-old"}'
+        values: '1x10'
+      - series: 'kube_job_created{namespace="rtns", job_name="rt-alpha-toolsimg-new"}'
+        values: '2000x10'
+      - series: 'kube_job_failed{namespace="rtns", job_name="rt-alpha-toolsimg-new", condition="true"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RoundtableToolsImageBuildFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: rtns
+              job_name: rt-alpha-toolsimg-new
+              knight: rt-alpha
+            exp_annotations:
+              summary: >-
+                Tools image build Job rt-alpha-toolsimg-new in namespace rtns failed;
+                the knight's pod rollout is held until the image builds.
+                kube_job_failed stays true until the failed Job's 1h TTL deletes it, so the alert is
+                suppressed (unless) only when a Job of the same knight (the job_name prefix) that was
+                created after the failed Job (kube_job_created) has succeeded, so an older success
+                still inside its TTL does not hide a newer failure.
+
+  # The same failure, then a newer build succeeded: the alert resolves.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_created{namespace="rtns", job_name="rt-alpha-toolsimg-new"}'
+        values: '2000x10'
+      - series: 'kube_job_failed{namespace="rtns", job_name="rt-alpha-toolsimg-new", condition="true"}'
+        values: '1x10'
+      - series: 'kube_job_created{namespace="rtns", job_name="rt-alpha-toolsimg-newest"}'
+        values: '3000x10'
+      - series: 'kube_job_status_succeeded{namespace="rtns", job_name="rt-alpha-toolsimg-newest"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RoundtableToolsImageBuildFailed
+        exp_alerts: []
