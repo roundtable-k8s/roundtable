@@ -13,6 +13,7 @@ Real-world examples of Round Table resources.
 | [`knight-mcp-headers.yaml`](knight-mcp-headers.yaml) | A claude-knight using a remote MCP server with an `Authorization` header from a Secret (`spec.mcpServers[].headersFrom`, [docs](../docs/crd-design.md#7-knight-specmcpservers-claude-knight-only)) |
 | [`knight-persona-jobs.yaml`](knight-persona-jobs.yaml) | A tool-less persona Knight and two job Chains on it, run through the gateway ([migrating from kagent](../docs/migrating-from-kagent.md)) |
 | [`knight-arsenal-oci.yaml`](knight-arsenal-oci.yaml) | A knight whose skills come from an OCI arsenal artifact |
+| [`knight-memory.yaml`](knight-memory.yaml) | Two knights sharing a ReadWriteMany memory claim set in the table's `defaults.memory`: each writes `/memory/<knight>` and reads `/memory` ([docs](../docs/memory.md#worked-example-shared-memory-claim)) |
 | [`knight-fork-from-snapshot.yaml`](knight-fork-from-snapshot.yaml) | A knight whose workspace is forked from a snapshot ([docs](../docs/workspace-snapshots.md)) |
 | [`knight-templates/`](knight-templates/) | RoundTable `knightTemplates` and a Mission that uses them, see [README](knight-templates/README.md) |
 | [`flux/`](flux/) | Install the operator with Flux: Namespace, OCIRepository and HelmRelease |
