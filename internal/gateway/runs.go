@@ -395,6 +395,9 @@ func (s *Service) RerunRun(ctx context.Context, namespace, name string, req Reru
 	if err != nil {
 		return nil, err
 	}
+	if old.Labels[chainrun.LabelRunSource] != chainrun.SourceGateway {
+		return nil, fmt.Errorf("%w: run %s/%s was not started by the gateway", ErrNotFound, ns, name)
+	}
 	if !runDone(old) {
 		phase := string(old.Status.Phase)
 		if phase == "" {
