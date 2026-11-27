@@ -642,13 +642,13 @@ func TestTokenUsageClamp(t *testing.T) {
 		in   string
 		want int64
 	}{
-		"negative":     {`-5`, 0},
+		"negative":      {`-5`, 0},
 		"very negative": {`-1e308`, 0},
-		"fraction<1":   {`0.9`, 0},
-		"very large": {`1e308`, math.MaxInt64},
-		"huge":         {`1e30`, math.MaxInt64},
-		"2^63":         {`9223372036854775808`, math.MaxInt64},
-		"normal":       {`42.9`, 42},
+		"fraction<1":    {`0.9`, 0},
+		"very large":    {`1e308`, math.MaxInt64},
+		"huge":          {`1e30`, math.MaxInt64},
+		"2^63":          {`9223372036854775808`, math.MaxInt64},
+		"normal":        {`42.9`, 42},
 	} {
 		var u TokenUsage
 		if err := json.Unmarshal([]byte(`{"input":`+tc.in+`}`), &u); err != nil {
