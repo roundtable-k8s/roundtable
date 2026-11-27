@@ -42,6 +42,20 @@ Add `-o wide` to `get knights` or `-o yaml` to read the full condition messages.
 | `ToolsImageReady=False`, reason `InvalidFlakeRef` | A `spec.tools.flakes` ref is invalid (it bypassed admission) | Fix the ref in `spec.tools.flakes`; the message names the problem |
 | Warning event `ToolsImageNotConfigured` | `spec.tools.nix` or `spec.tools.flakes` is set but the operator has no tools image repository (chart value `toolsImage.repository`); the Nix tools are not installed | Set `toolsImage.repository` in the chart, or drop `spec.tools` |
 
+## A knight did not roll after a change
+
+A changed pod template replaces a Recreate knight's pod, unless the rollout is
+held. The old pod keeps running until the change applies. Look for the
+`RolloutPending` condition (`kubectl -n <ns> get knight <name> -o jsonpath='{.status.conditions}'`):
+
+| You see | Because | Do this |
+| --- | --- | --- |
+| `RolloutPending=True`, reason `WaitingForIdle` | The knight has `spec.lifecycle.rollout: whenIdle` and its consumer still has queued or in-flight tasks. The change rolls when the knight is idle, or after `lifecycle.rolloutMaxWaitSeconds` (default 3600). The operator rechecks every 30 s | Wait for the tasks to finish. To roll now, set `spec.lifecycle.rollout` to `immediate`; that deletes the running pod and the tasks in it. See [rollout when idle](crd-design.md) |
+| `RolloutPending=True`, reason `WaitingForOtherRollouts` | The namespace's `maxConcurrentRollouts` limit is reached by other knights rolling at once (`0` is unlimited; [helm values](helm-values.md)) | Wait; the knight rolls when a slot frees. Raise the limit if rollouts should overlap more |
+| No `RolloutPending` condition, but the pod is old | Nothing is holding the rollout, so the change has not reached the Deployment yet | `kubectl -n <ns> describe knight <name>` and read the Events; a `ReconcileFailed` event or condition carries the error |
+
+The condition is removed once the knight rolls.
+
 ## Tasks do not reach a knight
 
 | You see | Because | Do this |
