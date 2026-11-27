@@ -138,10 +138,11 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 			t.Errorf("%s missing although its feature is enabled", p)
 		}
 	}
-	if !has(roundTrip(t, withKnights(openAPIService(t, false, false, false))), "/v1/knights/{name}/snapshot") {
+	const snapshotOp = "POST /v1/knights/{name}/snapshot"
+	if !slices.Contains(documented(t, roundTrip(t, withKnights(openAPIService(t, false, false, false)))), snapshotOp) {
 		t.Error("snapshot route missing with only knights enabled")
 	}
-	if has(roundTrip(t, openAPIService(t, true, true, true)), "/v1/knights/{name}/snapshot") {
+	if slices.Contains(documented(t, roundTrip(t, openAPIService(t, true, true, true))), snapshotOp) {
 		t.Error("snapshot route documented without knights")
 	}
 	if has(roundTrip(t, openAPIService(t, true, false, false)), "/v1/runs") {
