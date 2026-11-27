@@ -137,6 +137,13 @@ func (b *NATSBus) stream(ctx context.Context, name string) (jetstream.Stream, er
 	return st, nil
 }
 
+// forgetStream drops a cached handle so the next use fetches it afresh.
+func (b *NATSBus) forgetStream(name string) {
+	b.streamMu.Lock()
+	delete(b.streams, name)
+	b.streamMu.Unlock()
+}
+
 // dropStream forgets a cached handle once its stream is gone.
 func (b *NATSBus) dropStream(name string, err error) {
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
@@ -263,7 +270,15 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	if err != nil {
 		return fmt.Errorf("stream info %s: %w", stream, err)
 	}
-	if st.CachedInfo().Config.Retention != jetstream.WorkQueuePolicy {
+	// The cached handle's retention can be stale (the stream may have been
+	// recreated under the same name), so read the live info, which also
+	// refreshes the handle.
+	info, err := st.Info(ctx)
+	if err != nil {
+		b.forgetStream(stream)
+		return fmt.Errorf("stream info %s: %w", stream, err)
+	}
+	if info.Config.Retention != jetstream.WorkQueuePolicy {
 		return nil
 	}
 	msg, err := lastMsgWithRetry(ctx, st, subject)
@@ -275,6 +290,7 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 		return nil
 	}
 	if err := st.DeleteMsg(ctx, msg.Sequence); err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
+		b.forgetStream(stream)
 		return fmt.Errorf("delete %s seq %d: %w", stream, msg.Sequence, err)
 	}
 	return nil
