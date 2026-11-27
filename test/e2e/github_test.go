@@ -106,9 +106,6 @@ var _ = Describe("GitHub", Ordered, Label(tierGitHub), func() {
 	}
 
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(4 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart, pointed at the stub GitHub API")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", githubRelease, "charts/roundtable-operator",
 			"-n", githubNamespace, "--create-namespace", "-f", githubValues, "--wait", "--timeout", "5m"))
@@ -173,7 +170,7 @@ var _ = Describe("GitHub", Ordered, Label(tierGitHub), func() {
 				"jsonpath={.status.conditions[?(@.type=='Ready')].status}")
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(out).To(Equal("True"))
-		}).Should(Succeed())
+		}, 4*time.Minute).Should(Succeed())
 
 		By("seeding an rt:ready issue in the stub")
 		seed("add a widget")
@@ -188,7 +185,7 @@ var _ = Describe("GitHub", Ordered, Label(tierGitHub), func() {
 				"{.metadata.annotations.ai\\.roundtable\\.io/pickup-issue}")
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(out).To(Equal(githubRepo + "|1"))
-		}).Should(Succeed())
+		}, 4*time.Minute).Should(Succeed())
 
 		By("waiting for the run to succeed")
 		Eventually(func(g Gomega) {
@@ -203,10 +200,11 @@ var _ = Describe("GitHub", Ordered, Label(tierGitHub), func() {
 			issues, err := state()
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(issues).NotTo(BeEmpty())
+			g.Expect(issues[0].Number).To(Equal(1), "the claimed issue must be issue 1")
 			g.Expect(issues[0].Labels).To(ContainElement("rt:in-progress"))
 			g.Expect(issues[0].Labels).NotTo(ContainElement("rt:ready"))
 			g.Expect(issues[0].Comments).NotTo(BeEmpty())
-		}).Should(Succeed())
+		}, 4*time.Minute).Should(Succeed())
 	})
 
 	It("starts no second run for the same issue on a later poll", func() {

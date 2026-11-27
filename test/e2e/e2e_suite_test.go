@@ -103,6 +103,10 @@ var _ = ReportAfterSuite("tier summary", func(report Report) {
 })
 
 var _ = BeforeSuite(func() {
+	// Gomega defaults are process-wide, so they are set once here for every tier.
+	SetDefaultEventuallyTimeout(3 * time.Minute)
+	SetDefaultEventuallyPollingInterval(2 * time.Second)
+
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
 	_, err := utils.Run(cmd)

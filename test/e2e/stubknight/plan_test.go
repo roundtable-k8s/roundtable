@@ -24,6 +24,7 @@ import (
 )
 
 const samplePlan = `{"planVersion":"v1alpha1","metadata":{"objective":"Summarise the release"},` +
+	`"knights":[{"name":"stub","ephemeral":false}],` +
 	`"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}`
 
 func TestPlannerReply(t *testing.T) {
@@ -65,6 +66,9 @@ func TestSamplePlanDecodesAsPlannerOutput(t *testing.T) {
 	}
 	if po.Metadata.Objective != "Summarise the release" {
 		t.Errorf("Objective = %q", po.Metadata.Objective)
+	}
+	if len(po.Knights) != 1 || po.Knights[0].Name != "stub" || po.Knights[0].Ephemeral {
+		t.Fatalf("knights = %+v, want one non-ephemeral knight named stub", po.Knights)
 	}
 	if len(po.Chains) != 1 || len(po.Chains[0].Steps) != 1 {
 		t.Fatalf("chains = %+v, want one chain with one step", po.Chains)

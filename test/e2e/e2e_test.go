@@ -67,9 +67,6 @@ var (
 
 var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 	BeforeAll(func() {
-		SetDefaultEventuallyTimeout(3 * time.Minute)
-		SetDefaultEventuallyPollingInterval(2 * time.Second)
-
 		By("installing the operator chart with the local image")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", coreRelease, "charts/roundtable-operator",
 			"-n", coreNamespace, "--create-namespace", "-f", coreValues, "--wait", "--timeout", "5m"))
