@@ -41,12 +41,22 @@ type modelFakeNATS struct {
 	*fakeNATSClient
 	seq    uint64
 	result *natspkg.TaskResult
+	// sent keeps every published payload in order. The base fake keys
+	// published by subject, so fan-out items (same subject) would overwrite.
+	sent [][]byte
 }
 
 func (f *modelFakeNATS) PublishJSONSeq(subject string, v any) (uint64, error) {
 	if err := f.PublishJSON(subject, v); err != nil {
 		return 0, err
 	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+	f.mu.Lock()
+	f.sent = append(f.sent, raw)
+	f.mu.Unlock()
 	f.seq++
 	return f.seq, nil
 }
@@ -71,8 +81,8 @@ func (f *modelFakeNATS) FetchOne(
 func (f *modelFakeNATS) payloads() []map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]map[string]any, 0, len(f.published))
-	for _, raw := range f.published {
+	out := make([]map[string]any, 0, len(f.sent))
+	for _, raw := range f.sent {
 		m := map[string]any{}
 		Expect(json.Unmarshal(raw, &m)).To(Succeed())
 		out = append(out, m)
@@ -109,13 +119,13 @@ var _ = Describe("Chain per-step model override", func() {
 		Expect(k8sClient.Get(ctx, nn, c)).To(Succeed())
 		return c
 	}
-	// run creates a one-step chain, triggers it and reconciles until dispatch.
-	run := func(knightRef, model string) *aiv1alpha1.Chain {
+	// runSteps creates a chain from steps, triggers it and reconciles until dispatch.
+	runSteps := func(steps []aiv1alpha1.ChainStep, input string) *aiv1alpha1.Chain {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
 			ObjectMeta: metav1.ObjectMeta{Name: chainName, Namespace: namespace},
 			Spec: aiv1alpha1.ChainSpec{
 				RoundTableRef: aiv1alpha1.LocalRef(rtName), TimeoutSeconds: 86400,
-				Steps: []aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: knightRef}, Task: "do it", TimeoutSeconds: 120, Model: model, Effort: stepEffort}},
+				Steps: steps, Input: input,
 			},
 		})).To(Succeed())
 		reconcileN(3)
@@ -127,6 +137,20 @@ var _ = Describe("Chain per-step model override", func() {
 		Expect(k8sClient.Update(ctx, c)).To(Succeed())
 		reconcileN(2)
 		return get()
+	}
+	// run creates a one-step chain, triggers it and reconciles until dispatch.
+	run := func(knightRef, model string) *aiv1alpha1.Chain {
+		return runSteps([]aiv1alpha1.ChainStep{{Name: "work", KnightRef: corev1.LocalObjectReference{Name: knightRef}, Task: "do it", TimeoutSeconds: 120, Model: model, Effort: stepEffort}}, "")
+	}
+	// byStep returns the published payloads whose stepName matches.
+	byStep := func(step string) []map[string]any {
+		var out []map[string]any
+		for _, p := range fake.payloads() {
+			if p["stepName"] == step {
+				out = append(out, p)
+			}
+		}
+		return out
 	}
 	knightSpec := func(image string) aiv1alpha1.KnightSpec {
 		return aiv1alpha1.KnightSpec{
@@ -255,6 +279,67 @@ var _ = Describe("Chain per-step model override", func() {
 		c := get()
 		Expect(c.Status.StepStatuses[0].Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
 		Expect(c.Status.StepStatuses[0].Model).To(Equal("claude-opus-5-5"))
+	})
+
+	It("sends the step model and effort in every fan-out item payload (#788)", func() {
+		runSteps([]aiv1alpha1.ChainStep{{
+			Name: "impl", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, MaxParallel: 2,
+			Model: "deep", Effort: "high", ForEach: &aiv1alpha1.ChainForEach{From: "input"},
+		}}, `["a","b"]`)
+		reconcileN(2)
+		p := byStep("impl")
+		Expect(p).To(HaveLen(2))
+		for _, item := range p {
+			Expect(item).To(HaveKeyWithValue("model", "opus"))
+			Expect(item).To(HaveKeyWithValue("effort", "high"))
+		}
+	})
+
+	It("omits model and effort from fan-out item payloads when the step sets neither (#788)", func() {
+		runSteps([]aiv1alpha1.ChainStep{{
+			Name: "impl", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "do {{ .Item }}", TimeoutSeconds: 120, MaxParallel: 2,
+			ForEach: &aiv1alpha1.ChainForEach{From: "input"},
+		}}, `["a","b"]`)
+		reconcileN(2)
+		p := byStep("impl")
+		Expect(p).To(HaveLen(2))
+		for _, item := range p {
+			Expect(item).NotTo(HaveKey("model"))
+			Expect(item).NotTo(HaveKey("effort"))
+		}
+	})
+
+	It("sends the body step model and effort in the loop body task payload (#788)", func() {
+		runSteps([]aiv1alpha1.ChainStep{{
+			Name: "fixloop",
+			Loop: &aiv1alpha1.ChainLoop{
+				Until: `last.output.contains("done")`, MaxIterations: 1,
+				Steps: []aiv1alpha1.ChainLoopStep{{
+					Name: "fix", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "fix", TimeoutSeconds: 120,
+					Model: "deep", Effort: "high",
+				}},
+			},
+		}}, "")
+		p := byStep("fixloop.fix")
+		Expect(p).To(HaveLen(1))
+		Expect(p[0]).To(HaveKeyWithValue("model", "opus"))
+		Expect(p[0]).To(HaveKeyWithValue("effort", "high"))
+	})
+
+	It("omits model and effort from the loop body task payload when the body sets neither (#788)", func() {
+		runSteps([]aiv1alpha1.ChainStep{{
+			Name: "fixloop",
+			Loop: &aiv1alpha1.ChainLoop{
+				Until: `last.output.contains("done")`, MaxIterations: 1,
+				Steps: []aiv1alpha1.ChainLoopStep{{
+					Name: "fix", KnightRef: corev1.LocalObjectReference{Name: claudeKnight}, Task: "fix", TimeoutSeconds: 120,
+				}},
+			},
+		}}, "")
+		p := byStep("fixloop.fix")
+		Expect(p).To(HaveLen(1))
+		Expect(p[0]).NotTo(HaveKey("model"))
+		Expect(p[0]).NotTo(HaveKey("effort"))
 	})
 
 	It("rejects a step model with whitespace at admission", func() {
