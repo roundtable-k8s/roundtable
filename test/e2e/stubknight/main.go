@@ -20,6 +20,10 @@ limitations under the License.
 // owes under docs/design/telemetry-conventions.md (an `invoke_agent <knight>`
 // span and one `chat <model>` span with token, cost and redacted content
 // attributes), then publishes the result inside a traced publish.
+//
+// A mission planning task (its text starts with the planner prompt) is
+// answered with the plan in STUB_PLAN_JSON when that env is set, so a Mission
+// runs without an LLM; any other task gets the echo answer.
 package main
 
 import (
@@ -67,6 +71,7 @@ type config struct {
 	resultsPrefix  string
 	subjects       []string
 	captureContent bool
+	planJSON       string // STUB_PLAN_JSON: canned answer to a mission planning task
 }
 
 func loadConfig() config {
@@ -80,6 +85,7 @@ func loadConfig() config {
 		tasksStream:    os.Getenv("NATS_TASKS_STREAM"),
 		resultsPrefix:  os.Getenv("NATS_RESULTS_PREFIX"),
 		captureContent: !strings.EqualFold(strings.TrimSpace(os.Getenv("ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT")), "false"),
+		planJSON:       os.Getenv("STUB_PLAN_JSON"),
 	}
 	if c.table == "" {
 		c.table = "none"
@@ -328,6 +334,9 @@ func (k *knight) handle(ctx context.Context, msg jetstream.Msg) {
 	}
 	prompt := redactSecrets(task.Task)
 	output := fmt.Sprintf("stub knight %s handled step %q: %s", k.cfg.knight, task.StepName, prompt)
+	if plan, ok := plannerReply(task.Task, k.cfg.planJSON); ok {
+		output = plan
+	}
 	inTokens, outTokens := int64(len(task.Task)/4+1), int64(len(output)/4+1)
 	cost := float64(inTokens+outTokens) * costPerToken
 
