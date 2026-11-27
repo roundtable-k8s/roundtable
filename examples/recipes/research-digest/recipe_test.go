@@ -173,7 +173,7 @@ func splitDocuments(data []byte) ([][]byte, error) {
 }
 
 func hasContent(doc []byte) bool {
-	for _, line := range strings.Split(string(doc), "\n") {
+	for line := range strings.SplitSeq(string(doc), "\n") {
 		if l := strings.TrimSpace(line); l != "" && !strings.HasPrefix(l, "#") {
 			return true
 		}
