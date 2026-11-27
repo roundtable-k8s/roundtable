@@ -13,7 +13,7 @@ import (
 func TestQuietConflict(t *testing.T) {
 	conflict := apierrors.NewConflict(schema.GroupResource{Resource: "knights"}, "k", errors.New("modified"))
 	res, err := quietConflict(context.Background(), ctrl.Result{}, conflict)
-	if err != nil || !res.Requeue {
+	if err != nil || res.RequeueAfter != RequeueFast {
 		t.Fatalf("conflict must requeue without error, got %v %v", res, err)
 	}
 	other := errors.New("boom")

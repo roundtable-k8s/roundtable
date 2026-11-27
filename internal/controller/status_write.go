@@ -38,7 +38,7 @@ func writeStatus(ctx context.Context, c client.Client, obj client.Object) error 
 func quietConflict(ctx context.Context, res ctrl.Result, err error) (ctrl.Result, error) {
 	if err != nil && apierrors.IsConflict(err) {
 		logf.FromContext(ctx).V(1).Info("Conflict writing status; requeueing", "error", err.Error())
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: RequeueFast}, nil
 	}
 	return res, err
 }
