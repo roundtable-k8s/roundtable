@@ -235,18 +235,18 @@ spec:
       expression: 'has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}'
   validations:
     - expression: 'has(object.spec) == has(oldObject.spec) && (!has(object.spec) || object.spec == oldObject.spec)'
-      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its spec"
+      message: "{{ $name }}-snapshots: the gateway may change only the snapshot annotations of a Knight, not its spec"
       reason: Forbidden
     - expression: '(has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})'
-      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its labels"
+      message: "{{ $name }}-snapshots: the gateway may change only the snapshot annotations of a Knight, not its labels"
       reason: Forbidden
     - expression: '(has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : []) && (has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) == (has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : [])'
-      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its finalizers or owner references"
+      message: "{{ $name }}-snapshots: the gateway may change only the snapshot annotations of a Knight, not its finalizers or owner references"
       reason: Forbidden
     - expression: >-
         variables.newAnnotations.all(k, k in variables.snapshotKeys || (k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k])) &&
         variables.oldAnnotations.all(k, k in variables.snapshotKeys || k in variables.newAnnotations)
-      message: "{{ $name }}-snapshots: the gateway may change only the ai.roundtable.io/snapshot annotation of a Knight, not its other annotations"
+      message: "{{ $name }}-snapshots: the gateway may change only the snapshot annotations of a Knight, not its other annotations"
       reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1

@@ -3,7 +3,8 @@
 # kept token Secret wired into the dashboard and the webhook endpoint with
 # get-only Secret access and the schedule endpoints with get, list, watch,
 # create, update, patch and delete on Triggers, no write verb on Knights unless
-# gateway.knightSnapshots.enabled=true, and that a user-supplied Secret or
+# gateway.knightSnapshots.enabled=true (then with the ValidatingAdmissionPolicy
+# limiting the gateway's patch), and that a user-supplied Secret or
 # gateway.enabled=false suppress the generated one.
 #
 # Usage: HELM=bin/helm scripts/check-gateway-default.sh
@@ -132,6 +133,26 @@ has "$(knight_writes "$snap")" 'gateway-snapshots: verbs: \["get","patch"\]' "sn
 snapall="$(render --set gateway.knightSnapshots.enabled=true --set 'gateway.allowedNamespaces={*}')"
 has "$(knight_writes "$snapall")" 'gateway-snapshots: verbs: \["get","patch"\]' "snapshot ClusterRole missing with allowedNamespaces=*"
 lacks "$(knight_writes "$(render --set 'gateway.allowedNamespaces={*}')")" '"patch"' "patch on knights granted by default with allowedNamespaces=*"
+# Snapshots on: the gateway's patch on Knights is guarded by a
+# ValidatingAdmissionPolicy that matches only the gateway ServiceAccount and
+# lets it change only the snapshot annotations; no Kubernetes 1.30 API, no render.
+lacks "$def" 'ValidatingAdmissionPolicy' "snapshot policy rendered with snapshots disabled (default)"
+vap="$(awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicy\n/' <<<"$snap")"
+has "$vap" 'name: rt-roundtable-operator-gateway-snapshots$' "snapshot ValidatingAdmissionPolicy missing"
+has "$vap" 'request.userInfo.username == "system:serviceaccount:roundtable:rt-roundtable-operator-gateway"' "snapshot policy does not match the gateway ServiceAccount"
+has "$vap" 'operations: \["UPDATE"\]' "snapshot policy does not match Knight updates"
+has "$vap" 'values: \["roundtable"\]' "snapshot policy not scoped to the gateway namespaces"
+has "$vap" 'object.spec == oldObject.spec' "snapshot policy does not keep spec"
+vapb="$(awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding\n/' <<<"$snap")"
+has "$vapb" 'policyName: rt-roundtable-operator-gateway-snapshots$' "snapshot policy binding missing"
+has "$vapb" 'validationActions: \[Deny\]' "snapshot policy binding does not deny"
+has "$snapall" 'kind: ValidatingAdmissionPolicy$' "snapshot policy missing with allowedNamespaces *"
+lacks "$snapall" 'namespaceSelector:' "snapshot policy scoped to namespaces with allowedNamespaces *"
+if err="$(render --set gateway.knightSnapshots.enabled=true --kube-version 1.29.0 2>&1)"; then
+  fail "snapshots rendered on Kubernetes 1.29 without ValidatingAdmissionPolicy"
+fi
+has "$err" 'needs admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy' "missing ValidatingAdmissionPolicy fail message"
+has "$(render --set gateway.knightSnapshots.enabled=true --kube-version 1.29.0 --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy)" 'kind: ValidatingAdmissionPolicyBinding$' "snapshot policy not rendered when the API is served"
 off="$(render --set gateway.enabled=false)"
 lacks "$off" '--trigger-gateway-url' "trigger gateway URL passed with the gateway disabled"
 # The operator still records knight-target Trigger tasks in the gateway's task

@@ -70,6 +70,9 @@ jobs:
           ENVTEST_ASSETS=$(make -s print-envtest-assets)
           echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
 
+      # TestSnapshotPolicy renders the chart with helm and fails in CI without it.
+      - uses: azure/setup-helm@v5
+
       # -race: flaky tests only surfaced in the merge queue before (#253).
       - name: Test
         run: go test -race ./... -coverprofile cover.out
