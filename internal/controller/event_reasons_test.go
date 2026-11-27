@@ -24,8 +24,8 @@ var nonWarningReasons = map[string]bool{"ScaledObjectReady": true, "PlanCapAppli
 // Recorder.Event call on the line below a marker, it works out the reasons the
 // call can emit from the AST — a constant, the assignments to the reason
 // variable in the enclosing function, the arguments of every caller when the
-// reason is a parameter, or the composite literals of a local struct's reason
-// field — and requires them to equal the marker's set. A new reason on a
+// reason is a parameter, or the composite literals of a local (or, failing
+// that, package-level) struct's reason field — and requires them to equal the marker's set. A new reason on a
 // marked path therefore fails here until the marker (and docs/events.md) is
 // updated.
 func TestEventReasonMarkers(t *testing.T) {
@@ -138,50 +138,98 @@ func TestEventReasonMarkers(t *testing.T) {
 		if se, ok := e.(*ast.SelectorExpr); ok {
 			field = se.Sel.Name
 		}
-		structs := map[string]int{}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			ts, ok := n.(*ast.TypeSpec)
-			if !ok {
-				return true
-			}
-			if st, ok := ts.Type.(*ast.StructType); ok && field != "" {
-				i := 0
-				for _, f := range st.Fields.List {
-					for _, nm := range f.Names {
-						if nm.Name == field {
-							structs[ts.Name.Name] = i
+		// structFields records, for each struct type declared in node, the
+		// position of the reason field.
+		structFields := func(node ast.Node, structs map[string]int) {
+			ast.Inspect(node, func(n ast.Node) bool {
+				ts, ok := n.(*ast.TypeSpec)
+				if !ok {
+					return true
+				}
+				if st, ok := ts.Type.(*ast.StructType); ok && field != "" {
+					i := 0
+					for _, f := range st.Fields.List {
+						for _, nm := range f.Names {
+							if nm.Name == field {
+								structs[ts.Name.Name] = i
+							}
+							i++
 						}
-						i++
 					}
 				}
-			}
-			return true
-		})
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.AssignStmt:
-				for i, l := range x.Lhs {
-					if text(l) == want && i < len(x.Rhs) {
-						out = append(out, reasons(fn, x.Rhs[i])...)
-					}
+				return true
+			})
+		}
+		// literals collects the reason field of the literals of structs in
+		// node, resolving each value inside the function that builds it.
+		literals := func(node ast.Node, owner *ast.FuncDecl, structs map[string]int) {
+			ast.Inspect(node, func(n ast.Node) bool {
+				if fd, ok := n.(*ast.FuncDecl); ok {
+					owner = fd
 				}
-			case *ast.CompositeLit:
+				x, ok := n.(*ast.CompositeLit)
+				if !ok || owner == nil {
+					return true
+				}
 				if id, ok := x.Type.(*ast.Ident); ok {
 					if i, ok := structs[id.Name]; ok {
 						for j, el := range x.Elts {
 							if kv, ok := el.(*ast.KeyValueExpr); ok {
 								if k, ok := kv.Key.(*ast.Ident); ok && k.Name == field {
-									out = append(out, reasons(fn, kv.Value)...)
+									out = append(out, reasons(owner, kv.Value)...)
 								}
 							} else if j == i {
-								out = append(out, reasons(fn, el)...)
+								out = append(out, reasons(owner, el)...)
 							}
 						}
+					}
+				}
+				return true
+			})
+		}
+		local := map[string]int{}
+		structFields(fn.Body, local)
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if x, ok := n.(*ast.AssignStmt); ok {
+				for i, l := range x.Lhs {
+					if text(l) == want && i < len(x.Rhs) {
+						out = append(out, reasons(fn, x.Rhs[i])...)
 					}
 				}
 			}
 			return true
 		})
+		literals(fn.Body, fn, local)
+		// Package-level struct the function names (e.g. events built by a
+		// helper and emitted after a status patch): its literals anywhere in
+		// the package.
+		if field != "" && len(local) == 0 {
+			named := map[string]bool{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok {
+					named[id.Name] = true
+				}
+				return true
+			})
+			pkg := map[string]int{}
+			for _, f := range files {
+				for _, d := range f.Decls {
+					if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.TYPE {
+						structFields(g, pkg)
+					}
+				}
+			}
+			for name := range pkg {
+				if !named[name] {
+					delete(pkg, name)
+				}
+			}
+			if len(pkg) > 0 {
+				for _, f := range files {
+					literals(f, nil, pkg)
+				}
+			}
+		}
 		return out
 	}
 
