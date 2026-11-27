@@ -796,4 +796,4 @@ only `InProgress` before the operator has seen its spec for the first time.
 `TestChainKstatus` pins this.
 
 Mission, Trigger, Knight and RoundTable have not been audited against kstatus
-yet; follow-up issues track each kind.
+yet; follow-ups: Mission #928, Trigger #929, Knight #930, RoundTable #931.
