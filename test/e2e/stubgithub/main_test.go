@@ -43,12 +43,14 @@ func newTestServer(t *testing.T) *httptest.Server {
 // seed opens an issue through the control route and returns its number.
 func seed(t *testing.T, srv *httptest.Server, labels ...string) int {
 	t.Helper()
-	body, _ := json.Marshal(map[string]any{"repo": testRepo, "title": "fix the thing", "body": "details", "labels": labels})
+	body, _ := json.Marshal(map[string]any{
+		"repo": testRepo, "title": "fix the thing", "body": "details", "labels": labels,
+	})
 	resp, err := http.Post(srv.URL+"/_stub/issues", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /_stub/issues: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("seed status = %d", resp.StatusCode)
 	}
@@ -77,7 +79,7 @@ func readState(t *testing.T, srv *httptest.Server) repoView {
 	if err != nil {
 		t.Fatalf("GET /_stub/state: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("state status = %d", resp.StatusCode)
 	}
@@ -199,8 +201,12 @@ func TestRawRoutesAndStatuses(t *testing.T) {
 		{"unknown route", http.MethodGet, "/repos/acme/widgets/milestones", true, "", http.StatusNotFound},
 		{"unknown repo", http.MethodGet, "/repos/acme/nope/issues", true, "", http.StatusNotFound},
 		{"bad issue number", http.MethodGet, "/repos/acme/widgets/issues/abc", true, "", http.StatusNotFound},
-		{"comment without body", http.MethodPost, "/repos/acme/widgets/issues/" + strconv.Itoa(num) + "/comments", true, `{}`, http.StatusUnprocessableEntity},
-		{"duplicate label create", http.MethodPost, "/repos/acme/widgets/labels", true, `{"name":"ready"}`, http.StatusUnprocessableEntity},
+		{"comment without body", http.MethodPost,
+			"/repos/acme/widgets/issues/" + strconv.Itoa(num) + "/comments", true, `{}`,
+			http.StatusUnprocessableEntity},
+		{"duplicate label create", http.MethodPost,
+			"/repos/acme/widgets/labels", true, `{"name":"ready"}`,
+			http.StatusUnprocessableEntity},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,7 +221,7 @@ func TestRawRoutesAndStatuses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != tt.want {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tt.want)
 			}
@@ -231,7 +237,7 @@ func TestUnknownRouteAnswersJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Errorf("content type = %q", ct)
@@ -250,7 +256,7 @@ func TestSeedValidatesRepo(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("repo %q: status = %d, want 400", repo, resp.StatusCode)
 		}
