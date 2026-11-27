@@ -242,7 +242,10 @@ func (b *NATSBus) LastResult(ctx context.Context, stream, subject string) ([]byt
 	return msg.Data, nil
 }
 
-// Discard implements Bus.
+// Discard implements Bus. It looks the result up with retries: a result can
+// reach the gateway over core NATS before JetStream has stored it in the
+// results stream, so the first lookup may find nothing even though the
+// message is on its way.
 func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	if stream == "" {
 		return nil
@@ -268,12 +271,12 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	return nil
 }
 
-// Discard looks the result up with retries: a result can reach the gateway
-// over core NATS before JetStream has stored it in the results stream, so
-// the first lookup may find nothing even though the message is on its way.
-const (
+// Package variables so tests can change the lookup window.
+var (
+	// discardLookupAttempts is how many times Discard looks for the result.
 	discardLookupAttempts = 10
-	discardLookupWait     = 20 * time.Millisecond
+	// discardLookupWait is the pause between two lookups.
+	discardLookupWait = 20 * time.Millisecond
 )
 
 // lastMsgWithRetry returns the last message stored on subject, or nil when

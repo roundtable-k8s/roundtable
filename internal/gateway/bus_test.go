@@ -54,6 +54,12 @@ func TestNATSBusDiscardRemovesLateResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Widen the lookup window well past the publish delay so -race slowness
+	// cannot make the test flaky.
+	oldAttempts := discardLookupAttempts
+	discardLookupAttempts = 100
+	t.Cleanup(func() { discardLookupAttempts = oldAttempts })
+
 	published := make(chan error, 1)
 	go func() {
 		time.Sleep(50 * time.Millisecond)

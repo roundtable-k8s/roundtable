@@ -218,7 +218,7 @@ func TestDeadLettersTotalBeyondLimit(t *testing.T) {
 		t.Fatalf("list: %d %v", resp.StatusCode, body)
 	}
 	if n := len(body["deadLetters"].([]any)); n != 100 {
-		t.Fatalf("items: %d", n)
+		t.Fatalf("items: %d, want 100", n)
 	}
 	if body["total"] != float64(137) {
 		t.Fatalf("total: %v", body["total"])

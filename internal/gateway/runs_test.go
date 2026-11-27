@@ -684,3 +684,16 @@ func TestRunChainBusyCreatesNothing(t *testing.T) {
 		t.Fatalf("slot leaked: %d held", n)
 	}
 }
+
+func TestCancelResultFailedForAnotherReason(t *testing.T) {
+	rec := &RunRecord{Namespace: "ns", Run: "r1", Chain: "c", Done: true, Phase: "Failed",
+		Steps: []RunStep{{Name: "s", Error: "boom"}}}
+	text := cancelResult(rec).Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "cancelled") {
+		t.Fatalf("text = %q, must not say cancelled", text)
+	}
+	rec.Steps[0].Error = "cancelled: by user"
+	if text := cancelResult(rec).Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "was cancelled: by user") {
+		t.Fatalf("text = %q", text)
+	}
+}
