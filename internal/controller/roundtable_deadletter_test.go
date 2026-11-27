@@ -177,7 +177,7 @@ func TestEnsureStreamsResultsMaxAge(t *testing.T) {
 
 	// Unset: created without MaxAge, and no update is issued.
 	check(0)
-	if updated, err := cli.EnsureStreamMaxAge(ctx, "ra_results", 0); err != nil || updated {
+	if updated, err := cli.EnsureStream(ctx, natspkg.StreamConfig{Name: "ra_results"}); err != nil || updated {
 		t.Fatalf("unset must not update: updated=%v err=%v", updated, err)
 	}
 	// Set on an existing stream: applied.

@@ -276,7 +276,7 @@ func TraceIDFromHeaders(h nats.Header) string {
 		return ""
 	}
 	tid, err := trace.TraceIDFromHex(parts[1])
-	if err != nil || !tid.IsValid() || parts[1] != strings.ToLower(parts[1]) {
+	if err != nil || !tid.IsValid() {
 		return ""
 	}
 	return parts[1]

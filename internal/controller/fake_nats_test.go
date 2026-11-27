@@ -73,9 +73,6 @@ func (f *fakeNATSClient) PublishJSON(subject string, v any) error {
 }
 
 func (f *fakeNATSClient) CreateStream(context.Context, natspkg.StreamConfig) error { return nil }
-func (f *fakeNATSClient) EnsureStreamMaxAge(context.Context, string, time.Duration) (bool, error) {
-	return false, nil
-}
 func (f *fakeNATSClient) EnsureStream(context.Context, natspkg.StreamConfig) (bool, error) {
 	return false, nil
 }

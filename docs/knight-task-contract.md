@@ -184,6 +184,11 @@ handling, the gateway's `usageLimited` task field and the dead-letter reason
 and escalated as usual (dead-letter reason `refused`); pipeline behaviour for it
 (for example routing to another knight) is not defined.
 
+The operator also tolerates `refused: true` (a boolean, no reason) from older
+runtimes and decodes it as the reason `refused`. That is not a contract enum
+value (`credits`, `quota`): re-encoding such a TaskResult emits
+`"refused":"refused"`. Knights should send `"quota"` or `"credits"`.
+
 Readers use the fields when present and otherwise fall back to the prose
 `output` (`pkg/nats.ParseStructured`): a `Verdict: SHIP IT` / `Verdict: needs
 changes` line (the last one wins), and PR references as GitHub PR URLs,
