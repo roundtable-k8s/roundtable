@@ -307,12 +307,19 @@ runs, and keeps only the post-run checks and cleanup. See
 
 ### Trigger controller (#402)
 
-A `Trigger` starts a copy of its target Chain per event, with `spec.input`
-rendered from the event by a Go template. A `nats` source gets one durable
+A `Trigger` starts its target once per event, with `spec.input` (or the
+knight task text) rendered from the event by a Go template. The target is a
+Chain (`chainRef`, a copy of the Chain), one knight task (`target.knight`,
+`internal/controller/trigger_knight.go`) or a Mission (`target.mission`,
+`trigger_mission.go`). A `nats` source gets one durable
 consumer (`trigger-<namespace>_<name>`) on the table's events stream
 (`<subjectPrefix>.events.>`, created with `createStreams`); each message is
 acked only after the run is created or deliberately skipped. A `schedule`
-source fires on a cron with the same catch-up rule as `Chain.spec.schedule`.
+source is not timed by the controller: it renders an operator-owned CronJob
+`trigger-<name>` and ServiceAccount (`internal/controller/trigger_cronjob.go`)
+whose pod calls the gateway's `POST /v1/triggers/{namespace}/{name}/fire`; the
+gateway publishes the firing to the events stream, read like a `nats` source
+(see [scheduled-work.md](scheduled-work.md)).
 A `github` source runs one poll loop per Trigger that publishes matching issues
 or pull requests to the Trigger's own subject on the events stream, read like a
 `nats` source; its `claim` labels an item only after its run was created.

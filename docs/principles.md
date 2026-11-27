@@ -121,7 +121,7 @@ If an action is too dangerous to run unattended, the knight does not get the cap
 | The dashboard | Homelab watch |
 | The knight runtimes and the task contract | Human checkpoints |
 | | [Fleet self-improvement](recipe-fleet-self-improvement.md) |
-| Triggers (planned) | |
+| [Triggers](triggers.md) | |
 | Observability | |
 
-The dev factory still lives in the core today: `RoundTable.spec.issuePickup`, `spec.prFeedback` and the chart's `prPipeline`. Extracting it into recipes is tracked in [#399](https://github.com/roundtable-k8s/roundtable/issues/399) (generic triggers and recipes). See also [issue pickup](issue-pickup.md), [PR pipeline](pr-pipeline.md) and [PR feedback](pr-feedback.md).
+The dev factory is available both ways. The built-in pipeline still lives in the core: `RoundTable.spec.issuePickup`, `spec.prFeedback` and the chart's `prPipeline`. The recipe in [`examples/recipes/dev-factory/`](../examples/recipes/dev-factory/README.md) builds the same factory from generic Triggers and Chains (`issuePickup.engine: trigger`, `prFeedback.engine: trigger`) and sits next to the built-in one; the built-in code is not removed yet. See also [issue pickup](issue-pickup.md), [PR pipeline](pr-pipeline.md) and [PR feedback](pr-feedback.md).
