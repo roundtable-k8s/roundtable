@@ -3,6 +3,8 @@ package mission
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,52 +56,87 @@ func (c *CostTracker) SuspendMissionChains(ctx context.Context, mission *aiv1alp
 	return nil
 }
 
-// AggregateMissionCost calculates the total cost across all mission knights and updates costBreakdown.
+// AggregateMissionCost sums the cost of the mission's chains per knight, sets
+// Status.CostBreakdown from it and returns the total. Each step's costUSD
+// (already summed over its retries, fan-out items and loop rounds) is charged
+// to the knight that ran it. The breakdown has one line per knight in
+// Spec.Knights (zero for a knight that ran nothing), then one line per other
+// knight that ran a chain step (e.g. a fallback), by name.
 func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alpha1.Mission) (float64, error) {
-	var totalCost float64
-	costBreakdown := make([]aiv1alpha1.MissionKnightCost, 0, len(mission.Spec.Knights))
-
-	for _, mk := range mission.Spec.Knights {
-		knightName := mk.Name
-		knight := &aiv1alpha1.Knight{}
+	perKnight := map[string]float64{}
+	for _, cs := range mission.Status.ChainStatuses {
+		if cs.ChainCRName == "" {
+			continue
+		}
+		chain := &aiv1alpha1.Chain{}
 		if err := c.Client.Get(ctx, types.NamespacedName{
-			Name:      knightName,
+			Name:      cs.ChainCRName,
 			Namespace: mission.Namespace,
-		}, knight); err != nil {
+		}, chain); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				// Knight not found, add to breakdown with zero cost
-				costBreakdown = append(costBreakdown, aiv1alpha1.MissionKnightCost{
-					Name:      knightName,
-					CostUSD:   "0.0000",
-					Ephemeral: mk.Ephemeral,
-				})
 				continue
 			}
 			return 0, err
 		}
-
-		// Parse knight's total cost
-		knightCost := "0.0000"
-		if knight.Status.TotalCost != "" {
-			var cost float64
-			if _, err := fmt.Sscanf(knight.Status.TotalCost, "%f", &cost); err == nil {
-				totalCost += cost
-				knightCost = knight.Status.TotalCost
+		for i, ss := range chain.Status.StepStatuses {
+			if len(ss.KnightCosts) > 0 {
+				for _, kc := range ss.KnightCosts {
+					if v, err := strconv.ParseFloat(kc.CostUSD, 64); err == nil && v > 0 && kc.Name != "" {
+						perKnight[kc.Name] += v
+					}
+				}
+				continue
 			}
+			// Steps recorded before knightCosts existed: charge the whole
+			// step to its current knight; never to an empty name.
+			v, err := strconv.ParseFloat(ss.CostUSD, 64)
+			if err != nil || v == 0 {
+				continue
+			}
+			knight := ss.Knight
+			if knight == "" && i < len(chain.Spec.Steps) {
+				knight = chain.Spec.Steps[i].KnightRef.Name
+			}
+			if knight == "" && i < len(chain.Spec.Steps) {
+				knight = loopBodyKnight(chain.Spec.Steps[i])
+			}
+			if knight == "" {
+				knight = "unknown"
+			}
+			perKnight[knight] += v
 		}
+	}
 
-		// Add to breakdown
+	var total float64
+	costBreakdown := make([]aiv1alpha1.MissionKnightCost, 0, len(mission.Spec.Knights))
+	listed := make(map[string]bool, len(mission.Spec.Knights))
+	for _, mk := range mission.Spec.Knights {
+		listed[mk.Name] = true
+		cost := perKnight[mk.Name]
+		total += cost
 		costBreakdown = append(costBreakdown, aiv1alpha1.MissionKnightCost{
-			Name:      knightName,
-			CostUSD:   knightCost,
+			Name:      mk.Name,
+			CostUSD:   fmt.Sprintf("%.4f", cost),
 			Ephemeral: mk.Ephemeral,
 		})
 	}
+	var others []string
+	for name := range perKnight {
+		if !listed[name] {
+			others = append(others, name)
+		}
+	}
+	sort.Strings(others)
+	for _, name := range others {
+		total += perKnight[name]
+		costBreakdown = append(costBreakdown, aiv1alpha1.MissionKnightCost{
+			Name:    name,
+			CostUSD: fmt.Sprintf("%.4f", perKnight[name]),
+		})
+	}
 
-	// Update mission status with breakdown
 	mission.Status.CostBreakdown = costBreakdown
-
-	return totalCost, nil
+	return total, nil
 }
 
 // BudgetStatus is the result of a cost-budget check.
@@ -109,8 +146,8 @@ type BudgetStatus struct {
 	Exceeded bool
 }
 
-// CheckBudget aggregates the mission's cost (the larger of the knights' total
-// and the chains' own total), records it in Status.TotalCost and reports
+// CheckBudget aggregates the mission's cost (the larger of the per-knight
+// total and the chains' own total), records it in Status.TotalCost and reports
 // whether it exceeds Spec.CostBudgetUSD. A mission with no budget ("" or "0")
 // is not touched; an unparseable budget is never exceeded.
 func (c *CostTracker) CheckBudget(ctx context.Context, mission *aiv1alpha1.Mission) (BudgetStatus, error) {
@@ -148,4 +185,20 @@ func ApplyChainUsage(mission *aiv1alpha1.Mission) {
 			mission.Status.TotalCost = fmt.Sprintf("%.4f", chainCost)
 		}
 	}
+}
+
+// loopBodyKnight is the one knight every body step of a loop step names, or ""
+// when the step is not a loop or its body spans several knights.
+func loopBodyKnight(st aiv1alpha1.ChainStep) string {
+	if st.Loop == nil {
+		return ""
+	}
+	name := ""
+	for _, b := range st.Loop.Steps {
+		if name != "" && b.KnightRef.Name != name {
+			return ""
+		}
+		name = b.KnightRef.Name
+	}
+	return name
 }

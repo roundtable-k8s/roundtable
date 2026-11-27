@@ -131,6 +131,17 @@ var _ = Describe("Mission Controller", func() {
 		Expect(k8sClient.Status().Update(ctx, knight)).To(Succeed())
 	}
 
+	// setMissionChainCost records a chain cost on the mission status, where
+	// the budget check reads the chains' total.
+	setMissionChainCost := func(cost string) {
+		mission := &aiv1alpha1.Mission{}
+		Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+		mission.Status.ChainStatuses = []aiv1alpha1.MissionChainStatus{
+			{Name: "budget-chain", CostUSD: cost},
+		}
+		Expect(k8sClient.Status().Update(ctx, mission)).To(Succeed())
+	}
+
 	deleteKnight := func() {
 		knight := &aiv1alpha1.Knight{}
 		if err := k8sClient.Get(ctx, knightNN, knight); err == nil {
@@ -668,11 +679,8 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Active
 			driveToPhase(r, aiv1alpha1.MissionPhaseActive, 10, readyOnProvisioning(), readyOnAssembling())
 
-			// Set knight cost under budget
-			knight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, knightNN, knight)).To(Succeed())
-			knight.Status.TotalCost = "5.25"
-			Expect(k8sClient.Status().Update(ctx, knight)).To(Succeed())
+			// Record chain cost under budget (the mission's cost comes from its chains)
+			setMissionChainCost("5.25")
 
 			// Reconcile — should stay Active (no chains to complete) with cost tracked
 			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
@@ -699,11 +707,8 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Active (no chains, so it will try to succeed immediately)
 			driveToPhase(r, aiv1alpha1.MissionPhaseActive, 10, readyOnProvisioning(), readyOnAssembling())
 
-			// Set knight cost over budget
-			knight := &aiv1alpha1.Knight{}
-			Expect(k8sClient.Get(ctx, knightNN, knight)).To(Succeed())
-			knight.Status.TotalCost = "15.75"
-			Expect(k8sClient.Status().Update(ctx, knight)).To(Succeed())
+			// Record chain cost over budget (the mission's cost comes from its chains)
+			setMissionChainCost("15.75")
 
 			// Reconcile should fail due to budget
 			Eventually(func() aiv1alpha1.MissionPhase {

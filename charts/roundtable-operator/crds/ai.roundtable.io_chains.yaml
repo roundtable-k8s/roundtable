@@ -904,6 +904,30 @@ spec:
                         knightRef, or the fallbackRef while a plan-quota refusal is re-run on
                         the fallback knight. Empty before the step's first dispatch.
                       type: string
+                    knightCosts:
+                      description: |-
+                        knightCosts splits costUSD by the knight that ran each attempt (primary,
+                        fallback, loop body and fan-out knights). Absent on steps recorded before
+                        the field existed.
+                      items:
+                        description: StepKnightCost is the cost one knight incurred
+                          on a chain step.
+                        properties:
+                          costUSD:
+                            description: costUSD is the knight's cost on the step
+                              in USD.
+                            type: string
+                          name:
+                            description: name is the Knight that ran the attempts.
+                            type: string
+                        required:
+                        - costUSD
+                        - name
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
                     loop:
                       description: loop tracks a loop step. Unset for ordinary steps.
                       properties:
