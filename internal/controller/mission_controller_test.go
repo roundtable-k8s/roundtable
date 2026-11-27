@@ -1090,13 +1090,13 @@ var _ = Describe("Mission Controller", func() {
 			deleteMission()
 		})
 
-		It("deletes both NATS streams and then removes the finalizer", func() {
+		It("deletes the NATS streams, including the events stream, and then removes the finalizer", func() {
 			startDeletion("rt_msn_tasks", "rt_msn_results")
 
 			result, err := deleter.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeZero())
-			Expect(rec.deletedStreams()).To(ConsistOf("rt_msn_tasks", "rt_msn_results"))
+			Expect(rec.deletedStreams()).To(ConsistOf("rt_msn_tasks", "rt_msn_results", "rt_msn_tasks_EVENTS"))
 			Expect(missionGone()).To(BeTrue())
 		})
 

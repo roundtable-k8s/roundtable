@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -273,4 +275,66 @@ func TestStoreResultsToKVSummaryAndChainOutputs(t *testing.T) {
 	if m.Status.ResultsRef == nil || m.Status.ResultsRef.Bucket != "mission-results" || m.Status.ResultsRef.Key != "m1" {
 		t.Errorf("resultsRef = %+v", m.Status.ResultsRef)
 	}
+}
+
+// streamDeleter records DeleteStream calls on top of fakeNATS.
+type streamDeleter struct {
+	fakeNATS
+	deleted []string
+}
+
+func (s *streamDeleter) DeleteStream(_ context.Context, name string) error {
+	s.deleted = append(s.deleted, name)
+	return nil
+}
+
+// Cleanup deletes the tasks, results and ephemeral events streams.
+func TestDeleteNATSStreamsDeletesEventsStream(t *testing.T) {
+	nc := &streamDeleter{}
+	c := &Cleaner{NATS: natspkg.NewProviderWithClient(nc, logr.Discard())}
+	m := &aiv1alpha1.Mission{Status: aiv1alpha1.MissionStatus{
+		NATSTasksStream:   "rt_m1_TASKS",
+		NATSResultsStream: "rt_m1_RESULTS",
+	}}
+	if err := c.DeleteNATSStreams(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"rt_m1_TASKS", "rt_m1_RESULTS", "rt_m1_TASKS_EVENTS"}
+	if len(nc.deleted) != len(want) {
+		t.Fatalf("deleted %v, want %v", nc.deleted, want)
+	}
+	for i := range want {
+		if nc.deleted[i] != want[i] {
+			t.Errorf("deleted[%d] = %q, want %q", i, nc.deleted[i], want[i])
+		}
+	}
+}
+
+// A failed KV write reports the size of the document it tried to store.
+func TestStoreResultsToKVFailureReportsSize(t *testing.T) {
+	kv := &sizeRecordingFailingKV{}
+	c := &Cleaner{
+		Client: fake.NewClientBuilder().WithScheme(testScheme(t)).Build(),
+		NATS:   natspkg.NewProviderWithClient(kv, logr.Discard()),
+	}
+	m := &aiv1alpha1.Mission{ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "ns"}}
+	err := c.StoreResultsToKV(t.Context(), m)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	want := fmt.Sprintf("(%d bytes)", len(kv.value))
+	if kv.value == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not report size %s", err, want)
+	}
+}
+
+// sizeRecordingFailingKV remembers the value passed to KVPut and fails.
+type sizeRecordingFailingKV struct {
+	fakeNATS
+	value []byte
+}
+
+func (s *sizeRecordingFailingKV) KVPut(_ context.Context, _, _ string, value []byte) error {
+	s.value = value
+	return errors.New("max payload exceeded")
 }

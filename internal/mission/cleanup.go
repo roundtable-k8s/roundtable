@@ -113,8 +113,12 @@ func (c *Cleaner) DeleteNATSConsumers(ctx context.Context, mission *aiv1alpha1.M
 	return nil
 }
 
-// DeleteNATSStreams deletes the mission's task and result streams. A stream
-// that does not exist (already deleted) is not an error.
+// DeleteNATSStreams deletes the mission's task, result and events streams.
+// A stream that does not exist (already deleted) is not an error.
+//
+// The events stream is the ephemeral RoundTable's dead-letter stream. The
+// assembler does not set spec.nats.eventsStream, so its name is derived from
+// the tasks stream exactly as the RoundTable controller derives it.
 func (c *Cleaner) DeleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mission) error {
 	natsCli, err := c.natsClient()
 	if err != nil {
@@ -132,6 +136,15 @@ func (c *Cleaner) DeleteNATSStreams(ctx context.Context, mission *aiv1alpha1.Mis
 	if mission.Status.NATSResultsStream != "" {
 		if err := natsCli.DeleteStream(ctx, mission.Status.NATSResultsStream); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 			return fmt.Errorf("failed to delete results stream: %w", err)
+		}
+	}
+
+	// Delete events stream
+	if mission.Status.NATSTasksStream != "" {
+		nats := aiv1alpha1.RoundTableNATS{TasksStream: mission.Status.NATSTasksStream}
+		events := nats.EventsStreamName()
+		if err := natsCli.DeleteStream(ctx, events); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
+			return fmt.Errorf("failed to delete events stream: %w", err)
 		}
 	}
 
@@ -316,7 +329,11 @@ func (c *Cleaner) StoreResultsToKV(ctx context.Context, mission *aiv1alpha1.Miss
 	}
 
 	if err := natsCli.KVPut(ctx, kvBucket, kvKey, resultsJSON); err != nil {
-		return fmt.Errorf("failed to store results in NATS KV: %w", err)
+		// NATS rejects values over max_payload (1 MiB by default) with an
+		// error that does not say how large the value was; record the size.
+		log.Error(err, "Failed to store mission results in NATS KV", "bucket", kvBucket, "key", kvKey,
+			"bytes", len(resultsJSON))
+		return fmt.Errorf("failed to store results (%d bytes) in NATS KV: %w", len(resultsJSON), err)
 	}
 
 	SetResultsRef(mission, kvBucket, kvKey)
