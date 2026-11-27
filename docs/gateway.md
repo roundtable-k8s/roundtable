@@ -1271,9 +1271,19 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
 | `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
+| `list_schedules` | `namespace?`, `table?` | `{schedules: [...]}`: the same list as `GET /v1/schedules` |
+| `get_schedule` | `name`, `namespace?` | The schedule projection |
+| `suspend_schedule` | `name`, `namespace?` | The schedule's suspension state. Allowed on Git-managed schedules (it sets an annotation, not the spec) |
+| `resume_schedule` | `name`, `namespace?` | The suspension state; a schedule suspended in its spec stays suspended and the message says so |
+| `run_schedule` | `name`, `namespace?` | Fires the schedule once now (also while suspended, also Git-managed) and waits briefly for the operator: state `started`, `pending` or `skipped`. A skipped firing is a tool error |
+| `list_schedule_runs` | `name`, `namespace?`, `limit?` | `{runs: [...]}`, newest first |
+| `get_schedule_run` | `name`, `run`, `namespace?` | Text content is the run's output; a failed run is a tool error. Structured content is the run result |
 
 The mission tools are only listed when `gateway.missions.enabled` is true, the
-chain-run tools when `gateway.runs.enabled` is true.
+chain-run tools when `gateway.runs.enabled` is true. The schedule tools
+(`list_schedules` to `run_schedule`) are listed when `gateway.schedules.enabled`
+is true, and `list_schedule_runs` and `get_schedule_run` when the schedule run
+history is enabled. Creating, replacing and deleting schedules is REST only.
 
 `invoke_knight` and `run_chain` send MCP progress notifications while they
 wait, when the client passes a progress token: one per tool call the knight

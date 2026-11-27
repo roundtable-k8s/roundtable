@@ -195,7 +195,149 @@ func NewMCPServer(svc *Service) *mcp.Server {
 	if svc.RunsEnabled() {
 		addRunTools(s, svc)
 	}
+	if svc.SchedulesEnabled() {
+		addScheduleTools(s, svc)
+	}
+	if svc.ScheduleRunsEnabled() {
+		addScheduleRunTools(s, svc)
+	}
 	return s
+}
+
+// ScheduleRefInput names one schedule.
+type ScheduleRefInput struct {
+	Namespace string `json:"namespace,omitempty" jsonschema:"namespace of the schedule; omit for the default"`
+	Name      string `json:"name" jsonschema:"name of the schedule"`
+}
+
+// ListSchedulesOutput is the output of the list_schedules tool.
+type ListSchedulesOutput struct {
+	Schedules []*ScheduleView `json:"schedules"`
+}
+
+// ListScheduleRunsInput is the input of the list_schedule_runs tool.
+type ListScheduleRunsInput struct {
+	ScheduleRefInput
+	Limit int `json:"limit,omitempty" jsonschema:"maximum number of runs to return"`
+}
+
+// ListScheduleRunsOutput is the output of the list_schedule_runs tool.
+type ListScheduleRunsOutput struct {
+	Runs []*ScheduleRun `json:"runs"`
+}
+
+// GetScheduleRunInput is the input of the get_schedule_run tool.
+type GetScheduleRunInput struct {
+	ScheduleRefInput
+	Run string `json:"run" jsonschema:"run name from list_schedule_runs"`
+}
+
+func addScheduleTools(s *mcp.Server, svc *Service) {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_schedules",
+		Description: "List the schedules (cron Triggers) of a table with their target, next fire time, suspension and how they are managed (git or api).",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleFilter) (*mcp.CallToolResult, ListSchedulesOutput, error) {
+		out, err := svc.ListSchedules(ctx, in)
+		return nil, ListSchedulesOutput{Schedules: out}, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_schedule",
+		Description: "Get one schedule: cron, target, suspension, recent firings and whether it is Git-managed.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleRefInput) (*mcp.CallToolResult, *ScheduleView, error) {
+		v, err := svc.GetSchedule(ctx, in.Namespace, in.Name)
+		return nil, v, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "suspend_schedule",
+		Description: "Suspend a schedule so it stops firing. Allowed on Git-managed schedules too: it only sets an annotation, " +
+			"not the spec. Undo with resume_schedule.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleRefInput) (*mcp.CallToolResult, *ScheduleState, error) {
+		st, err := svc.SuspendSchedule(ctx, in.Namespace, in.Name)
+		return nil, st, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "resume_schedule",
+		Description: "Resume a schedule suspended with suspend_schedule. A schedule suspended in its spec (Git) stays suspended; " +
+			"the result says so.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleRefInput) (*mcp.CallToolResult, *ScheduleState, error) {
+		st, err := svc.ResumeSchedule(ctx, in.Namespace, in.Name)
+		return nil, st, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "run_schedule",
+		Description: "Fire a schedule once now, even while suspended and also for Git-managed schedules. Waits briefly for the operator " +
+			"to start the run; state is started, pending or skipped. Fetch the result with get_schedule_run.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleRefInput) (*mcp.CallToolResult, *ScheduleRunNow, error) {
+		run, err := svc.RunSchedule(ctx, in.Namespace, in.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return scheduleRunNowResult(run), run, nil
+	})
+}
+
+func addScheduleRunTools(s *mcp.Server, svc *Service) {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_schedule_runs",
+		Description: "List a schedule's runs (firings), newest first, with outcome, duration and cost.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListScheduleRunsInput) (*mcp.CallToolResult, ListScheduleRunsOutput, error) {
+		runs, err := svc.ListScheduleRuns(ctx, ScheduleRunsFilter{Namespace: in.Namespace, Name: in.Name, Limit: in.Limit})
+		return nil, ListScheduleRunsOutput{Runs: runs}, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_schedule_run",
+		Description: "Get the result of one run of a schedule: the output of its chain, knight task or mission. A failed run is a tool error.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetScheduleRunInput) (*mcp.CallToolResult, *ScheduleRunResult, error) {
+		res, err := svc.ScheduleRunResult(ctx, in.Namespace, in.Name, in.Run)
+		if err != nil {
+			return nil, nil, err
+		}
+		return scheduleRunResult(res), res, nil
+	})
+}
+
+// scheduleRunNowResult describes a run-now outcome; a skipped firing is a
+// tool error (nothing started, as the REST route answers 409).
+func scheduleRunNowResult(r *ScheduleRunNow) *mcp.CallToolResult {
+	id := r.Namespace + "/" + r.Schedule
+	switch r.State {
+	case ScheduleRunSkipped:
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+			Text: "Schedule " + id + " run was skipped: " + r.SkipReason}}}
+	case ScheduleRunPending:
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Schedule " + id + " run requested; the operator has not started it yet. Check list_schedule_runs shortly."}}}
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+		Text: "Schedule " + id + " started " + r.Target + " run " + r.Run + ". Fetch it with get_schedule_run."}}}
+}
+
+// scheduleRunResult puts a run's output first in the text content and marks
+// failed runs as tool errors.
+func scheduleRunResult(r *ScheduleRunResult) *mcp.CallToolResult {
+	switch {
+	case r.Task != nil:
+		switch r.Task.Status {
+		case string(TaskSucceeded):
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Task.Output}}}
+		case string(TaskFailed):
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+				Text: "knight " + r.Task.Knight + " failed task " + r.Task.Run + ": " + r.Task.Error}}}
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Task " + r.Task.Run + " of schedule " + r.Schedule + " is still running."}}}
+	case r.Mission != nil:
+		return missionResult(r.Mission)
+	case r.RunRecord != nil:
+		return runResult(r.RunRecord)
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "Run of schedule " + r.Schedule + " has no result."}}}
 }
 
 func addMissionTools(s *mcp.Server, svc *Service) {
