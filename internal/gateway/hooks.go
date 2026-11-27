@@ -295,28 +295,44 @@ func (s *Service) hookTable(ctx context.Context, trg *aiv1alpha1.Trigger) string
 	if table, ok := s.hookTables.get(key, trg.ResourceVersion, now); ok {
 		return table
 	}
-	table := s.resolveHookTable(ctx, trg)
-	s.hookTables.put(key, trg.ResourceVersion, table, now)
+	table, final := s.resolveHookTable(ctx, trg)
+	if final {
+		// A transient lookup failure falls back to the Trigger's own table
+		// for this request only; caching it would pin the wrong label for
+		// hookMissTTL.
+		s.hookTables.put(key, trg.ResourceVersion, table, now)
+	}
 	return table
 }
 
-func (s *Service) resolveHookTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
+// resolveHookTable returns the table label and whether it is final. It is not
+// final when the target Chain or knight lookup failed for a reason other than
+// not-found, in which case the Trigger's own table is only a fallback.
+func (s *Service) resolveHookTable(ctx context.Context, trg *aiv1alpha1.Trigger) (string, bool) {
+	final := true
 	switch target := trg.Spec.Target; {
 	case target.Knight != nil:
 		if s.Resolver != nil {
-			if name, err := s.Resolver.KnightTable(ctx, trg.Namespace, target.Knight.Name); err == nil && name != "" {
-				return name
+			name, err := s.Resolver.KnightTable(ctx, trg.Namespace, target.Knight.Name)
+			if err == nil && name != "" {
+				return name, true
+			}
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				final = false
 			}
 		}
 	case target.ChainRef != nil:
 		chain := &aiv1alpha1.Chain{}
-		if err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err == nil {
+		err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain)
+		if err == nil {
 			if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
-				return name
+				return name, true
 			}
+		} else if !apierrors.IsNotFound(err) {
+			final = false
 		}
 	}
-	return aiv1alpha1.RefName(trg.Spec.RoundTableRef)
+	return aiv1alpha1.RefName(trg.Spec.RoundTableRef), final
 }
 
 // hookCredential reads the Trigger's credential: the referenced key of a
