@@ -36,6 +36,9 @@ func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 // the attempts, the counters grow once per finished attempt, and a run copy
 // reports under its template's name.
 func TestChainUsageTwoStepRunWithRetry(t *testing.T) {
+	// The series count below is global; reset so series written by other
+	// tests (e.g. the Ginkgo suite) under -shuffle do not leak in.
+	metrics.ChainStepCostUSDTotal.Reset()
 	r := &ChainReconciler{Recorder: record.NewFakeRecorder(50)}
 	chain := &aiv1alpha1.Chain{
 		ObjectMeta: metav1.ObjectMeta{
