@@ -152,6 +152,14 @@ func (m *Manager) Ensure(ctx context.Context, nc *nats.Conn, key string, cfg Tab
 	return nil
 }
 
+// Running reports whether the RoundTable identified by key has a watcher.
+func (m *Manager) Running(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.watchers[key]
+	return ok
+}
+
 // Stop stops the watcher of the RoundTable identified by key, if any. The
 // streams, consumer and KV state are kept.
 func (m *Manager) Stop(key string) {
