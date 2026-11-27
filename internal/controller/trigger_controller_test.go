@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -120,6 +121,26 @@ var _ = Describe("Trigger controller", func() {
 		Expect(k8sClient.Create(ctx, t)).To(Succeed())
 		reconcileTrigger(name)
 		return getTrigger(name)
+	}
+	// recreateStream deletes the events stream, recreates it (its sequence
+	// restarts at 1) and waits for the Trigger consumer loops to exit.
+	recreateStream := func() {
+		Expect(js.DeleteStream(ctx, stream)).To(Succeed())
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+		Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
+		Eventually(func() bool {
+			r.consumers.mu.Lock()
+			defer r.consumers.mu.Unlock()
+			for _, l := range r.consumers.loops {
+				select {
+				case <-l.done:
+					return true
+				default:
+				}
+			}
+			return false
+		}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
 	}
 	getCronJob := func(name string) *batchv1.CronJob {
 		cj := &batchv1.CronJob{}
@@ -539,22 +560,7 @@ var _ = Describe("Trigger controller", func() {
 
 			// Recreating the stream restarts its sequence at 1 and removes the
 			// consumer; the next reconcile recreates both and the loop.
-			Expect(js.DeleteStream(ctx, stream)).To(Succeed())
-			Eventually(func() bool {
-				r.consumers.mu.Lock()
-				defer r.consumers.mu.Unlock()
-				for _, l := range r.consumers.loops {
-					select {
-					case <-l.done:
-						return true
-					default:
-					}
-				}
-				return false
-			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
-			rt := &aiv1alpha1.RoundTable{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
-			Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
+			recreateStream()
 			reconcileTrigger("recreate")
 			Expect(consumerExists(t.Status.Consumer)).To(BeTrue())
 
@@ -565,6 +571,23 @@ var _ = Describe("Trigger controller", func() {
 					Expect(run.Annotations[aiv1alpha1.AnnotationTriggerKey]).To(HaveSuffix("/1"))
 				}
 			}
+		})
+
+		It("looks the events stream up once per consumer loop, not per message", func() {
+			nc, err := r.natsConn()
+			Expect(err).NotTo(HaveOccurred())
+			var infoCalls atomic.Int32
+			sub, err := nc.Subscribe("$JS.API.STREAM.INFO."+stream, func(*nats.Msg) { infoCalls.Add(1) })
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = sub.Unsubscribe() }()
+			Expect(nc.Flush()).To(Succeed())
+
+			natsTrigger("infocache", prefix+".events.infocache", nil)
+			for i := 0; i < 3; i++ {
+				publish(prefix+".events.infocache", "", `{"service":"api"}`)
+			}
+			Eventually(func() int { return len(runsOf("infocache")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(3))
+			Expect(infoCalls.Load()).To(Equal(int32(1)))
 		})
 
 		It("treats a run under the former seq-<n> key as a duplicate", func() {
@@ -602,22 +625,7 @@ var _ = Describe("Trigger controller", func() {
 			// The stream is recreated after that run: wait out the
 			// one-second resolution of creationTimestamp.
 			time.Sleep(2 * time.Second)
-			Expect(js.DeleteStream(ctx, stream)).To(Succeed())
-			rt := &aiv1alpha1.RoundTable{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
-			Expect((&RoundTableReconciler{NATS: r.NATS}).ensureStreams(ctx, rt)).To(Succeed())
-			Eventually(func() bool {
-				r.consumers.mu.Lock()
-				defer r.consumers.mu.Unlock()
-				for _, l := range r.consumers.loops {
-					select {
-					case <-l.done:
-						return true
-					default:
-					}
-				}
-				return false
-			}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
+			recreateStream()
 			reconcileTrigger("oldlegacy")
 
 			publish(prefix+".events.oldlegacy", "", `{"service":"api"}`)
@@ -844,7 +852,8 @@ var _ = Describe("Trigger controller", func() {
 			Expect(failed).To(Equal(1))
 
 			// A later Job that did not fail clears it.
-			time.Sleep(1100 * time.Millisecond) // creationTimestamp has second resolution
+			// Same-second creationTimestamps tie-break on the name, and
+			// "-2" sorts after "-1": no wait is needed.
 			newJob("trigger-health-2")
 			reconcileTrigger("health")
 			Expect(meta.IsStatusConditionTrue(getTrigger("health").Status.Conditions, aiv1alpha1.ConditionTriggerScheduleHealthy)).To(BeTrue())
@@ -856,6 +865,19 @@ var _ = Describe("Trigger controller", func() {
 			Expect(k8sClient.Status().Update(ctx, cj)).To(Succeed())
 			reconcileTrigger("health")
 			Expect(getTrigger("health").Status.LastSuccessfulScheduledAt.Time).To(BeTemporally("==", ok.Time))
+		})
+
+		It("maps a firing Job to its Trigger and ignores other Jobs", func() {
+			job := func(lbls map[string]string) *batchv1.Job {
+				return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: ns, Labels: lbls}}
+			}
+			Expect(fireJobToTrigger(ctx, job(map[string]string{
+				aiv1alpha1.LabelTrigger: "health", labelManagedBy: triggerManagedBy,
+			}))).To(Equal([]reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: ns, Name: "health"}}}))
+			// Not managed by the operator, or not a Trigger's Job.
+			Expect(fireJobToTrigger(ctx, job(map[string]string{aiv1alpha1.LabelTrigger: "health"}))).To(BeEmpty())
+			Expect(fireJobToTrigger(ctx, job(map[string]string{labelManagedBy: triggerManagedBy}))).To(BeEmpty())
+			Expect(fireJobToTrigger(ctx, job(nil))).To(BeEmpty())
 		})
 
 		It("reads only this Trigger's labelled firing Jobs for ScheduleHealthy", func() {
@@ -1790,6 +1812,81 @@ var _ = Describe("Trigger controller", func() {
 			rec, err := svc.GetTask(ctx, sent[0].TaskID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(rec.Caller).To(Equal("roundtable/ui"))
+		})
+
+		It("keeps a run-now request that fails transiently, still updates status and warns once", func() {
+			t := scheduleKnightTrigger("kt-runnow-transient", func(s *aiv1alpha1.TriggerSpec) { s.Suspend = true })
+			clock = t.CreationTimestamp.Add(time.Second)
+			patch := client.MergeFrom(t.DeepCopy())
+			t.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-t"}
+			Expect(k8sClient.Patch(ctx, t, patch)).To(Succeed())
+
+			// Without NATS the task cannot be sent: a transient failure.
+			provider := r.NATS
+			r.NATS = nil
+			DeferCleanup(func() { r.NATS = provider })
+			rec := r.Recorder.(*record.FakeRecorder)
+			for len(rec.Events) > 0 {
+				<-rec.Events
+			}
+			res := reconcileTrigger("kt-runnow-transient")
+			Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+			Expect(res.RequeueAfter).To(BeNumerically("<=", 10*time.Second))
+			t = getTrigger("kt-runnow-transient")
+			Expect(t.Annotations).To(HaveKeyWithValue(aiv1alpha1.AnnotationTriggerRunNow, "req-t"))
+			Expect(t.Status.SuspendedBy).To(Equal(aiv1alpha1.TriggerSuspendedBySpec))
+			Expect(meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)).NotTo(BeNil())
+
+			// The retry stays quiet: one Warning Event per request.
+			Expect(reconcileTrigger("kt-runnow-transient").RequeueAfter).To(BeNumerically("<=", 10*time.Second))
+			var warned int
+			for len(rec.Events) > 0 {
+				if strings.Contains(<-rec.Events, "RunNowNotFired") {
+					warned++
+				}
+			}
+			Expect(warned).To(Equal(1))
+		})
+
+		It("raises a task's Warning Event only after the status patch, not while collecting", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-event-order", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyAllow
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("kt-event-order")
+			fireSchedule("kt-event-order", due, "")
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(1))
+			Eventually(func() []string { return getTrigger("kt-event-order").Status.ActiveRuns }).Should(HaveLen(1))
+			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","error":"boom"}`)
+
+			rec := r.Recorder.(*record.FakeRecorder)
+			for len(rec.Events) > 0 {
+				<-rec.Events
+			}
+			// Collecting alone (a patch that then conflicts) raises nothing,
+			// however often it runs.
+			var events []triggerEvent
+			Eventually(func() int {
+				_, events = r.collectTasks(ctx, getTrigger("kt-event-order"), clock)
+				return len(events)
+			}, "10s").Should(Equal(1))
+			_, _ = r.collectTasks(ctx, getTrigger("kt-event-order"), clock)
+			Expect(events[0].reason).To(Equal("TaskFailed"))
+			Expect(rec.Events).To(BeEmpty())
+
+			// The reconcile that persists the outcome raises it once.
+			reconcileTrigger("kt-event-order")
+			reconcileTrigger("kt-event-order")
+			var failed int
+			for len(rec.Events) > 0 {
+				if strings.Contains(<-rec.Events, "Warning TaskFailed") {
+					failed++
+				}
+			}
+			Expect(failed).To(Equal(1))
 		})
 
 		It("records a skipped firing and clears a run-now request for a missing knight", func() {
