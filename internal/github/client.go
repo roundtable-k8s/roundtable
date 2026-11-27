@@ -588,7 +588,9 @@ func (c *Client) EnableAutoMerge(ctx context.Context, nodeID string) error {
 // LoadMergeQueueState asks GraphQL (isInMergeQueue / mergeQueueEntry) whether
 // an open pull request is in a merge queue and records it in pr.InMergeQueue.
 // It is a no-op (no call) for a merged, closed or draft PR, one already
-// showing auto_merge, or one without a node ID.
+// showing auto_merge, or one without a node ID. A GraphQL error is returned
+// to the caller: in the verify pass it fails the pass, which is retried on the
+// next poll.
 func (c *Client) LoadMergeQueueState(ctx context.Context, pr *PullRequest) error {
 	if pr.AutoMerge != nil || pr.Merged || pr.State == "closed" || pr.Draft || pr.NodeID == "" {
 		return nil
