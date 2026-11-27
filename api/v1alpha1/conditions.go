@@ -85,9 +85,9 @@ const (
 	// Status=True means a CiliumNetworkPolicy limits egress to DNS, NATS and
 	// the allowed hosts and Services (reason FQDNPolicyApplied, or
 	// ServiceNotFound when an allowed Service is missing or has no selector
-	// and its rule is left out). Status=False means the hostname allowlist can't be
-	// enforced (FQDNPolicyUnavailable: a NetworkPolicy allows the allowed
-	// ports to any destination) or the policy failed to apply.
+	// and its rule is left out). Status=False means the hostname allowlist
+	// can't be enforced (FQDNPolicyUnavailable: a NetworkPolicy allows the
+	// allowed ports to any destination) or the policy failed to apply.
 	ConditionKnightEgressRestricted = "EgressRestricted"
 
 	// ConditionKnightIsolated reports how isolated the knight actually is.

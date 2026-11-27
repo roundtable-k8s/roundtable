@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -199,4 +201,31 @@ func TestReconcileEgressDerivedFromMCP(t *testing.T) {
 	assert.Equal(t, aiv1alpha1.ReasonEgressPolicyFailed, cond.Reason)
 	assert.Contains(t, cond.Message, `mcpServers entry "bad"`)
 	require.NotNil(t, k.Status.DerivedEgress)
+}
+
+func TestReconcileEgressFailureNamesDroppedHosts(t *testing.T) {
+	sch := k8sruntime.NewScheme()
+	require.NoError(t, scheme.AddToScheme(sch))
+	require.NoError(t, aiv1alpha1.AddToScheme(sch))
+	k := mcpKnight(&aiv1alpha1.KnightEgress{
+		AllowedHosts:    []aiv1alpha1.EgressHostEntry{aiv1alpha1.NewEgressHostEntry("bad host!")},
+		AllowedServices: []aiv1alpha1.EgressService{{Name: "web-fetch", Namespace: "tools"}},
+	})
+	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(k).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*corev1.Service); ok {
+				return errors.New("boom")
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	}).Build()
+	r := &KnightReconciler{Client: c, Scheme: sch, CiliumEnabled: true}
+
+	require.Error(t, r.reconcileEgress(context.Background(), k))
+	cond := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, aiv1alpha1.ReasonEgressPolicyFailed, cond.Reason)
+	assert.Contains(t, cond.Message, "failed to get allowed Service tools/web-fetch")
+	assert.Contains(t, cond.Message, "bad host!")
 }

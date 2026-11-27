@@ -678,6 +678,11 @@ func (r *KnightReconciler) reconcileEgress(ctx context.Context, k *aiv1alpha1.Kn
 			}
 		}
 	}
+	if err != nil && len(dropped) > 0 {
+		// The policy itself failed: still name the dropped entries.
+		cond.Message = fmt.Sprintf("%s; %d allowedHosts or mcpServers entr(ies) invalid and not allowed: %s",
+			cond.Message, len(dropped), errors.Join(dropped...))
+	}
 	if err == nil && len(dropped) > 0 {
 		err = fmt.Errorf("%d allowedHosts or mcpServers entr(ies) invalid and not allowed: %w", len(dropped), errors.Join(dropped...))
 		cond.Status = metav1.ConditionFalse
