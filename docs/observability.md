@@ -407,9 +407,10 @@ below with their label values.
 
 ## Trigger and gateway metrics
 
-The metrics are in the table above. Both carry the `table` label (`none` when
-unknown); a Trigger's table is its target chain's
-`roundTableRef`. Label values:
+The Trigger and gateway metrics are listed in the
+[operator and gateway metrics](#operator-and-gateway-metrics) table above. They
+carry the `table` label (`none` when unknown); a Trigger's table is its target
+chain's `roundTableRef`. Label values:
 
 - `source`: `schedule`, `nats`, `webhook`, `github`.
 - `outcome` of `roundtable_trigger_runs_finished_total`: `succeeded`, `failed`,

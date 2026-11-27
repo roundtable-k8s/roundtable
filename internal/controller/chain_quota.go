@@ -67,10 +67,11 @@ const stepReasonFallbackQuota = "FallbackQuota"
 // when the plan window resets. The machine-readable signal, refused: "quota"
 // or the deprecated usage_limited flag (TaskResult.QuotaRefused), always makes
 // a result a refusal; refused: "credits" does not (a plain failure). The reset
-// time is parsed from the message when present, else the zero time (quotaDeferUntil then uses
-// quotaDeferFallback). Without the flag, the "Task refused: " prefix alone is
-// not enough: it also needs a parseable reset time. Anything else is an
-// ordinary error (the existing retry/failure handling).
+// time is parsed from the message when present, else the zero time
+// (quotaDeferUntil then uses quotaDeferFallback). Without the flag, the
+// "Task refused: " prefix alone is not enough: it also needs a parseable reset
+// time. Anything else is an ordinary error (the existing retry/failure
+// handling).
 func quotaRefusal(res *natspkg.TaskResult) (resetsAt time.Time, ok bool) {
 	if res == nil {
 		return time.Time{}, false
