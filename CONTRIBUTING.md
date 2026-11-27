@@ -151,6 +151,7 @@ chore: bump Go to 1.26
 - Include tests
 - Update documentation if behavior changes
 - Link related issues
+- A PR that adds a write verb to any ServiceAccount the chart creates must default it off and say so in its description
 
 ## License
 

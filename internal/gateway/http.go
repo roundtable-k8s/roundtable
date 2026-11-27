@@ -81,15 +81,15 @@ func (s *Service) routes() []route {
 		{pattern: "GET /v1/knights", handler: s.handleListKnights},
 		{pattern: "POST /v1/knights/{name}/invoke", handler: s.handleInvoke},
 		{pattern: "GET /v1/knights/{name}/snapshots", handler: s.handleListSnapshots},
+		// Served even when snapshots are off, to answer 403 with the reason
+		// rather than a bare 404/405.
+		{pattern: "POST /v1/knights/{name}/snapshot", handler: s.handleSnapshotKnight},
 		{pattern: "GET /v1/tasks", handler: s.handleListTasks},
 		{pattern: "GET /v1/tasks/{taskId}", handler: s.handleGetTask},
 		{pattern: "GET /v1/tasks/{taskId}/events", handler: s.handleTaskEvents},
 		{pattern: "GET /v1/dead-letters", handler: s.handleListDeadLetters},
 		{pattern: "GET /v1/dead-letters/{taskId}", handler: s.handleGetDeadLetter},
 		{pattern: "POST /v1/dead-letters/{taskId}/retry", handler: s.handleRetryDeadLetter},
-	}
-	if s.SnapshotsEnabled() {
-		rs = append(rs, route{pattern: "POST /v1/knights/{name}/snapshot", handler: s.handleSnapshotKnight})
 	}
 	if s.MissionsEnabled() {
 		rs = append(rs,

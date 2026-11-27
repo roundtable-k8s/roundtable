@@ -121,8 +121,9 @@ func main() {
 			"(needs RBAC to get Triggers, get and list Chains).")
 	flag.DurationVar(&scheduleRetention, "schedule-result-retention", gateway.DefaultScheduleResultRetention,
 		"How long the results of a schedule's runs stay readable: the task record TTL is raised to it.")
-	flag.BoolVar(&snapshotsEnabled, "knight-snapshots", true,
-		"Serve POST /v1/knights/{name}/snapshot (needs RBAC to get and patch Knights).")
+	flag.BoolVar(&snapshotsEnabled, "knight-snapshots", false,
+		"Serve POST /v1/knights/{name}/snapshot and the snapshot_knight tool (needs RBAC to get and patch Knights); "+
+			"when off the route answers 403.")
 	flag.BoolVar(&hooksEnabled, "hooks", true,
 		"Serve POST /v1/hooks/{namespace}/{trigger} for webhook Triggers (needs RBAC to get Triggers and "+
 			"Secrets labelled ai.roundtable.io/webhook-secret=true).")
