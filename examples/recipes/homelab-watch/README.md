@@ -105,7 +105,10 @@ Sending the same body again starts nothing: the dedupe key
 (`<first alert's fingerprint>/<status>`) matches the existing run. A flapping
 alert keeps its fingerprint, so repeated notifications while it fires are one
 run, and its resolution is one more. A different status or fingerprint starts
-a new run. A run is remembered until it is deleted
+a new run. Alertmanager sorts the alerts of a group by their labels, so a new
+alert that joins the group can change which one is first; that changes the key
+and starts another run. To avoid this, key on `groupKey` plus the fingerprints
+instead. A run is remembered until it is deleted
 (`ttlSecondsAfterFinished`, one day by default), so an alert that fires again
 after that starts a new run.
 

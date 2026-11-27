@@ -98,7 +98,7 @@ As narrow and short-lived as possible. Egress credential injection (#169, the En
 ## C. Knights working together
 
 ### 10. Memory is pluggable with a simple default
-*2026-11-24. Status: Standing. Led to #371 (closed), #211 (open), pi-knight#28. See [memory](memory.md).*
+*2026-11-24. Status: Standing. Led to #371 (closed), #211 (closed), pi-knight#28. See [memory](memory.md).*
 
 - Default: plain files on a PVC.
 - Shared memory is an RWX volume several knights mount (the owner: PVCs plus the Obsidian vault).
@@ -264,7 +264,7 @@ Consequences so far: no table MCP catalogue (decision 29); kay keeps every tool 
 ## The orchestrator becomes a knight
 
 ### 31. `merlin`: the orchestrator is a knight on `roundtable-dev`, on Fable for everything
-*2026-11-25, answered by the owner as short questions. Status: Standing.*
+*2026-11-25, answered by the owner as short questions. Status: Standing. Epic #607; see also #608.*
 
 merlin does what the external session's 30-minute check does. Purpose: less context held in one long session, and a more hands-off factory.
 

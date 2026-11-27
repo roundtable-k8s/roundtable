@@ -316,7 +316,10 @@ and `metrics.podMonitor.enabled`.
 ConfigMaps or `GrafanaDashboard` CRs.
 
 - *Round Table / Fleet overview*: knights by phase, tasks per minute, task error rate, active tasks, NATS connected, KEDA desired vs
-  actual replicas, queue depth by knight (pending tasks from KEDA's `keda_scaler_metrics_value` for the `nats-jetstream` scaler; needs KEDA's metrics scraped and covers only knights with a ScaledObject, i.e. `maxReplicas > 1` or scale-to-zero).
+  actual replicas, queue depth by knight (pending tasks from KEDA's
+  `keda_scaler_metrics_value` for the `nats-jetstream` scaler; needs KEDA's
+  metrics scraped and covers only knights with a ScaledObject, i.e.
+  `maxReplicas > 1` or scale-to-zero).
 - *Round Table / Chains and platform*: chain runs by status, p95 step
   duration, provider retries, missions by phase, dead letters open, ready
   knight consumers, isolation state and wake latency.
@@ -404,16 +407,15 @@ below with their label values.
 
 ## Trigger and gateway metrics
 
-Both carry the `table` label (`none` when unknown). A Trigger's table is its
-target chain's `roundTableRef`.
+The Trigger and gateway metrics are listed in the
+[operator and gateway metrics](#operator-and-gateway-metrics) table above. They
+carry the `table` label (`none` when unknown); a Trigger's table is its target
+chain's `roundTableRef`. Label values:
 
-| Metric | Type | Labels |
-|---|---|---|
-| `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` |
-| `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` (`succeeded`, `failed`, `lost`) |
-| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `namespace`, `table`, `trigger` |
-| `roundtable_gateway_requests_total` | counter | `table`, `route`, `code`, `caller_kind` (`serviceaccount`, `token`, `none`) |
-| `roundtable_gateway_request_duration_seconds` | histogram | `route` |
+- `source`: `schedule`, `nats`, `webhook`, `github`.
+- `outcome` of `roundtable_trigger_runs_finished_total`: `succeeded`, `failed`,
+  `lost`.
+- `caller_kind`: `serviceaccount`, `token`, `none`.
 
 `outcome` is `started` (a run started), `deduped` (its run already exists),
 `skipped` (concurrency, a missed `startingDeadlineSeconds`, a filter) or `error`

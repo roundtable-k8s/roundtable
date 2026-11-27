@@ -737,8 +737,8 @@ works with the gateway disabled too.
   flight.
 - `status.activeRuns` lists the task IDs without a result: they are the active
   runs `concurrency` counts. `Forbid` skips while one is in flight, `Allow`
-  caps them at `maxActive`. `Replace` is rejected (the Trigger is not Ready): a sent task cannot be
-  withdrawn.
+  caps them at `maxActive`. `Replace` is rejected (the Trigger is not Ready):
+  a sent task cannot be withdrawn.
 - Dedupe: the dedupe key becomes the task's gateway `Idempotency-Key`, so a
   key that already sent a task sends nothing (also on redelivery) while the
   gateway keeps its task records (`gateway.taskTTL`, 7 days by default), not
@@ -792,7 +792,8 @@ Secret, pod or knight spec.
   its final phase and `outcome` is `succeeded`, `failed` or `lost` (expired or
   already cleaned up).
 - `status.activeRuns` lists the unfinished Missions: `Forbid` skips while one
-  exists, `Allow` caps them at `maxActive`. `Replace` is rejected (the Trigger is not Ready).
+  exists, `Allow` caps them at `maxActive`. `Replace` is rejected (the Trigger
+  is not Ready).
 - Dedupe: a Mission already named for the key means it fired; this holds until
   the Mission is cleaned up.
 - A firing while the RoundTable is at `policies.maxMissions` is recorded as
@@ -959,16 +960,16 @@ status:
       reason: Listening
 ```
 
-`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject, cron, or `spec.concurrency.policy: Replace` with a
-knight or mission target), `TargetNotFound`, `TargetWrongTable` (knight target),
-`RoundTableNotFound`, `ConsumerError` (for example no
-events stream: set `createStreams` or create the stream yourself; Mission
-(ephemeral) RoundTables never have an events stream, so a Trigger that
-resolves to one gets `ConsumerError`),
-`CronJobError` (schedule source: no gateway URL, or a CronJob or
-ServiceAccount of that name not owned by the Trigger). A github
-source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
-and `lastPolledAt`.
+`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject,
+cron, or `spec.concurrency.policy: Replace` with a knight or mission target),
+`TargetNotFound`, `TargetWrongTable` (knight target), `RoundTableNotFound`,
+`ConsumerError` (for example no events stream: set `createStreams` or create
+the stream yourself; Mission (ephemeral) RoundTables never have an events
+stream, so a Trigger that resolves to one gets `ConsumerError`),
+`CronJobError` (schedule source: no gateway URL, or a CronJob or ServiceAccount
+of that name not owned by the Trigger). A github source also has `GitHubReady`
+(see [Rate limits and GitHubReady](#rate-limits-and-githubready)) and
+`lastPolledAt`.
 
 ### Schedule health
 

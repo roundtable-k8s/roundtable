@@ -66,11 +66,12 @@ const stepReasonFallbackQuota = "FallbackQuota"
 // quotaRefusal reports whether a task result is a plan-quota refusal, and
 // when the plan window resets. The machine-readable signal, refused: "quota"
 // or the deprecated usage_limited flag (TaskResult.QuotaRefused), always makes
-// a result a refusal; refused: "credits" does not (a plain failure); the reset time is parsed from
-// the message when present, else the zero time (quotaDeferUntil then uses
-// quotaDeferFallback). Without the flag, the "Task refused: " prefix alone is
-// not enough: it also needs a parseable reset time. Anything else is an
-// ordinary error (the existing retry/failure handling).
+// a result a refusal; refused: "credits" does not (a plain failure). The reset
+// time is parsed from the message when present, else the zero time
+// (quotaDeferUntil then uses quotaDeferFallback). Without the flag, the
+// "Task refused: " prefix alone is not enough: it also needs a parseable reset
+// time. Anything else is an ordinary error (the existing retry/failure
+// handling).
 func quotaRefusal(res *natspkg.TaskResult) (resetsAt time.Time, ok bool) {
 	if res == nil {
 		return time.Time{}, false
@@ -217,7 +218,7 @@ const (
 // transientProviderReason reports whether a failed task result is a
 // transient model provider failure, and why: the machine-readable transient
 // flag first (its transientReason, or "unknown" when unset), else an HTTP
-// 529/503/502/500 or "Overloaded"/"overloaded_error" in the error text.
+// 529/503/502/500 status or an "overloaded_error" in the error text.
 // Plan-quota refusals are not transient (see quotaRefusal).
 func transientProviderReason(res *natspkg.TaskResult) (string, bool) {
 	if res == nil {
