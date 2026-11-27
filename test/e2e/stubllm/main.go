@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Command stubllm is an OpenAI-compatible chat completions server for the e2e
-// tests. It is stdlib only and key-free, so a knight pointed at it with
-// OPENAI_BASE_URL gets deterministic replies: the reply is chosen by a
-// `STUB:<name>` tag in the last user message, and a prompt without a tag gets
-// the fixed default reply. See README.md in this directory.
+// Command stubllm is an OpenAI-compatible chat completions server, plus an
+// Anthropic Messages endpoint, for the e2e tests. It is stdlib only and
+// key-free, so a knight pointed at it with OPENAI_BASE_URL or ANTHROPIC_BASE_URL
+// gets deterministic replies: the reply is chosen by a `STUB:<name>` tag in the
+// last user message, and a prompt without a tag gets the fixed default reply.
+// See README.md in this directory.
 package main
 
 import (
@@ -42,6 +43,9 @@ const modelID = "stubllm"
 const defaultReply = "done"
 
 const finishStop = "stop"
+
+// stopEndTurn is the Anthropic stop_reason for a complete text reply.
+const stopEndTurn = "end_turn"
 
 // replies is the scripted table a `STUB:<name>` tag selects from.
 var replies = map[string]string{
@@ -112,10 +116,42 @@ type chunkDelta struct {
 	Content string `json:"content,omitempty"`
 }
 
+// anthropicRequest is the subset of POST /v1/messages the stub reads. System is
+// accepted but never scripted: only the last user message picks the reply.
+type anthropicRequest struct {
+	Model     string          `json:"model"`
+	System    json.RawMessage `json:"system,omitempty"`
+	Messages  []chatMessage   `json:"messages"`
+	MaxTokens int             `json:"max_tokens"` // accepted, deliberately unused: replies are scripted
+	Stream    bool            `json:"stream"`
+}
+
+type anthropicBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type anthropicUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type anthropicMessage struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Role         string           `json:"role"`
+	Model        string           `json:"model"`
+	Content      []anthropicBlock `json:"content"`
+	StopReason   *string          `json:"stop_reason"`
+	StopSequence *string          `json:"stop_sequence"`
+	Usage        anthropicUsage   `json:"usage"`
+}
+
 // newHandler returns the server's routes.
 func newHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", handleChat)
+	mux.HandleFunc("POST /v1/messages", handleMessages)
 	mux.HandleFunc("GET /v1/models", handleModels)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -156,6 +192,83 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMessages answers the Anthropic Messages API: a JSON message, or the
+// SSE event sequence when the request sets stream.
+func handleMessages(w http.ResponseWriter, r *http.Request) {
+	var req anthropicRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	reply, err := scriptedReply(lastUserText(req.Messages))
+	if err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	u := usageFor(req.Messages, reply)
+	msg := anthropicMessage{
+		ID:    fmt.Sprintf("msg_stub_%d", completionSeq.Add(1)),
+		Type:  "message",
+		Role:  "assistant",
+		Model: req.Model,
+		Usage: anthropicUsage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens},
+	}
+	if req.Stream {
+		streamAnthropic(w, msg, reply)
+		return
+	}
+	stop := stopEndTurn
+	msg.Content = []anthropicBlock{{Type: "text", Text: reply}}
+	msg.StopReason = &stop
+	writeJSON(w, http.StatusOK, msg)
+}
+
+// streamAnthropic writes the reply as Anthropic SSE: message_start,
+// content_block_start, one content_block_delta per word, content_block_stop,
+// message_delta carrying the stop reason and output usage, then message_stop.
+// Each event is written as an `event:` line followed by a `data:` line.
+func streamAnthropic(w http.ResponseWriter, msg anthropicMessage, reply string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+
+	emit := func(event string, v any) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	start := msg
+	start.Content = []anthropicBlock{}
+	start.Usage.OutputTokens = 0
+	emit("message_start", map[string]any{"type": "message_start", "message": start})
+	emit("content_block_start", map[string]any{
+		"type":          "content_block_start",
+		"index":         0,
+		"content_block": anthropicBlock{Type: "text", Text: ""},
+	})
+	for _, piece := range wordPieces(reply) {
+		emit("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": 0,
+			"delta": map[string]string{"type": "text_delta", "text": piece},
+		})
+	}
+	emit("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+	emit("message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": stopEndTurn, "stop_sequence": nil},
+		"usage": map[string]int{"output_tokens": msg.Usage.OutputTokens},
+	})
+	emit("message_stop", map[string]string{"type": "message_stop"})
+}
+
 func handleModels(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
@@ -192,10 +305,7 @@ func streamReply(w http.ResponseWriter, req chatRequest, id string, created int6
 	}
 
 	emit(base([]chunkChoice{{Index: 0, Delta: chunkDelta{Role: "assistant"}}}))
-	for _, piece := range strings.SplitAfter(reply, " ") {
-		if piece == "" {
-			continue
-		}
+	for _, piece := range wordPieces(reply) {
 		emit(base([]chunkChoice{{Index: 0, Delta: chunkDelta{Content: piece}}}))
 	}
 	stop := finishStop
@@ -273,9 +383,29 @@ func approxTokens(s string) int {
 	return max(1, (len(s)+3)/4)
 }
 
+// wordPieces splits a reply into the chunks streamed one at a time, each word
+// keeping its trailing space.
+func wordPieces(reply string) []string {
+	var out []string
+	for _, piece := range strings.SplitAfter(reply, " ") {
+		if piece != "" {
+			out = append(out, piece)
+		}
+	}
+	return out
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{
 		"error": map[string]string{"message": msg, "type": "invalid_request_error"},
+	})
+}
+
+// writeAnthropicError uses the Anthropic error envelope.
+func writeAnthropicError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": "invalid_request_error", "message": msg},
 	})
 }
 

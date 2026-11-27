@@ -264,6 +264,212 @@ func TestChatCompletionStreamingWithoutUsage(t *testing.T) {
 	}
 }
 
+func postMessages(t *testing.T, srv *httptest.Server, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func TestMessagesScriptedReply(t *testing.T) {
+	srv := newTestServer(t)
+	tests := []struct {
+		name     string
+		messages string
+		want     string
+	}{
+		{
+			name:     "string content",
+			messages: `[{"role":"user","content":"STUB:pong"}]`,
+			want:     "pong",
+		},
+		{
+			name:     "block content",
+			messages: `[{"role":"user","content":[{"type":"text","text":"STUB:summary"}]}]`,
+			want:     replies["summary"],
+		},
+		{
+			name:     "no tag gets default reply",
+			messages: `[{"role":"user","content":"hello there"}]`,
+			want:     defaultReply,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := postMessages(t, srv,
+				`{"model":"claude-stub","max_tokens":64,"system":"be brief","messages":`+tt.messages+`}`)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			var got anthropicMessage
+			if err := json.Unmarshal([]byte(readBody(t, resp)), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !strings.HasPrefix(got.ID, "msg_stub_") {
+				t.Errorf("id = %q, want msg_stub_ prefix", got.ID)
+			}
+			if got.Type != "message" || got.Role != "assistant" {
+				t.Errorf("type/role = %q/%q, want message/assistant", got.Type, got.Role)
+			}
+			if got.Model != "claude-stub" {
+				t.Errorf("model = %q, want the request model echoed", got.Model)
+			}
+			if len(got.Content) != 1 || got.Content[0].Type != "text" || got.Content[0].Text != tt.want {
+				t.Errorf("content = %+v, want one text block %q", got.Content, tt.want)
+			}
+			if got.StopReason == nil || *got.StopReason != "end_turn" {
+				t.Errorf("stop_reason = %v, want end_turn", got.StopReason)
+			}
+			if got.StopSequence != nil {
+				t.Errorf("stop_sequence = %v, want null", *got.StopSequence)
+			}
+			if got.Usage.InputTokens < 1 || got.Usage.OutputTokens != approxTokens(tt.want) {
+				t.Errorf("usage = %+v, want input >= 1 and output = %d", got.Usage, approxTokens(tt.want))
+			}
+		})
+	}
+}
+
+func TestMessagesUnknownTagIsBadRequest(t *testing.T) {
+	srv := newTestServer(t)
+	resp := postMessages(t, srv, `{"model":"m","max_tokens":8,"messages":[{"role":"user","content":"STUB:nope"}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var got struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(readBody(t, resp)), &got); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if got.Type != "error" || got.Error.Type != "invalid_request_error" {
+		t.Errorf("error envelope = %+v, want type error / invalid_request_error", got)
+	}
+	if !strings.Contains(got.Error.Message, `unknown STUB tag "nope"`) {
+		t.Errorf("message = %q, want the unknown tag named", got.Error.Message)
+	}
+}
+
+func TestMessagesInvalidJSONIsBadRequest(t *testing.T) {
+	srv := newTestServer(t)
+	resp := postMessages(t, srv, `{not json`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+type sseEvent struct {
+	name string
+	data string
+}
+
+// sseEvents returns each event as its `event:` name and `data:` payload, in order.
+func sseEvents(t *testing.T, body string) []sseEvent {
+	t.Helper()
+	var out []sseEvent
+	var name string
+	sc := bufio.NewScanner(strings.NewReader(body))
+	for sc.Scan() {
+		line := sc.Text()
+		if n, ok := strings.CutPrefix(line, "event: "); ok {
+			name = n
+		} else if d, ok := strings.CutPrefix(line, "data: "); ok {
+			out = append(out, sseEvent{name: name, data: d})
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan SSE: %v", err)
+	}
+	return out
+}
+
+func TestMessagesStreamEventOrder(t *testing.T) {
+	srv := newTestServer(t)
+	resp := postMessages(t, srv, `{"model":"claude-stub","max_tokens":64,"stream":true,`+
+		`"messages":[{"role":"user","content":[{"type":"text","text":"STUB:greeting"}]}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	events := sseEvents(t, readBody(t, resp))
+
+	// Collect the names in order, folding the run of deltas into one entry.
+	var names []string
+	for _, ev := range events {
+		if ev.name == "content_block_delta" && len(names) > 0 && names[len(names)-1] == ev.name {
+			continue
+		}
+		names = append(names, ev.name)
+	}
+	wantNames := []string{"message_start", "content_block_start", "content_block_delta",
+		"content_block_stop", "message_delta", "message_stop"}
+	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
+		t.Fatalf("event order = %v, want %v", names, wantNames)
+	}
+
+	var text strings.Builder
+	for _, ev := range events {
+		switch ev.name {
+		case "message_start":
+			var m struct {
+				Message anthropicMessage `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(ev.data), &m); err != nil {
+				t.Fatalf("message_start: %v", err)
+			}
+			if m.Message.Role != "assistant" || m.Message.Model != "claude-stub" || len(m.Message.Content) != 0 {
+				t.Errorf("message_start message = %+v", m.Message)
+			}
+		case "content_block_start":
+			if !strings.Contains(ev.data, `"type":"text"`) {
+				t.Errorf("content_block_start = %s, want a text block", ev.data)
+			}
+		case "content_block_delta":
+			var d struct {
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(ev.data), &d); err != nil {
+				t.Fatalf("content_block_delta: %v", err)
+			}
+			if d.Delta.Type != "text_delta" {
+				t.Errorf("delta type = %q, want text_delta", d.Delta.Type)
+			}
+			text.WriteString(d.Delta.Text)
+		case "message_delta":
+			var d struct {
+				Delta struct {
+					StopReason *string `json:"stop_reason"`
+				} `json:"delta"`
+				Usage anthropicUsage `json:"usage"`
+			}
+			if err := json.Unmarshal([]byte(ev.data), &d); err != nil {
+				t.Fatalf("message_delta: %v", err)
+			}
+			if d.Delta.StopReason == nil || *d.Delta.StopReason != "end_turn" {
+				t.Errorf("stop_reason = %v, want end_turn", d.Delta.StopReason)
+			}
+			if want := approxTokens(replies["greeting"]); d.Usage.OutputTokens != want {
+				t.Errorf("output_tokens = %d, want %d", d.Usage.OutputTokens, want)
+			}
+		}
+	}
+	if want := replies["greeting"]; text.String() != want {
+		t.Errorf("streamed text = %q, want %q", text.String(), want)
+	}
+}
+
 func TestListModels(t *testing.T) {
 	srv := newTestServer(t)
 	resp, err := http.Get(srv.URL + "/v1/models")
