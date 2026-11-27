@@ -19,14 +19,18 @@ package controller
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -413,4 +417,33 @@ func (r *RoundTableReconciler) cleanupDeletedTableCards(ctx context.Context, tab
 		}
 	}
 	r.deleteTableCards(ctx, table)
+}
+
+// knightChangedForTable filters the Knight watch: creates and deletes pass;
+// updates pass only when the generation, the labels or a status field a table
+// reads change (phase, ready, readyReplicas, model and the Available
+// condition's status and reason). Other status-only writes are dropped.
+func knightChangedForTable() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldK, ok1 := e.ObjectOld.(*aiv1alpha1.Knight)
+			newK, ok2 := e.ObjectNew.(*aiv1alpha1.Knight)
+			if !ok1 || !ok2 {
+				return true
+			}
+			if oldK.Generation != newK.Generation || !maps.Equal(oldK.Labels, newK.Labels) {
+				return true
+			}
+			o, n := &oldK.Status, &newK.Status
+			if o.Phase != n.Phase || o.Ready != n.Ready || o.ReadyReplicas != n.ReadyReplicas || o.Model != n.Model {
+				return true
+			}
+			oc := meta.FindStatusCondition(o.Conditions, aiv1alpha1.ConditionKnightAvailable)
+			nc := meta.FindStatusCondition(n.Conditions, aiv1alpha1.ConditionKnightAvailable)
+			if (oc == nil) != (nc == nil) {
+				return true
+			}
+			return oc != nil && (oc.Status != nc.Status || oc.Reason != nc.Reason)
+		},
+	}
 }
