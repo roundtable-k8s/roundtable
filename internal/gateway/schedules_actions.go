@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -172,6 +173,81 @@ func (s *Service) ResumeSchedule(ctx context.Context, namespace, name string) (*
 	return st, nil
 }
 
+// TableSchedulesRequest is the body of POST /v1/schedules/suspend and /resume.
+type TableSchedulesRequest struct {
+	Table     string `json:"table" jsonschema:"table (RoundTable) whose schedules to change"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"namespace of the table; omit for the default"`
+}
+
+// ScheduleFailure is a schedule a bulk suspend or resume could not change.
+type ScheduleFailure struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+// TableSchedulesResult is the answer to a bulk suspend or resume. Changed
+// holds the schedules whose annotation was set or removed, Unchanged those
+// that already were in the requested state.
+type TableSchedulesResult struct {
+	Changed   []*ScheduleState  `json:"changed"`
+	Unchanged []*ScheduleState  `json:"unchanged"`
+	Failed    []ScheduleFailure `json:"failed"`
+}
+
+// SuspendSchedules suspends every schedule of a table (annotation only).
+func (s *Service) SuspendSchedules(ctx context.Context, req TableSchedulesRequest) (*TableSchedulesResult, error) {
+	return s.changeTableSchedules(ctx, req, true)
+}
+
+// ResumeSchedules resumes every schedule of a table; schedules suspended in
+// their spec stay suspended (their state carries the message).
+func (s *Service) ResumeSchedules(ctx context.Context, req TableSchedulesRequest) (*TableSchedulesResult, error) {
+	return s.changeTableSchedules(ctx, req, false)
+}
+
+func (s *Service) changeTableSchedules(ctx context.Context, req TableSchedulesRequest, suspend bool) (*TableSchedulesResult, error) {
+	if req.Table == "" {
+		return nil, fmt.Errorf("%w: table is required", ErrInvalid)
+	}
+	list, err := s.ListSchedules(ctx, ScheduleFilter{Namespace: req.Namespace, Table: req.Table})
+	if err != nil {
+		return nil, err
+	}
+	out := &TableSchedulesResult{Changed: []*ScheduleState{}, Unchanged: []*ScheduleState{}, Failed: []ScheduleFailure{}}
+	for _, v := range list {
+		// A schedule counts as changed when the annotation flips, which is
+		// what the single-schedule functions patch on.
+		had, err := s.hasSuspendAnnotation(ctx, v.Namespace, v.Name)
+		if err != nil {
+			out.Failed = append(out.Failed, ScheduleFailure{Name: v.Name, Error: err.Error()})
+			continue
+		}
+		var st *ScheduleState
+		if suspend {
+			st, err = s.SuspendSchedule(ctx, v.Namespace, v.Name)
+		} else {
+			st, err = s.ResumeSchedule(ctx, v.Namespace, v.Name)
+		}
+		switch {
+		case err != nil:
+			out.Failed = append(out.Failed, ScheduleFailure{Name: v.Name, Error: err.Error()})
+		case had == suspend:
+			out.Unchanged = append(out.Unchanged, st)
+		default:
+			out.Changed = append(out.Changed, st)
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) hasSuspendAnnotation(ctx context.Context, namespace, name string) (bool, error) {
+	trg, err := s.fetchSchedule(ctx, namespace, name)
+	if err != nil {
+		return false, err
+	}
+	return trg.SuspendedByAnnotation(), nil
+}
+
 // RunSchedule asks the trigger controller to fire the schedule once now (the
 // run-now annotation) and waits briefly for it to be handled. The firing goes
 // through the controller's normal path: input rendering, concurrency policy
@@ -321,4 +397,32 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, code, run)
+}
+
+func (s *Service) handleTableSchedules(suspend bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req TableSchedulesRequest
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+			return
+		}
+		if dec.More() {
+			writeError(w, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid))
+			return
+		}
+		var res *TableSchedulesResult
+		var err error
+		if suspend {
+			res, err = s.SuspendSchedules(r.Context(), req)
+		} else {
+			res, err = s.ResumeSchedules(r.Context(), req)
+		}
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	}
 }

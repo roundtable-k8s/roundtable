@@ -122,6 +122,12 @@ func (s *Service) routes() []route {
 			route{pattern: "GET /v1/schedules/{namespace}/{name}/runs/{run}", handler: s.handleScheduleRunResult},
 		)
 	}
+	if s.SchedulesEnabled() {
+		rs = append(rs,
+			route{pattern: "POST /v1/schedules/suspend", handler: s.handleTableSchedules(true)},
+			route{pattern: "POST /v1/schedules/resume", handler: s.handleTableSchedules(false)},
+		)
+	}
 	if s.HooksEnabled() {
 		rs = append(rs,
 			route{pattern: "POST /v1/hooks/{namespace}/{trigger}", public: true, handler: s.handleHook},

@@ -187,6 +187,12 @@ A knight firing that ends `failed` or `lost` records why in `status.recentFiring
 Suspend the Trigger, not the CronJob: a CronJob edited by hand is reset at the
 next reconcile.
 
+To suspend or resume every schedule of a table at once (maintenance, an
+incident), call `POST /v1/schedules/suspend` or `/resume` with
+`{"table": "..."}` ([gateway](gateway.md#post-v1schedulessuspend-and-post-v1schedulesresume)),
+or the MCP tools `suspend_table_schedules` and `resume_table_schedules`. It sets
+the same annotation per schedule, so Git is untouched.
+
 The gateway has full CRUD for schedules ([Schedules](gateway.md#schedules)):
 list and get, create, replace and delete, `suspend`, `resume`, and `run` (fire
 once now), plus the run history
