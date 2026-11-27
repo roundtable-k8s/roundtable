@@ -98,6 +98,11 @@ func (r *MissionReconciler) emitMissionSpan(ctx context.Context, mission *aiv1al
 // Reconcile runs one reconcile of a Mission and resets the requeue priority
 // (see requeuePriority, #700).
 func (r *MissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return quietConflict(ctx, res, err)
+}
+
+func (r *MissionReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	return resetRequeuePriority(r.reconcileOnce(ctx, req))
 }
 

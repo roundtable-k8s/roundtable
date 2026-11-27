@@ -208,6 +208,11 @@ const runtimeDeployment = "deployment"
 // +kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes;sandboxes/status,verbs=get;list;watch;create;update;patch;delete
 
 func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return quietConflict(ctx, res, err)
+}
+
+func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Count table-less knights (roundtable_knights{table="none"}); the
@@ -461,6 +466,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Update status based on reconciliation results
 	if err := r.updateStatus(ctx, knight, plan.Scaling, reconcileErr); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{}, err
+		}
 		log.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
