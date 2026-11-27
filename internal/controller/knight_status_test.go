@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -196,4 +197,115 @@ func TestRuntimeClassKnightRequests(t *testing.T) {
 
 func clientKey(k *aiv1alpha1.Knight) types.NamespacedName {
 	return types.NamespacedName{Name: k.Name, Namespace: k.Namespace}
+}
+
+type countingPending struct {
+	n     uint64
+	calls int
+}
+
+func (f *countingPending) ConsumerPending(context.Context, string, string) (uint64, error) {
+	f.calls++
+	return f.n, nil
+}
+
+func TestWakeTimeoutSticksAtOneReplicaAndBacksOff(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := base
+	s := statusTestScheme()
+	zero, one := int32(0), int32(1)
+	k := &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: "stuck", Namespace: "default"},
+		Spec:       aiv1alpha1.KnightSpec{NATS: aiv1alpha1.KnightNATS{Stream: "rt_tasks"}},
+	}
+	d := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "stuck", Namespace: "default"},
+		Spec:       appsv1.DeploymentSpec{Replicas: &zero},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k, d).WithStatusSubresource(k, d).Build()
+	src := &countingPending{n: 2}
+	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50),
+		PendingSource: src, Now: func() time.Time { return clock }}
+	update := func(now time.Time) {
+		t.Helper()
+		clock = now
+		if err := r.updateStatus(context.Background(), k, knightpkg.Scaling{Autoscaled: true}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update(base)
+	update(base.Add(knightWakeTimeout + time.Second))
+	if availReason(k) != aiv1alpha1.ReasonKnightWakeTimeout {
+		t.Fatalf("reason = %q, want WakeTimeout", availReason(k))
+	}
+	// KEDA scales to 1 but the pod never gets ready.
+	d.Spec.Replicas = &one
+	if err := c.Update(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	t0 := base.Add(knightWakeTimeout + 2*time.Second)
+	update(t0)
+	if availReason(k) != aiv1alpha1.ReasonKnightWakeTimeout || k.Status.Phase != aiv1alpha1.KnightPhaseDegraded {
+		t.Fatalf("reason=%q phase=%q at 1 replica, want WakeTimeout/Degraded", availReason(k), k.Status.Phase)
+	}
+	if got := r.wakeBackoffDelay(client.ObjectKeyFromObject(k)); got <= wakingRequeue || got > time.Minute {
+		t.Errorf("backoff delay = %v, want in (%v, 1m]", got, wakingRequeue)
+	}
+	// Inside the backoff window there is no pending lookup and the reason sticks.
+	calls := src.calls
+	update(t0.Add(time.Second))
+	if src.calls != calls {
+		t.Errorf("pending lookups grew %d -> %d inside the backoff window", calls, src.calls)
+	}
+	if availReason(k) != aiv1alpha1.ReasonKnightWakeTimeout {
+		t.Errorf("reason = %q inside backoff, want WakeTimeout", availReason(k))
+	}
+	// Delay grows to the bound and stays there.
+	var last time.Duration
+	now := t0
+	for i := 0; i < 6; i++ {
+		now = now.Add(2 * time.Minute)
+		update(now)
+		last = r.wakeBackoffDelay(client.ObjectKeyFromObject(k))
+	}
+	if last != time.Minute {
+		t.Errorf("final backoff = %v, want 1m bound", last)
+	}
+}
+
+func TestParkedModelChangeRaisesNoSecondEvent(t *testing.T) {
+	s := statusTestScheme()
+	k := newParkedKnight("model-a", false)
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
+	rec := record.NewFakeRecorder(50)
+	r := &KnightReconciler{Client: c, Scheme: s, Recorder: rec}
+	reconcileByName(t, r, "parked")
+	drain := func() (n int) {
+		for {
+			select {
+			case <-rec.Events:
+				n++
+			default:
+				return
+			}
+		}
+	}
+	if n := drain(); n != 1 {
+		t.Fatalf("events after first park = %d, want 1", n)
+	}
+	got := &aiv1alpha1.Knight{}
+	_ = c.Get(context.Background(), clientKey(k), got)
+	got.Spec.Model = "model-b"
+	got.Generation++
+	if err := c.Update(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	reconcileByName(t, r, "parked")
+	_ = c.Get(context.Background(), clientKey(k), got)
+	if got.Status.Model != "model-b" {
+		t.Errorf("status.model = %q, want model-b", got.Status.Model)
+	}
+	if n := drain(); n != 0 {
+		t.Errorf("events after model change = %d, want 0", n)
+	}
 }

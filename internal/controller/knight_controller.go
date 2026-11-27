@@ -68,8 +68,10 @@ const (
 // KnightReconciler reconciles a Knight object
 type KnightReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	// wakeBackoff holds per-knight probe state after a WakeTimeout.
+	wakeBackoff sync.Map
+	Scheme      *runtime.Scheme
+	Recorder    record.EventRecorder
 	// BrowserImage is the browser sidecar image (KNIGHT_BROWSER_IMAGE); empty uses the built-in pinned default.
 	BrowserImage string
 	DefaultImage string // Default pi-knight image (set via DEFAULT_KNIGHT_IMAGE env var)
@@ -481,8 +483,12 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Waking: poll so the transition to Ready is visible without a pod event.
 	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil &&
 		(c.Reason == aiv1alpha1.ReasonKnightWaking || c.Reason == aiv1alpha1.ReasonKnightWakeTimeout) {
-		if nixRequeue == 0 || wakingRequeue < nixRequeue {
-			nixRequeue = wakingRequeue
+		d := wakingRequeue
+		if c.Reason == aiv1alpha1.ReasonKnightWakeTimeout {
+			d = r.wakeBackoffDelay(client.ObjectKeyFromObject(knight))
+		}
+		if nixRequeue == 0 || d < nixRequeue {
+			nixRequeue = d
 		}
 	}
 
@@ -536,6 +542,57 @@ func setRolloutPending(knight *aiv1alpha1.Knight, reason string, now time.Time, 
 
 // wakingRequeue is how often a waking knight is re-checked.
 const wakingRequeue = 5 * time.Second
+
+// wakeBackoffSteps is the requeue delay after a WakeTimeout, per probe.
+// The last step repeats.
+var wakeBackoffSteps = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute}
+
+type wakeBackoffState struct {
+	attempt int
+	next    time.Time
+}
+
+func (r *KnightReconciler) wakeBackoffStep(attempt int) time.Duration {
+	if attempt >= len(wakeBackoffSteps) {
+		attempt = len(wakeBackoffSteps) - 1
+	}
+	return wakeBackoffSteps[attempt]
+}
+
+// wakeBackingOff reports whether the next pending-task probe of a timed-out
+// knight is still in the future.
+func (r *KnightReconciler) wakeBackingOff(key client.ObjectKey) bool {
+	v, ok := r.wakeBackoff.Load(key)
+	return ok && r.now().Before(v.(wakeBackoffState).next)
+}
+
+// advanceWakeBackoff records a probe and schedules the next one further out.
+func (r *KnightReconciler) advanceWakeBackoff(key client.ObjectKey) {
+	st := wakeBackoffState{}
+	if v, ok := r.wakeBackoff.Load(key); ok {
+		st = v.(wakeBackoffState)
+	}
+	st.next = r.now().Add(r.wakeBackoffStep(st.attempt))
+	st.attempt++
+	r.wakeBackoff.Store(key, st)
+}
+
+// wakeBackoffDelay is the requeue delay for a timed-out knight: the time to
+// its next probe, bounded by the backoff steps and never below wakingRequeue.
+func (r *KnightReconciler) wakeBackoffDelay(key client.ObjectKey) time.Duration {
+	v, ok := r.wakeBackoff.Load(key)
+	if !ok {
+		return wakeBackoffSteps[0]
+	}
+	d := v.(wakeBackoffState).next.Sub(r.now())
+	if d < wakingRequeue {
+		d = wakingRequeue
+	}
+	if max := wakeBackoffSteps[len(wakeBackoffSteps)-1]; d > max {
+		d = max
+	}
+	return d
+}
 
 // knightWakeTimeout caps how long a knight reports Waking: past it the pod
 // is considered stuck and the knight reports Degraded (WakeTimeout).
@@ -630,6 +687,10 @@ func runtimeClassOf(knight *aiv1alpha1.Knight) string {
 // changed it (changed).
 func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha1.Knight, reason, msg string, changed bool) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+	prevRT := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRuntimeAvailable)
+	prevAv := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+	needsEvent := prevRT == nil || prevRT.Reason != reason || prevRT.Message != msg ||
+		prevAv == nil || prevAv.Reason != reason || prevAv.Message != msg
 	changed = meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
 		Status:             metav1.ConditionFalse,
@@ -650,11 +711,18 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 		knight.Status.ObservedGeneration != knight.Generation {
 		changed = true
 	}
+	if knight.Status.Phase != aiv1alpha1.KnightPhaseDegraded || knight.Status.Ready {
+		needsEvent = true
+	}
 
-	if changed {
-		log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
-		// event-reasons: RuntimeClassNotFound SandboxUnavailable
-		r.Recorder.Event(knight, corev1.EventTypeWarning, reason, msg)
+	if changed || needsEvent {
+		// The Warning is raised only when the reason or message changed,
+		// not when the caller only changed e.g. the model.
+		if needsEvent {
+			log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
+			// event-reasons: RuntimeClassNotFound SandboxUnavailable
+			r.Recorder.Event(knight, corev1.EventTypeWarning, reason, msg)
+		}
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
 		knight.Status.Ready = false
 		knight.Status.ObservedGeneration = knight.Generation
@@ -1107,11 +1175,27 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	// still starting after being at zero. Phase stays Suspended; the
 	// Available condition reason distinguishes it from idle ScaledToZero.
 	wasAsleep := knight.Status.Phase == aiv1alpha1.KnightPhaseSuspended
+	// A knight that already timed out waking is Degraded, not Suspended; it
+	// still counts as asleep so a never-ready pod at 1 replica keeps WakeTimeout.
+	prevAvail := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+	wasTimedOut := prevAvail != nil && prevAvail.Reason == aiv1alpha1.ReasonKnightWakeTimeout
 	// An empty queue with a starting pod is Provisioning, not ScaledToZero.
 	waking := false
+	key := client.ObjectKeyFromObject(knight)
 	if scaling.Autoscaled && deployFound && !isReady && reconcileErr == nil &&
-		(atZero || (wasAsleep && deploy.Status.ReadyReplicas == 0)) {
-		waking = r.hasPendingTasks(ctx, knight)
+		(atZero || ((wasAsleep || wasTimedOut) && deploy.Status.ReadyReplicas == 0)) {
+		if wasTimedOut && r.wakeBackingOff(key) {
+			// Backing off after the timeout: skip the NATS lookup.
+			waking = true
+		} else {
+			waking = r.hasPendingTasks(ctx, knight)
+			if waking && wasTimedOut {
+				r.advanceWakeBackoff(key)
+			}
+		}
+	}
+	if !wasTimedOut || !waking {
+		r.wakeBackoff.Delete(key)
 	}
 	scaledToZero := atZero || waking
 
