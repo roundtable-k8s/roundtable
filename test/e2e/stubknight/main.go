@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -229,12 +230,67 @@ func shouldCrash(task string) bool {
 	return strings.HasPrefix(strings.TrimSpace(task), crashPrefix)
 }
 
+// sleepPrefix starts a task text that asks the stub to wait before answering.
+const sleepPrefix = "STUB:sleep="
+
+// ackHeartbeat is how often a waiting stub tells JetStream the task is still
+// in progress (the consumer's AckWait is a minute).
+const ackHeartbeat = 15 * time.Second
+
+// parseSleep returns the delay a task text asks for with a leading
+// `STUB:sleep=<seconds>` (whole seconds); ok is false when there is none or
+// the value is not a non-negative integer.
+func parseSleep(task string) (d time.Duration, ok bool) {
+	rest, found := strings.CutPrefix(strings.TrimSpace(task), sleepPrefix)
+	if !found {
+		return 0, false
+	}
+	n := rest
+	if i := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
+		n = rest[:i]
+	}
+	secs, err := strconv.Atoi(n)
+	if err != nil || secs < 0 {
+		return 0, false
+	}
+	return time.Duration(secs) * time.Second, true
+}
+
+// wait sleeps for d, keeping the message's ack deadline alive. It returns
+// false when ctx ends first (SIGTERM); the message is then nak'd so the task
+// is redelivered.
+func wait(ctx context.Context, msg jetstream.Msg, d time.Duration) bool {
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	beat := time.NewTicker(ackHeartbeat)
+	defer beat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			_ = msg.Nak()
+			return false
+		case <-deadline.C:
+			return true
+		case <-beat.C:
+			_ = msg.InProgress()
+		}
+	}
+}
+
 func (k *knight) handle(ctx context.Context, msg jetstream.Msg) {
 	var task natspkg.TaskPayload
 	if err := json.Unmarshal(msg.Data(), &task); err != nil {
 		log.Printf("bad task on %s: %v", msg.Subject(), err)
 		_ = msg.Term()
 		return
+	}
+
+	if d, ok := parseSleep(task.Task); ok {
+		log.Printf("task %s: sleeping %s", task.TaskID, d)
+		if !wait(ctx, msg, d) {
+			log.Printf("task %s: interrupted, nak'd", task.TaskID)
+			return
+		}
 	}
 
 	common := []attribute.KeyValue{
