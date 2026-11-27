@@ -52,7 +52,7 @@ type PodSpecBuilder func(ctx context.Context, knight *aiv1alpha1.Knight) appsv1.
 type DeploymentBackend struct {
 	// idleSince remembers when the whenIdle wait for a spec hash started,
 	// keyed by namespace/name, so a gateRollout deferral does not restart it.
-	idleSince sync.Map
+	idleSince    sync.Map
 	Client       client.Client
 	Scheme       *runtime.Scheme
 	DefaultImage string
