@@ -156,20 +156,14 @@ func handler() http.Handler {
 				writeMessage(w, http.StatusUnauthorized, "Requires authentication")
 				return
 			}
-			// The first /repos/{owner}/{repo} call that names a repository
-			// creates it, so EnsureLabel works before any issue is seeded.
-			if parts := strings.SplitN(r.URL.Path, "/", 5); len(parts) >= 4 && parts[2] != "" && parts[3] != "" {
-				s.mu.Lock()
-				s.repo(parts[2]+"/"+parts[3], true)
-				s.mu.Unlock()
-			}
 		}
 		routes.ServeHTTP(w, r)
 	})
 }
 
-// routes registers the stub's routes on a mux. It does not check auth or create
-// repositories; handler does both before a request reaches the mux.
+// routes registers the stub's routes on a mux. It does not check auth. Each
+// /repos/ route handler creates its repository on first use (routeRepo), so a
+// path that matches no route, such as an unknown sub-route, creates nothing.
 func (s *stub) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues", s.listIssues)
@@ -194,14 +188,18 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 	writeMessage(w, http.StatusNotFound, "Not Found")
 }
 
+// routeRepo returns the repository a matched /repos/ route acts on, creating it
+// on first use, so EnsureLabel works before any issue is seeded. Only route
+// handlers call it: the mux never dispatches an unmatched path to one. The
+// caller must hold s.mu.
+func (s *stub) routeRepo(r *http.Request) *repoState {
+	return s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), true)
+}
+
 func (s *stub) listIssues(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	repo := s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), false)
-	if repo == nil {
-		writeMessage(w, http.StatusNotFound, "Not Found")
-		return
-	}
+	repo := s.routeRepo(r)
 	state := r.URL.Query().Get("state")
 	if state == "" {
 		state = "open"
@@ -226,6 +224,9 @@ func (s *stub) listIssues(w http.ResponseWriter, r *http.Request) {
 // listPulls answers the open-pull-request poll that issue pickup makes before
 // claiming anything (the breaking-PR hold). The stub has no pull requests.
 func (s *stub) listPulls(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.routeRepo(r)
+	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, []any{})
 }
 
@@ -278,9 +279,9 @@ func (s *stub) addLabels(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	repo := s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), false)
+	repo := s.routeRepo(r)
 	iss, ok := s.lookupIssue(r)
-	if repo == nil || !ok {
+	if !ok {
 		writeMessage(w, http.StatusNotFound, "Not Found")
 		return
 	}
@@ -344,11 +345,7 @@ func (s *stub) createComment(w http.ResponseWriter, r *http.Request) {
 func (s *stub) getLabel(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	repo := s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), false)
-	if repo == nil {
-		writeMessage(w, http.StatusNotFound, "Not Found")
-		return
-	}
+	repo := s.routeRepo(r)
 	l, ok := repo.labels[strings.ToLower(r.PathValue("name"))]
 	if !ok {
 		writeMessage(w, http.StatusNotFound, "Not Found")
@@ -365,11 +362,7 @@ func (s *stub) createLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	repo := s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), false)
-	if repo == nil {
-		writeMessage(w, http.StatusNotFound, "Not Found")
-		return
-	}
+	repo := s.routeRepo(r)
 	if _, exists := repo.labels[strings.ToLower(l.Name)]; exists {
 		writeMessage(w, http.StatusUnprocessableEntity, "Validation Failed: already_exists")
 		return
@@ -450,10 +443,7 @@ func (s *stub) state(w http.ResponseWriter, r *http.Request) {
 // lookupIssue resolves {number} in the path to an issue of {owner}/{repo}. The
 // caller must hold s.mu.
 func (s *stub) lookupIssue(r *http.Request) (*issue, bool) {
-	repo := s.repo(r.PathValue("owner")+"/"+r.PathValue("repo"), false)
-	if repo == nil {
-		return nil, false
-	}
+	repo := s.routeRepo(r)
 	n, err := strconv.Atoi(r.PathValue("number"))
 	if err != nil {
 		return nil, false
