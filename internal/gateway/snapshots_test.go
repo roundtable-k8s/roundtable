@@ -330,7 +330,7 @@ func TestRequestSnapshot(t *testing.T) {
 		{"only scheduled", []string{"k-ws-sched-9"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var snaps []SnapshotInfo
+			snaps := make([]SnapshotInfo, 0, len(tc.snaps))
 			for _, n := range tc.snaps {
 				snaps = append(snaps, SnapshotInfo{Name: n})
 			}

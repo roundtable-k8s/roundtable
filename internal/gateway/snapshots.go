@@ -123,7 +123,7 @@ func snapshotWaitEnded(view *KnightSnapshots, k *aiv1alpha1.Knight, request stri
 	}
 	c := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
 	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == aiv1alpha1.ReasonSnapshotFailed &&
-		c.LastTransitionTime.Time.UnixNano() >= reqNanos
+		c.LastTransitionTime.UnixNano() >= reqNanos
 }
 
 func knightSnapshots(k *aiv1alpha1.Knight) *KnightSnapshots {
