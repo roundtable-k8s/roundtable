@@ -144,9 +144,12 @@ operator reads from TABLE_PLANNER_DEFAULTS.
 
 {{/*
 Pod-spec scheduling fields shared by every component: nodeSelector,
-affinity, tolerations, priorityClassName and imagePullSecrets. The component's
-own nodeSelector/affinity/tolerations, when non-empty, replace the global
-value. Call with (dict "root" . "component" <values block>) and indent the
+affinity, tolerations, topologySpreadConstraints, priorityClassName and
+imagePullSecrets. The component's own nodeSelector/affinity/tolerations/
+topologySpreadConstraints, when non-empty, replace the global value. A
+topology spread constraint without a labelSelector gets matchLabels from the
+optional "selector" map (the component's pod selector labels). Call with
+(dict "root" . "component" <values block> "selector" <map>) and indent the
 result to the pod spec.
 */}}
 {{- define "roundtable-operator.podScheduling" -}}
@@ -164,6 +167,17 @@ affinity:
 tolerations:
   {{- toYaml . | nindent 2 }}
 {{- end }}
+{{- with (or $c.topologySpreadConstraints $v.topologySpreadConstraints) }}
+topologySpreadConstraints:
+  {{- $sel := $.selector | default dict }}
+  {{- range . }}
+  {{- $tsc := deepCopy . }}
+  {{- if and $sel (not (hasKey $tsc "labelSelector")) }}
+  {{- $_ := set $tsc "labelSelector" (dict "matchLabels" $sel) }}
+  {{- end }}
+  - {{ toYaml $tsc | nindent 4 | trim }}
+  {{- end }}
+{{- end }}
 {{- with $v.priorityClassName }}
 priorityClassName: {{ . | quote }}
 {{- end }}
@@ -174,7 +188,8 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
-PodDisruptionBudget for a replicated component. Call with
+PodDisruptionBudget for a replicated component (the operator passes
+replicaCount as component.replicas). Call with
 (dict "root" . "name" <deployment name> "component" <values block>
 "app" <app.kubernetes.io/name> "label" <component label>). Renders only when
 podDisruptionBudget.enabled and the component runs more than one replica.

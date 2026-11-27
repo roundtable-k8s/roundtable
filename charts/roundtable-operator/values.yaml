@@ -38,10 +38,27 @@ leaderElection:
 # Pod scheduling and pull settings applied to every Deployment the chart
 # renders (operator, gateway, dashboard, collector). gateway.*, dashboard.* and
 # telemetry.collector.* may set their own nodeSelector, tolerations and
-# affinity, each replacing the global value when non-empty.
+# affinity and topologySpreadConstraints, each replacing the global value when
+# non-empty. A constraint without a labelSelector gets the component's pod
+# selector labels; set labelSelector yourself to spread by other labels.
 nodeSelector: {}
 tolerations: []
 affinity: {}
+topologySpreadConstraints: []
+
+# Operator liveness/readiness probes against the manager's health server
+# (--health-probe-bind-address, default :8081; /healthz and /readyz do not
+# depend on holding the leader lease). If extraArgs sets a different
+# --health-probe-bind-address, set probes.port to match or probes.enabled: false.
+probes:
+  enabled: true
+  port: 8081
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
 priorityClassName: ""
 # Pull secrets for the operator, gateway, dashboard and collector pods,
 # e.g. [{name: regcred}]. Knight pods are configured on the Knight.
@@ -50,9 +67,9 @@ imagePullSecrets: []
 podAnnotations: {}
 podLabels: {}
 
-# PodDisruptionBudget for the gateway and dashboard; only rendered for a
-# component with more than one replica. maxUnavailable wins when set.
-# The operator (leader election) has none.
+# PodDisruptionBudget for the operator, gateway and dashboard; only rendered
+# for a component with more than one replica (replicaCount for the operator).
+# maxUnavailable wins when set.
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
@@ -277,6 +294,7 @@ telemetry:
     nodeSelector: {}
     affinity: {}
     tolerations: []
+    topologySpreadConstraints: []
     image:
       repository: otel/opentelemetry-collector-contrib
       tag: "0.120.0"
@@ -309,6 +327,7 @@ dashboard:
   nodeSelector: {}
   affinity: {}
   tolerations: []
+  topologySpreadConstraints: []
   resources:
     requests:
       cpu: 50m
@@ -351,6 +370,7 @@ gateway:
   nodeSelector: {}
   affinity: {}
   tolerations: []
+  topologySpreadConstraints: []
   # Image; defaults to the operator image (image.repository:image.tag).
   image:
     repository: ""

@@ -96,7 +96,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "roundtable-operator.fullname" . }}-dashboard
-      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" .Values.dashboard) }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" .Values.dashboard "selector" (dict "app.kubernetes.io/name" "roundtable-dashboard" "app.kubernetes.io/instance" .Release.Name)) }}
       {{- . | nindent 6 }}
       {{- end }}
       securityContext:

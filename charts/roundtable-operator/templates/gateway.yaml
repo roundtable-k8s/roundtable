@@ -292,7 +292,7 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $gw) }}
+      {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" $gw "selector" (dict "app.kubernetes.io/name" "roundtable-gateway" "app.kubernetes.io/instance" .Release.Name)) }}
       {{- . | nindent 6 }}
       {{- end }}
       containers:
