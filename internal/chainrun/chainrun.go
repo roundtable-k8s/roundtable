@@ -188,7 +188,15 @@ func Name(base string, parts ...string) string {
 	if len(suffix) > maxNameLen {
 		suffix = strings.TrimRight(suffix[:maxNameLen], "-")
 	}
-	prefix := strings.Join(append([]string{base}, clean...), "-")
+	// Empty middle parts and an empty base are skipped so the name neither
+	// starts with "-" nor contains "--".
+	var segs []string
+	for _, seg := range append([]string{base}, clean...) {
+		if seg != "" {
+			segs = append(segs, seg)
+		}
+	}
+	prefix := strings.Join(segs, "-")
 	if limit := max(maxNameLen-len(suffix), 0); len(prefix) > limit {
 		prefix = strings.TrimRight(prefix[:limit], "-")
 	}

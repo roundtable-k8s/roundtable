@@ -136,15 +136,20 @@ func TestNameEmptyLastPart(t *testing.T) {
 		{"empty base falls back to hash of last part", "", []string{"!!!"}, KeyHash("!!!")},
 		{"empty base and empty last part hash the empty part", "", []string{""}, KeyHash("")},
 		{"no parts and empty base", "", nil, ""},
+		{"empty base skips leading dash", "", []string{"mid", ""}, "mid"},
+		{"empty base and middle part", "", []string{"mid", "x"}, "mid-x"},
+		{"empty middle part skips doubled dash", "b", []string{"", "x"}, "b-x"},
 	}
 	for _, tc := range cases {
-		got := Name(tc.base, tc.parts...)
-		if got != tc.want {
-			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
-		}
-		if got != "" && (!dnsName.MatchString(got) || len(got) > 253) {
-			t.Fatalf("%s: invalid name %q", tc.name, got)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			got := Name(tc.base, tc.parts...)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+			if got != "" && (!dnsName.MatchString(got) || len(got) > 253 || strings.Contains(got, "--")) {
+				t.Fatalf("invalid name %q", got)
+			}
+		})
 	}
 	if Name("", "!!!") == Name("", "???") {
 		t.Fatal("different unsafe last parts collided on an empty name")
