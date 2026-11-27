@@ -29,6 +29,18 @@ gw="$(render rt --set dashboard.enabled=false)"
 has "$gw" '/readyz' "gateway check missing"
 lacks "$gw" '/api/health' "dashboard check rendered while disabled"
 
+np="$(render rt --set networkPolicy.enabled=true --show-only templates/networkpolicy.yaml)"
+has "$np" 'app.kubernetes.io/component: test' "dashboard NetworkPolicy does not admit the test Pod"
+
+# dashboard securityContext: empty, null and user-set keys render valid YAML without duplicates
+for v in '{}' 'null'; do
+  sc="$(render rt --set-json "dashboard.podSecurityContext=$v" --show-only templates/dashboard.yaml)" || fail "podSecurityContext=$v failed"
+  has "$sc" 'runAsNonRoot: true' "podSecurityContext=$v lost runAsNonRoot"
+done
+sc="$(render rt --set dashboard.podSecurityContext.runAsNonRoot=true --set dashboard.podSecurityContext.seccompProfile.type=Localhost --show-only templates/dashboard.yaml)"
+[ "$(grep -c '^        runAsNonRoot:' <<<"$sc")" = 1 ] || fail "runAsNonRoot duplicated"
+[ "$(grep -c '^        seccompProfile:' <<<"$sc")" = 1 ] || fail "seccompProfile duplicated"
+
 off="$(render rt --set gateway.enabled=false --set dashboard.enabled=false)"
 [ "$(count "$off")" = 0 ] || fail "test Pod rendered with both components off"
 

@@ -66,7 +66,10 @@ nodash="$(render --set networkPolicy.enabled=true --set dashboard.enabled=false)
 # Empty peer lists render no ingress rule: no rule may exist without `from`.
 empty="$(render --set networkPolicy.enabled=true --set networkPolicy.metricsFrom=null --set dashboard.enabled=true)"
 [ "$(policies "$empty")" = 3 ] || fail "empty metricsFrom: expected 3 NetworkPolicies, got $(policies "$empty")"
-for name in operator dashboard knights; do
+# The dashboard policy still admits the `helm test` Pod, by label only.
+has "$(doc "$empty" "$base-dashboard")" 'app.kubernetes.io/component: test' "dashboard policy lost the helm test peer"
+lacks "$(doc "$empty" "$base-dashboard")" 'namespaceSelector' "dashboard policy has peers besides the test Pod"
+for name in operator knights; do
   lacks "$(doc "$empty" "$base-$name")" '^  ingress:' "empty peer lists still render an ingress rule ($name)"
 done
 

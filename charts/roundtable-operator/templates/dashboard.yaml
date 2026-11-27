@@ -99,14 +99,12 @@ spec:
       {{- with include "roundtable-operator.podScheduling" (dict "root" . "component" .Values.dashboard "selector" (dict "app.kubernetes.io/name" "roundtable-dashboard" "app.kubernetes.io/instance" .Release.Name)) }}
       {{- . | nindent 6 }}
       {{- end }}
-      {{- $sc := deepCopy .Values.dashboard.podSecurityContext }}
+      {{- $sc := mergeOverwrite (dict "runAsNonRoot" true "seccompProfile" (dict "type" "RuntimeDefault")) (deepCopy (.Values.dashboard.podSecurityContext | default dict)) }}
       {{- if and .Values.dashboard.vault.enabled (not (hasKey $sc "fsGroup")) }}
       {{- $_ := set $sc "fsGroup" ($sc.runAsGroup | default 65532) }}
+      {{- $_ := set $sc "fsGroupChangePolicy" ($sc.fsGroupChangePolicy | default "OnRootMismatch") }}
       {{- end }}
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
         {{- toYaml $sc | nindent 8 }}
       containers:
         - name: dashboard
