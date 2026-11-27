@@ -873,7 +873,7 @@ func TestRerunRun(t *testing.T) {
 
 func TestRerunRunRejects(t *testing.T) {
 	e := newRunEnv(t, Options{}, true)
-	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, nil)
+	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{})
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("start: %d %v", resp.StatusCode, out)
 	}
