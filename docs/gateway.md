@@ -777,6 +777,24 @@ included). The call waits up to 10 seconds for that and returns the run record
 This needs `patch` on Chains, which the chart grants only when
 `gateway.runs.enabled` is true.
 
+### `POST /v1/runs/{namespace}/{run}/rerun`
+
+Re-runs a finished run the gateway started, in one call. The optional body is
+`{"input": ..., "waitSeconds": N}`: the new run gets the finished run's stored
+`spec.input` unless `input` overrides it (same encoding as `run_chain`).
+`Idempotency-Key` works as on `POST /v1/chains/{name}/runs`.
+
+The run's template Chain is started through the same path as `run_chain`, so all
+its checks apply: the template must still exist (**404** otherwise), carry the
+label `ai.roundtable.io/invokable=true` (**403**) and not be suspended (**503**),
+and a waiting call needs a `maxInFlight` slot (**429**). A run that is not
+finished is a **409** (`{"error": "...", "state": "<phase>"}`). Failed steps are
+not resumed: the whole chain runs again.
+
+The response is the new run's record (**200** if finished, else **202** with a
+`Location`), with `rerunOf: "<run>"` naming the original (also set as the
+`ai.roundtable.io/rerun-of` annotation on the new copy).
+
 ### `GET /v1/runs/{namespace}/{run}?waitSeconds=`
 
 Returns a run the gateway started (any other Chain is a **404**), with the
@@ -1441,6 +1459,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `run_chain` | `chain`, `input?` (a string or any JSON value), `waitSeconds?`, `namespace?` | Text content is the final step's output once done, else a note to call `get_run`. Structured content is the run record. A failed run is a tool error. |
 | `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
 | `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
+| `rerun_run` | `run`, `namespace?`, `input?`, `waitSeconds?` | Re-runs a finished run with its input (or `input`) and returns the new run record (see `POST /v1/runs/{namespace}/{run}/rerun`); an unfinished run is an error |
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `source?`, `active?`, `issue?`, `limit?` | `{runs: [...]}`, the same filters and records as `GET /v1/runs` |
 | `list_knight_snapshots` | `name`, `namespace?` | The `GET /v1/knights/{name}/snapshots` answer |
 | `snapshot_knight` | `name`, `namespace?`, `waitSeconds?` | Requests a workspace snapshot (see `POST /v1/knights/{name}/snapshot`); listed only when `gateway.knightSnapshots.enabled` is true (default `false`); when off the REST route answers `403` |
