@@ -607,8 +607,8 @@ var _ = Describe("Trigger GitHub source", func() {
 		c = heldCond()
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerNoHold))
-		Expect(triggerSeries(metrics.TriggerGitHubHeldItems, ns, "held")).To(BeZero())
-		Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held")).To(BeZero())
+		Expect(triggerSeries(metrics.TriggerGitHubHeldItems, "held")).To(BeZero())
+		Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held")).To(BeZero())
 	})
 
 	It("drops hold state when the label is removed, the Trigger is suspended or the repository is removed", func() {
@@ -628,11 +628,11 @@ var _ = Describe("Trigger GitHub source", func() {
 		hold := func() {
 			poll("held2")
 			Expect(heldCond().Status).To(Equal(metav1.ConditionTrue))
-			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held2")).To(Equal(1))
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held2")).To(Equal(1))
 		}
 		noSeries := func() {
-			Expect(triggerSeries(metrics.TriggerGitHubHeldItems, ns, "held2")).To(BeZero())
-			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held2")).To(BeZero())
+			Expect(triggerSeries(metrics.TriggerGitHubHeldItems, "held2")).To(BeZero())
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held2")).To(BeZero())
 		}
 		cleared := func() {
 			Expect(heldCond().Status).To(Equal(metav1.ConditionFalse))
@@ -860,7 +860,7 @@ func TestGithubRepoListed(t *testing.T) {
 
 // triggerSeries counts a collector's series for one Trigger, so specs do not
 // depend on series other specs left in the shared gauges.
-func triggerSeries(c prometheus.Collector, namespace, trigger string) int {
+func triggerSeries(c prometheus.Collector, trigger string) int {
 	ch := make(chan prometheus.Metric, 64)
 	go func() { c.Collect(ch); close(ch) }()
 	n := 0
@@ -876,7 +876,7 @@ func triggerSeries(c prometheus.Collector, namespace, trigger string) int {
 				tr = l.GetValue()
 			}
 		}
-		if ns == namespace && tr == trigger {
+		if ns == "default" && tr == trigger {
 			n++
 		}
 	}
