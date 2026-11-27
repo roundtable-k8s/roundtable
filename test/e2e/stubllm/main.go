@@ -122,7 +122,7 @@ type anthropicRequest struct {
 	Model     string          `json:"model"`
 	System    json.RawMessage `json:"system,omitempty"`
 	Messages  []chatMessage   `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
+	MaxTokens int             `json:"max_tokens"` // accepted, deliberately unused: replies are scripted
 	Stream    bool            `json:"stream"`
 }
 

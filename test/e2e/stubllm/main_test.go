@@ -299,7 +299,8 @@ func TestMessagesScriptedReply(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp := postMessages(t, srv, `{"model":"claude-stub","max_tokens":64,"system":"be brief","messages":`+tt.messages+`}`)
+			resp := postMessages(t, srv,
+				`{"model":"claude-stub","max_tokens":64,"system":"be brief","messages":`+tt.messages+`}`)
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200", resp.StatusCode)
 			}
@@ -459,12 +460,12 @@ func TestMessagesStreamEventOrder(t *testing.T) {
 			if d.Delta.StopReason == nil || *d.Delta.StopReason != "end_turn" {
 				t.Errorf("stop_reason = %v, want end_turn", d.Delta.StopReason)
 			}
-			if want := approxTokens("Hello from the stub LLM."); d.Usage.OutputTokens != want {
+			if want := approxTokens(replies["greeting"]); d.Usage.OutputTokens != want {
 				t.Errorf("output_tokens = %d, want %d", d.Usage.OutputTokens, want)
 			}
 		}
 	}
-	if want := "Hello from the stub LLM."; text.String() != want {
+	if want := replies["greeting"]; text.String() != want {
 		t.Errorf("streamed text = %q, want %q", text.String(), want)
 	}
 }
