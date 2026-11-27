@@ -541,8 +541,65 @@ func TestHookTablePrefersTargetChain(t *testing.T) {
 	if got := e.svc.hookTable(context.Background(), trg); got != "dev" {
 		t.Fatalf("table = %q, want the chain's dev", got)
 	}
+	trg = hookTrigger(testNS, "alerts2", aiv1alpha1.TriggerWebhookAuth{})
 	trg.Spec.Target.ChainRef.Name = "missing"
+	trg.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: "own"}
 	if got := e.svc.hookTable(context.Background(), trg); got != "own" {
 		t.Fatalf("table = %q, want the trigger's own", got)
+	}
+}
+
+// chainCounter counts Gets of Chains.
+type chainCounter struct {
+	client.Reader
+	gets *int
+}
+
+func (r chainCounter) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*aiv1alpha1.Chain); ok {
+		*r.gets++
+	}
+	return r.Reader.Get(ctx, key, obj, opts...)
+}
+
+// Two requests to one Trigger resolve the table once; the 429 still carries
+// the table label; the entry expires after hookMissTTL.
+func TestHookTableCached(t *testing.T) {
+	e := newHookEnv(t, HookOptions{Rate: 0.001, Burst: 1}, true)
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { return clock }
+	gets := 0
+	e.svc.Hooks = chainCounter{Reader: e.svc.Hooks, gets: &gets}
+	trg := hookTrigger(testNS, "alerts", aiv1alpha1.TriggerWebhookAuth{})
+	trg.Spec.RoundTableRef = nil
+	trg.Spec.Target.ChainRef.Name = "tabled"
+	ctx := context.Background()
+	for range 2 {
+		if got := e.svc.hookTable(ctx, trg); got != "dev" {
+			t.Fatalf("table = %q, want dev", got)
+		}
+	}
+	if gets != 1 {
+		t.Fatalf("table resolved %d times for 2 requests, want 1", gets)
+	}
+	clock = clock.Add(hookMissTTL)
+	e.svc.hookTable(ctx, trg)
+	if gets != 2 {
+		t.Fatalf("table resolved %d times after the window, want 2", gets)
+	}
+	// A changed Trigger drops the entry.
+	trg.ResourceVersion = "99"
+	e.svc.hookTable(ctx, trg)
+	if gets != 3 {
+		t.Fatalf("table resolved %d times after an update, want 3", gets)
+	}
+
+	// 429 responses still go through hookTable (cached), so keep the label.
+	h := map[string]string{"Authorization": "Bearer " + hookBearer}
+	for range 2 {
+		e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), h)
+	}
+	if resp, _ := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), h); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status %d, want 429", resp.StatusCode)
 	}
 }

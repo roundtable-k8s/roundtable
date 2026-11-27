@@ -425,3 +425,78 @@ func TestNATSBusStreamCacheDroppedWhenStreamGone(t *testing.T) {
 		t.Fatal("stale stream handle kept")
 	}
 }
+
+// A stream recreated under the same name with another retention: the next
+// Discard acts on the live retention, not the cached handle's.
+func TestNATSBusDiscardRefreshesStaleHandle(t *testing.T) {
+	ctx := context.Background()
+	bus, _ := newListTestBus(t, "bus_stale_test")
+	cfg := jetstream.StreamConfig{Name: "stale_s", Subjects: []string{"stale.>"}, Retention: jetstream.LimitsPolicy}
+	if _, err := bus.js.CreateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Discard(ctx, "stale_s", "stale.res"); err != nil { // caches the Limits handle
+		t.Fatal(err)
+	}
+	if err := bus.js.DeleteStream(ctx, "stale_s"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Retention = jetstream.WorkQueuePolicy
+	if _, err := bus.js.CreateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.js.Publish(ctx, "stale.res", []byte("r")); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Discard(ctx, "stale_s", "stale.res"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := bus.js.Stream(ctx, "stale_s")
+	if info, _ := st.Info(ctx); info.State.Msgs != 0 {
+		t.Fatalf("result not discarded from the recreated WorkQueue stream: %d msgs", info.State.Msgs)
+	}
+
+	// And back the other way: a Limits stream must keep its message.
+	if err := bus.js.DeleteStream(ctx, "stale_s"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Retention = jetstream.LimitsPolicy
+	if _, err := bus.js.CreateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.js.Publish(ctx, "stale.res", []byte("r")); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Discard(ctx, "stale_s", "stale.res"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = bus.js.Stream(ctx, "stale_s")
+	if info, _ := st.Info(ctx); info.State.Msgs != 1 {
+		t.Fatalf("Limits stream lost its message: %d msgs", info.State.Msgs)
+	}
+}
+
+// A DeleteMsg failure drops the cached handle.
+func TestNATSBusDiscardDropsHandleOnDeleteError(t *testing.T) {
+	ctx := context.Background()
+	bus, _ := newListTestBus(t, "bus_delerr_test")
+	st, err := bus.js.CreateStream(ctx, jetstream.StreamConfig{Name: "delerr_s", Subjects: []string{"delerr.>"}, Retention: jetstream.WorkQueuePolicy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.js.Publish(ctx, "delerr.res", []byte("r")); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the cache with a handle whose DeleteMsg fails.
+	bus.streams = map[string]jetstream.Stream{"delerr_s": failingDelete{Stream: st}}
+	if err := bus.Discard(ctx, "delerr_s", "delerr.res"); err == nil {
+		t.Fatal("want delete error")
+	}
+	if len(bus.streams) != 0 {
+		t.Fatal("handle kept after a DeleteMsg error")
+	}
+}
+
+type failingDelete struct{ jetstream.Stream }
+
+func (failingDelete) DeleteMsg(context.Context, uint64) error { return errors.New("boom") }

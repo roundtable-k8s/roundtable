@@ -207,6 +207,54 @@ func (c *hookMissCache) add(key string, now time.Time) {
 	c.expires[key] = now.Add(hookMissTTL)
 }
 
+// hookTableCache remembers a Trigger's resolved table label for hookMissTTL,
+// so a request does not resolve the target Chain or knight every time. An
+// entry is also dropped when the Trigger's resourceVersion changes.
+type hookTableCache struct {
+	mu      sync.Mutex
+	entries map[string]hookTableEntry
+}
+
+type hookTableEntry struct {
+	version string
+	table   string
+	expires time.Time
+}
+
+func newHookTableCache() *hookTableCache {
+	return &hookTableCache{entries: map[string]hookTableEntry{}}
+}
+
+func (c *hookTableCache) get(key, version string, now time.Time) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok {
+		return "", false
+	}
+	if !now.Before(e.expires) || e.version != version {
+		delete(c.entries, key)
+		return "", false
+	}
+	return e.table, true
+}
+
+func (c *hookTableCache) put(key, version, table string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.entries) >= hookMissMax {
+		for k, e := range c.entries {
+			if !now.Before(e.expires) {
+				delete(c.entries, k)
+			}
+		}
+		if len(c.entries) >= hookMissMax {
+			return
+		}
+	}
+	c.entries[key] = hookTableEntry{version: version, table: table, expires: now.Add(hookMissTTL)}
+}
+
 // lookupHook returns the webhook Trigger at namespace/name. An unknown
 // Trigger, one without source.webhook and one in a namespace callers may not
 // target all give the same ErrNotFound, so a sender learns nothing about
@@ -242,6 +290,17 @@ func (s *Service) lookupHook(ctx context.Context, namespace, name string) (*aiv1
 // controller's triggerTable: the target chain's or knight's table first, then
 // the Trigger's own.
 func (s *Service) hookTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
+	key := trg.Namespace + "/" + trg.Name
+	now := s.now()
+	if table, ok := s.hookTables.get(key, trg.ResourceVersion, now); ok {
+		return table
+	}
+	table := s.resolveHookTable(ctx, trg)
+	s.hookTables.put(key, trg.ResourceVersion, table, now)
+	return table
+}
+
+func (s *Service) resolveHookTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
 	switch target := trg.Spec.Target; {
 	case target.Knight != nil:
 		if s.Resolver != nil {
