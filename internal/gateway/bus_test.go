@@ -276,7 +276,7 @@ func TestNATSBusListRecords(t *testing.T) {
 		t.Fatalf("empty bucket: got %d records, err %v", len(got), err)
 	}
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		if err := bus.PutRecord(ctx, &TaskRecord{TaskID: fmt.Sprintf("t%03d", i)}); err != nil {
 			t.Fatal(err)
 		}
