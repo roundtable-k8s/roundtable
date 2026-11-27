@@ -17,12 +17,15 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/cli-utils/pkg/kstatus/status"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -118,5 +121,40 @@ func TestChainKstatus(t *testing.T) {
 				t.Errorf("after reconcile (phase %s): kstatus = %s, want Current", got.Status.Phase, s)
 			}
 		})
+	}
+}
+
+// TestChainKstatusRunningChainWithUnresolvedRoundTable covers a chart upgrade
+// that changes a running Chain while its RoundTable cannot be read (e.g. it is
+// being replaced in the same release). The reconcile of the run fails and is
+// retried with backoff, but the new spec was accepted, so the Chain must not
+// stay InProgress for kstatus (Helm --wait, Flux) until the run can continue.
+func TestChainKstatusRunningChainWithUnresolvedRoundTable(t *testing.T) {
+	chain := phasesChain([]aiv1alpha1.ChainStep{{Name: "a", Task: "t"}},
+		aiv1alpha1.ChainStepStatus{Name: "a", Phase: aiv1alpha1.ChainStepPhaseRunning, TaskID: "t1"})
+	chain.Generation = 2
+	chain.Status.ObservedGeneration = 1
+	chain.Finalizers = []string{chainFinalizer}
+	chain.Spec.RoundTableRef = aiv1alpha1.LocalRef("missing")
+
+	r, _ := newPhasesReconciler(t)
+	r.Client = fake.NewClientBuilder().WithScheme(r.Scheme).WithObjects(chain.DeepCopy(), &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: phasesKnight, Namespace: phasesNS},
+		Spec:       aiv1alpha1.KnightSpec{Domain: "ops", Model: "claude-sonnet-4"},
+	}).WithStatusSubresource(&aiv1alpha1.Chain{}).Build()
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}})
+	if err == nil {
+		t.Fatal("expected the unresolved RoundTable to fail the reconcile")
+	}
+	got := &aiv1alpha1.Chain{}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != aiv1alpha1.ChainPhaseRunning {
+		t.Fatalf("phase = %s, want Running", got.Status.Phase)
+	}
+	if s := kstatusOf(t, got); s != status.CurrentStatus {
+		t.Errorf("kstatus = %s (observedGeneration %d, generation %d), want Current", s, got.Status.ObservedGeneration, got.Generation)
 	}
 }

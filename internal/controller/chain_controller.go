@@ -273,6 +273,10 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 	// A run in flight keeps going when the spec changes (a chart upgrade bumps
 	// the generation), but the new spec is accepted: record that right away so
 	// kstatus (Helm --wait, Flux) never reads an active run as InProgress.
+	// Reconciles of a running Chain can end before reconcileRunning writes it
+	// (resolveNATSConfig failing while the RoundTable is unreadable, retried
+	// with backoff; run-trigger and schedule-trigger returns), which left the
+	// generation unobserved for as long as that lasted.
 	if chain.Status.ObservedGeneration != chain.Generation {
 		chain.Status.ObservedGeneration = chain.Generation
 		if err := r.Status().Update(ctx, chain); err != nil {
