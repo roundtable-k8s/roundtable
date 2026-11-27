@@ -117,7 +117,7 @@ func TestSnapshotPolicy(t *testing.T) {
 	if err := admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNS}}); err != nil {
 		t.Fatal(err)
 	}
-	var kinds []string
+	kinds := make([]string, 0, len(objs))
 	for _, o := range objs {
 		if err := admin.Create(ctx, o); err != nil {
 			t.Fatalf("create %s %s: %v", o.GetKind(), o.GetName(), err)
