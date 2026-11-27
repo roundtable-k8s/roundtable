@@ -355,7 +355,7 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `KnightNotIsolated` | a knight's `Isolated` reason is a failure (not `Isolated`, `OptedOut` or `IsolationDisabled`) for 10m |
 | `RoundtableChainRunsFailing` | the failed share of chain runs in 1h exceeds `alerts.chainFailureRatio` |
 | `RoundtableGatewayErrors` | a gateway route's 5xx share over 15m exceeds `alerts.gatewayErrorRatio` (routes with fewer than 20 requests are ignored) |
-| `RoundtableReconcileErrors` | a controller in the release namespace has a `controller_runtime_reconcile_errors_total` rate above 0 for 15m (other operators' controllers are not covered) |
+| `RoundtableReconcileErrors` | a controller in the release namespace has a `controller_runtime_reconcile_errors_total` rate above 0 for 15m (other operators' controllers are not covered). Upgrade note: the rule matches `job="<fullname>-metrics"`; an install that scrapes the operator without the chart's ServiceMonitor must set `alerts.operatorJob` |
 | `RoundtableScheduleMissed` | a scheduled Trigger's CronJob (`trigger-*`, not suspended) is more than `alerts.scheduleMissedSeconds` past its next scheduled time (kube-state-metrics) |
 | `RoundtableRepositoryHeld` | a github-source Trigger has held a repository back for more than `alerts.repositoryHeldMinutes` (30) because of an open breaking pull request; the Trigger shows it in its `RepositoryHeld` condition |
 | `RoundtableScheduledRunFailed` | a scheduled knight or mission run finished `failed` or `lost` in the last hour (`roundtable_trigger_runs_finished_total`) |
@@ -491,15 +491,19 @@ sum by (chain, step) (increase(roundtable_chain_step_tokens_total{type="output"}
 
 The same totals show in `kubectl get`. Chains have a **Cost** column from
 `status.costUSD`, and missions from `status.totalCost` (the `Cost` printer
-column, shown by default next to `Phase` and `Age`):
+column, a default column that is not only in `-o wide`). On chains it sits
+between `Runs` and `Age`, after the other default columns `Schedule`,
+`TimeZone` and `Next`; on missions it sits between `TTL` and `Age`:
 
 ```sh
 kubectl -n roundtable get chains
 kubectl -n roundtable get missions
 ```
 
-The Cost cell stays empty (or `0.0000` on a mission) until a step has
-finished. For subscription-billed
+The Cost cell stays empty until a finished step has reported a cost above 0,
+so a chain whose finished steps all reported cost 0 shows nothing. A mission
+shows `0.0000` only when it has `costBudgetUSD`; without a budget its cell
+stays empty until a chain reports a cost above 0. For subscription-billed
 knights it is the same notional amount as above. `-o wide` adds the
 lower-priority columns (`Table`, `Message`, and `Objective` on missions). For
 the per-chain breakdown of a mission, read `status.chainStatuses[]`.
