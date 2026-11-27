@@ -87,7 +87,7 @@ in flight surviving an operator rollout, `gateway` for asking a knight and runni
 a Chain through the invoke gateway with a ServiceAccount token, `chain` for the Chain
 engine (step output, `when`, `forEach`) on the stub knight, `schedule` for a scheduled Trigger created, run now,
 suspended and deleted through the gateway, `github` for issue pickup on the
-trigger engine against a stub GitHub API, `all` for everything). The `restart` tier
+trigger engine against a stub GitHub API, `webhook` for an HTTP POST to a webhook Trigger on the gateway starting one Chain run, `all` for everything). The `restart` tier
 needs the fix from #700 (chain steps stranded by an operator restart); without it
 the spec times out waiting for the step's result to be read. It is not part of
 the default `TIER=core` run.

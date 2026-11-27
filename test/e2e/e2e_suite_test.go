@@ -68,6 +68,7 @@ const (
 	tierChain    = "chain"
 	tierSchedule = "schedule"
 	tierGitHub   = "github"
+	tierWebhook  = "webhook"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -127,7 +128,8 @@ var _ = BeforeSuite(func() {
 
 	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) ||
 		tierSelected(tierGateway) || tierSelected(tierChain) || tierSelected(tierSchedule) ||
-		tierSelected(tierGitHub) {
+		tierSelected(tierGitHub) ||
+		tierSelected(tierWebhook) {
 		buildStubKnightImage()
 	}
 
