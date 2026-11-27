@@ -443,6 +443,113 @@ var _ = Describe("PR feedback watcher", func() {
 		Expect(feedbackChain().Annotations[aiv1alpha1.AnnotationChainRun]).To(Equal(trigger), "no second run")
 	})
 
+	// busyWithPR5 starts a conflict fix round for PR 5 so that PR 6 stays
+	// queued behind it, and returns the trigger of the running round.
+	busyWithPR5 := func() string {
+		pr5 := fakePull(5, "h5")
+		pr5["mergeable_state"] = "dirty"
+		gh.pulls = []map[string]any{pr5}
+		reconcileOnce()
+		Expect(prRecord(5).Phase).To(Equal(aiv1alpha1.PRFeedbackFixing))
+		return feedbackChain().Annotations[aiv1alpha1.AnnotationChainRun]
+	}
+	pollPR6 := func(state string) {
+		pr5 := fakePull(5, "h5")
+		pr5["mergeable_state"] = "dirty"
+		pr6 := fakePull(6, "h6")
+		pr6["mergeable_state"] = state
+		gh.pulls = []map[string]any{pr5, pr6}
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+	}
+
+	It("keeps a queued conflict when the merge state is unknown for one poll", func() {
+		trigger := busyWithPR5()
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		pollPR6("unknown")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+		Expect(prRecord(6).LastFailure).To(Equal("conflict:h6"))
+
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		// The busy round ends: the queued conflict gets its fix round.
+		c := feedbackChain()
+		c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+		c.Status.LastRunTrigger = trigger
+		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackFixing))
+		Expect(feedbackChain().Annotations[aiv1alpha1.AnnotationChainRun]).To(HavePrefix("prfeedback-6-"))
+	})
+
+	It("detects a conflict again on the same head after a queued one cleared", func() {
+		busyWithPR5()
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		pollPR6("clean")
+		rec := prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
+
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+		Expect(prRecord(6).LastFailure).To(Equal("conflict:h6"))
+	})
+
+	It("clears a queued CI failure fixed by a push while the merge state is unset or unknown", func() {
+		busyWithPR5()
+		poll := func(head, state string) {
+			pr5 := fakePull(5, "h5")
+			pr5["mergeable_state"] = "dirty"
+			pr6 := fakePull(6, head)
+			if state != "" {
+				pr6["mergeable_state"] = state
+			}
+			gh.pulls = []map[string]any{pr5, pr6}
+			now = now.Add(5 * time.Minute)
+			reconcileOnce()
+		}
+		gh.checks["h6"] = []map[string]any{fakeCheck(601, "lint", "failure", "2026-11-23T11:00:00Z")}
+		poll("h6", "clean")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		// A push fixed it: new head, merge state unset.
+		poll("h6b", "")
+		rec := prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
+
+		// Same again with an explicit unknown merge state.
+		gh.checks["h6b"] = []map[string]any{fakeCheck(602, "test", "failure", "2026-11-23T11:30:00Z")}
+		poll("h6b", "clean")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+		poll("h6c", "unknown")
+		rec = prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
+	})
+
+	It("clears a queued conflict whose head moved while the merge state is unknown", func() {
+		busyWithPR5()
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		pr5 := fakePull(5, "h5")
+		pr5["mergeable_state"] = "dirty"
+		pr6 := fakePull(6, "h6b")
+		pr6["mergeable_state"] = "unknown"
+		gh.pulls = []map[string]any{pr5, pr6}
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+		rec := prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
+	})
+
 	It("leaves a clean PR alone", func() {
 		pr := fakePull(5, "h1")
 		pr["mergeable_state"] = "clean"

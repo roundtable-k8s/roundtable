@@ -81,6 +81,8 @@ const (
 
 	// ghMergeableDirty is the mergeable_state of a PR with merge conflicts.
 	ghMergeableDirty = "dirty"
+	// ghMergeableUnknown is the mergeable_state while GitHub recomputes it.
+	ghMergeableUnknown = "unknown"
 
 	// GitHub check run / workflow run status and conclusions.
 	ghCompleted = "completed"
@@ -532,17 +534,28 @@ func (r *PRFeedbackReconciler) pollRepo(ctx context.Context, gh *github.Client, 
 		// conflict comes first: the PR cannot merge until it is rebased, and
 		// the rebase re-runs CI anyway.
 		var f *failure
+		mergeUnknown := false
 		if full, err := gh.GetPull(ctx, repo, pr.Number); err != nil {
 			errs = append(errs, fmt.Errorf("PR #%d merge state: %w", pr.Number, err))
+			mergeUnknown = true
 		} else {
 			f = detectConflict(full)
+			// GitHub reports unknown while it recomputes mergeability.
+			mergeUnknown = full.MergeableState == "" || strings.EqualFold(full.MergeableState, ghMergeableUnknown)
 		}
 		if f == nil {
 			f = detectFailure(pr, checks, mg, ignoredChecks(cfg))
 		}
 		if f == nil && rec != nil && rec.Phase == aiv1alpha1.PRFeedbackQueued {
-			// Fixed or re-run before its turn came.
+			if mergeUnknown && rec.FailureKind == failureKindConflict && rec.FailureHeadSHA == pr.Head.SHA {
+				// The merge state is undetermined: a queued conflict on this
+				// head may still stand, decide on a later poll.
+				continue
+			}
+			// Fixed or re-run before its turn came. Forget the failure key
+			// so the same failure is detected again if it comes back.
 			rec.Phase = aiv1alpha1.PRFeedbackWatching
+			rec.LastFailure = ""
 			rec.Message = "failure cleared before a fix round started"
 			r.touch(rec)
 		}

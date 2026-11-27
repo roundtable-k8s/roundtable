@@ -311,7 +311,7 @@ spec:
             - --default-timeout={{ $gw.defaultTimeout }}
             - --max-timeout={{ $gw.maxTimeout }}
             - --max-in-flight={{ $gw.maxInFlight }}
-            - --max-streams={{ $gw.maxStreams | default 0 }}
+            - --max-streams={{ if kindIs "invalid" $gw.maxStreams }}64{{ else }}{{ $gw.maxStreams }}{{ end }}
             - --task-bucket={{ $gw.taskBucket }}
             - --task-ttl={{ $gw.taskTTL }}
             - --schedule-runs={{ $scheduleRuns.enabled | default false }}

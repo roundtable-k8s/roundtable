@@ -270,6 +270,20 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 	}
 	defer watch.Close()
 
+	// Follow the task's activity for MCP progress before publishing, as the
+	// result watch above: a knight that starts at once publishes task.started
+	// and its first tool events before a later subscription would exist.
+	// Progress is best-effort, so a failure here only drops it.
+	var pump *activityPump
+	if progressFrom(ctx) != nil && wait > 0 {
+		pump = s.newActivityPump(ctx)
+		defer pump.close()
+		if err := pump.add(taskID, natspkg.ActivitySubject(t.SubjectPrefix, knightName, taskID)); err != nil {
+			s.Log.Error(err, "Not reporting task progress", "taskId", taskID)
+			pump = nil
+		}
+	}
+
 	if idemKey != "" {
 		prior, err := s.Bus.CreateIdempotency(ctx, idemKey, IdempotencyEntry{TaskID: taskID, Fingerprint: fingerprint})
 		if err != nil {
@@ -307,14 +321,9 @@ func (s *Service) Invoke(ctx context.Context, knightName string, req InvokeReque
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	s.Log.Info("Invoked knight", "knight", knightName, "namespace", ns, "taskId", taskID, "runId", runID, "model", model)
-	if progress := progressFrom(ctx); progress != nil && wait > 0 {
+	if pump != nil {
 		// Report the task's tool calls to an MCP client that asked for progress.
-		stop := s.startProgress(ctx, progress, func(ctx context.Context, emit func(StreamEvent) error) error {
-			pump := s.newActivityPump(ctx)
-			defer pump.close()
-			if err := pump.add(taskID, natspkg.ActivitySubject(t.SubjectPrefix, knightName, taskID)); err != nil {
-				return err
-			}
+		stop := s.startProgress(ctx, progressFrom(ctx), func(ctx context.Context, emit func(StreamEvent) error) error {
 			for {
 				select {
 				case <-ctx.Done():

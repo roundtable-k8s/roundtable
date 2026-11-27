@@ -155,6 +155,14 @@ func (p *activityPump) add(key, subject string) error {
 	return nil
 }
 
+// has reports whether the task is already followed.
+func (p *activityPump) has(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.subs[key]
+	return ok
+}
+
 // remove stops following one task.
 func (p *activityPump) remove(key string) {
 	p.mu.Lock()
@@ -381,7 +389,7 @@ func (s *Service) emitStepChanges(ctx context.Context, c *aiv1alpha1.Chain,
 // followStepActivity subscribes to a running step's task; a step whose
 // knight can't be resolved just has no activity.
 func (s *Service) followStepActivity(ctx context.Context, ns, knight, taskID string, pump *activityPump) {
-	if knight == "" {
+	if knight == "" || pump.has(taskID) {
 		return
 	}
 	t, err := s.Resolver.resolve(ctx, ns, knight)
