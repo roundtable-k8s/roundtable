@@ -214,7 +214,7 @@ var _ = Describe("Schedule", Ordered, Label(tierSchedule), func() {
 
 	It("runs it now and records a succeeded run", func() {
 		code, body := call(http.MethodPost, path+"/run", nil)
-		Expect(code).To(SatisfyAny(Equal(http.StatusCreated), Equal(http.StatusAccepted)), string(body))
+		Expect(code).To(Equal(http.StatusCreated), string(body))
 		var run struct {
 			State string `json:"state"`
 			Key   string `json:"key"`
