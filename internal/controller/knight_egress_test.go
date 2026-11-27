@@ -594,6 +594,20 @@ func TestResolveEgressHostNetworkUnresolvedPort(t *testing.T) {
 	assert.Contains(t, missing[0], "ha/hass")
 }
 
+func TestHostNetworkPortsReportsUnresolved(t *testing.T) {
+	svc := &corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
+		{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8123)},
+		{Name: "metrics", Port: 9090, TargetPort: intstr.FromString("m")},
+	}}}
+	ports, unresolved := hostNetworkPorts(svc, []int32{80, 9090}, nil)
+	assert.Equal(t, []EgressServicePort{{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP}}, ports)
+	assert.Equal(t, []int32{9090}, unresolved)
+
+	notes := hostNetworkNotes([]EgressServicePeer{{Namespace: "ha", Name: "hass", HostNetwork: true, Ports: ports, UnresolvedPorts: unresolved}})
+	require.Len(t, notes, 2)
+	assert.Contains(t, notes[1], "ha/hass: listed port 9090 could not be resolved")
+}
+
 func TestEgressEndpointSliceChangedPredicate(t *testing.T) {
 	old := &discoveryv1.EndpointSlice{Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}}}
 	n := old.DeepCopy()
@@ -935,12 +949,13 @@ func TestRenderEgressOTLPCollector(t *testing.T) {
 
 	cases := []struct {
 		name, endpoint, key string
+		inCluster           bool
 		ports               []int32
 	}{
-		{"in-cluster", "http://otel-collector.observability.svc:4318", "toEndpoints", []int32{4318}},
-		{"external", "https://otlp.example.com:4317", "toFQDNs", []int32{4317}},
-		{"default ports", "http://collector.example.com", "toFQDNs", []int32{4317, 4318}},
-		{"ip", "http://10.1.2.3:4317", "toCIDR", []int32{4317}},
+		{"in-cluster", "http://otel-collector.observability.svc:4318", "toEndpoints", true, []int32{4318}},
+		{"external", "https://otlp.example.com:4317", "toFQDNs", false, []int32{4317}},
+		{"default ports", "http://collector.example.com", "toFQDNs", false, []int32{4317, 4318}},
+		{"ip", "http://10.1.2.3:4317", "toCIDR", false, []int32{4317}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -958,13 +973,13 @@ func TestRenderEgressOTLPCollector(t *testing.T) {
 				got = append(got, int32(n))
 			}
 			assert.Equal(t, c.ports, got)
-			if c.name == "in-cluster" {
+			if c.inCluster {
 				sel := found["toEndpoints"].([]any)[0].(map[string]any)["matchLabels"].(map[string]any)
 				assert.Equal(t, "observability", sel["k8s:io.kubernetes.pod.namespace"])
 			}
 
 			np := RenderEgressNetworkPolicy(k, allow, s)
-			if c.name == "in-cluster" {
+			if c.inCluster {
 				require.Len(t, np.Spec.Egress, len(baseNP.Spec.Egress)+1)
 				var ns string
 				for _, r := range np.Spec.Egress {

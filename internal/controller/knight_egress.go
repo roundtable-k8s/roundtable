@@ -118,6 +118,9 @@ type EgressServicePeer struct {
 	// allowed as traffic to the nodes (Cilium: toEntities host and
 	// remote-node) on Ports, not as a pod selector.
 	HostNetwork bool
+	// UnresolvedPorts are listed Service ports of a host-network Service that
+	// could not be resolved to a port number; they are not allowed.
+	UnresolvedPorts []int32
 	// Addresses are the ready endpoint addresses of a host-network Service
 	// (the /32 or /128 ipBlocks of the fallback NetworkPolicy).
 	Addresses []string
@@ -360,13 +363,9 @@ func ciliumFQDNRule(hosts []string, ports []int32) map[string]any {
 			fqdns = append(fqdns, map[string]any{"matchName": h})
 		}
 	}
-	toPorts := make([]any, 0, len(ports))
-	for _, p := range ports {
-		toPorts = append(toPorts, map[string]any{"port": strconv.Itoa(int(p)), "protocol": "TCP"})
-	}
 	return map[string]any{
 		"toFQDNs": fqdns,
-		"toPorts": []any{map[string]any{"ports": toPorts}},
+		"toPorts": []any{map[string]any{"ports": ciliumTCPPorts(ports)}},
 	}
 }
 
@@ -493,11 +492,11 @@ func RenderEgressNetworkPolicy(k *aiv1alpha1.Knight, allow EgressAllowlist, s mi
 	for _, u := range natsURLs(k.Spec.NATS.URL) {
 		ns, port, inCluster := missionpkg.NATSNamespaceAndPort(u)
 		key := fmt.Sprintf("%s/%d/%t", ns, port, inCluster)
-		rule, _ := missionpkg.NATSEgressRule(u, s.NATSPodLabels)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
+		rule, _ := missionpkg.NATSEgressRule(u, s.NATSPodLabels)
 		rules = append(rules, rule)
 	}
 	otlp := parseOTLPPeer(allow.OTLPEndpoint)
@@ -776,8 +775,9 @@ func (r *KnightReconciler) resolveEgressServices(ctx context.Context, k *aiv1alp
 			return nil, nil, err
 		}
 		if hostNet {
-			if ports := hostNetworkPorts(svc, ref.Ports, slicePorts); len(ports) > 0 {
+			if ports, unresolved := hostNetworkPorts(svc, ref.Ports, slicePorts); len(ports) > 0 {
 				peer.HostNetwork = true
+				peer.UnresolvedPorts = unresolved
 				peer.Addresses = addrs
 				peer.Ports = ports
 			} else {
@@ -853,8 +853,7 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 // host-network Service: each listed Service port resolved to the port number
 // in the EndpointSlices (which resolves a named targetPort), else the
 // targetPort when numeric, else the Service port itself.
-func hostNetworkPorts(svc *corev1.Service, listed []int32, slicePorts []discoveryv1.EndpointPort) []EgressServicePort {
-	var out []EgressServicePort
+func hostNetworkPorts(svc *corev1.Service, listed []int32, slicePorts []discoveryv1.EndpointPort) (out []EgressServicePort, unresolved []int32) {
 	for _, p := range listed {
 		matched := false
 		for _, sp := range svc.Spec.Ports {
@@ -884,7 +883,8 @@ func hostNetworkPorts(svc *corev1.Service, listed []int32, slicePorts []discover
 				num = sp.Port
 			}
 			if num == 0 {
-				continue // unresolved named port: nothing to allow
+				unresolved = append(unresolved, p) // unresolved named port: nothing to allow
+				continue
 			}
 			out = append(out, EgressServicePort{Port: intstr.FromInt32(num), Protocol: proto})
 		}
@@ -898,7 +898,8 @@ func hostNetworkPorts(svc *corev1.Service, listed []int32, slicePorts []discover
 		}
 		return strings.Compare(string(a.Protocol), string(b.Protocol))
 	})
-	return slices.Compact(out)
+	slices.Sort(unresolved)
+	return slices.Compact(out), slices.Compact(unresolved)
 }
 
 // hostNetworkNotes describes each host-network Service in the status message:
@@ -917,6 +918,14 @@ func hostNetworkNotes(services []EgressServicePeer) []string {
 		ports = slices.Compact(ports)
 		out = append(out, fmt.Sprintf("Service %s/%s uses the host network: reaches every node on port %s",
 			svc.Namespace, svc.Name, strings.Join(ports, ", ")))
+		if len(svc.UnresolvedPorts) > 0 {
+			un := make([]string, 0, len(svc.UnresolvedPorts))
+			for _, p := range svc.UnresolvedPorts {
+				un = append(un, strconv.Itoa(int(p)))
+			}
+			out = append(out, fmt.Sprintf("Service %s/%s: listed port %s could not be resolved to a number and is not allowed",
+				svc.Namespace, svc.Name, strings.Join(un, ", ")))
+		}
 	}
 	return out
 }

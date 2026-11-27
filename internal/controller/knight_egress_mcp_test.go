@@ -17,10 +17,19 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -114,4 +123,80 @@ func TestDeriveMCPEgressInvalidURL(t *testing.T) {
 	require.NotNil(t, d)
 	assert.Equal(t, []aiv1alpha1.EgressHost{{Host: "ok.example.com", Ports: []int32{443}}}, d.AllowedHosts)
 	assert.ErrorContains(t, errs[0], `mcpServers entry "srv" url "ftp://mcp.example.com/mcp"`)
+}
+
+func TestHostCoversOneLabel(t *testing.T) {
+	for _, c := range []struct {
+		pattern, host string
+		want          bool
+	}{
+		{"*.x.example", "a.x.example", true},
+		{"*.x.example", "a.b.x.example", false},
+		{"*.x.example", "x.example", false},
+		{"*.x.example", ".x.example", false},
+		{"x.example", "x.example", true},
+		{"x.example", "a.x.example", false},
+	} {
+		assert.Equal(t, c.want, hostCovers(c.pattern, c.host), "%s vs %s", c.pattern, c.host)
+	}
+}
+
+func TestDeriveMCPEgressDeepHostUnderWildcard(t *testing.T) {
+	k := mcpKnight(&aiv1alpha1.KnightEgress{
+		AllowedHosts: []aiv1alpha1.EgressHostEntry{aiv1alpha1.NewEgressHostEntry("*.wild.example")},
+	}, "https://a.b.wild.example/mcp")
+	d, errs := deriveMCPEgress(k)
+	require.Empty(t, errs)
+	require.NotNil(t, d)
+	assert.Equal(t, []aiv1alpha1.EgressHost{{Host: "a.b.wild.example", Ports: []int32{443}}}, d.AllowedHosts)
+}
+
+func TestReconcileEgressDerivedFromMCP(t *testing.T) {
+	sch := k8sruntime.NewScheme()
+	require.NoError(t, scheme.AddToScheme(sch))
+	require.NoError(t, aiv1alpha1.AddToScheme(sch))
+	k := mcpKnight(&aiv1alpha1.KnightEgress{}, "https://mcp.example.com/mcp", "http://web-fetch.tools.svc:8080/mcp")
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "web-fetch"},
+		Spec:       corev1.ServiceSpec{Selector: map[string]string{"app": "web-fetch"}},
+	}
+	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(k, svc).Build()
+	r := &KnightReconciler{Client: c, Scheme: sch, CiliumEnabled: true}
+
+	require.NoError(t, r.reconcileEgress(context.Background(), k))
+	require.NotNil(t, k.Status.DerivedEgress)
+	assert.Equal(t, []aiv1alpha1.EgressHost{{Host: "mcp.example.com", Ports: []int32{443}}}, k.Status.DerivedEgress.AllowedHosts)
+	assert.Equal(t, []aiv1alpha1.EgressService{{Name: "web-fetch", Namespace: "tools", Ports: []int32{8080}}}, k.Status.DerivedEgress.AllowedServices)
+
+	cnp := newCiliumEgressPolicy(k)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(cnp), cnp))
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	var fqdn, endpoint bool
+	for _, e := range egress {
+		rule := e.(map[string]any)
+		if fq, ok := rule["toFQDNs"].([]any); ok {
+			for _, f := range fq {
+				fqdn = fqdn || f.(map[string]any)["matchName"] == "mcp.example.com"
+			}
+		}
+		if eps, ok := rule["toEndpoints"].([]any); ok {
+			lbl := eps[0].(map[string]any)["matchLabels"].(map[string]any)
+			endpoint = endpoint || lbl["app"] == "web-fetch"
+		}
+	}
+	assert.True(t, fqdn, "derived host rendered")
+	assert.True(t, endpoint, "derived Service rendered")
+	cond := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionTrue, cond.Status)
+
+	// A bad MCP URL is reported, with the valid entries still rendered.
+	k.Spec.MCPServers = append(k.Spec.MCPServers, aiv1alpha1.KnightMCPServer{Name: "bad", URL: "http://[::1"})
+	require.Error(t, r.reconcileEgress(context.Background(), k))
+	cond = meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightEgressRestricted)
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, aiv1alpha1.ReasonEgressPolicyFailed, cond.Reason)
+	assert.Contains(t, cond.Message, `mcpServers entry "bad"`)
+	require.NotNil(t, k.Status.DerivedEgress)
 }
