@@ -147,6 +147,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			r.pollers.stop(req.String())
 			deleteTriggerLastFired(req.Namespace, req.Name)
 			r.clearRepositoryHolds(req.Namespace, req.Name)
+			r.runNowWarned.Delete(req.String())
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -781,7 +782,7 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 // restarts its sequence at 1, so the sequence alone would match runs from
 // before the reset.
 func (r *TriggerReconciler) streamSeqKey(ctx context.Context, cache *streamCreatedCache, md *jetstream.MsgMetadata) (string, time.Time, error) {
-	if created, ok := cache.get(md.Stream); ok {
+	if created, ok := cache.get(md.Stream, md.Sequence.Stream); ok {
 		return streamSeqKeyOf(created, md.Sequence.Stream), created, nil
 	}
 	nc, err := r.natsConn()
@@ -797,32 +798,39 @@ func (r *TriggerReconciler) streamSeqKey(ctx context.Context, cache *streamCreat
 		return "", time.Time{}, fmt.Errorf("stream %s: %w", md.Stream, err)
 	}
 	created := s.CachedInfo().Created
-	cache.set(md.Stream, created)
+	cache.set(md.Stream, created, md.Sequence.Stream)
 	return streamSeqKeyOf(created, md.Sequence.Stream), created, nil
 }
 
 // streamCreatedCache remembers the creation time of the stream a consumer
-// loop reads from. A recreated stream ends the loop (its consumer is gone),
-// and the new loop gets a new cache.
+// loop reads from, with the last stream sequence seen. A recreated stream
+// restarts its sequence, so a sequence below the last seen drops the cached
+// time (a delete and recreate between two fetches would otherwise keep it).
 type streamCreatedCache struct {
 	mu      sync.Mutex
 	stream  string
 	created time.Time
+	lastSeq uint64
 }
 
-func (c *streamCreatedCache) get(stream string) (time.Time, bool) {
+func (c *streamCreatedCache) get(stream string, seq uint64) (time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stream != stream || c.created.IsZero() {
 		return time.Time{}, false
 	}
+	if seq < c.lastSeq {
+		c.created, c.lastSeq = time.Time{}, 0
+		return time.Time{}, false
+	}
+	c.lastSeq = seq
 	return c.created, true
 }
 
-func (c *streamCreatedCache) set(stream string, created time.Time) {
+func (c *streamCreatedCache) set(stream string, created time.Time, seq uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stream, c.created = stream, created
+	c.stream, c.created, c.lastSeq = stream, created, seq
 }
 
 func streamSeqKeyOf(created time.Time, seq uint64) string {
@@ -1057,7 +1065,9 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	chainName := aiv1alpha1.RefName(trg.Spec.Target.ChainRef)
 	if tmpl == nil {
-		tmpl, tmplErr = &aiv1alpha1.Chain{}, r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, tmpl)
+		fetched := &aiv1alpha1.Chain{}
+		tmplErr = r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, fetched)
+		tmpl = fetched
 	}
 	if err := tmplErr; err != nil {
 		if manual != nil && apierrors.IsNotFound(err) {

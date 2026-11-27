@@ -93,7 +93,7 @@ func compileTriggerWhen(trg *aiv1alpha1.Trigger) (cel.Program, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	if t := ast.OutputType(); !t.IsAssignableType(cel.BoolType) && t != cel.DynType {
+	if t := ast.OutputType(); !t.IsAssignableType(cel.BoolType) {
 		return nil, fmt.Errorf("expression must evaluate to a bool, not %s", t)
 	}
 	prg, err := env.Program(ast, cel.CostLimit(celCostLimit))
