@@ -165,7 +165,11 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 
 	// Concurrency: the tasks without a result are the active runs. They
 	// are tracked in status.activeRuns, read uncached with the Trigger.
-	active := trg.Status.ActiveRuns
+	svc, err := r.taskService(ctx)
+	if err != nil {
+		return triggerRetry, fmt.Errorf("gateway task service: %w", err)
+	}
+	active := r.refreshActiveRuns(ctx, svc, trg, f.now)
 	switch trg.Spec.Concurrency.Policy {
 	case aiv1alpha1.TriggerConcurrencyForbid:
 		if len(active) > 0 {
@@ -180,10 +184,6 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 		}
 	}
 
-	svc, err := r.taskService(ctx)
-	if err != nil {
-		return triggerRetry, fmt.Errorf("gateway task service: %w", err)
-	}
 	invokeCtx := ctx
 	if f.manual != nil && f.manual.caller != "" {
 		invokeCtx = gateway.WithCaller(ctx, gateway.Caller{Name: f.manual.caller})
@@ -235,6 +235,62 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 	logf.Log.WithName("trigger").Info("Sent knight task", "trigger", f.nn.String(), "knight", kt.Name, "taskId", rec.TaskID, "key", firing.Key)
 	r.event(trg, corev1.EventTypeNormal, "Fired", "Sent task %s to knight %s", rec.TaskID, kt.Name)
 	return triggerHandled, nil
+}
+
+// refreshActiveRuns returns the Trigger's tasks that are still in flight,
+// looked up now like collectTasks looks them up, so a task that finished since
+// the last reconcile does not count against concurrency. It does not touch
+// trg's status: collectTasks records the outcomes. A lookup that fails keeps
+// the task and is logged, so the firing still goes ahead.
+func (r *TriggerReconciler) refreshActiveRuns(ctx context.Context, svc *gateway.Service, trg *aiv1alpha1.Trigger, now time.Time) []string {
+	cached := trg.Status.ActiveRuns
+	var tracked []string
+	for _, id := range cached {
+		if strings.HasPrefix(id, gateway.TaskIDPrefix) {
+			tracked = append(tracked, id)
+		}
+	}
+	if len(tracked) == 0 {
+		return cached
+	}
+	log := logf.FromContext(ctx)
+	timeout := time.Duration(trg.Spec.Target.Knight.EffectiveTimeoutSeconds()) * time.Second
+	var active []string
+	for _, id := range cached {
+		if !strings.HasPrefix(id, gateway.TaskIDPrefix) {
+			active = append(active, id)
+			continue
+		}
+		if _, _, finished, err := r.lookupTask(ctx, svc, id, now, timeout); err != nil {
+			log.Error(err, "Could not refresh Trigger task; counting it as active", "taskId", id)
+			active = append(active, id)
+		} else if !finished {
+			active = append(active, id)
+		}
+	}
+	return active
+}
+
+// lookupTask reads one tracked task. A task with a result, without a record,
+// or without a result after timeout is finished, with its firing outcome.
+// err is a failed read, which says nothing about the task.
+func (r *TriggerReconciler) lookupTask(ctx context.Context, svc *gateway.Service, id string, now time.Time, timeout time.Duration) (outcome aiv1alpha1.TriggerFiringOutcome, reason string, finished bool, err error) {
+	rec, err := svc.GetTask(ctx, id)
+	switch {
+	case errors.Is(err, gateway.ErrNotFound):
+		return aiv1alpha1.TriggerFiringLost, "task record not found", true, nil
+	case err != nil:
+		return "", "", false, fmt.Errorf("read task %s: %w", id, err)
+	case rec.Done():
+		outcome = taskOutcome(rec)
+		if outcome == aiv1alpha1.TriggerFiringFailed {
+			reason = taskFailureReason(rec)
+		}
+		return outcome, reason, true, nil
+	case now.Sub(rec.CreatedAt) > timeout:
+		return aiv1alpha1.TriggerFiringLost, fmt.Sprintf("no result within %ds", int(timeout/time.Second)), true, nil
+	}
+	return "", "", false, nil
 }
 
 // taskOutcome maps a finished gateway task to a firing outcome.
@@ -290,25 +346,20 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	}
 	timeout := time.Duration(trg.Spec.Target.Knight.EffectiveTimeoutSeconds()) * time.Second
 	var active []string
+	readFailed := false
 	for _, id := range tracked {
-		rec, err := svc.GetTask(ctx, id)
-		var outcome aiv1alpha1.TriggerFiringOutcome
-		var reason string
-		switch {
-		case errors.Is(err, gateway.ErrNotFound):
-			outcome = aiv1alpha1.TriggerFiringLost
-			reason = "task record not found"
-		case err != nil:
-			return 0, fmt.Errorf("read task %s: %w", id, err)
-		case rec.Done():
-			outcome = taskOutcome(rec)
-			if outcome == aiv1alpha1.TriggerFiringFailed {
-				reason = taskFailureReason(rec)
+		outcome, reason, finished, err := r.lookupTask(ctx, svc, id, now, timeout)
+		if err != nil {
+			// A failed read says nothing about the task: keep it active and
+			// look again later, so the other tasks' outcomes are still recorded.
+			if !readFailed {
+				logf.FromContext(ctx).Error(err, "Could not read Trigger task result")
 			}
-		case now.Sub(rec.CreatedAt) > timeout:
-			outcome = aiv1alpha1.TriggerFiringLost
-			reason = fmt.Sprintf("no result within %ds", trg.Spec.Target.Knight.EffectiveTimeoutSeconds())
-		default:
+			readFailed = true
+			active = append(active, id)
+			continue
+		}
+		if !finished {
 			active = append(active, id)
 			continue
 		}

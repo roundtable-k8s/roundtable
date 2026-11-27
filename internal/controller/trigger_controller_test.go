@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -46,6 +47,7 @@ import (
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
+	"github.com/roundtable-k8s/roundtable/internal/gateway"
 	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -1483,6 +1485,66 @@ var _ = Describe("Trigger controller", func() {
 			Expect(lost).To(Equal(1))
 		})
 
+		It("fires under Forbid when the listed task has finished since the last reconcile", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-forbid-fresh", func(s *aiv1alpha1.TriggerSpec) {
+				s.Concurrency.Policy = aiv1alpha1.TriggerConcurrencyForbid
+			})
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("kt-forbid-fresh")
+			fireSchedule("kt-forbid-fresh", due, "")
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(1))
+			Eventually(func() []aiv1alpha1.TriggerFiring { return getTrigger("kt-forbid-fresh").Status.RecentFirings }).Should(HaveLen(1))
+			Expect(getTrigger("kt-forbid-fresh").Status.ActiveRuns).To(Equal([]string{sent[0].TaskID}))
+
+			// The result arrives, but no reconcile has collected it yet.
+			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","output":"done"}`)
+			clock = due.Add(5*time.Minute + time.Second)
+			fireSchedule("kt-forbid-fresh", due.Add(5*time.Minute), "")
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(2))
+			Expect(sent[1].TaskID).NotTo(Equal(sent[0].TaskID))
+		})
+
+		It("keeps the other tasks' outcomes when one task lookup fails", func() {
+			got := tasks()
+			t := scheduleKnightTrigger("kt-lookup", nil)
+			due := nextFive(t.CreationTimestamp.Time)
+			clock = due.Add(time.Second)
+			reconcileTrigger("kt-lookup")
+			fireSchedule("kt-lookup", due, "")
+			fireSchedule("kt-lookup", due.Add(5*time.Minute), "")
+			var sent []natspkg.TaskPayload
+			Eventually(func() int { sent = got(); return len(sent) }, "10s").Should(Equal(2))
+			Eventually(func() []string { return getTrigger("kt-lookup").Status.ActiveRuns }, "10s").Should(HaveLen(2))
+
+			svc, err := r.taskService(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			// Swap in a copy under the lock rather than mutating the shared
+			// service, which other goroutines may be reading.
+			failing := gateway.NewService(r.knightResolver(), failingGetBus{Bus: svc.Bus, fail: sent[0].TaskID}, gateway.Options{
+				AllowedNamespaces:  []string{"*"},
+				DefaultKnightImage: r.DefaultKnightImage,
+			}, logr.Discard())
+			r.tasksMu.Lock()
+			r.tasks = failing
+			r.tasksMu.Unlock()
+			DeferCleanup(func() {
+				r.tasksMu.Lock()
+				r.tasks = svc
+				r.tasksMu.Unlock()
+			})
+
+			publishResult(sent[1].TaskID, `{"taskId":"`+sent[1].TaskID+`","output":"ok"}`)
+			res := reconcileTrigger("kt-lookup")
+			Expect(res.RequeueAfter).To(Equal(triggerTaskPoll))
+			st := getTrigger("kt-lookup").Status
+			Expect(st.ActiveRuns).To(Equal([]string{sent[0].TaskID}))
+			Expect(st.RecentFirings).To(ContainElement(SatisfyAll(
+				HaveField("Run", sent[1].TaskID), HaveField("Outcome", aiv1alpha1.TriggerFiringSucceeded))))
+		})
+
 		It("dedupes NATS events by dedupeKey and holds maxActive", func() {
 			got := tasks()
 			natsTrigger("kt-nats", prefix+".events.alerts.>", func(s *aiv1alpha1.TriggerSpec) {
@@ -1810,4 +1872,17 @@ func (j *jobListRecorder) List(ctx context.Context, list client.ObjectList, opts
 		j.selectors = append(j.selectors, sel)
 	}
 	return j.Client.List(ctx, list, opts...)
+}
+
+// failingGetBus fails reads of one task record, like a transient KV error.
+type failingGetBus struct {
+	gateway.Bus
+	fail string
+}
+
+func (b failingGetBus) GetRecord(ctx context.Context, taskID string) (*gateway.TaskRecord, error) {
+	if taskID == b.fail {
+		return nil, errors.New("kv unavailable")
+	}
+	return b.Bus.GetRecord(ctx, taskID)
 }

@@ -70,3 +70,39 @@ func TestTriggerTable(t *testing.T) {
 		t.Errorf("missing chain: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestResolverKnightTable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	knight := func(name string, labels map[string]string) *aiv1alpha1.Knight {
+		return &aiv1alpha1.Knight{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns", Labels: labels}}
+	}
+	table := func(name string) *aiv1alpha1.RoundTable {
+		return &aiv1alpha1.RoundTable{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+			Spec: aiv1alpha1.RoundTableSpec{NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: name}}}
+	}
+	ownerless := knight("ownerless", nil)
+	ownerless.Spec.NATS.Subjects = []string{"own.tasks.>"}
+	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		table("labelled"), table("legacy"),
+		knight("by-label", map[string]string{aiv1alpha1.LabelRoundTable: "labelled"}),
+		knight("by-legacy", map[string]string{legacyTableLabel: "legacy"}),
+		ownerless,
+	).Build()
+	r := &Resolver{Client: k8s}
+	for _, tc := range []struct{ name, knight, want string }{
+		{"table label", "by-label", "labelled"},
+		{"legacy label", "by-legacy", "legacy"},
+		{"ownerless knight", "ownerless", ""},
+	} {
+		got, err := r.KnightTable(context.Background(), "ns", tc.knight)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: KnightTable = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
+	}
+	if _, err := r.KnightTable(context.Background(), "ns", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing knight: err = %v, want ErrNotFound", err)
+	}
+}
