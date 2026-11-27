@@ -225,7 +225,7 @@ func TestDeadLettersTotalBeyondLimit(t *testing.T) {
 	}
 	_, body = e.do(t, "GET", "/v1/dead-letters?state=open&limit=5", testToken, nil)
 	if len(body["deadLetters"].([]any)) != 5 || body["total"] != float64(137) {
-		t.Fatalf("limit=5: %v", body["total"])
+		t.Fatalf("limit=5: items = %d, total = %v", len(body["deadLetters"].([]any)), body["total"])
 	}
 }
 
