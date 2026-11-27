@@ -91,15 +91,14 @@ type SnapshotRequest struct {
 // the knight's snapshot schedule (<knight>-ws-sched-<unix seconds>).
 const scheduledSnapshotMarker = "-ws-sched-"
 
-// requestSnapshot picks the snapshot a request took: the one named
-// expectedName, else the newest that is not a scheduled one (a scheduled
-// snapshot can be created in the same reconcile and be listed last).
-func requestSnapshot(snaps []SnapshotInfo, expectedName string) (SnapshotInfo, bool) {
-	for _, sn := range snaps {
-		if sn.Name == expectedName {
-			return sn, true
-		}
-	}
+// requestSnapshot picks the snapshot a handled request took: the newest one
+// that is not a scheduled one (a scheduled snapshot can be created in the same
+// reconcile and be listed last). The name is not matched against
+// SnapshotRequest.ExpectedName: the controller names snapshots with its own
+// clock, so the name can belong to an earlier request. The controller creates
+// the snapshot before it records LastSnapshotRequest, and lists snapshots by
+// creation time, so the newest non-scheduled one is exact.
+func requestSnapshot(snaps []SnapshotInfo) (SnapshotInfo, bool) {
 	for i := len(snaps) - 1; i >= 0; i-- {
 		if !strings.Contains(snaps[i].Name, scheduledSnapshotMarker) {
 			return snaps[i], true
@@ -111,6 +110,9 @@ func requestSnapshot(snaps []SnapshotInfo, expectedName string) (SnapshotInfo, b
 // snapshotWaitEnded reports whether the wait for request can stop before the
 // timeout without a snapshot: a newer request replaced it, or the
 // WorkspaceSnapshots condition went False/SnapshotFailed after it was made.
+// The condition is not tied to a request, so a failed scheduled snapshot or a
+// create error the controller retries can also end the wait; the caller then
+// reads the condition from the answer.
 func snapshotWaitEnded(view *KnightSnapshots, k *aiv1alpha1.Knight, request string) bool {
 	reqNanos, err := strconv.ParseInt(request, 10, 64)
 	if err != nil {
@@ -251,7 +253,7 @@ func (s *Service) waitSnapshot(ctx context.Context, out *SnapshotRequest, wait t
 		view := knightSnapshots(k)
 		out.Condition = view.Condition
 		if view.LastSnapshotRequest == out.Request {
-			if sn, ok := requestSnapshot(view.Snapshots, out.ExpectedName); ok {
+			if sn, ok := requestSnapshot(view.Snapshots); ok {
 				out.Snapshot = &sn
 				if sn.ReadyToUse {
 					out.Ready = true

@@ -326,7 +326,7 @@ func TestRequestSnapshot(t *testing.T) {
 	}{
 		{"newest", []string{"k-ws-1", "k-ws-2"}, "k-ws-2"},
 		{"scheduled last is skipped", []string{"k-ws-1", "k-ws-sched-9"}, "k-ws-1"},
-		{"expected name wins", []string{"k-ws-5", "k-ws-6"}, "k-ws-5"},
+		{"previous request's name is not matched", []string{"k-ws-5", "k-ws-6"}, "k-ws-6"},
 		{"only scheduled", []string{"k-ws-sched-9"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -334,11 +334,7 @@ func TestRequestSnapshot(t *testing.T) {
 			for _, n := range tc.snaps {
 				snaps = append(snaps, SnapshotInfo{Name: n})
 			}
-			expected := "k-ws-2"
-			if tc.name == "expected name wins" {
-				expected = "k-ws-5"
-			}
-			sn, ok := requestSnapshot(snaps, expected)
+			sn, ok := requestSnapshot(snaps)
 			if (tc.want != "") != ok || sn.Name != tc.want {
 				t.Errorf("got %q, %v; want %q", sn.Name, ok, tc.want)
 			}
@@ -381,15 +377,22 @@ func TestWaitSnapshotEnds(t *testing.T) {
 			}
 			out := &SnapshotRequest{Knight: "fresh", Namespace: testNS, Request: req}
 			start := time.Now()
-			if err := e.svc.waitSnapshot(t.Context(), out, 600*time.Millisecond); err != nil {
+			// Ending early is checked against a wait far longer than any
+			// plausible slow runner; waiting on is checked against a short
+			// one that can only elapse in full.
+			wait := 30 * time.Second
+			if !tc.early {
+				wait = 300 * time.Millisecond
+			}
+			if err := e.svc.waitSnapshot(t.Context(), out, wait); err != nil {
 				t.Fatal(err)
 			}
 			if out.Ready != tc.wantReady || (tc.wantSnap != "") != (out.Snapshot != nil) ||
 				(out.Snapshot != nil && out.Snapshot.Name != tc.wantSnap) {
 				t.Errorf("ready=%v snapshot=%v", out.Ready, out.Snapshot)
 			}
-			if early := time.Since(start) < 400*time.Millisecond; early != tc.early {
-				t.Errorf("ended early = %v, want %v (%s)", early, tc.early, time.Since(start))
+			if took := time.Since(start); tc.early && took >= 20*time.Second || !tc.early && took < wait {
+				t.Errorf("early = %v, waited %s of %s", tc.early, took, wait)
 			}
 		})
 	}
