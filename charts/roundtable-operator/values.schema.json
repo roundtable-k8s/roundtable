@@ -14,7 +14,10 @@
           "type": "string"
         },
         "tag": {
-          "type": "string"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "pullPolicy": {
           "type": "string"
@@ -209,7 +212,10 @@
               "type": "string"
             },
             "tag": {
-              "type": "string"
+              "type": [
+                "string",
+                "integer"
+              ]
             }
           }
         },
@@ -220,7 +226,10 @@
               "type": "string"
             },
             "tag": {
-              "type": "string"
+              "type": [
+                "string",
+                "integer"
+              ]
             }
           }
         }
@@ -423,7 +432,10 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "integer"
+                  ]
                 }
               }
             },
@@ -533,6 +545,9 @@
               "type": "boolean"
             }
           }
+        },
+        "podSecurityContext": {
+          "type": "object"
         }
       }
     },
@@ -564,7 +579,10 @@
               "type": "string"
             },
             "tag": {
-              "type": "string"
+              "type": [
+                "string",
+                "integer"
+              ]
             }
           }
         },
@@ -655,7 +673,15 @@
               "type": "boolean"
             },
             "maxBudgetUSD": {
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]*\\.?[0-9]+$"
+                }
+              ]
             },
             "maxTTLSeconds": {
               "type": "integer"
@@ -921,7 +947,15 @@
           "type": "boolean"
         },
         "costSpikeUSDPer24h": {
-          "type": "integer"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]*\\.?[0-9]+$"
+            }
+          ]
         },
         "taskFailuresPerHour": {
           "type": "integer"
@@ -930,9 +964,14 @@
           "type": "integer"
         },
         "chainFailureRatio": {
-          "type": [
-            "number",
-            "string"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]*\\.?[0-9]+$"
+            }
           ]
         },
         "deadLettersOpenMinutes": {
@@ -945,9 +984,14 @@
           "type": "integer"
         },
         "gatewayErrorRatio": {
-          "type": [
-            "number",
-            "string"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]*\\.?[0-9]+$"
+            }
           ]
         },
         "natsReconnectsPer30m": {

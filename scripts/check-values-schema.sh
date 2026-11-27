@@ -28,6 +28,13 @@ done
   --set isolation.egress.mode=off --set someUnknownKey=1 >/dev/null \
   || fail "loosely typed values rejected"
 
+# Dollar amounts and ratios accept fractions, but not text.
+"$HELM" template rt "$chart" --set gateway.missions.maxBudgetUSD=2.5 \
+  --set alerts.costSpikeUSDPer24h=12.5 --set alerts.gatewayErrorRatio=0.3 \
+  --set image.tag=1234567 >/dev/null || fail "fractional values rejected"
+"$HELM" template rt "$chart" --set alerts.gatewayErrorRatio=abc >/dev/null 2>&1 \
+  && fail "alerts.gatewayErrorRatio=abc was accepted"
+
 err="$("$HELM" template rt "$chart" --set gateway.replicas=abc 2>&1)" && fail "gateway.replicas=abc was accepted"
 grep -q 'gateway.replicas' <<<"$err" || fail "error does not name gateway.replicas: $err"
 echo "values schema OK"
