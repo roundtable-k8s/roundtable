@@ -15,6 +15,7 @@ usually needs them. The [README](../README.md) gives the overview.
 
 - [Triggers](triggers.md): start a Chain run, or send one task to a knight, from a cron time, a NATS message, a webhook or a GitHub event.
 - [Scheduled work](scheduled-work.md): run a task, a Chain or a Mission on a cron cadence, written as a Trigger.
+- [Dashboard](dashboard.md): the web UI's pages, what it can change, how to reach it and who can use it.
 - [Invoke gateway](gateway.md): the synchronous HTTP front door to the knights, with a task ID to poll for slow answers.
 - [Egress](egress.md): default-deny egress for knights that read untrusted web pages, feeds or issues, and how to allow a host.
 - [Runtime isolation](runtime-isolation.md): knights run under a sandboxing RuntimeClass (gVisor) by default, and how to opt out.
