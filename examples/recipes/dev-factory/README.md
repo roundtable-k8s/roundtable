@@ -69,7 +69,7 @@ runs against `maxActive` / `maxActivePerRepo`, deletes finished Chains after
 The planner picks a tier per issue from `implementModels`: `cheap` (a small,
 well-specified issue, one area, no API change), `fast` (the default), `deep`
 (design-heavy or cross-cutting). `modelAliases` on the table map each tier to
-a model; the aliases must resolve on the coder's runtime. Every fix round runs
+a model; the aliases must resolve on the coder's runtime (the manifests set the claude-knight image, which takes `sonnet`-style aliases). Every fix round runs
 `fixModel` (`deep`), so a cheap draft is repaired by a stronger model. Lead
 steps set no model and use the lead knight's own; pin one with `leadModel`.
 

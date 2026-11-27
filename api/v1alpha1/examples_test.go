@@ -214,7 +214,9 @@ func TestBacklogGroomingRecipe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(b), "roundtable-k8s") || strings.Contains(string(b), "dapperdivers") {
+		// The platform's own runtime image is not a stand-in for a user's repo.
+		text := strings.ReplaceAll(string(b), "ghcr.io/roundtable-k8s/claude-knight", "")
+		if strings.Contains(text, "roundtable-k8s") || strings.Contains(text, "dapperdivers") {
 			t.Errorf("%s names a real org", f)
 		}
 	}
@@ -257,5 +259,59 @@ func TestOllamaKnightExample(t *testing.T) {
 	}
 	if !slices.Contains(svc.Ports, 11434) {
 		t.Errorf("allowedServices[0] ports = %v, want Ollama port 11434", svc.Ports)
+	}
+}
+
+// TestRecipeClaudeAliasesNameClaudeKnightImage fails when a recipe Knight (or
+// a recipe RoundTable's defaults) names a Claude CLI model alias but the
+// effective image is not claude-knight. The default knight image is pi-knight,
+// which reads a bare name as an anthropic model that does not exist.
+func TestRecipeClaudeAliasesNameClaudeKnightImage(t *testing.T) {
+	aliases := []string{"opus", "sonnet", "haiku", "fable", "opusplan"}
+	// Copy of internal/knight.AgentRuntimeForImage's rule (that package
+	// imports this one, so it can't be used here): the image's repository
+	// name, without registry, tag and digest, is claude-knight or starts
+	// with "claude-knight-".
+	isClaudeKnight := func(image string) bool {
+		ref, _, _ := strings.Cut(image, "@")
+		if i := strings.LastIndex(ref, "/"); i >= 0 {
+			ref = ref[i+1:]
+		}
+		ref, _, _ = strings.Cut(ref, ":")
+		return ref == "claude-knight" || strings.HasPrefix(ref, "claude-knight-")
+	}
+	files, err := filepath.Glob("../../examples/recipes/*/*.yaml")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no recipe files found: %v", err)
+	}
+	byRecipe := map[string][]exampleObject{}
+	for _, f := range files {
+		byRecipe[filepath.Dir(f)] = append(byRecipe[filepath.Dir(f)], decodeExampleFile(t, f)...)
+	}
+	for dir, objs := range byRecipe {
+		tableImage := ""
+		for _, o := range objs {
+			if rt, ok := o.obj.(*RoundTable); ok {
+				if d := rt.Spec.Defaults; d != nil {
+					tableImage = d.Image
+					if slices.Contains(aliases, d.Model) && !isClaudeKnight(tableImage) {
+						t.Errorf("%s/%s: defaults.model %q is a Claude alias but defaults.image is %q", dir, o.file, d.Model, tableImage)
+					}
+				}
+			}
+		}
+		for _, o := range objs {
+			k, ok := o.obj.(*Knight)
+			if !ok || !slices.Contains(aliases, k.Spec.Model) {
+				continue
+			}
+			image := k.Spec.Image
+			if image == "" {
+				image = tableImage
+			}
+			if !isClaudeKnight(image) {
+				t.Errorf("%s/%s: knight %s has Claude alias model %q but image %q is not claude-knight", dir, o.file, o.name, k.Spec.Model, image)
+			}
+		}
 	}
 }

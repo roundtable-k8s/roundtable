@@ -12,6 +12,8 @@ metadata:
 spec:
   domain: lead
   model: sonnet
+  # The model alias needs the claude-knight runtime (pi-knight takes provider/model).
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   skills:
     - project
     - shared
@@ -44,6 +46,8 @@ metadata:
 spec:
   domain: coder
   model: sonnet
+  # The model alias needs the claude-knight runtime (pi-knight takes provider/model).
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   skills:
     - project
     - coding
