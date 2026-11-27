@@ -413,7 +413,8 @@ func TestDeploymentBackend_Reconcile_UpdatesStrategyWithoutTemplateChange(t *tes
 	require.NoError(t, b.Reconcile(ctx, knight))
 	after := getDeploy(t, b, "lamorak")
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, after.Spec.Strategy.Type)
-	assert.Equal(t, before.Spec.Template.Annotations[specHashAnnotation], after.Spec.Template.Annotations[specHashAnnotation])
+	assert.Equal(t, before.Spec.Template.Annotations[specHashAnnotation],
+		after.Spec.Template.Annotations[specHashAnnotation])
 }
 
 func TestDeploymentBackend_Reconcile_RestoresReplicasAfterSuspend(t *testing.T) {
