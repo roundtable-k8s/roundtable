@@ -1,8 +1,9 @@
 # Keeping mission output
 
 A Mission's status holds a result and a cost breakdown, and with
-`retainResults: true` the operator copies the results to a ConfigMap before
-cleanup. That copy is for post-mortems, not a record you curate. To keep what a
+`retainResults: true` the operator writes the results to NATS KV (the
+`mission-results` bucket, 30 days by default) before cleanup; `status.resultsRef`
+names where. That copy is for post-mortems, not a record you curate. To keep what a
 mission produced, a knight writes it somewhere durable that the owner chose.
 There are three ways to do that, and they can be combined.
 

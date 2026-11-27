@@ -222,10 +222,10 @@ func TestMissionNetworkPolicyNATSFromURL(t *testing.T) {
 	}
 }
 
-func TestMissionNetworkPolicyNATSPodLabelsAndClusterLocal(t *testing.T) {
+func TestMissionNetworkPolicyNATSPodLabelsAndShortForm(t *testing.T) {
 	s := DefaultNetPolSettings()
 	s.NATSPodLabels = map[string]string{"app.kubernetes.io/name": "nats"}
-	p := buildNetpol(t, "nats://nats.database.svc.cluster.local:4222", s)
+	p := buildNetpol(t, "nats://nats.database.svc:4222", s)
 	r := p.Spec.Egress[0]
 	if r.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "database" ||
 		r.To[0].PodSelector.MatchLabels["app.kubernetes.io/name"] != "nats" ||

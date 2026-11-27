@@ -77,7 +77,7 @@ func ciliumNetworkPolicyCRD() *apiextensionsv1.CustomResourceDefinition {
 	}
 }
 
-const egressTestNATSURL = "nats://nats.database.svc.cluster.local:4222"
+const egressTestNATSURL = "nats://nats.database.svc:4222"
 
 func egressKnight(name string, egress *aiv1alpha1.KnightEgress) *aiv1alpha1.Knight {
 	return scalingKnight("default", name, func(s *aiv1alpha1.KnightSpec) {

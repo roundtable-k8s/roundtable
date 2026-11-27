@@ -393,7 +393,7 @@ type KnightArsenal struct {
 	Image string `json:"image,omitempty"`
 
 	// oci loads the arsenal from an OCI image mounted read-only as an image
-	// volume at /arsenal/<name> instead of syncing a git repo. No git-sync
+	// volume at /arsenal-oci/<name> instead of syncing a git repo. No git-sync
 	// sidecar is added; repo, ref, periodSeconds and image are ignored.
 	// +optional
 	OCI *KnightArsenalOCI `json:"oci,omitempty"`
