@@ -266,7 +266,7 @@ the operator does not commit results to git.
    - `policies.costBudgetUSD`: the table's cost: the `costUSD` of its chains' current (or most recent) run plus the `totalCost` of its missions. This is not a lifetime total (a chain's cost restarts with each run). If exceeding it, the table goes `OverBudget`, `Available` is set to `False` and a `BudgetExceeded` event is recorded once per transition into `OverBudget`. If the usage cannot be read, the previous totals are kept. Knights are not suspended or otherwise limited.
    - `policies.maxConcurrentPlanTasks`: caps plan-backed knights' replicas (see Knight `PlanCapLimited`).
    - `policies.maxMissions`: caps concurrently active missions; extra missions wait in `Pending`.
-   - Not enforced (deprecated): `policies.costResetSchedule`. It is still accepted; a standing table that sets it gets a `DeprecatedFieldsUsed=True` condition and a Warning event. `policies.maxConcurrentTasks` and `policies.maxKnights` were removed in chart 0.24.0 (they were never enforced; the API server now prunes them). The reported cost is cumulative; nothing resets it.
+   - Not enforced (deprecated): `policies.costResetSchedule`. It is still accepted; a standing table that sets it gets a `DeprecatedFieldsUsed=True` condition and a Warning event. `policies.maxConcurrentTasks` and `policies.maxKnights` were removed in chart 0.24.0 (they were never enforced; the API server now prunes them).
    - To cap the number of knights in a namespace, use a Kubernetes `ResourceQuota`:
 
      ```yaml

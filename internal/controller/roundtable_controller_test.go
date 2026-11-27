@@ -209,6 +209,37 @@ var _ = Describe("RoundTable health with knights at rest", func() {
 		Expect(countEvents(rec, "BudgetExceeded")).To(BeZero(), "already OverBudget: no new event")
 	})
 
+	It("records BudgetExceeded once when the table goes over budget", func() {
+		newKnight("idle-ready", false, aiv1alpha1.KnightPhaseReady, true, aiv1alpha1.ReasonKnightReady)
+		key := types.NamespacedName{Name: table, Namespace: namespace}
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{CostBudgetUSD: "1"}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+
+		mission := &aiv1alpha1.Mission{
+			ObjectMeta: metav1.ObjectMeta{Name: "idle-budget-mission", Namespace: namespace},
+			Spec: aiv1alpha1.MissionSpec{
+				Objective:     "spend",
+				RoundTableRef: &corev1.LocalObjectReference{Name: table},
+			},
+		}
+		Expect(k8sClient.Create(ctx, mission)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, mission) })
+		mission.Status.TotalCost = "5.0000"
+		Expect(k8sClient.Status().Update(ctx, mission)).To(Succeed())
+
+		rec := record.NewFakeRecorder(100)
+		r := &RoundTableReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		for range 2 {
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(k8sClient.Get(ctx, key, rt)).To(Succeed())
+		Expect(rt.Status.Phase).To(Equal(aiv1alpha1.RoundTablePhaseOverBudget))
+		Expect(countEvents(rec, "BudgetExceeded")).To(Equal(1))
+	})
+
 	It("reports DeprecatedFieldsUsed on a suspended table", func() {
 		key := types.NamespacedName{Name: table, Namespace: namespace}
 		rt := &aiv1alpha1.RoundTable{}
