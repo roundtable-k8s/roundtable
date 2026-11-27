@@ -861,12 +861,15 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	var item *githubItem
 	if trg.Spec.Source.GitHub != nil {
 		it, err := githubEventItem(ev)
-		if err != nil {
+		if err != nil && manual == nil {
 			// The events subject is writable by any NATS client: a payload
-			// without a valid repo/number must not start a run.
+			// without a valid repo/number must not start a run. A run-now
+			// carries no payload and fires without an item.
 			return skip(triggerHandled, "github event has no valid item: %v", err)
 		}
-		item = &it
+		if err == nil {
+			item = &it
+		}
 	}
 	if item != nil && !githubRepoListed(trg.Spec.Source.GitHub, item.Repo) {
 		// The events subject is writable by any NATS client, and repositories

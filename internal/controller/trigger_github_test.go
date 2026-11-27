@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"errors"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,11 +40,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -452,6 +457,37 @@ var _ = Describe("Trigger GitHub source", func() {
 			g.Expect(st.RecentFirings[0].SkipReason).To(ContainSubstring("github event has no valid item"))
 		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 		Expect(runsOf("malformed")).To(BeEmpty())
+	})
+
+	It("fires a run-now request, which carries no github item", func() {
+		githubTrigger("runnow", nil)
+		t := getTrigger("runnow")
+		t.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerRunNow: "req-1"}
+		Expect(k8sClient.Update(ctx, t)).To(Succeed())
+		reconcileTrigger("runnow")
+		Expect(runsOf("runnow")).To(HaveLen(1))
+		st := getTrigger("runnow").Status
+		Expect(st.RecentFirings).To(HaveLen(1))
+		Expect(st.RecentFirings[0].SkipReason).To(BeEmpty())
+		Expect(getTrigger("runnow").Annotations).NotTo(HaveKey(aiv1alpha1.AnnotationTriggerRunNow))
+	})
+
+	It("requeues instead of failing when the status patch conflicts", func() {
+		githubTrigger("conflict", nil)
+		conflicts := 0
+		r.Client = interceptor.NewClient(k8sClient, interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, c client.Client, sub string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if _, ok := obj.(*aiv1alpha1.Trigger); ok && sub == "status" {
+					conflicts++
+					return apierrors.NewConflict(schema.GroupResource{Group: aiv1alpha1.GroupVersion.Group, Resource: "triggers"}, obj.GetName(), errors.New("the object has been modified"))
+				}
+				return c.SubResource(sub).Patch(ctx, obj, patch, opts...)
+			},
+		})
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conflict"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Requeue).To(BeTrue()) //nolint:staticcheck // the reconciler requeues this way
+		Expect(conflicts).To(BeNumerically(">", 0))
 	})
 
 	It("skips an event for a repository the Trigger does not list", func() {
