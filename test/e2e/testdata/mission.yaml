@@ -1,7 +1,8 @@
 # A table, one stub knight (test/e2e/stubknight, no LLM) and a meta-Mission for
 # the e2e mission tier. The stub knight answers the planning task with the plan
-# in STUB_PLAN_JSON: one chain, one step on the existing knight `stub` and no
-# knights[], so no ephemeral knight pods are created.
+# in STUB_PLAN_JSON: one chain, one step on the existing knight `stub`, listed in
+# knights[] as non-ephemeral (the plan check needs it), so no ephemeral
+# knight pods are created.
 apiVersion: ai.roundtable.io/v1alpha1
 kind: RoundTable
 metadata:
@@ -36,7 +37,7 @@ spec:
       - "e2em.tasks.e2e.>"
   env:
     - name: STUB_PLAN_JSON
-      value: '{"planVersion":"v1alpha1","metadata":{"objective":"Summarise the release"},"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}'
+      value: '{"planVersion":"v1alpha1","metadata":{"objective":"Summarise the release"},"knights":[{"name":"stub","ephemeral":false}],"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}'
   isolation:
     runtime: none
     egress: unrestricted
