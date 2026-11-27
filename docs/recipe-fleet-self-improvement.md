@@ -16,7 +16,7 @@ merges the usual way.
 
 | Step | Runs | What it does |
 |---|---|---|
-| `roster` | the lead | Lists the table's knights (`find_knights`, backed by the [agent cards](agent-cards.md)), or uses `spec.input` `{"knights": [...]}` when given. Returns `{"knights": [{"name", "domain"}]}`. |
+| `roster` | the lead | Lists the table's knights (`find_knights`, backed by the [agent cards](agent-cards.md#how-a-knight-finds-another-knight)), or uses `spec.input` `{"knights": [...]}` when given. Returns `{"knights": [{"name", "domain"}]}`. |
 | `assess` | the lead, once per knight | A [`forEach`](crd-design.md) over `steps.roster` (`path: .knights`, `maxParallel: 4`, `failurePolicy: continue`). The lead asks each knight for its self-assessment with `nats_request`. The lead's `spec.concurrency` must be at least `maxParallel`, or the extra items queue behind it. Worst case is roster 600s + 5 waves (`maxItems: 20` / 4) x 900s + report 1200s = 6300s, inside the chain `timeoutSeconds: 7200`; raise that if you raise `maxItems` or the step timeout. A step has a single `knightRef`, so the lead is the one that runs every item. |
 | `report` | the lead | Reads the join (`[{index, item, phase, output, error}]`), groups the answers and writes one markdown report with `outputPath`. |
 
