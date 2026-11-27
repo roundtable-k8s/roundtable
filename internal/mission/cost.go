@@ -79,6 +79,16 @@ func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alp
 			return 0, err
 		}
 		for i, ss := range chain.Status.StepStatuses {
+			if len(ss.KnightCosts) > 0 {
+				for _, kc := range ss.KnightCosts {
+					if v, err := strconv.ParseFloat(kc.CostUSD, 64); err == nil && v > 0 && kc.Name != "" {
+						perKnight[kc.Name] += v
+					}
+				}
+				continue
+			}
+			// Steps recorded before knightCosts existed: charge the whole
+			// step to its current knight; never to an empty name.
 			v, err := strconv.ParseFloat(ss.CostUSD, 64)
 			if err != nil || v == 0 {
 				continue
@@ -86,6 +96,12 @@ func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alp
 			knight := ss.Knight
 			if knight == "" && i < len(chain.Spec.Steps) {
 				knight = chain.Spec.Steps[i].KnightRef.Name
+			}
+			if knight == "" && i < len(chain.Spec.Steps) {
+				knight = loopBodyKnight(chain.Spec.Steps[i])
+			}
+			if knight == "" {
+				knight = "unknown"
 			}
 			perKnight[knight] += v
 		}
@@ -169,4 +185,20 @@ func ApplyChainUsage(mission *aiv1alpha1.Mission) {
 			mission.Status.TotalCost = fmt.Sprintf("%.4f", chainCost)
 		}
 	}
+}
+
+// loopBodyKnight is the one knight every body step of a loop step names, or ""
+// when the step is not a loop or its body spans several knights.
+func loopBodyKnight(st aiv1alpha1.ChainStep) string {
+	if st.Loop == nil {
+		return ""
+	}
+	name := ""
+	for _, b := range st.Loop.Steps {
+		if name != "" && b.KnightRef.Name != name {
+			return ""
+		}
+		name = b.KnightRef.Name
+	}
+	return name
 }

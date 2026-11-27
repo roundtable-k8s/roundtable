@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 
@@ -136,8 +137,12 @@ func budgetMission(budget string, chainCosts ...string) *aiv1alpha1.Mission {
 	}
 	// The mission always has chain "c1"; chainCosts are its status.costUSD.
 	m.Status.ChainStatuses = append(m.Status.ChainStatuses, aiv1alpha1.MissionChainStatus{Name: "c", ChainCRName: "c1"})
-	for _, c := range chainCosts {
-		m.Status.ChainStatuses[0].CostUSD = c
+	// One value per chain; the first goes on "c1", the rest on c2, c3, ...
+	for i, c := range chainCosts {
+		if i > 0 {
+			m.Status.ChainStatuses = append(m.Status.ChainStatuses, aiv1alpha1.MissionChainStatus{Name: fmt.Sprintf("c%d", i+1)})
+		}
+		m.Status.ChainStatuses[i].CostUSD = c
 	}
 	return m
 }
@@ -235,4 +240,49 @@ func TestApplyChainUsage(t *testing.T) {
 			t.Errorf("TotalCost lowered to %q", m.Status.TotalCost)
 		}
 	})
+}
+
+func TestAggregateMissionCostPerKnightSplit(t *testing.T) {
+	chain := &aiv1alpha1.Chain{
+		ObjectMeta: metav1.ObjectMeta{Name: "c2", Namespace: "ns"},
+		Spec: aiv1alpha1.ChainSpec{Steps: []aiv1alpha1.ChainStep{
+			{Name: "loop", Loop: &aiv1alpha1.ChainLoop{Steps: []aiv1alpha1.ChainLoopStep{
+				{Name: "w", KnightRef: corev1.LocalObjectReference{Name: "a"}},
+				{Name: "r", KnightRef: corev1.LocalObjectReference{Name: "b"}},
+			}}},
+			{Name: "fb"},
+			{Name: "legacy-loop", Loop: &aiv1alpha1.ChainLoop{Steps: []aiv1alpha1.ChainLoopStep{
+				{Name: "w", KnightRef: corev1.LocalObjectReference{Name: "a"}},
+			}}},
+		}},
+		Status: aiv1alpha1.ChainStatus{StepStatuses: []aiv1alpha1.ChainStepStatus{
+			{CostUSD: "0.5", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "a", CostUSD: "0.3"}, {Name: "b", CostUSD: "0.2"}}},
+			{Knight: "fb", CostUSD: "0.4", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "a", CostUSD: "0.3"}, {Name: "fb", CostUSD: "0.1"}}},
+			{CostUSD: "0.1"},
+		}},
+	}
+	ct := &CostTracker{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(chain).Build()}
+	m := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "ns"},
+		Spec:       aiv1alpha1.MissionSpec{Knights: []aiv1alpha1.MissionKnight{{Name: "a"}, {Name: "b"}}},
+		Status: aiv1alpha1.MissionStatus{ChainStatuses: []aiv1alpha1.MissionChainStatus{
+			{Name: "x", ChainCRName: "c2"},
+		}},
+	}
+	total, err := ct.AggregateMissionCost(t.Context(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(total-1.0) > 1e-9 {
+		t.Errorf("total = %v, want 1.0", total)
+	}
+	want := map[string]string{"a": "0.7000", "b": "0.2000", "fb": "0.1000"}
+	if len(m.Status.CostBreakdown) != len(want) {
+		t.Fatalf("breakdown = %+v", m.Status.CostBreakdown)
+	}
+	for _, bc := range m.Status.CostBreakdown {
+		if bc.Name == "" || want[bc.Name] != bc.CostUSD {
+			t.Errorf("line %+v, want %v", bc, want)
+		}
+	}
 }

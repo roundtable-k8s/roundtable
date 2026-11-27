@@ -176,3 +176,28 @@ func TestChainUsageIgnoresNegativeCounts(t *testing.T) {
 		t.Errorf("chain tokens = %+v, want %+v", chain.Status.Tokens, a.Tokens)
 	}
 }
+
+// A step's cost is split by the knight that ran each attempt: a fallback or a
+// loop body on another knight does not take over the primary's cost.
+func TestRecordUsageKnightCosts(t *testing.T) {
+	r := &ChainReconciler{Recorder: record.NewFakeRecorder(10)}
+	chain := &aiv1alpha1.Chain{
+		ObjectMeta: metav1.ObjectMeta{Name: "knight-costs"},
+		Spec:       aiv1alpha1.ChainSpec{RoundTableRef: aiv1alpha1.LocalRef("tbl-kc")},
+	}
+	ss := &aiv1alpha1.ChainStepStatus{Name: "s"}
+	ctx := context.Background()
+	r.recordUsage(ctx, chain, ss, "kay", &natspkg.TaskResult{Output: "x", Cost: 0.25})
+	r.recordUsage(ctx, chain, ss, "bors", &natspkg.TaskResult{Output: "x", Cost: 0.5})
+	r.recordUsage(ctx, chain, ss, "kay", &natspkg.TaskResult{Output: "x", Cost: 0.25})
+	if ss.CostUSD != "1.000000" {
+		t.Errorf("costUSD = %q", ss.CostUSD)
+	}
+	got := map[string]string{}
+	for _, kc := range ss.KnightCosts {
+		got[kc.Name] = kc.CostUSD
+	}
+	if len(got) != 2 || got["kay"] != "0.500000" || got["bors"] != "0.500000" {
+		t.Errorf("knightCosts = %+v", ss.KnightCosts)
+	}
+}

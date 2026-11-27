@@ -610,6 +610,14 @@ type ChainStepStatus struct {
 	// +optional
 	CostUSD string `json:"costUSD,omitempty"`
 
+	// knightCosts splits costUSD by the knight that ran each attempt (primary,
+	// fallback, loop body and fan-out knights). Absent on steps recorded before
+	// the field existed.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	KnightCosts []StepKnightCost `json:"knightCosts,omitempty"`
+
 	// tokens is the step's token use, summed like costUSD.
 	// +optional
 	Tokens *TokenTotals `json:"tokens,omitempty"`
@@ -998,4 +1006,12 @@ type ChainList struct {
 
 func init() {
 	SchemeBuilder.Register(&Chain{}, &ChainList{})
+}
+
+// StepKnightCost is the cost one knight incurred on a chain step.
+type StepKnightCost struct {
+	// name is the Knight that ran the attempts.
+	Name string `json:"name"`
+	// costUSD is the knight's cost on the step in USD.
+	CostUSD string `json:"costUSD"`
 }

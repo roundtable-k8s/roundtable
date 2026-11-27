@@ -93,6 +93,7 @@ func (r *ChainReconciler) recordUsage(ctx context.Context, chain *aiv1alpha1.Cha
 	}
 	if cost > 0 {
 		ss.CostUSD = formatCostUSD(parseCostUSD(ss.CostUSD) + cost)
+		addKnightCost(ss, knight, cost)
 	}
 	if !tok.IsZero() {
 		ss.Tokens = ss.Tokens.Add(tok)
@@ -138,4 +139,15 @@ func refreshChainUsage(chain *aiv1alpha1.Chain) {
 		chain.Status.CostUSD = formatCostUSD(cost)
 	}
 	chain.Status.Tokens = tokens
+}
+
+// addKnightCost adds cost to the step's per-knight split.
+func addKnightCost(ss *aiv1alpha1.ChainStepStatus, knight string, cost float64) {
+	for i := range ss.KnightCosts {
+		if ss.KnightCosts[i].Name == knight {
+			ss.KnightCosts[i].CostUSD = formatCostUSD(parseCostUSD(ss.KnightCosts[i].CostUSD) + cost)
+			return
+		}
+	}
+	ss.KnightCosts = append(ss.KnightCosts, aiv1alpha1.StepKnightCost{Name: knight, CostUSD: formatCostUSD(cost)})
 }
