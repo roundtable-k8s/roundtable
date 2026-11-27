@@ -23,6 +23,7 @@ count() { grep -c '^kind: PrometheusRule$' <<<"$1" || true; }
 on="$(render --set alerts.enabled=true "${api[@]}" \
   --set alerts.costSpikeUSDPer24h=42 --set alerts.taskFailuresPerHour=7 \
   --set alerts.labels.team=ops --set alerts.labels.severity=critical \
+  --set alerts.gatewayErrorRatio=0.3 --set alerts.natsReconnectsPer30m=9 \
   --namespace rtns)"
 [ "$(count "$on")" = 1 ] || fail "enabled: expected 1 PrometheusRule"
 grep -q '> 42$' <<<"$on" || fail "costSpikeUSDPer24h not applied"
@@ -41,6 +42,20 @@ grep -q 'status=~"error|publish_failed"' <<<"$on" || fail "failure alert does no
 for a in RoundtableDeadLettersOpen KnightConsumerNotReady KnightNotIsolated RoundtableChainRunsFailing KnightNotReady RoundtableToolsImageBuildFailed; do
   grep -q "alert: $a\$" <<<"$on" || fail "alert $a missing"
 done
+for a in RoundtableGatewayErrors KnightNatsFlapping RoundtableReconcileErrors; do
+  grep -q "alert: $a\$" <<<"$on" || fail "alert $a missing"
+done
+grep -q 'roundtable_knight_nats_reconnects_total\[30m\]' <<<"$on" || fail "KnightNatsFlapping expr missing"
+grep -q '> 9$' <<<"$on" || fail "natsReconnectsPer30m not applied"
+grep -q '> 0.3$' <<<"$on" || fail "gatewayErrorRatio not applied"
+grep -q 'code=~"5\.\."' <<<"$on" || fail "gateway rule does not count 5xx"
+grep -q 'sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code' <<<"$on" \
+  || fail "gateway rule does not keep route and table"
+! grep -qE 'sum by \(namespace, table\) \(increase\(roundtable_gateway' <<<"$on" \
+  || fail "gateway rule aggregates away route"
+grep -q 'sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="rtns"}\[10m\])) > 0' <<<"$on" \
+  || fail "RoundtableReconcileErrors expr missing"
+grep -q 'roundtable.operator' <<<"$on" || fail "roundtable.operator group missing"
 grep -q 'roundtable.platform' <<<"$on" || fail "roundtable.platform group missing"
 grep -q 'for: 15m' <<<"$(grep -A12 'alert: KnightNotReady$' <<<"$on")" || fail "default knightNotReadyMinutes not 15m"
 kn="$(render --set alerts.enabled=true "${api[@]}" --set alerts.knightNotReadyMinutes=30)"

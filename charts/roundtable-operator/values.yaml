@@ -710,6 +710,12 @@ alerts:
   # Seconds a scheduled Trigger's CronJob may stay past its next scheduled time
   # before RoundtableScheduleMissed fires.
   scheduleMissedSeconds: 600
+  # Share (0-1) of a gateway route's requests over 15m that are 5xx above which
+  # RoundtableGatewayErrors fires. Routes with fewer than 20 requests in 15m are
+  # ignored, so one failed request does not page.
+  gatewayErrorRatio: 0.05
+  # Knight NATS reconnects over 30m above which KnightNatsFlapping fires.
+  natsReconnectsPer30m: 3
   # Extra labels on every rule; `severity` here overrides the default "warning".
   labels: {}
   scaling:
