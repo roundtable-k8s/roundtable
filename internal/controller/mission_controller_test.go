@@ -386,7 +386,7 @@ var _ = Describe("Mission Controller", func() {
 
 			r := newReconciler()
 			r.TracerProvider = sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(telemetry.NewIDGenerator()))
-			for range 3 {
+			for range 2 {
 				// Later cycles may error on the missing RoundTable; only the log matters.
 				_, _ = r.Reconcile(logCtx, reconcile.Request{NamespacedName: missionNN})
 			}
@@ -864,7 +864,7 @@ var _ = Describe("Mission Controller", func() {
 			// Drive to Assembling — it won't progress further since knight doesn't exist
 			driveToPhase(r, aiv1alpha1.MissionPhaseAssembling, 10, readyOnProvisioning())
 			// A few more reconciles to set KnightsReady condition (stays in Assembling)
-			for range 3 {
+			for range 2 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			}
 
@@ -985,8 +985,16 @@ var _ = Describe("Mission Controller", func() {
 			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
 		})
 
+	})
+
+	Context("When the mission has a duplicate knight template", func() {
+		AfterEach(func() { deleteMission() })
+
 		It("should fail on a duplicate knight template with a Complete condition and a Warning event", func() {
-			tmpl := aiv1alpha1.MissionKnightTemplate{Name: "dup", Spec: aiv1alpha1.KnightSpec{Domain: "d"}}
+			tmpl := aiv1alpha1.MissionKnightTemplate{Name: "dup", Spec: aiv1alpha1.KnightSpec{
+				Domain: "d", Skills: []string{"s"},
+				NATS: aiv1alpha1.KnightNATS{Subjects: []string{"t.>"}},
+			}}
 			createMission(aiv1alpha1.MissionSpec{
 				Objective:       "duplicate templates",
 				KnightTemplates: []aiv1alpha1.MissionKnightTemplate{tmpl, tmpl},
@@ -998,7 +1006,7 @@ var _ = Describe("Mission Controller", func() {
 			r.Recorder = rec
 
 			// First reconcile sets Pending, the next validates the spec.
-			for range 3 {
+			for range 2 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
 			}
 
@@ -1012,8 +1020,12 @@ var _ = Describe("Mission Controller", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
 
-			Expect(rec.Events).To(Receive(And(
-				ContainSubstring("Warning"), ContainSubstring("Failed"), ContainSubstring("Duplicate knight template name"))))
+			var events []string
+			for len(rec.Events) > 0 {
+				events = append(events, <-rec.Events)
+			}
+			Expect(events).To(ContainElement(And(
+				HavePrefix("Warning Failed"), ContainSubstring("Duplicate knight template name"))))
 		})
 	})
 
