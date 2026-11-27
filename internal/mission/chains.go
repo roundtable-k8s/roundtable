@@ -14,7 +14,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/internal/status"
 )
 
 // defaultRoundTableRef is the RoundTable used when a mission does not name one.
@@ -92,7 +91,7 @@ func (m *ChainManager) ReconcileChains(ctx context.Context, mission *aiv1alpha1.
 			now := metav1.Now()
 			chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
 			chain.Status.StartedAt = &now
-			if err := status.Update(ctx, m.Client, chain); err != nil {
+			if err := m.Client.Status().Update(ctx, chain); err != nil {
 				if apierrors.IsConflict(err) {
 					log.Info("Conflict triggering chain, will retry", "chain", missionChainName)
 					allComplete = false
@@ -233,7 +232,7 @@ func (m *ChainManager) TriggerGeneratedChains(ctx context.Context, mission *aiv1
 		now := metav1.Now()
 		chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
 		chain.Status.StartedAt = &now
-		if err := status.Update(ctx, m.Client, &chain); err != nil {
+		if err := m.Client.Status().Update(ctx, &chain); err != nil {
 			// Log but don't fail the mission - the chain controller will eventually reconcile
 			log.Error(err, "Failed to trigger chain (will retry)", "chain", chain.Name)
 			return fmt.Errorf("failed to trigger chain %s: %w", chain.Name, err)

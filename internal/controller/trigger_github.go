@@ -822,7 +822,7 @@ func (r *TriggerReconciler) setGitHubCondition(ctx context.Context, nn types.Nam
 			at := metav1.NewTime(now)
 			trg.Status.LastPolledAt = &at
 		}
-		return writeStatus(ctx, r.Client, trg)
+		return r.Status().Update(ctx, trg)
 	})
 }
 
@@ -1027,7 +1027,7 @@ func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1
 		}
 		cond.ObservedGeneration = cur.Generation
 		meta.SetStatusCondition(&cur.Status.Conditions, cond)
-		return writeStatus(ctx, r.Client, cur)
+		return r.Status().Update(ctx, cur)
 	})
 	if err != nil && !apierrors.IsNotFound(err) {
 		logf.Log.WithName("trigger-github").Error(err, "Failed to record repository hold", "trigger", trg.Name)

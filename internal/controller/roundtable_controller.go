@@ -142,7 +142,7 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 			ObservedGeneration: rt.Generation,
 		})
 		rt.Status.ObservedGeneration = rt.Generation
-		if err := writeStatus(ctx, r.Client, rt); err != nil {
+		if err := r.Status().Update(ctx, rt); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueVerySlow}, nil
@@ -264,7 +264,7 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 	// Update Prometheus metrics
 	r.updateMetrics(ctx, rt, knights, totalCost)
 
-	if err := writeStatus(ctx, r.Client, rt); err != nil {
+	if err := r.Status().Update(ctx, rt); err != nil {
 		return ctrl.Result{}, err
 	}
 

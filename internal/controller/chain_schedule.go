@@ -293,7 +293,7 @@ func (r *ChainReconciler) triggerChain(ctx context.Context, nn types.NamespacedN
 		chain.Status.LastScheduledAt = &now
 		resetRunTrace(chain)
 
-		if err := writeStatus(ctx, r.Client, chain); err != nil {
+		if err := r.Status().Update(ctx, chain); err != nil {
 			return err
 		}
 		r.Recorder.Event(chain, corev1.EventTypeNormal, "CronTriggered", "Chain triggered by cron schedule")

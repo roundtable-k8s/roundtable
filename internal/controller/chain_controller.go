@@ -315,7 +315,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 // conflicts into a requeue instead of a reconcile error. On success the
 // result carries requeueAfter (zero means no requeue).
 func (r *ChainReconciler) updateStatus(ctx context.Context, chain *aiv1alpha1.Chain, requeueAfter time.Duration) (ctrl.Result, error) {
-	if err := writeStatus(ctx, r.Client, chain); err != nil {
+	if err := r.Status().Update(ctx, chain); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -505,7 +505,7 @@ func (r *ChainReconciler) startOrResumeRun(ctx context.Context, chain *aiv1alpha
 			})
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain timed out after %ds", chain.Spec.TimeoutSeconds)
 			chain.Status.ObservedGeneration = chain.Generation
-			return nil, ctrl.Result{}, writeStatus(ctx, r.Client, chain)
+			return nil, ctrl.Result{}, r.Status().Update(ctx, chain)
 		}
 	}
 

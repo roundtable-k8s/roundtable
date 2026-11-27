@@ -239,7 +239,7 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 		outcome := mission.Status.Phase
 		mission.Status.Phase = aiv1alpha1.MissionPhaseCleaningUp
 		mission.Status.ObservedGeneration = mission.Generation
-		err := writeStatus(ctx, r.Client, mission)
+		err := r.Status().Update(ctx, mission)
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -260,7 +260,7 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 	case aiv1alpha1.MissionPhaseExpired:
 		// Already handled above, but if we get here directly just clean up
 		mission.Status.Phase = aiv1alpha1.MissionPhaseCleaningUp
-		err := writeStatus(ctx, r.Client, mission)
+		err := r.Status().Update(ctx, mission)
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -319,7 +319,7 @@ func (r *MissionReconciler) reconcileNotification(ctx context.Context, mission *
 	completedAt := notifyCompletedAt(mission.Status.CompletedAt, mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
 	requeue := deliverNotification(ctx, r.Client, r.Recorder, r.Notify, mission,
 		&mission.Status.Conditions, mission.Generation, completedAt, missionNotifyPayload(mission))
-	if err := writeStatus(ctx, r.Client, mission); err != nil {
+	if err := r.Status().Update(ctx, mission); err != nil {
 		// Conflict or transient — retry the whole pass; the delivery guard is
 		// the (unpersisted) condition, so the next attempt re-evaluates it.
 		logf.FromContext(ctx).Error(err, "Failed to update status after notification attempt")
@@ -361,7 +361,7 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 				ObservedGeneration: mission.Generation,
 			})
 			mission.Status.ObservedGeneration = mission.Generation
-			err := writeStatus(ctx, r.Client, mission)
+			err := r.Status().Update(ctx, mission)
 			if err == nil {
 				r.Recorder.Event(mission, corev1.EventTypeWarning, "Failed", msg)
 			}
@@ -457,7 +457,7 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 		log.Info("Using existing RoundTable", "roundTable", aiv1alpha1.RefName(mission.Spec.RoundTableRef))
 		mission.Status.Phase = nextPhaseAfterProvisioning(mission)
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{RequeueAfter: RequeueFast}, writeStatus(ctx, r.Client, mission)
+		return ctrl.Result{RequeueAfter: RequeueFast}, r.Status().Update(ctx, mission)
 	}
 
 	// If no ephemeral knights, skip ephemeral RT creation (v1 compatibility)
@@ -472,7 +472,7 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 		log.Info("No ephemeral knights, skipping ephemeral RoundTable creation")
 		mission.Status.Phase = nextPhaseAfterProvisioning(mission)
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{RequeueAfter: RequeueFast}, writeStatus(ctx, r.Client, mission)
+		return ctrl.Result{RequeueAfter: RequeueFast}, r.Status().Update(ctx, mission)
 	}
 
 	// Generate resource names
@@ -518,7 +518,7 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 		mission.Status.NATSResultsStream = resultsStream
 		mission.Status.ObservedGeneration = mission.Generation
 
-		if err := writeStatus(ctx, r.Client, mission); err != nil {
+		if err := r.Status().Update(ctx, mission); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update mission status: %w", err)
 		}
 
@@ -543,7 +543,7 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 	// Transition to Assembling phase
 	mission.Status.Phase = nextPhaseAfterProvisioning(mission)
 	mission.Status.ObservedGeneration = mission.Generation
-	if err := writeStatus(ctx, r.Client, mission); err != nil {
+	if err := r.Status().Update(ctx, mission); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -564,7 +564,7 @@ func (r *MissionReconciler) reconcileAssembling(ctx context.Context, mission *ai
 	}
 
 	// Update status after assembly
-	if err := writeStatus(ctx, r.Client, mission); err != nil {
+	if err := r.Status().Update(ctx, mission); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update mission status: %w", err)
 	}
 
@@ -596,7 +596,7 @@ func (r *MissionReconciler) reconcileBriefing(ctx context.Context, mission *aiv1
 				ObservedGeneration: mission.Generation,
 			})
 			mission.Status.ObservedGeneration = mission.Generation
-			if statusErr := writeStatus(ctx, r.Client, mission); statusErr != nil {
+			if statusErr := r.Status().Update(ctx, mission); statusErr != nil {
 				log.Error(statusErr, "Failed to update status after briefing publish failure")
 			}
 			return ctrl.Result{RequeueAfter: RequeueDefault}, nil
@@ -631,7 +631,7 @@ func (r *MissionReconciler) reconcileBriefing(ctx context.Context, mission *aiv1
 
 	mission.Status.Phase = aiv1alpha1.MissionPhaseActive
 	mission.Status.ObservedGeneration = mission.Generation
-	err := writeStatus(ctx, r.Client, mission)
+	err := r.Status().Update(ctx, mission)
 	if apierrors.IsConflict(err) {
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -737,7 +737,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 				ObservedGeneration: mission.Generation,
 			})
 			mission.Status.ObservedGeneration = mission.Generation
-			err := writeStatus(ctx, r.Client, mission)
+			err := r.Status().Update(ctx, mission)
 			if apierrors.IsConflict(err) {
 				return ctrl.Result{Requeue: true}, nil
 			}
@@ -757,7 +757,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 				ObservedGeneration: mission.Generation,
 			})
 			mission.Status.ObservedGeneration = mission.Generation
-			err := writeStatus(ctx, r.Client, mission)
+			err := r.Status().Update(ctx, mission)
 			if apierrors.IsConflict(err) {
 				return ctrl.Result{Requeue: true}, nil
 			}
@@ -773,7 +773,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 	// Update knight statuses
 	r.updateKnightStatuses(ctx, mission)
 	mission.Status.ObservedGeneration = mission.Generation
-	if statusErr := writeStatus(ctx, r.Client, mission); statusErr != nil {
+	if statusErr := r.Status().Update(ctx, mission); statusErr != nil {
 		log.Error(statusErr, "Failed to update status with knight statuses")
 	}
 	return ctrl.Result{RequeueAfter: RequeueDefault}, nil
@@ -807,7 +807,7 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			now := metav1.Now()
 			chain.Status.Phase = aiv1alpha1.ChainPhaseRunning
 			chain.Status.StartedAt = &now
-			if err := writeStatus(ctx, r.Client, chain); err != nil {
+			if err := r.Status().Update(ctx, chain); err != nil {
 				log.Error(err, "Failed to trigger teardown chain", "chain", chainRef.Name)
 			}
 			// Requeue to wait for teardown
@@ -910,7 +910,7 @@ func (r *MissionReconciler) transitionToTerminalPhase(ctx context.Context, missi
 	mission.Status.Phase = missionpkg.TerminalOutcome(mission)
 
 	mission.Status.ObservedGeneration = mission.Generation
-	if err := writeStatus(ctx, r.Client, mission); err != nil {
+	if err := r.Status().Update(ctx, mission); err != nil {
 		log.Error(err, "Failed to update status during terminal phase transition")
 	}
 

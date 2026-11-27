@@ -229,7 +229,7 @@ func (r *ChainReconciler) rejectSpec(ctx context.Context, chain *aiv1alpha1.Chai
 		chain.Status.NextScheduledAt = nil
 	}
 	chain.Status.ObservedGeneration = chain.Generation
-	if statusErr := writeStatus(ctx, r.Client, chain); statusErr != nil {
+	if statusErr := r.Status().Update(ctx, chain); statusErr != nil {
 		log.Error(statusErr, "Failed to update status during validation error")
 	}
 	return err

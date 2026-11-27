@@ -23,7 +23,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/internal/status"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -66,7 +65,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		log.Info("Not a meta-mission, skipping Planning phase")
 		mission.Status.Phase = aiv1alpha1.MissionPhaseAssembling
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Auto-initialize Planner spec with defaults if metaMission but no explicit planner config
@@ -106,7 +105,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	if mission.Status.PlanningResult == nil {
 		log.Info("Initializing planning phase")
 		mission.Status.PlanningResult = &aiv1alpha1.PlanningResult{}
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	pr := mission.Status.PlanningResult
@@ -118,7 +117,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		log.Info("Plan already applied, transitioning to Assembling phase")
 		mission.Status.Phase = aiv1alpha1.MissionPhaseAssembling
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Check for planning error first (terminal state — must precede CompletedAt check)
@@ -136,7 +135,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		})
 		mission.Status.ObservedGeneration = mission.Generation
 		planErr := pr.Error
-		err := status.Update(ctx, p.Client, mission)
+		err := p.Client.Status().Update(ctx, mission)
 		if err == nil {
 			if p.Recorder != nil {
 				p.Recorder.Event(mission, corev1.EventTypeWarning, "Failed", failMsg)
@@ -154,7 +153,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 			"knights", pr.KnightsGenerated)
 		mission.Status.Phase = aiv1alpha1.MissionPhaseAssembling
 		mission.Status.ObservedGeneration = mission.Generation
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Check timeout
@@ -167,7 +166,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		pr.Error = fmt.Sprintf("planning timeout after %d seconds", timeout)
 		now := metav1.Now()
 		pr.CompletedAt = &now
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Ensure planner knight exists
@@ -175,7 +174,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	if err != nil {
 		log.Error(err, "Failed to ensure planner knight")
 		pr.Error = fmt.Sprintf("failed to create planner knight: %v", err)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Wait for planner knight to be ready. A knight scaled to zero by its
@@ -197,13 +196,13 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		if err != nil {
 			log.Error(err, "Failed to dispatch planning task")
 			pr.Error = fmt.Sprintf("failed to dispatch planning task: %v", err)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, status.Update(ctx, p.Client, mission)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, p.Client.Status().Update(ctx, mission)
 		}
 		log.Info("Dispatched planning task", "taskID", taskID, "knight", plannerKnight.Name)
 		mission.Status.PlanningTaskID = taskID
 		now := metav1.Now()
 		pr.StartedAt = &now
-		if err := status.Update(ctx, p.Client, mission); err != nil {
+		if err := p.Client.Status().Update(ctx, mission); err != nil {
 			// Status update failed (likely conflict). Log but don't requeue
 			// aggressively — the deterministic taskID prevents duplicate work.
 			log.V(1).Info("Status update after dispatch failed, will retry on next reconcile",
@@ -235,7 +234,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		pr.RawOutput = util.Truncate(result.GetOutput(), 10000)
 		now := metav1.Now()
 		pr.CompletedAt = &now
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Parse planner output
@@ -247,7 +246,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		pr.RawOutput = util.Truncate(output, 10000)
 		now := metav1.Now()
 		pr.CompletedAt = &now
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Validate plan
@@ -258,7 +257,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		pr.Error = fmt.Sprintf("plan validation failed: %v", err)
 		pr.RawOutput = util.Truncate(output, 10000)
 		// Do NOT set pr.CompletedAt here - allow retry
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Apply plan to mission spec
@@ -267,7 +266,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 		pr.Error = fmt.Sprintf("failed to apply plan: %v", err)
 		now := metav1.Now()
 		pr.CompletedAt = &now
-		return ctrl.Result{}, status.Update(ctx, p.Client, mission)
+		return ctrl.Result{}, p.Client.Status().Update(ctx, mission)
 	}
 
 	// Mark planning complete
@@ -311,7 +310,7 @@ func (p *Planner) ReconcilePlanning(ctx context.Context, mission *aiv1alpha1.Mis
 	mission.Status.Phase = aiv1alpha1.MissionPhaseAssembling
 	mission.Status.ObservedGeneration = mission.Generation
 
-	if err := status.Update(ctx, p.Client, mission); err != nil {
+	if err := p.Client.Status().Update(ctx, mission); err != nil {
 		// If status update fails, return error for requeue with fresh object
 		return ctrl.Result{}, fmt.Errorf("failed to update mission status after plan application: %w", err)
 	}

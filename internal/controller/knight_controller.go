@@ -261,7 +261,7 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Set initial status
 	if knight.Status.Phase == "" {
 		knight.Status.Phase = aiv1alpha1.KnightPhaseProvisioning
-		if err := writeStatus(ctx, r.Client, knight); err != nil {
+		if err := r.Status().Update(ctx, knight); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -648,7 +648,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
 		knight.Status.Ready = false
 		knight.Status.ObservedGeneration = knight.Generation
-		if err := writeStatus(ctx, r.Client, knight); err != nil {
+		if err := r.Status().Update(ctx, knight); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -699,7 +699,7 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 		ObservedGeneration: knight.Generation,
 	})
 	knight.Status.ObservedGeneration = knight.Generation
-	if err := writeStatus(ctx, r.Client, knight); err != nil {
+	if err := r.Status().Update(ctx, knight); err != nil {
 		return err
 	}
 
@@ -722,7 +722,7 @@ func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alph
 		ObservedGeneration: knight.Generation,
 	})
 	knight.Status.ObservedGeneration = knight.Generation
-	if err := writeStatus(ctx, r.Client, knight); err != nil {
+	if err := r.Status().Update(ctx, knight); err != nil {
 		return err
 	}
 	return nil
@@ -1213,7 +1213,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	knight.Status.NATSConsumer = consumerName
 	knight.Status.ObservedGeneration = knight.Generation
 
-	if err := writeStatus(ctx, r.Client, knight); err != nil {
+	if err := r.Status().Update(ctx, knight); err != nil {
 		return err
 	}
 	if observeWake {

@@ -21,17 +21,8 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/roundtable-k8s/roundtable/internal/status"
 )
-
-// writeStatus is the one status write of every controller: it retries an
-// optimistic-lock conflict on the latest resourceVersion (see status.Update).
-func writeStatus(ctx context.Context, c client.Client, obj client.Object) error {
-	return status.Update(ctx, c, obj)
-}
 
 // quietConflict turns a conflict that escaped a reconcile into a quiet
 // requeue: neither an ERROR line nor a counted reconcile error.
