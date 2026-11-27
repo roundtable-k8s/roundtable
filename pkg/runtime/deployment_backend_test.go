@@ -587,7 +587,7 @@ func TestDeploymentBackend_Reconcile_RolloutWhenIdle(t *testing.T) {
 		t.Helper()
 		s := newTestScheme(t)
 		c := fake.NewClientBuilder().WithScheme(s).Build()
-		b := NewDeploymentBackend(c, s, "default:latest", stubPodSpecBuilder)
+		b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(1, appsv1.RecreateDeploymentStrategyType))
 		b.Busy = func(context.Context, *aiv1alpha1.Knight) bool { return busy }
 		b.Now = func() time.Time { return start }
 		require.NoError(t, b.Reconcile(ctx, newTestKnight("kay")))
