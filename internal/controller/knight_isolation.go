@@ -132,3 +132,9 @@ func setIsolatedMetric(k *aiv1alpha1.Knight, reason string) {
 func deleteIsolatedMetric(k *aiv1alpha1.Knight) {
 	rtmetrics.KnightIsolated.DeletePartialMatch(isolatedMetricLabels(k))
 }
+
+// deleteKnightWakeMetric drops the knight's wake-latency histogram series,
+// whatever table label they were observed under.
+func deleteKnightWakeMetric(k *aiv1alpha1.Knight) {
+	rtmetrics.KnightWakeSeconds.DeletePartialMatch(prometheus.Labels{"knight": k.Name, "namespace": k.Namespace})
+}

@@ -28,7 +28,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // finishRun completes the run once every step is terminal: it sets the chain
@@ -150,7 +149,7 @@ func (r *ChainReconciler) completeRun(ctx context.Context, chain *aiv1alpha1.Cha
 			ObservedGeneration: chain.Generation,
 		})
 		r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain failed: %s", failMsg)
-		metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "failed").Inc()
+		r.recordRunOutcome(ctx, chain, "failed")
 	} else if softFailures > 0 {
 		// No hard failures, but some soft failures
 		chain.Status.Phase = aiv1alpha1.ChainPhasePartiallySucceeded
@@ -163,7 +162,7 @@ func (r *ChainReconciler) completeRun(ctx context.Context, chain *aiv1alpha1.Cha
 			ObservedGeneration: chain.Generation,
 		})
 		r.Recorder.Eventf(chain, corev1.EventTypeNormal, "Succeeded", "Chain partially succeeded: %d/%d steps succeeded", succeededSteps, totalSteps)
-		metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "partially_succeeded").Inc()
+		r.recordRunOutcome(ctx, chain, "partially_succeeded")
 	} else {
 		// All steps succeeded
 		chain.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
@@ -176,7 +175,7 @@ func (r *ChainReconciler) completeRun(ctx context.Context, chain *aiv1alpha1.Cha
 			ObservedGeneration: chain.Generation,
 		})
 		r.Recorder.Event(chain, corev1.EventTypeNormal, "Succeeded", "Chain completed successfully")
-		metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "succeeded").Inc()
+		r.recordRunOutcome(ctx, chain, "succeeded")
 	}
 }
 
@@ -194,7 +193,7 @@ func (r *ChainReconciler) warnNoStepsExecuted(ctx context.Context, chain *aiv1al
 		logf.FromContext(ctx).Info("Chain run completed without executing any steps")
 		r.Recorder.Event(chain, corev1.EventTypeWarning, "NoStepsExecuted",
 			"Chain run completed without executing any steps (all outputs restored from cache)")
-		metrics.ChainNoOpRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name).Inc()
+		r.recordNoOpRun(ctx, chain)
 	}
 }
 

@@ -29,7 +29,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // handleCancel acts on the ai.roundtable.io/cancel annotation. On an active
@@ -127,5 +126,5 @@ func (r *ChainReconciler) cancelRun(ctx context.Context, chain *aiv1alpha1.Chain
 	})
 	r.Recorder.Eventf(chain, corev1.EventTypeWarning, "RunCancelled", "Run cancelled (%d step(s) unfinished): %s", cancelled, msg)
 	logf.FromContext(ctx).Info("Chain run cancelled", "runId", chain.Status.RunID, "steps", cancelled, "reason", reason)
-	metrics.ChainRunsTotal.WithLabelValues(r.chainTable(ctx, chain), chain.Name, "failed").Inc()
+	r.recordRunOutcome(ctx, chain, "failed")
 }
