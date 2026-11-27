@@ -39,8 +39,8 @@ import (
 const (
 	triggerNamespace = "roundtable-trigger"
 	triggerRelease   = "rt-trigger"
-	triggerOperator  = "rt-trigger" // fullnameOverride in trigger-values.yaml
-	triggerValues    = "test/e2e/testdata/trigger-values.yaml"
+	triggerOperator  = "rt-trigger" // --set fullnameOverride (shared core-values.yaml)
+	triggerValues    = "test/e2e/testdata/core-values.yaml"
 	triggerManifests = "test/e2e/testdata/trigger.yaml"
 	triggerName      = "on-event"
 	triggerKnight    = "stub"
@@ -68,7 +68,7 @@ var _ = Describe("Trigger", Ordered, Label(tierTrigger), func() {
 
 		By("installing the operator chart")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", triggerRelease, "charts/roundtable-operator",
-			"-n", triggerNamespace, "--create-namespace", "-f", triggerValues, "--wait", "--timeout", "5m"))
+			"-n", triggerNamespace, "--create-namespace", "-f", triggerValues, "--set", "fullnameOverride="+triggerOperator, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the operator chart")
 
 		By("creating the table, the stub knight, the template Chain and the Trigger")
