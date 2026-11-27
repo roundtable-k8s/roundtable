@@ -10,6 +10,7 @@ spec:
     - shared
   nats:
     stream: fleet_a_tasks
+    resultsStream: fleet_a_results
     subjects:
       - "fleet-a.tasks.per-host-ports.>"
   egress:
