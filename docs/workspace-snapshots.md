@@ -16,9 +16,12 @@ Scheduled snapshots are not supported: a snapshot is taken only when you ask for
 - A knight with the default `workspace.mode: pvc`. Ephemeral workspaces cannot be
   snapshotted.
 
-The operator checks for the API **once, at startup** (`pkg/runtime/snapshot_detect.go`). If
-you install the snapshotter after the operator, restart the operator. There is no
-fallback: without the API the feature does nothing except report the conditions below. The
+The operator checks for the API at startup (`pkg/runtime/snapshot_detect.go`). If it was
+missing, the operator checks again, at most once a minute, whenever a snapshot or a
+`workspace.fromSnapshot` restore is requested, so installing the snapshotter later needs no
+operator restart. Knights are then polled for snapshot readiness instead of watched until
+the operator next restarts. Without the API the feature does nothing except report the
+conditions below. The
 chart RBAC already grants the operator `get, list, watch, create, delete` on
 `volumesnapshots` (`charts/roundtable-operator/templates/rbac.yaml`). See
 [dependencies.md](dependencies.md).
@@ -67,7 +70,7 @@ The `WorkspaceSnapshots` condition on the Knight (`kubectl describe knight galah
 | Status / reason | Meaning |
 |---|---|
 | `True` / `SnapshotsReady` | Snapshots are in order |
-| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API was not served when the operator started; install the snapshotter and restart the operator |
+| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API is not served; install the snapshotter. The operator looks again, at most once a minute, when a snapshot is requested; no restart is needed |
 | `False` / `WorkspaceNotPersistent` | The knight uses `workspace.mode: ephemeral` |
 | `False` / `SnapshotFailed` | Creating or deleting a `VolumeSnapshot` failed; the message has the error |
 
@@ -107,7 +110,7 @@ condition:
 | Status / reason | Meaning |
 |---|---|
 | `False` / `SnapshotNotReady` | The `VolumeSnapshot` does not exist or is not `readyToUse`. The PVC is **not created** yet, so the knight's pod stays `Pending` until the PVC exists; the operator looks again every 30 seconds |
-| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API was not served when the operator started. The PVC is not created, so the pod stays `Pending`; the operator looks again every 30 seconds |
+| `False` / `SnapshotAPIUnavailable` | The `VolumeSnapshot` API is not served. The PVC is not created, so the pod stays `Pending`; the operator looks again every 30 seconds and rechecks the API at most once a minute |
 | `True` / `RestoredFromSnapshot` | The PVC was created from the snapshot |
 | `True` / `FromSnapshotIgnored` | The PVC already existed (not created from this snapshot), so `fromSnapshot` was not applied |
 

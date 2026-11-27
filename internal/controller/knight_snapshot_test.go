@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	rtruntime "github.com/roundtable-k8s/roundtable/pkg/runtime"
@@ -255,6 +256,67 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotAPIUnavailable))
 		Expect(getKnight(k).Status.Workspace).To(BeNil())
+	})
+})
+
+var _ = Describe("Knight snapshot API recheck (#725)", func() {
+	It("notices the API after startup, probing at most once a minute", func() {
+		_, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+			CRDs: []*apiextensionsv1.CustomResourceDefinition{volumeSnapshotCRD()},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		k := scalingKnight("default", "snap-late", func(s *aiv1alpha1.KnightSpec) {
+			s.Workspace = &aiv1alpha1.KnightWorkspace{
+				Snapshots: &aiv1alpha1.WorkspaceSnapshots{ClassName: "fast"},
+			}
+		})
+		k.Annotations = map[string]string{aiv1alpha1.AnnotationKnightSnapshot: "x"}
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+
+		r := newScalingReconciler(false)
+		clock := time.Unix(1_700_000_000, 0)
+		r.Now = func() time.Time { return clock }
+		served, calls := false, 0
+		r.SnapshotAPIProbe = func() (bool, error) { calls++; return served, nil }
+		cond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+		}
+
+		reconcileRes := func() reconcile.Result {
+			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: k.Name, Namespace: k.Namespace}})
+			Expect(err).NotTo(HaveOccurred())
+			return res
+		}
+		res := reconcileRes()
+		Expect(calls).To(Equal(1))
+		Expect(res.RequeueAfter).To(Equal(time.Minute))
+		Expect(cond().Reason).To(Equal(aiv1alpha1.ReasonSnapshotAPIUnavailable))
+		Expect(cond().Message).NotTo(ContainSubstring("restart"))
+		Expect(snapshotsOf(k)).To(BeEmpty())
+
+		// Within the minute the probe is not called again.
+		clock = clock.Add(30 * time.Second)
+		served = true
+		reconcileRes()
+		Expect(calls).To(Equal(1))
+		Expect(snapshotsOf(k)).To(BeEmpty())
+
+		// After the minute the API is found and the snapshot is created.
+		clock = clock.Add(31 * time.Second)
+		res = reconcileRes()
+		Expect(calls).To(Equal(2))
+		snaps := snapshotsOf(k)
+		Expect(snaps).To(HaveLen(1))
+		Expect(snaps[0].GetName()).To(Equal(fmt.Sprintf("snap-late-ws-%d", clock.Unix())))
+		Expect(cond().Reason).To(Equal(aiv1alpha1.ReasonSnapshotsReady))
+		// Not ready yet and no watch: the knight is polled.
+		Expect(res.RequeueAfter).To(Equal(RequeueSlow))
+
+		// The positive answer is kept; no further probing.
+		reconcileRes()
+		Expect(calls).To(Equal(2))
 	})
 })
 

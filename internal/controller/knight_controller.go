@@ -142,6 +142,17 @@ type KnightReconciler struct {
 	// annotation only sets WorkspaceSnapshots=False.
 	SnapshotsEnabled bool
 
+	// SnapshotAPIProbe re-detects the VolumeSnapshot API after startup. It is
+	// consulted only while SnapshotsEnabled is false and a snapshot or restore
+	// was requested, at most once per snapshotProbeInterval, so installing the
+	// snapshot controller later works without an operator restart. Nil
+	// disables the recheck.
+	SnapshotAPIProbe func() (bool, error)
+
+	snapProbeMu   sync.Mutex
+	snapLastProbe time.Time
+	snapLate      bool
+
 	// EgressNetPol configures the DNS and NATS peers of knight egress
 	// policies (the chart's missionNetworkPolicy values, shared with mission
 	// NetworkPolicies). Nil uses the defaults.
@@ -356,7 +367,8 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// 2a'. Workspace VolumeSnapshots (annotation-triggered).
-	if err := r.reconcileSnapshots(ctx, knight); err != nil {
+	snapRequeue, err := r.reconcileSnapshots(ctx, knight)
+	if err != nil {
 		reconcileErr = err
 		log.Error(err, "Failed to reconcile workspace snapshots")
 	}
@@ -463,6 +475,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if pvcRequeue > 0 && (nixRequeue == 0 || pvcRequeue < nixRequeue) {
 		nixRequeue = pvcRequeue
+	}
+
+	if snapRequeue > 0 && (nixRequeue == 0 || snapRequeue < nixRequeue) {
+		nixRequeue = snapRequeue
 	}
 
 	if nixRequeue > 0 {

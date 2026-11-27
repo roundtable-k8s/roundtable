@@ -448,6 +448,7 @@ func main() {
 		NATS:                   natsProvider,
 		CiliumEnabled:          ciliumEnabled,
 		SnapshotsEnabled:       snapshotsEnabled,
+		SnapshotAPIProbe:       func() (bool, error) { return rtruntime.VolumeSnapshotAPIServed(discoveryClient) },
 		EgressNetPol:           &egressNetPol,
 		Isolation:              isolation,
 	}
