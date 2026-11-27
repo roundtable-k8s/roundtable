@@ -118,8 +118,7 @@ func TestMissionTraceOffStoresNothing(t *testing.T) {
 func sdktraceNoop() trace.TracerProvider { return noop.NewTracerProvider() }
 
 // The reconciler emits the mission's root span once, as the mission moves from
-// its terminal phase to CleaningUp, and a second reconcile of the CleaningUp
-// mission does not emit another.
+// its terminal phase to CleaningUp.
 func TestMissionReconcileEmitsSpanOnCleaningUp(t *testing.T) {
 	ctx := context.Background()
 	rec := tracetest.NewSpanRecorder()
