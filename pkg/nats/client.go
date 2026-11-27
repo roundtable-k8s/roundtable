@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -515,6 +516,29 @@ func (c *JetStreamClient) DeleteConsumer(ctx context.Context, stream, consumer s
 	return nil
 }
 
+// pullConsumer creates or updates the pull consumer described by config on
+// stream. A durable of the same name left in push mode by an earlier version
+// cannot be turned into a pull consumer, so it is deleted and created again.
+func (c *JetStreamClient) pullConsumer(
+	ctx context.Context, js jetstream.JetStream, stream string, config jetstream.ConsumerConfig,
+) (jetstream.Consumer, error) {
+	cons, err := js.CreateOrUpdateConsumer(ctx, stream, config)
+	if err == nil || !strings.Contains(err.Error(), pushToPullError) {
+		return cons, err
+	}
+	c.log.Info("Replacing push-mode consumer left by an earlier version",
+		"stream", stream, "consumer", config.Durable)
+	if derr := js.DeleteConsumer(ctx, stream, config.Durable); derr != nil &&
+		!errors.Is(derr, jetstream.ErrConsumerNotFound) {
+		return nil, fmt.Errorf("delete push consumer %s on stream %s: %w", config.Durable, stream, derr)
+	}
+	return js.CreateOrUpdateConsumer(ctx, stream, config)
+}
+
+// pushToPullError is the server's reply when a push consumer is asked to
+// become a pull consumer.
+const pushToPullError = "can not update push consumer to pull based"
+
 // FetchOne reads and acknowledges one message through the consumer described
 // by config on stream. See Client.FetchOne.
 func (c *JetStreamClient) FetchOne(
@@ -525,7 +549,7 @@ func (c *JetStreamClient) FetchOne(
 		return nil, err
 	}
 
-	cons, err := js.CreateOrUpdateConsumer(ctx, stream, config)
+	cons, err := c.pullConsumer(ctx, js, stream, config)
 	if errors.Is(err, jetstream.ErrStreamNotFound) && config.FilterSubject != "" {
 		// The configured stream does not exist: find the one that captures
 		// the subject instead.
@@ -535,7 +559,7 @@ func (c *JetStreamClient) FetchOne(
 		if lerr != nil {
 			return nil, fmt.Errorf("consumer %s on stream %s: %w (lookup by subject: %v)", config.Durable, stream, err, lerr)
 		}
-		cons, err = js.CreateOrUpdateConsumer(ctx, found, config)
+		cons, err = c.pullConsumer(ctx, js, found, config)
 		if err == nil {
 			// Callers delete the consumer on the configured (missing)
 			// stream, so remove the one created here ourselves; otherwise
