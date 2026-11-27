@@ -236,7 +236,7 @@ func TestScheduleRunResultKnightTarget(t *testing.T) {
 	e := newRunsEnv(t, trg)
 	e.svc.Bus = &stubBus{recs: map[string]*TaskRecord{
 		"task-1": {TaskID: "task-1", Knight: "operator", Namespace: testNS, Status: TaskSucceeded, Output: "all done",
-			Model: "opus", Verdict: "ship", CreatedAt: scheduleT0, CompletedAt: &done},
+			Model: "opus", Verdict: "ship", CreatedAt: scheduleT0, CompletedAt: &done, TraceID: testTraceID},
 		// Sent by something else, not by this schedule.
 		"task-foreign": {TaskID: "task-foreign", Knight: "operator", Namespace: testNS, Status: TaskSucceeded, Output: "x"},
 	}}
@@ -248,7 +248,8 @@ func TestScheduleRunResultKnightTarget(t *testing.T) {
 	}
 	task, _ := body["task"].(map[string]any)
 	if body["target"] != "knight" || body["schedule"] != "k" || task["output"] != "all done" ||
-		task["status"] != "succeeded" || task["model"] != "opus" || task["run"] != "task-1" {
+		task["status"] != "succeeded" || task["model"] != "opus" || task["run"] != "task-1" ||
+		task["traceId"] != testTraceID {
 		t.Errorf("result = %v", body)
 	}
 	for _, run := range []string{"task-foreign", "task-expired", "task-gone", "Not a name"} {
@@ -278,18 +279,18 @@ func TestScheduleRunsKnightUsage(t *testing.T) {
 	e := newRunsEnv(t, trg)
 	e.svc.Bus = &stubBus{recs: map[string]*TaskRecord{
 		"invoke-op-1-a": {TaskID: "invoke-op-1-a", Namespace: testNS, Status: TaskSucceeded, Output: "x",
-			DurationMs: 94000, Cost: 0.5, Turns: 6, ToolCalls: &calls},
+			DurationMs: 94000, Cost: 0.5, Turns: 6, ToolCalls: &calls, TraceID: testTraceID},
 		"other-task": {TaskID: "other-task", Namespace: testNS, Status: TaskSucceeded, Output: "x", DurationMs: 1000, Cost: 1},
 	}}
 	_, body := e.do(t, "GET", "/v1/schedules/"+testNS+"/u/runs", testToken, nil)
 	for _, r := range runsOf(body) {
 		switch r["run"] {
 		case "invoke-op-1-a":
-			if r["durationSeconds"] != float64(94) || r["costUSD"] != "0.5" || r["turns"] != float64(6) || r["toolCalls"] != float64(4) {
+			if r["durationSeconds"] != float64(94) || r["costUSD"] != "0.5" || r["turns"] != float64(6) || r["toolCalls"] != float64(4) || r["traceId"] != testTraceID {
 				t.Errorf("usage row = %v", r)
 			}
 		default:
-			for _, k := range []string{"durationSeconds", "costUSD", "turns", "toolCalls"} {
+			for _, k := range []string{"durationSeconds", "costUSD", "turns", "toolCalls", "traceId"} {
 				if _, ok := r[k]; ok {
 					t.Errorf("run %v has %s: %v", r["run"], k, r)
 				}
@@ -303,7 +304,7 @@ func missionScheduleRun(trg *aiv1alpha1.Trigger, name, result string) *aiv1alpha
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: trg.Namespace,
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "Trigger",
 				Name: trg.Name, UID: trg.UID, Controller: new(true)}}},
-		Status: aiv1alpha1.MissionStatus{Phase: aiv1alpha1.MissionPhaseSucceeded, Result: result},
+		Status: aiv1alpha1.MissionStatus{Phase: aiv1alpha1.MissionPhaseSucceeded, Result: result, TraceID: testTraceID},
 	}
 }
 
@@ -331,7 +332,7 @@ func TestScheduleRunResultMissionTarget(t *testing.T) {
 		}
 	}
 	_, body = e.do(t, "GET", base, testToken, nil)
-	if runs := runsOf(body); len(runs) != 1 || runs[0]["resultAvailable"] != true {
+	if runs := runsOf(body); len(runs) != 1 || runs[0]["resultAvailable"] != true || runs[0]["traceId"] != testTraceID {
 		t.Errorf("runs = %v, want one with resultAvailable", runs)
 	}
 }

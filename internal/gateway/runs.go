@@ -120,6 +120,23 @@ type RunRecord struct {
 	// Replayed marks a record returned for a repeated Idempotency-Key. Not
 	// serialized.
 	Replayed bool `json:"-"`
+	// TraceID is the trace of the run (the Chain's status.traceID); omitted
+	// when the run has none or the value is not a valid trace ID.
+	TraceID string `json:"traceId,omitempty"`
+}
+
+// validTraceID returns id when it is a W3C trace ID (32 lowercase hex digits,
+// not all zero), otherwise "".
+func validTraceID(id string) string {
+	if len(id) != 32 || id == "00000000000000000000000000000000" {
+		return ""
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return id
 }
 
 // RunStep is one step of a run.
@@ -545,11 +562,12 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 		CreatedAt:   c.CreationTimestamp.UTC(),
 		StartedAt:   timePtr(st.StartedAt),
 		CompletedAt: timePtr(st.CompletedAt),
+		TraceID:     validTraceID(st.TraceID),
 	}
 	if r.Phase == "" || (chainrun.Active(c) && st.Phase != aiv1alpha1.ChainPhaseRunning) {
 		// The run hasn't started: any status is from before it.
 		r.Phase = runPhasePending
-		r.StartedAt, r.CompletedAt = nil, nil
+		r.StartedAt, r.CompletedAt, r.TraceID = nil, nil, ""
 	} else {
 		r.RunID = st.RunID
 	}
