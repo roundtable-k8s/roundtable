@@ -185,9 +185,10 @@ func (r *ChainReconciler) collectStepResult(ctx context.Context, chain *aiv1alph
 		log.Error(err, "Failed to poll result", "step", ss.Name)
 		result = nil
 	}
-	if result == nil && err == nil {
+	if result == nil {
 		// The result may have been acked off the stream by an earlier
-		// reconcile whose status write failed (#683); recover it from KV.
+		// reconcile whose status write failed (#683), or the stream read
+		// itself failed; recover it from KV in both cases.
 		result = r.recoverStepResultFromKV(ctx, chain, ss)
 	}
 	if result != nil {
@@ -362,7 +363,7 @@ func (r *ChainReconciler) applyStepSuccess(ctx context.Context, nc natsConfig, c
 
 	// Store full output to NATS KV (best-effort)
 	if spec != nil {
-		r.storeStepOutputToKV(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, "", spec.KnightRef.Name, ss.StartedAt, now, result.Structured())
+		r.storeStepOutputToKVWithResult(ctx, chain.Name, chain.Status.RunID, ss.Name, resultOutput, "", spec.KnightRef.Name, ss.StartedAt, now, result, result.Structured())
 	}
 
 	// Truncate CRD status output to avoid etcd bloat (4000 chars allows
