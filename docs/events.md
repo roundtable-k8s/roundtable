@@ -26,6 +26,7 @@ A cause marked "inferred" is not stated by the code; it is the likely reason.
 | `ConsumerDeleteAbandoned` | Knight controller | Deleting the consumer failed repeatedly, so the Knight is deleted anyway and the consumer is left | Delete it by hand: `nats consumer rm <stream> <consumer>` |
 | `ServiceNotFound` | Knight controller | An egress `allowedServices` entry names a Service that does not exist | `kubectl get svc`; fix `spec.egress`; [egress](egress.md) |
 | `InClusterAllowedHost` | Knight controller | An `allowedHosts` entry names an in-cluster Service host | Use `allowedServices` for in-cluster targets; [egress](egress.md) |
+| `HostNetworkPortUnresolved` | Knight controller | A listed port of a host-network `allowedServices` Service does not resolve to a number and is not allowed | Use a numeric `targetPort` on the Service or list a resolvable port; [egress](egress.md) |
 | `MemoryNotRWX` | Knight controller | The memory PVC is not ReadWriteMany but the knight can run more than one pod | Set `spec.memory.storageClassName` to an RWX class and recreate the PVC; [memory](memory.md) |
 | `UnsupportedRuntime` | Knight controller | Autoscaling is requested with a runtime other than `deployment`; one pod runs | Use `runtime: deployment` or drop `maxReplicas`/`suspendPolicy: auto` |
 | `KEDAUnavailable` | Knight controller | Autoscaling is requested but the operator started without KEDA; a fixed replica count runs | Install KEDA and restart the operator, or set `--enable-keda` |

@@ -287,7 +287,7 @@ func TestNetPolSettingsFromEnv(t *testing.T) {
 			// Pins current behaviour: a DNS label value made only of malformed
 			// entries replaces the default selector with nil, so the DNS peer
 			// has no pod selector and matches every pod in the DNS namespace.
-			// Filed separately; not changed here.
+			// Tracked in #751; this case must change when #751 lands.
 			name: "malformed dns labels clear the default selector",
 			env:  map[string]string{EnvNetPolDNSPodLabels: "=x"},
 			want: func(s *NetPolSettings) { s.DNSPodLabels = nil },

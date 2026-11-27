@@ -603,9 +603,16 @@ func TestHostNetworkPortsReportsUnresolved(t *testing.T) {
 	assert.Equal(t, []EgressServicePort{{Port: intstr.FromInt32(8123), Protocol: corev1.ProtocolTCP}}, ports)
 	assert.Equal(t, []int32{9090}, unresolved)
 
-	notes := hostNetworkNotes([]EgressServicePeer{{Namespace: "ha", Name: "hass", HostNetwork: true, Ports: ports, UnresolvedPorts: unresolved}})
-	require.Len(t, notes, 2)
-	assert.Contains(t, notes[1], "ha/hass: listed port 9090 could not be resolved")
+	peer := EgressServicePeer{Namespace: "ha", Name: "hass", HostNetwork: true, Ports: ports, UnresolvedPorts: unresolved}
+	require.Len(t, hostNetworkNotes([]EgressServicePeer{peer}), 1)
+	warns := hostNetworkUnresolvedWarnings([]EgressServicePeer{peer})
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "ha/hass: listed port 9090 could not be resolved to a number and is not allowed")
+
+	peer.UnresolvedPorts = []int32{80, 81}
+	warns = hostNetworkUnresolvedWarnings([]EgressServicePeer{peer})
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "listed ports 80, 81 could not be resolved to a number and are not allowed")
 }
 
 func TestEgressEndpointSliceChangedPredicate(t *testing.T) {

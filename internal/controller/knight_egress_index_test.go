@@ -2,7 +2,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -123,4 +127,35 @@ func TestHostNetworkEndpointsReadsEachPodOnce(t *testing.T) {
 	if spy.podGets != 2 {
 		t.Fatalf("pod reads = %d, want 2 (one per pod across three reconciles)", spy.podGets)
 	}
+}
+
+type fakeFieldIndexer struct{ fields map[string]bool }
+
+func (f *fakeFieldIndexer) IndexField(_ context.Context, obj client.Object, field string, _ client.IndexerFunc) error {
+	f.fields[fmt.Sprintf("%T/%s", obj, field)] = true
+	return nil
+}
+
+func TestRegisterEgressIndexes(t *testing.T) {
+	idx := &fakeFieldIndexer{fields: map[string]bool{}}
+	r := &KnightReconciler{}
+	require.NoError(t, r.registerEgressIndexes(context.Background(), idx))
+	assert.True(t, r.serviceIndexed)
+	assert.True(t, idx.fields["*v1alpha1.Knight/"+knightEgressServiceIndex])
+	assert.True(t, idx.fields["*v1alpha1.RoundTable/"+tableEgressServiceIndex])
+}
+
+func TestRememberHostNetPodKeepsRecentOnOverflow(t *testing.T) {
+	r := &KnightReconciler{}
+	for i := 0; i < hostNetPodCacheMax+1; i++ {
+		r.rememberHostNetPod(types.UID(fmt.Sprintf("uid-%d", i)), true)
+	}
+	_, oldest := r.hostNetPods.Load(types.UID("uid-0"))
+	_, newest := r.hostNetPods.Load(types.UID(fmt.Sprintf("uid-%d", hostNetPodCacheMax)))
+	_, recent := r.hostNetPods.Load(types.UID(fmt.Sprintf("uid-%d", hostNetPodCacheMax-1)))
+	assert.False(t, oldest)
+	assert.True(t, newest)
+	assert.True(t, recent)
+	assert.LessOrEqual(t, r.hostNetPodCount.Load(), int64(hostNetPodCacheMax))
+	assert.Greater(t, r.hostNetPodCount.Load(), int64(hostNetPodCacheMax/2))
 }
