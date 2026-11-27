@@ -817,3 +817,22 @@ and will be removed one release later:
 The operator no longer writes the `mise.toml` and `apt.txt` ConfigMap keys. Move
 any tools to `spec.tools.nix` or `spec.tools.flakes` before upgrading: with the
 CRD field gone, a manifest that still sets either one fails to apply.
+
+## 9. Health semantics (kstatus, Helm `--wait`, Flux)
+
+Helm 3.13+ `--wait` and Flux health checks read custom resources with kstatus
+(`sigs.k8s.io/cli-utils/pkg/kstatus/status`): an object is `InProgress` while
+`status.observedGeneration` lags `metadata.generation` or a `Reconciling`
+condition is True, `Failed` when `Stalled` is True, otherwise `Current`.
+
+**Chain.** A Chain that is running, idle, suspended, succeeded or failed is
+healthy (`Current`): a run is the Chain doing its job, and a failed run does not
+stop the next one from starting. The operator writes `status.observedGeneration`
+as soon as it accepts a spec, including for a run already in flight, and never
+sets `Reconciling` or `Stalled` for run progress. Run state lives in
+`status.phase` and the `ChainValid` / `ChainComplete` conditions. A Chain is
+only `InProgress` before the operator has seen its spec for the first time.
+`TestChainKstatus` pins this.
+
+Mission, Trigger, Knight and RoundTable have not been audited against kstatus
+yet; follow-ups: Mission #928, Trigger #929, Knight #930, RoundTable #931.
