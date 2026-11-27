@@ -117,6 +117,7 @@ type TriggerReconciler struct {
 	manualGitHubPolls bool
 	fireLocks         sync.Map // namespace/name -> *sync.Mutex
 	holdSince         sync.Map // namespace/name/repository -> time.Time the repository's hold began
+	runNowWarned      sync.Map // namespace/name -> run-now request id whose failure was already reported as an Event
 
 	tasksMu   sync.Mutex
 	tasks     *gateway.Service
@@ -172,9 +173,13 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// A request that cannot fire yet must not block the Ready
 		// condition and suspendedBy: keep it, carry on, and requeue.
 		if err := r.runNow(ctx, trg, id); err != nil {
-			logf.FromContext(ctx).Error(err, "run-now request not fired, will retry", "request", id)
+			r.reportRunNowRetry(ctx, trg, id, err)
 			runNowRetry = true
+		} else {
+			r.runNowWarned.Delete(req.String())
 		}
+	} else {
+		r.runNowWarned.Delete(req.String())
 	}
 
 	now := r.now()
@@ -196,6 +201,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	orig := latest.DeepCopy()
+	var taskEvents []triggerEvent
 	active, gcAfter, err := r.collectRuns(ctx, latest, now)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -212,7 +218,8 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	} else if latest.Spec.Target.Knight != nil {
 		// A knight target's active runs are its tasks without a result.
-		pollAfter := r.collectTasks(ctx, latest, now)
+		var pollAfter time.Duration
+		pollAfter, taskEvents = r.collectTasks(ctx, latest, now)
 		if pollAfter > 0 && (gcAfter == 0 || pollAfter < gcAfter) {
 			gcAfter = pollAfter
 		}
@@ -259,6 +266,10 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		return ctrl.Result{}, err
 	}
+	// Events too: a conflicted patch is retried and would raise them again.
+	for _, ev := range taskEvents {
+		r.event(latest, corev1.EventTypeWarning, ev.reason, "%s", ev.message)
+	}
 	// Count after the patch so a conflict-retried reconcile cannot count a
 	// firing twice: the outcome is persisted exactly once.
 	if latest.Spec.Target.Knight != nil || latest.Spec.Target.Mission != nil {
@@ -272,6 +283,20 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		res.RequeueAfter = runNowRetryDelay
 	}
 	return res, nil
+}
+
+// reportRunNowRetry reports a run-now request that could not fire yet: a
+// Warning Event and a log line the first time for a request, V(1) after, so
+// a transient failure does not log at Error level every retry.
+func (r *TriggerReconciler) reportRunNowRetry(ctx context.Context, trg *aiv1alpha1.Trigger, id string, err error) {
+	key := client.ObjectKeyFromObject(trg).String()
+	if prev, ok := r.runNowWarned.Load(key); ok && prev == id {
+		logf.FromContext(ctx).V(1).Info("run-now request not fired, will retry", "request", id, "error", err.Error())
+		return
+	}
+	r.runNowWarned.Store(key, id)
+	r.event(trg, corev1.EventTypeWarning, "RunNowNotFired", "run-now request %s not fired, will retry: %v", id, err)
+	logf.FromContext(ctx).Info("run-now request not fired, will retry", "request", id, "error", err.Error())
 }
 
 // runNowRetryDelay is how long a run-now request that could not fire waits
@@ -696,6 +721,9 @@ func (r *TriggerReconciler) reconcileSchedule(ctx context.Context, trg *aiv1alph
 // was deliberately skipped, term when the templates can't render it, and nak
 // with a delay on errors worth retrying.
 func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHandler {
+	// One handler serves one consumer loop: the stream's creation time is
+	// looked up once per loop, not per message.
+	cache := &streamCreatedCache{}
 	return func(ctx context.Context, msg jetstream.Msg) {
 		log := logf.Log.WithName("trigger").WithValues("trigger", nn.String(), "subject", msg.Subject())
 		ev := TriggerEvent{
@@ -711,7 +739,7 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 			ev.Time = md.Timestamp
 			if key == "" {
 				var err error
-				if key, ev.streamCreated, err = r.streamSeqKey(ctx, md); err != nil {
+				if key, ev.streamCreated, err = r.streamSeqKey(ctx, cache, md); err != nil {
 					log.Error(err, "Failed to build the default dedupe key, will retry")
 					_ = msg.NakWithDelay(triggerNakDelay)
 					return
@@ -749,7 +777,10 @@ func (r *TriggerReconciler) messageHandler(nn types.NamespacedName) triggerMsgHa
 // the stream's creation time and the message's sequence. A recreated stream
 // restarts its sequence at 1, so the sequence alone would match runs from
 // before the reset.
-func (r *TriggerReconciler) streamSeqKey(ctx context.Context, md *jetstream.MsgMetadata) (string, time.Time, error) {
+func (r *TriggerReconciler) streamSeqKey(ctx context.Context, cache *streamCreatedCache, md *jetstream.MsgMetadata) (string, time.Time, error) {
+	if created, ok := cache.get(md.Stream); ok {
+		return streamSeqKeyOf(created, md.Sequence.Stream), created, nil
+	}
 	nc, err := r.natsConn()
 	if err != nil {
 		return "", time.Time{}, err
@@ -763,7 +794,32 @@ func (r *TriggerReconciler) streamSeqKey(ctx context.Context, md *jetstream.MsgM
 		return "", time.Time{}, fmt.Errorf("stream %s: %w", md.Stream, err)
 	}
 	created := s.CachedInfo().Created
+	cache.set(md.Stream, created)
 	return streamSeqKeyOf(created, md.Sequence.Stream), created, nil
+}
+
+// streamCreatedCache remembers the creation time of the stream a consumer
+// loop reads from. A recreated stream ends the loop (its consumer is gone),
+// and the new loop gets a new cache.
+type streamCreatedCache struct {
+	mu      sync.Mutex
+	stream  string
+	created time.Time
+}
+
+func (c *streamCreatedCache) get(stream string) (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream != stream || c.created.IsZero() {
+		return time.Time{}, false
+	}
+	return c.created, true
+}
+
+func (c *streamCreatedCache) set(stream string, created time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream, c.created = stream, created
 }
 
 func streamSeqKeyOf(created time.Time, seq uint64) string {
@@ -853,7 +909,14 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 	}
 	now := r.now()
 	firing := aiv1alpha1.TriggerFiring{Time: metav1.NewTime(now)}
-	table := r.triggerTable(ctx, trg)
+	// The target chain is read once: its table label here, its template below.
+	var tmpl *aiv1alpha1.Chain
+	var tmplErr error
+	if trg.Spec.Target.ChainRef != nil && trg.Spec.Target.Knight == nil && trg.Spec.Target.Mission == nil {
+		tmpl = &aiv1alpha1.Chain{}
+		tmplErr = r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: aiv1alpha1.RefName(trg.Spec.Target.ChainRef)}, tmpl)
+	}
+	table := r.triggerTable(ctx, trg, tmpl, tmplErr)
 	// A failed attempt is retried (and counted again) until it succeeds.
 	defer func() {
 		if retErr != nil {
@@ -991,8 +1054,10 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 		})
 	}
 	chainName := aiv1alpha1.RefName(trg.Spec.Target.ChainRef)
-	tmpl := &aiv1alpha1.Chain{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, tmpl); err != nil {
+	if tmpl == nil {
+		tmpl, tmplErr = &aiv1alpha1.Chain{}, r.Get(ctx, types.NamespacedName{Namespace: nn.Namespace, Name: chainName}, tmpl)
+	}
+	if err := tmplErr; err != nil {
 		if manual != nil && apierrors.IsNotFound(err) {
 			// A run-now request can never fire without its Chain: record
 			// it as skipped and let the request be cleared.
@@ -1178,15 +1243,21 @@ const (
 // triggerTable is the table label of a Trigger's metrics: its target chain's
 // roundTableRef or target knight's RoundTable, else the Trigger's own, else
 // none.
-func (r *TriggerReconciler) triggerTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
+//
+// A chain target's Chain may be passed in with the error of reading it (chain
+// nil reads it here), so a caller that already loaded it costs no second read.
+func (r *TriggerReconciler) triggerTable(ctx context.Context, trg *aiv1alpha1.Trigger, chain *aiv1alpha1.Chain, chainErr error) string {
 	switch target := trg.Spec.Target; {
 	case target.Knight != nil:
 		if name, err := r.knightResolver().KnightTable(ctx, trg.Namespace, target.Knight.Name); err == nil && name != "" {
 			return name
 		}
 	case target.ChainRef != nil:
-		chain := &aiv1alpha1.Chain{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err == nil {
+		if chain == nil {
+			chain = &aiv1alpha1.Chain{}
+			chainErr = r.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain)
+		}
+		if chainErr == nil {
 			if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
 				return name
 			}
@@ -1231,7 +1302,7 @@ func (r *TriggerReconciler) countFinishedRuns(ctx context.Context, before, after
 			continue
 		}
 		if table == "" {
-			table = r.triggerTable(ctx, after)
+			table = r.triggerTable(ctx, after, nil, nil)
 		}
 		countTriggerRunFinished(table, after, string(f.Outcome))
 		delete(pending, f.Run)
