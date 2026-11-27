@@ -939,7 +939,7 @@ func (l *triggerPoller) stop() {
 // conditionNamesRepository reports whether a RepositoryHeld message (lines of
 // "<repo>: ..." joined by "; ") has a line for repo.
 func conditionNamesRepository(message, repo string) bool {
-	for _, line := range strings.Split(message, "; ") {
+	for line := range strings.SplitSeq(message, "; ") {
 		if strings.HasPrefix(line, repo+": ") {
 			return true
 		}
