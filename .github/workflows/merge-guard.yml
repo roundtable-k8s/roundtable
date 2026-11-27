@@ -26,9 +26,13 @@ permissions:
 
 # Never cancel a running check: a cancelled required check run on the head
 # commit blocks the merge even when a newer run succeeds (roundtable#1022).
-# The check takes seconds, so a newer event just queues behind it.
+# GitHub keeps only one pending run per group, so a third event queued behind
+# a running one would cancel the pending one (roundtable#1024). PR-event runs
+# only report and are idempotent, so each gets its own group (run_id) and
+# never queues or gets cancelled. merge_group runs keep the queue-ref group
+# and stay serialised.
 concurrency:
-  group: merge-guard-${{ github.event.pull_request.number || github.event.merge_group.head_ref }}
+  group: merge-guard-${{ github.event.merge_group.head_ref || format('pr-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
