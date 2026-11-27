@@ -27,7 +27,8 @@ const samplePlan = `{"planVersion":"v1alpha1","metadata":{"objective":"Summarise
 	`"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}`
 
 func TestPlannerReply(t *testing.T) {
-	planningTask := plannerPrompt + " Your task is to generate a detailed execution plan.\n\n**Mission Objective:**\nSummarise the release"
+	planningTask := plannerPrompt +
+		" Your task is to generate a detailed execution plan.\n\n**Mission Objective:**\nSummarise the release"
 	cases := []struct {
 		name     string
 		task     string
