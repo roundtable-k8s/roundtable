@@ -1863,6 +1863,9 @@ var _ = Describe("Trigger controller", func() {
 			publishResult(sent[0].TaskID, `{"taskId":"`+sent[0].TaskID+`","error":"boom"}`)
 
 			rec := r.Recorder.(*record.FakeRecorder)
+			// The consumer loop raises its Normal Fired event after the status
+			// patch that set ActiveRuns: wait for it before draining.
+			Eventually(rec.Events, "10s").Should(Receive(ContainSubstring("Normal Fired")))
 			for len(rec.Events) > 0 {
 				<-rec.Events
 			}
