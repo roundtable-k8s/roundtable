@@ -1160,7 +1160,16 @@ default).
   exists, so senders that retry 5xx keep the event.
 - **No oracle.** An unknown Trigger, a Trigger without `source.webhook` and a
   namespace outside the gateway's namespace and `allowedNamespaces` all get
-  the same 404.
+  the same 404. A 404 for an unknown name is cached per replica for 5 seconds,
+  so repeated probes of that name read the API once; a Trigger created in that
+  window is reachable once the entry expires. Found Triggers are read on every
+  request.
+- **NATS publishers bypass the credential.** The credential guards only this
+  HTTP path. Anyone who can publish on
+  `<subjectPrefix>.events.webhook.<namespace>.<trigger>` (or `<subjectPrefix>.events.>`)
+  fires the Trigger without its credential. NATS users and permissions are not
+  managed by the gateway (see issue #234); restrict who can publish to the
+  events subjects if that matters for a Trigger.
 - **In-cluster senders.** Allow each sender in `gateway.networkPolicy.from`,
   for example Alertmanager and Flux:
 
