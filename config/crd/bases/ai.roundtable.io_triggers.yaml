@@ -795,6 +795,18 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              when:
+                description: |-
+                  when is a CEL expression over the event that must be true for the event
+                  to fire; only for source.nats and source.webhook. Variables: event
+                  (subject, data: the payload parsed as JSON or the raw string, headers:
+                  map of header name to value, time: RFC 3339) and trigger (name,
+                  namespace). An event for which it is false is acknowledged and starts
+                  nothing, and is not recorded in status. An evaluation error (for
+                  example a missing key: guard with has()) rejects the event like a
+                  failing input template. run-now skips it. Empty fires on every event.
+                maxLength: 4096
+                type: string
             required:
             - source
             - target
@@ -829,6 +841,8 @@ spec:
                 a sent task cannot be withdrawn'
               rule: '!has(self.target.knight) || !has(self.concurrency) || !has(self.concurrency.policy)
                 || self.concurrency.policy != ''Replace'''
+            - message: when is only supported with source.nats or source.webhook
+              rule: '!has(self.when) || has(self.source.nats) || has(self.source.webhook)'
           status:
             description: status defines the observed state of Trigger
             properties:

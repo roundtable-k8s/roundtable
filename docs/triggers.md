@@ -154,6 +154,27 @@ A complete, copyable version (read-only knight, triage chain, Alertmanager recei
 and acknowledged, but start nothing and are not recorded in
 `status.recentFirings`.
 
+### Filtering events
+
+`spec.when` (NATS and webhook sources, at most 4096 characters) is a
+[CEL](conditional-steps.md) expression over the event that must be true for
+the event to fire. Variables: `event.subject`, `event.data` (the payload parsed
+as JSON, or the raw string), `event.headers` (map of header name to value),
+`event.time` (RFC 3339), and `trigger.name` / `trigger.namespace`. Same
+libraries and cost limit as chain conditions.
+
+```yaml
+spec:
+  when: 'event.data.status == "firing"'   # Alertmanager: skip "resolved"
+```
+
+An event for which `when` is false is acknowledged and starts nothing; like
+`eventType` it is not recorded in `status.recentFirings` and not counted in
+the firing metrics. An evaluation error (a missing key, a non-bool result) is
+recorded as a rejected event, like a failing `input` template, so guard
+optional fields: `has(event.data.service) && event.data.service == "api"`.
+A bad expression sets `Ready=False` (`InvalidSpec`). Run-now skips `when`.
+
 ### Senders
 
 The gateway is reachable in the cluster only; webhooks from the internet
@@ -825,6 +846,7 @@ and the `Suspended` condition's message names it too.
 | `source.github.skipIfBodyMatches` | `patterns` on title and body, and `handBack` (`addLabels`, `removeLabels`, `comment` with `.Reason`) for items handed back instead of run. |
 | `target.chainRef` | The Chain (same namespace) each firing copies. |
 | `target.knight` | Instead of `chainRef`: `name`, `task` (template), `model` and `timeoutSeconds` of one task sent to a knight per firing (see [Knight target](#knight-target)). |
+| `when` | CEL expression over the event (NATS and webhook sources); false starts nothing (see [Filtering events](#filtering-events)). |
 | `input` | Go template rendered into the run's `spec.input`. Empty keeps the target's own input. |
 | `dedupeKey` | Go template whose result identifies the event. Defaults: see the table above. |
 | `concurrency.policy` | `Allow` (default), `Forbid` or `Replace`. |

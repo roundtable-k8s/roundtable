@@ -346,6 +346,58 @@ var _ = Describe("Trigger controller", func() {
 		})
 	})
 
+	Context("spec.when", func() {
+		It("fires only on events the expression accepts and rejects a bad expression", func() {
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{Name: "when-wh", Namespace: ns},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source: aiv1alpha1.TriggerSource{Webhook: &aiv1alpha1.TriggerWebhookSource{
+						Auth: aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "hook"}, Key: "token"}},
+					}},
+					Target:        aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
+					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+					When:          `event.data.status == "firing"`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			reconcileTrigger("when-wh")
+			subject := natspkg.WebhookEventSubject(prefix, ns, "when-wh")
+			js2 := func(id, data string) {
+				msg := nats.NewMsg(subject)
+				msg.Data = []byte(data)
+				_, err := js.PublishMsg(ctx, msg, jetstream.WithMsgID(id))
+				Expect(err).NotTo(HaveOccurred())
+			}
+			js2("w1", `{"status":"resolved"}`)
+			js2("w2", `{"status":"firing"}`)
+			Eventually(func() int { return len(runsOf("when-wh")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+			Consistently(func() int { return len(runsOf("when-wh")) }, time.Second, 200*time.Millisecond).Should(Equal(1))
+			Expect(getTrigger("when-wh").Status.RecentFirings).To(HaveLen(1))
+
+			got := getTrigger("when-wh")
+			got.Spec.When = `event.data.status ==`
+			Expect(k8sClient.Update(ctx, got)).To(Succeed())
+			reconcileTrigger("when-wh")
+			cond := meta.FindStatusCondition(getTrigger("when-wh").Status.Conditions, aiv1alpha1.ConditionTriggerReady)
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerInvalidSpec))
+			Expect(cond.Message).To(ContainSubstring("when:"))
+		})
+
+		It("is rejected for a schedule source", func() {
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{Name: "when-sched", Namespace: ns},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "* * * * *"}},
+					Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
+					When:   `true`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, t)).To(MatchError(ContainSubstring("when is only supported with source.nats or source.webhook")))
+		})
+	})
+
 	Context("NATS source", func() {
 		It("starts exactly one run per message with the rendered input and dedupes Nats-Msg-Id", func() {
 			t := natsTrigger("on-deploy", prefix+".events.deploys.>", nil)
