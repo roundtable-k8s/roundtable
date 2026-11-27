@@ -931,8 +931,8 @@ status:
       reason: Listening
 ```
 
-`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject, cron, or `spec.concurrency.policy: Replace` with a
-knight or mission target), `TargetNotFound`, `TargetWrongTable` (knight target),
+`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject,
+cron, or `spec.concurrency.policy: Replace` with a knight or mission target), `TargetNotFound`, `TargetWrongTable` (knight target),
 `RoundTableNotFound`, `ConsumerError` (for example no
 events stream: set `createStreams` or create the stream yourself; Mission
 (ephemeral) RoundTables never have an events stream, so a Trigger that

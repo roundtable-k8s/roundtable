@@ -82,7 +82,9 @@ roundtable_knight_isolated{reason!="Isolated"} == 1
 
 Isolation also turns on default-deny egress. `tools.nix` and `tools.flakes`
 need no egress at pod start: the tools image is built by the operator's builder
-Job and mounted read-only at `/nix`, not downloaded when the pod starts; see
+Job and mounted read-only at `/nix`, not downloaded when the pod starts. The
+kubelet, not the knight pod, pulls that image, so the registry needs no
+`allowedHosts` entry; see
 [Tool installs need egress](egress.md#tool-installs-need-egress).
 
 ## Upgrading a cluster without gVisor

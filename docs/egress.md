@@ -256,7 +256,9 @@ builder Job builds the packages into a tools image, and the knight mounts that
 image read-only at `/nix` as a Kubernetes image volume. Nothing is downloaded
 when the pod starts, so the knight needs no package hosts in `allowedHosts`.
 Changing the tool set builds a new image; the builder Job pushes it to the
-registry, which is not part of the knight's allowlist.
+registry, which is not part of the knight's allowlist. The kubelet, not the
+knight pod, pulls the tools image, so the registry needs no `allowedHosts`
+entry either.
 
 When enabling isolation on an existing knight, check its `tools` first; see
 `examples/tristan.yaml`.

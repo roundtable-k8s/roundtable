@@ -157,7 +157,7 @@ func main() {
 			"0 means unlimited.")
 	flag.IntVar(&providerMaxRetries, "provider-overload-max-retries", 4,
 		"Retries (1m, 2m, 4m, 8m backoff) of a chain step whose task failed with a transient "+
-			"model provider error (HTTP 529/503/502/500, overloaded). 0 disables.")
+			"model provider error (HTTP 529/503/502/500, overloaded_error). 0 disables.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
