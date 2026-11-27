@@ -225,6 +225,37 @@ sequenceDiagram
 
 Sources: `internal/gateway/service.go` (`Invoke`: `Watch`, `PutRecord`, `Publish`), `internal/gateway/bus.go` (`LastResult`).
 
+### Scheduled firing
+
+A Trigger with `spec.source.schedule` is not timed inside the operator. The Trigger controller renders a CronJob `trigger-<name>` and a ServiceAccount of the same name; each cron time the CronJob starts a short pod that calls the gateway, which publishes the firing to the table's events stream. The Trigger controller reads it like any other event, dedupes on the firing key, applies `concurrency` and starts the target: a Chain (`chainRef`), one knight task (`target.knight`) or a Mission (`target.mission`). See [scheduled-work.md](scheduled-work.md) and [triggers.md](triggers.md).
+
+```mermaid
+sequenceDiagram
+  participant CJ as CronJob pod (fire-trigger)
+  participant G as Invoke gateway
+  participant E as Events stream
+  participant TC as Trigger controller
+  participant T as Tasks stream
+  participant K as Knight pod
+  CJ->>G: POST /v1/triggers/namespace/name/fire (ServiceAccount token, scheduled time from the Job name)
+  G->>G: authorize caller, resolve Trigger and its RoundTable
+  G->>E: publish schedule event on the Trigger's subject (key = scheduled minute)
+  G-->>CJ: 202 with stream sequence and firing key
+  E-->>TC: durable consumer trigger-namespace_name
+  TC->>TC: dedupe on key, apply concurrency policy
+  alt target.chainRef
+    TC->>TC: create and start a Chain copy
+  else target.mission
+    TC->>TC: create a Mission
+  else target.knight
+    TC->>T: publish TaskPayload on prefix.tasks.domain.knight
+    T-->>K: pull via Knight-consumer
+  end
+  TC->>TC: record the firing in status.recentFirings
+```
+
+Sources: `internal/controller/trigger_cronjob.go` (`desiredTriggerCronJob`), `internal/gateway/fire.go` (`handleFireTrigger`), `internal/controller/trigger_controller.go`, `trigger_knight.go`, `trigger_mission.go`.
+
 ## Mission Lifecycle
 
 ```

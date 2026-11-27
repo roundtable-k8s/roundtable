@@ -146,7 +146,7 @@ spec:
 Full example: [`examples/roundtable-issue-pickup.yaml`](../examples/roundtable-issue-pickup.yaml).
 
 Pause it with `spec.issuePickup.suspend: true` (running Chains continue) or
-remove `spec.issuePickup`. A suspended RoundTable (`spec.suspended`) does not
+remove `spec.issuePickup`. A suspended RoundTable (`spec.suspend`) does not
 poll either.
 
 ## Engines
