@@ -240,6 +240,17 @@ var GatewayRequestDurationSeconds = prometheus.NewHistogramVec(
 	[]string{"route"},
 )
 
+// GithubPaginationTruncatedTotal counts GitHub list calls that stopped at the
+// page cap with more pages left, so part of the result set was not read.
+// call names the client method (a fixed set).
+var GithubPaginationTruncatedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "roundtable_github_pagination_truncated_total",
+		Help: "GitHub list calls that hit the page cap with more results available, by call",
+	},
+	[]string{"call"},
+)
+
 func init() {
 	// Register all custom metrics with the controller-runtime metrics registry
 	metrics.Registry.MustRegister(
@@ -263,5 +274,6 @@ func init() {
 		TriggerLastFiredTimestampSeconds,
 		GatewayRequestsTotal,
 		GatewayRequestDurationSeconds,
+		GithubPaginationTruncatedTotal,
 	)
 }

@@ -393,6 +393,7 @@ below with their label values.
 | `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` | Knight and mission Trigger runs that finished, by `outcome` (`succeeded`, `failed`, `lost`); chain targets are in `roundtable_chain_runs_total` |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` | Unix time a Trigger last started a run |
 | `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
+| `roundtable_github_pagination_truncated_total` | counter | `call` | GitHub list calls that stopped at the page cap (5 pages of 100) with more results available; the rest of the result set was not read |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` | Invoke gateway HTTP request duration |
 
 ## Trigger and gateway metrics

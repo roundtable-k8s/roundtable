@@ -26,10 +26,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	gh "github.com/google/go-github/v93/github"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // DefaultAPIURL is the public GitHub REST endpoint.
@@ -120,16 +124,23 @@ const maxPages = 5
 
 // paginate follows resp.NextPage for up to maxPages pages of 100, passing
 // each page's ListOptions to fetch and collecting what it returns.
-func paginate[T any](fetch func(gh.ListOptions) ([]T, *gh.Response, error)) ([]T, error) {
+func paginate[T any](call string, fetch func(gh.ListOptions) ([]T, *gh.Response, error)) ([]T, error) {
 	var all []T
 	opt := gh.ListOptions{PerPage: 100}
-	for range maxPages {
+	for pages := 1; pages <= maxPages; pages++ {
 		items, resp, err := fetch(opt)
 		if err != nil {
 			return all, err
 		}
 		all = append(all, items...)
 		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		if pages == maxPages {
+			// The cap is reached with more pages left: say so, the rest of
+			// the result set is not read.
+			metrics.GithubPaginationTruncatedTotal.WithLabelValues(call).Inc()
+			logf.Log.WithName("github").Info("pagination truncated at page cap; later results are not read", "call", call, "maxPages", maxPages)
 			break
 		}
 		opt.Page = resp.NextPage
@@ -212,7 +223,7 @@ func (c *Client) listIssues(ctx context.Context, repo string, opts *gh.IssueList
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.Issue, *gh.Response, error) {
+	raw, err := paginate("list_issues", func(lo gh.ListOptions) ([]*gh.Issue, *gh.Response, error) {
 		o := *opts
 		o.ListOptions = lo
 		return g.Issues.ListByRepo(ctx, owner, name, &o)
@@ -260,7 +271,7 @@ func (c *Client) ListIssuesByQuery(ctx context.Context, repo string, q IssueQuer
 		state = "open"
 	}
 	opts := gh.IssueListByRepoOptions{State: state, Labels: q.Labels, Sort: "created", Direction: "asc"}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.Issue, *gh.Response, error) {
+	raw, err := paginate("list_issues_query", func(lo gh.ListOptions) ([]*gh.Issue, *gh.Response, error) {
 		o := opts
 		o.ListOptions = lo
 		items, resp, err := g.Issues.ListByRepo(ctx, owner, name, &o)
@@ -464,7 +475,7 @@ func (c *Client) ListOpenPulls(ctx context.Context, repo string) ([]PullRequest,
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.PullRequest, *gh.Response, error) {
+	raw, err := paginate("list_pull_requests", func(lo gh.ListOptions) ([]*gh.PullRequest, *gh.Response, error) {
 		return g.PullRequests.List(ctx, owner, name, &gh.PullRequestListOptions{State: "open", ListOptions: lo})
 	})
 	out := make([]PullRequest, 0, len(raw))
@@ -510,7 +521,7 @@ func (c *Client) ListReviews(ctx context.Context, repo string, number int) ([]Re
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	raw, err := paginate("list_reviews", func(lo gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
 		return g.PullRequests.ListReviews(ctx, owner, name, number, &lo)
 	})
 	out := make([]Review, 0, len(raw))
@@ -610,7 +621,7 @@ func (c *Client) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRu
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.CheckRun, *gh.Response, error) {
+	raw, err := paginate("list_check_runs", func(lo gh.ListOptions) ([]*gh.CheckRun, *gh.Response, error) {
 		res, resp, err := g.Checks.ListCheckRunsForRef(ctx, owner, name, sha, &gh.ListCheckRunsOptions{Filter: new("all"), ListOptions: lo})
 		if res == nil {
 			return nil, resp, err
@@ -648,10 +659,20 @@ type WorkflowRun struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// mergeGroupWindow is how far back merge_group runs are read. A merge-queue
+// attempt is only relevant to PR feedback while its pull request is queued,
+// so one day of runs is enough and normally fits on one page.
+const mergeGroupWindow = 24 * time.Hour
+
+func mergeGroupCreatedFilter(now time.Time) string {
+	return ">=" + now.Add(-mergeGroupWindow).UTC().Format("2006-01-02")
+}
+
 // ListMergeGroupRuns returns the merge_group workflow runs of repo, newest
-// first, following up to maxPages pages (500 runs) so a busy merge queue
-// cannot hide an older failed run on page 2+. The cap also bounds how long a
-// huge history can stall a reconcile; runs beyond it are not seen.
+// first, created within mergeGroupWindow, following up to maxPages pages (500
+// runs) so a busy merge queue cannot hide an older failed run on page 2+. The
+// cap also bounds how long a huge history can stall a reconcile; runs beyond it
+// are not seen (counted by roundtable_github_pagination_truncated_total).
 func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]WorkflowRun, error) {
 	g, err := c.api()
 	if err != nil {
@@ -661,8 +682,8 @@ func (c *Client) ListMergeGroupRuns(ctx context.Context, repo string) ([]Workflo
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.WorkflowRun, *gh.Response, error) {
-		res, resp, err := g.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, &gh.ListWorkflowRunsOptions{Event: "merge_group", ListOptions: lo})
+	raw, err := paginate("list_merge_group_runs", func(lo gh.ListOptions) ([]*gh.WorkflowRun, *gh.Response, error) {
+		res, resp, err := g.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, &gh.ListWorkflowRunsOptions{Event: "merge_group", Created: mergeGroupCreatedFilter(time.Now()), ListOptions: lo})
 		if res == nil {
 			return nil, resp, err
 		}
@@ -697,7 +718,7 @@ func (c *Client) ListRunJobs(ctx context.Context, repo string, runID int64) ([]J
 	if err != nil {
 		return nil, err
 	}
-	raw, err := paginate(func(lo gh.ListOptions) ([]*gh.WorkflowJob, *gh.Response, error) {
+	raw, err := paginate("list_run_jobs", func(lo gh.ListOptions) ([]*gh.WorkflowJob, *gh.Response, error) {
 		res, resp, err := g.Actions.ListWorkflowJobs(ctx, owner, name, runID, &gh.ListWorkflowJobsOptions{ListOptions: lo})
 		if res == nil {
 			return nil, resp, err
@@ -731,7 +752,12 @@ func (c *Client) JobLog(ctx context.Context, repo string, jobID int64) (string, 
 	}
 	resp, err := g.Client().Do(req)
 	if err != nil {
-		return "", fmt.Errorf("github job log %d: %w", jobID, err)
+		// The transport error carries the pre-signed log URL; drop it.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return "", fmt.Errorf("github job log %d: download from %s: %w", jobID, u.Host, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

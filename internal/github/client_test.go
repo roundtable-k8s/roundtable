@@ -26,8 +26,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v93/github"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // pagedServer serves total items over pages of size per, wrapping each page
@@ -102,7 +106,7 @@ func TestRemoveLabelIgnoresMissing(t *testing.T) {
 	}
 }
 
-func TestAPIError(t *testing.T) {
+func TestErrorResponseSurfacesStatusAndMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = io.WriteString(w, `{"message":"Resource not accessible by integration"}`)
@@ -238,6 +242,9 @@ func TestListMergeGroupRunsStopsAtMaxPages(t *testing.T) {
 	if len(pages) != maxPages || len(runs) != maxPages*100 {
 		t.Fatalf("pages=%v runs=%d", pages, len(runs))
 	}
+	if got := testutil.ToFloat64(metrics.GithubPaginationTruncatedTotal.WithLabelValues("list_merge_group_runs")); got != 1 {
+		t.Fatalf("truncated counter = %v, want 1", got)
+	}
 }
 
 func TestEnableAutoMergeSendsGraphQL(t *testing.T) {
@@ -285,6 +292,46 @@ func TestJobLogFollowsRedirect(t *testing.T) {
 	got, err := NewClient(srv.URL, "tok").JobLog(context.Background(), "o/r", 5)
 	if err != nil || got != "line 1\n##[error]boom\n" {
 		t.Fatalf("log %q err %v", got, err)
+	}
+}
+
+func TestJobLogErrorOmitsSignedURL(t *testing.T) {
+	var blobURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			http.Redirect(w, r, blobURL, http.StatusFound)
+			return
+		}
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	blobURL = "http://" + srv.Listener.Addr().String() + "/blob/log.txt?sig=SECRETSIG&se=2030"
+	_, err := NewClient(srv.URL, "tok").JobLog(context.Background(), "o/r", 5)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, bad := range []string{"SECRETSIG", "?", "sig=", "/blob/log.txt"} {
+		if strings.Contains(err.Error(), bad) {
+			t.Fatalf("error leaks %q: %v", bad, err)
+		}
+	}
+}
+
+func TestListMergeGroupRunsSendsCreatedFilter(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("created")
+		_, _ = io.WriteString(w, `{"workflow_runs":[]}`)
+	}))
+	defer srv.Close()
+	if _, err := NewClient(srv.URL, "tok").ListMergeGroupRuns(context.Background(), "o/r"); err != nil {
+		t.Fatal(err)
+	}
+	want := ">=" + time.Now().Add(-mergeGroupWindow).UTC().Format("2006-01-02")
+	if query != want && query != ">="+time.Now().UTC().Add(-mergeGroupWindow).Format("2006-01-02") {
+		t.Fatalf("created = %q, want %q", query, want)
 	}
 }
 
