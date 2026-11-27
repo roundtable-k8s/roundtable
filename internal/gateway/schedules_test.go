@@ -17,6 +17,7 @@ limitations under the License.
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -363,5 +364,40 @@ func TestScheduleViewKnightTargetTable(t *testing.T) {
 	v := scheduleView(tr, nil, func(n string) string { return "table-of-" + n })
 	if v.Table != "table-of-galahad" {
 		t.Errorf("table = %q, want the knight's table", v.Table)
+	}
+}
+
+func TestScheduleViewConcurrencyAndSuspension(t *testing.T) {
+	// Defaults when unset.
+	v := scheduleView(scheduleTrigger(testNS, "a", "* * * * *", "digest"), nil, nil)
+	if v.Concurrency.Policy != "Allow" || v.Concurrency.MaxActive != 0 || v.StartingDeadlineSeconds != nil {
+		t.Errorf("defaults: concurrency %+v deadline %v", v.Concurrency, v.StartingDeadlineSeconds)
+	}
+	if v.Suspended || v.SuspendedBy != "" {
+		t.Errorf("not suspended: got %v %q", v.Suspended, v.SuspendedBy)
+	}
+
+	// Forbid, deadline and annotation suspension come through.
+	tr := scheduleTrigger(testNS, "b", "* * * * *", "digest")
+	tr.Spec.Concurrency = aiv1alpha1.TriggerConcurrency{Policy: aiv1alpha1.TriggerConcurrencyForbid, MaxActive: 2}
+	d := int64(300)
+	tr.Spec.Source.Schedule.StartingDeadlineSeconds = &d
+	tr.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "true"}
+	v = scheduleView(tr, nil, nil)
+	if v.Concurrency.Policy != "Forbid" || v.Concurrency.MaxActive != 2 {
+		t.Errorf("concurrency = %+v", v.Concurrency)
+	}
+	if v.StartingDeadlineSeconds == nil || *v.StartingDeadlineSeconds != 300 {
+		t.Errorf("startingDeadlineSeconds = %v", v.StartingDeadlineSeconds)
+	}
+	if !v.Suspended || v.SuspendedBy != "annotation" {
+		t.Errorf("suspended = %v by %q, want true by annotation", v.Suspended, v.SuspendedBy)
+	}
+
+	b, _ := json.Marshal(v)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	if m["suspended"] != true || m["suspendedBy"] != "annotation" || m["startingDeadlineSeconds"] != float64(300) {
+		t.Errorf("json = %s", b)
 	}
 }

@@ -859,6 +859,8 @@ RoundTable. Each schedule:
   "description": "at 07:00 on Monday to Friday",
   "target": {"kind": "chain", "summary": "chain digest", "chain": "digest"},
   "suspended": false,
+  "concurrency": {"policy": "Forbid", "maxActive": 0},
+  "startingDeadlineSeconds": 300,
   "nextRunAt": "2026-11-26T06:00:00Z",
   "lastRunAt": "2026-11-25T06:00:02Z",
   "lastResult": {"time": "2026-11-25T06:00:02Z", "outcome": "started", "run": "digest-trg-1a2b"},
@@ -872,6 +874,13 @@ RoundTable. Each schedule:
   comes back as `cron <expression>`.
 - `target.kind` is `chain` or `knight`; `summary` is a one-line description of
   the target.
+- `suspended` is effective: true when `spec.suspend` is set or the suspend
+  annotation (set by `POST .../suspend`) is present. `suspendedBy` says which
+  (`spec`, `annotation`, or `spec,annotation`) and is omitted when not suspended.
+- `concurrency` is `spec.concurrency`: `policy` (`Allow` when unset, `Forbid` or
+  `Replace`) and `maxActive` (0: no cap).
+- `startingDeadlineSeconds` is the schedule source's deadline for a missed tick;
+  omitted when unset.
 - `nextRunAt` and `lastRunAt` are `status.nextScheduledAt` and
   `status.lastFiredAt`. `lastResult` is the newest of `status.recentFirings`:
   `outcome` is `started` (with the `run`), `skipped` (with the
