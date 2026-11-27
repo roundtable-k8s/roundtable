@@ -41,6 +41,19 @@ rules:
   - list
   - watch
 - apiGroups:
+  - agents.x-k8s.io
+  resources:
+  - sandboxes
+  - sandboxes/status
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ai.roundtable.io
   resources:
   - chains
