@@ -274,7 +274,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / clamp_min(sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m])), 1e-9)",
+          "expr": "sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / (sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (knight) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m]))",
           "legendFormat": "{{knight}}"
         }
       ],
@@ -307,7 +307,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / clamp_min(sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m])), 1e-9)",
+          "expr": "sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) / (sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"cache_read\"}[5m])) + sum by (model) (rate(roundtable_knight_llm_tokens_total{namespace=~\"$namespace\", table=~\"$table\", type=\"input\"}[5m]))",
           "legendFormat": "{{model}}"
         }
       ],

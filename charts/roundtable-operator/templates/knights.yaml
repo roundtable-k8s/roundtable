@@ -1,4 +1,7 @@
 {{- range $name, $spec := .Values.knights }}
+{{- if hasKey $spec "arsenal" }}
+{{- fail (printf "knights.%s.arsenal is no longer supported and would be ignored: rename it to knights.%s.arsenals" $name $name) }}
+{{- end }}
 ---
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Knight

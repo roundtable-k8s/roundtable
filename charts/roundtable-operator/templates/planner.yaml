@@ -1,3 +1,6 @@
+{{- if hasKey .Values.planner "arsenal" }}
+{{- fail "planner.arsenal is no longer supported and would be ignored: rename it to planner.arsenals" }}
+{{- end }}
 {{- if .Values.planner.enabled }}
 ---
 apiVersion: ai.roundtable.io/v1alpha1
