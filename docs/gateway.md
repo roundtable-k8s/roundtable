@@ -1120,6 +1120,11 @@ default).
 - **Limits.** Body at most `gateway.hooks.maxBodyBytes` (1 MiB, else 413).
   Each Trigger has a token bucket (`gateway.hooks.rate` per second, burst
   `gateway.hooks.burst`, else 429 with `Retry-After`), per replica.
+- **Credential read errors.** A credential Secret that is missing, forbidden,
+  unlabelled or too short gets the same 401 as a bad token. If the Secret
+  cannot be read for another reason (API timeout, 5xx), the answer is a **503**
+  with `Retry-After: 5` and a body that does not say whether the credential
+  exists, so senders that retry 5xx keep the event.
 - **No oracle.** An unknown Trigger, a Trigger without `source.webhook` and a
   namespace outside the gateway's namespace and `allowedNamespaces` all get
   the same 404.

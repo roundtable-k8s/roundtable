@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,9 +37,12 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -400,5 +404,53 @@ func TestHooksDisabledNeedGatewayAuth(t *testing.T) {
 	resp, out := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), map[string]string{"Authorization": "Bearer " + hookBearer})
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status %d %v", resp.StatusCode, out)
+	}
+}
+
+// errReader fails Get for Secrets with err, and delegates everything else.
+type errReader struct {
+	client.Reader
+	err error
+}
+
+func (r errReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Secret); ok {
+		return r.err
+	}
+	return r.Reader.Get(ctx, key, obj, opts...)
+}
+
+func TestHookCredentialReadErrors(t *testing.T) {
+	secretGR := schema.GroupResource{Resource: "secrets"}
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"not found": {apierrors.NewNotFound(secretGR, "bearer"), http.StatusUnauthorized},
+		"forbidden": {apierrors.NewForbidden(secretGR, "bearer", errors.New("no")), http.StatusUnauthorized},
+		"timeout":   {errors.New("etcdserver: request timed out"), http.StatusServiceUnavailable},
+		"cancelled": {context.Canceled, http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newHookEnv(t, HookOptions{}, true)
+			e.svc.Hooks = errReader{Reader: e.svc.Hooks, err: tc.err}
+			resp, out := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), map[string]string{"Authorization": "Bearer " + hookBearer})
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d %v, want %d", resp.StatusCode, out, tc.want)
+			}
+			raw := out["_raw"].(string)
+			if tc.want == http.StatusServiceUnavailable {
+				if resp.Header.Get("Retry-After") != "5" {
+					t.Fatalf("Retry-After %q", resp.Header.Get("Retry-After"))
+				}
+				for _, leak := range []string{"bearer", "secret", "found", "timed out", "exist"} {
+					if strings.Contains(strings.ToLower(raw), leak) {
+						t.Fatalf("503 body %q mentions %q", raw, leak)
+					}
+				}
+			} else if out["error"] != errHookUnauthorized.Error() {
+				t.Fatalf("401 body %q differs from a bad token's", raw)
+			}
+		})
 	}
 }

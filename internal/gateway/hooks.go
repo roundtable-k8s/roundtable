@@ -69,6 +69,12 @@ var hookForwardHeaders = []string{"Content-Type", "X-Github-Event", "X-Github-De
 // errHookUnauthorized is a missing or wrong webhook credential.
 var errHookUnauthorized = errors.New("unauthorized")
 
+// errHookCredentialUnusable marks a Trigger credential that cannot be met: no
+// reference, a Secret that is missing, forbidden, unlabelled or too short. It
+// is a misconfiguration, refused like a bad credential (401). Any other
+// failure to read the credential wraps ErrUnavailable (503, retryable).
+var errHookCredentialUnusable = errors.New("webhook credential unusable")
+
 // HookOptions configures the webhook endpoint.
 type HookOptions struct {
 	// MaxBodyBytes caps a delivery's body (default 1 MiB).
@@ -185,18 +191,21 @@ func (s *Service) hookCredential(ctx context.Context, trg *aiv1alpha1.Trigger) (
 		ref = auth.HMACSecretRef
 	}
 	if ref == nil || ref.Name == "" || ref.Key == "" {
-		return nil, errors.New("no auth secret reference")
+		return nil, fmt.Errorf("%w: no auth secret reference", errHookCredentialUnusable)
 	}
 	sec := &corev1.Secret{}
 	if err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: ref.Name}, sec); err != nil {
-		return nil, fmt.Errorf("get secret %s: %w", ref.Name, err)
+		if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+			return nil, fmt.Errorf("%w: get secret %s: %v", errHookCredentialUnusable, ref.Name, err)
+		}
+		return nil, fmt.Errorf("%w: get secret %s: %v", ErrUnavailable, ref.Name, err)
 	}
 	if sec.Labels[aiv1alpha1.LabelWebhookSecret] != labelTrue {
-		return nil, fmt.Errorf("secret %s is not labelled %s=true", ref.Name, aiv1alpha1.LabelWebhookSecret)
+		return nil, fmt.Errorf("%w: secret %s is not labelled %s=true", errHookCredentialUnusable, ref.Name, aiv1alpha1.LabelWebhookSecret)
 	}
 	val := []byte(strings.TrimRight(string(sec.Data[ref.Key]), "\r\n"))
 	if len(val) < minTokenLength {
-		return nil, fmt.Errorf("secret %s key %s must hold at least %d characters", ref.Name, ref.Key, minTokenLength)
+		return nil, fmt.Errorf("%w: secret %s key %s must hold at least %d characters", errHookCredentialUnusable, ref.Name, ref.Key, minTokenLength)
 	}
 	return val, nil
 }
@@ -314,6 +323,15 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	isHMAC := hookUsesHMAC(trg)
 	secret, err := s.hookCredential(ctx, trg)
 	if err != nil {
+		if !errors.Is(err, errHookCredentialUnusable) {
+			// The credential could not be read (API timeout, 5xx, cancelled
+			// context): the sender should retry. The body says nothing about
+			// whether the credential exists.
+			log.Error(err, "Webhook Trigger credential not readable")
+			w.Header().Set("Retry-After", "5")
+			writeError(w, fmt.Errorf("%w: the webhook could not be checked, retry later", ErrUnavailable))
+			return
+		}
 		// A misconfigured credential can't be met: refuse like a bad one,
 		// and tell the operator, not the sender.
 		log.Info("Refused webhook: Trigger credential unusable", "reason", err.Error())
