@@ -59,6 +59,11 @@ const (
 	// with a cap.
 	ConditionKnightPlanCapLimited = "PlanCapLimited"
 
+	// ConditionKnightRolloutPending is True while a changed pod template is
+	// not applied because the operator's max concurrent rollouts limit is
+	// reached (ReasonWaitingForOtherRollouts). Removed once the knight rolls.
+	ConditionKnightRolloutPending = "RolloutPending"
+
 	// ConditionKnightToolsImageReady reports whether the tools image for the
 	// current spec.tools is published. Only set on knights with Nix tools.
 	// Status=False means the pod rollout is held on its current template
@@ -271,6 +276,10 @@ const (
 	// ReasonRuntimeClassNotFound indicates the RuntimeClass named by the
 	// knight's spec.runtimeClassName (or the table default) does not exist.
 	ReasonRuntimeClassNotFound = "RuntimeClassNotFound"
+
+	// ReasonWaitingForOtherRollouts indicates the pod rollout is deferred
+	// until fewer knights are rolling out than the configured limit.
+	ReasonWaitingForOtherRollouts = "WaitingForOtherRollouts"
 
 	// ReasonToolsImageBuilding indicates the tools image for the new spec is
 	// still building; the pod keeps its current template meanwhile.
