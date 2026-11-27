@@ -23,6 +23,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -32,10 +34,32 @@ var (
 	triggerWhenEnv     *cel.Env
 	errTriggerWhenEnv  error
 
-	// triggerWhenPrograms caches compiled programs by expression: a program
-	// is stateless and safe for concurrent use.
-	triggerWhenPrograms sync.Map // string -> cel.Program
+	// triggerWhenPrograms caches the compiled spec.when of each Trigger, one
+	// entry per Trigger UID, replaced when its generation changes and dropped
+	// when the Trigger is deleted. A program is stateless and safe for
+	// concurrent use.
+	triggerWhenMu       sync.Mutex
+	triggerWhenPrograms = map[types.UID]triggerWhenEntry{}
 )
+
+// triggerWhenEntry is a compiled spec.when and the generation it came from.
+type triggerWhenEntry struct {
+	nn         types.NamespacedName
+	generation int64
+	expr       string
+	prg        cel.Program
+}
+
+// forgetTriggerWhen drops the cached spec.when program of a deleted Trigger.
+func forgetTriggerWhen(nn types.NamespacedName) {
+	triggerWhenMu.Lock()
+	defer triggerWhenMu.Unlock()
+	for uid, e := range triggerWhenPrograms {
+		if e.nn == nn {
+			delete(triggerWhenPrograms, uid)
+		}
+	}
+}
 
 // triggerWhenCELEnv is the CEL environment of spec.when: event and trigger
 // variables, with the libraries and cost limit of chain conditions.
@@ -51,11 +75,15 @@ func triggerWhenCELEnv() (*cel.Env, error) {
 	return triggerWhenEnv, errTriggerWhenEnv
 }
 
-// compileTriggerWhen compiles (and caches) a spec.when expression; it must
-// yield a bool.
-func compileTriggerWhen(expr string) (cel.Program, error) {
-	if p, ok := triggerWhenPrograms.Load(expr); ok {
-		return p.(cel.Program), nil
+// compileTriggerWhen compiles a Trigger's spec.when expression, caching the
+// program by the Trigger's UID and generation; it must yield a bool.
+func compileTriggerWhen(trg *aiv1alpha1.Trigger) (cel.Program, error) {
+	expr := trg.Spec.When
+	triggerWhenMu.Lock()
+	e, ok := triggerWhenPrograms[trg.UID]
+	triggerWhenMu.Unlock()
+	if ok && e.generation == trg.Generation && e.expr == expr {
+		return e.prg, nil
 	}
 	env, err := triggerWhenCELEnv()
 	if err != nil {
@@ -72,13 +100,15 @@ func compileTriggerWhen(expr string) (cel.Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	triggerWhenPrograms.Store(expr, prg)
+	triggerWhenMu.Lock()
+	triggerWhenPrograms[trg.UID] = triggerWhenEntry{nn: client.ObjectKeyFromObject(trg), generation: trg.Generation, expr: expr, prg: prg}
+	triggerWhenMu.Unlock()
 	return prg, nil
 }
 
 // evalTriggerWhen evaluates spec.when against the event.
 func evalTriggerWhen(trg *aiv1alpha1.Trigger, ev TriggerEvent) (bool, error) {
-	prg, err := compileTriggerWhen(trg.Spec.When)
+	prg, err := compileTriggerWhen(trg)
 	if err != nil {
 		return false, err
 	}

@@ -154,7 +154,8 @@ func main() {
 	flag.IntVar(&missionMaxTTL, "mission-max-ttl-seconds", 86400, "Upper bound on a mission's ttlSeconds.")
 	flag.IntVar(&missionMaxTimeout, "mission-max-timeout-seconds", 21600, "Upper bound on a mission's timeoutSeconds.")
 	flag.BoolVar(&missionAllowSkillGeneration, "mission-allow-skill-generation", false,
-		"Let Trigger missions set planner.allowSkillGeneration.")
+		"Let callers of the gateway's mission API set planner.allowSkillGeneration. "+
+			"It does not apply to Trigger mission targets, which cannot set it.")
 	flag.DurationVar(&scheduleResultRetention, "schedule-result-retention", gateway.DefaultScheduleResultRetention,
 		"How long the results of schedule Triggers' runs stay readable: finished runs are kept at least this "+
 			"long and the task record TTL is raised to it.")

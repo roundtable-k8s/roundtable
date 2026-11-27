@@ -129,7 +129,6 @@ type knightFiring struct {
 	firing *aiv1alpha1.TriggerFiring
 	now    time.Time
 	table  string
-	mutate func(*aiv1alpha1.TriggerStatus)
 	// manual is set for a run-now firing; its caller is recorded on the task.
 	manual *triggerManualFiring
 	// late is the reason a schedule firing is past startingDeadlineSeconds,
@@ -236,9 +235,6 @@ func (r *TriggerReconciler) fireKnight(ctx context.Context, f knightFiring) (tri
 		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, f.table, trg.Name).Set(float64(f.now.Unix()))
 		if !rec.Done() && !slices.Contains(st.ActiveRuns, rec.TaskID) {
 			st.ActiveRuns = append(st.ActiveRuns, rec.TaskID)
-		}
-		if f.mutate != nil {
-			f.mutate(st)
 		}
 	}); err != nil {
 		// The task was sent; a redelivery replays its Idempotency-Key.
