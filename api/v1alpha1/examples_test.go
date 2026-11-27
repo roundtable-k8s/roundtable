@@ -330,7 +330,7 @@ func TestHomelabWatchRecipeFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, doc := range strings.Split(string(data), "\n---\n") {
+	for doc := range strings.SplitSeq(string(data), "\n---\n") {
 		var sec struct {
 			Kind       string            `json:"kind"`
 			StringData map[string]string `json:"stringData"`
@@ -361,7 +361,7 @@ func TestHomelabWatchRecipeFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, doc := range strings.Split(string(b), "\n---\n") {
+		for doc := range strings.SplitSeq(string(b), "\n---\n") {
 			var obj struct {
 				APIVersion string `json:"apiVersion"`
 				Kind       string `json:"kind"`
