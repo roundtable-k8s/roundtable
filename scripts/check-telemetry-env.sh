@@ -40,6 +40,8 @@ has "$on" 'name: TRACE_URL_TEMPLATE' "dashboard trace URL missing"
 
 esc="$(render --set telemetry.enabled=true --set 'telemetry.resourceAttributes.k=a\,b\=c')"
 has "$esc" 'value: "k=a%2Cb%3Dc"' "resource attribute ',' and '=' not percent-encoded"
+pct="$(render --set telemetry.enabled=true --set 'telemetry.resourceAttributes.k%x=a%2C\,b\=c')"
+has "$pct" 'value: "k%25x=a%252C%2Cb%3Dc"' "resource attribute '%' not encoded first"
 
 off="$(render --set telemetry.enabled=true --set telemetry.captureContent=false)"
 [ "$(grep -A1 'name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' <<<"$off" | grep -c 'value: "false"')" = 3 ] || fail "captureContent=false not honoured"

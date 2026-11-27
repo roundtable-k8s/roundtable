@@ -154,7 +154,7 @@ What each policy allows:
 
 - **Operator** (`<release>-roundtable-operator-operator`): TCP 8081 (health probes) and the metrics port (`metrics.port` when `metrics.enabled`, else `operatorMetricsPort`), from `metricsFrom`.
 - **OpenTelemetry Collector** (`<release>-roundtable-operator-otel-collector`, only when `telemetry.collector.enabled`): ports 4317 and 4318, from `otlpFrom`. The collector pods use their own `app.kubernetes.io/name: roundtable-otel-collector`, so the operator policy and Deployment selector never match them.
-- **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom` and `metricsFrom`. Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
+- **Dashboard** (`<release>-roundtable-operator-dashboard`, only when `dashboard.enabled`): the `http` port, from `dashboardFrom`, `metricsFrom` and the `helm test` Pod (matched by `app.kubernetes.io/component: test` in the release). Knights are reached through NATS and the Kubernetes API, so nothing else needs to connect to the dashboard.
 - **Knights** (`<release>-roundtable-operator-knights`): TCP 3000 from `metricsFrom`. It selects every pod labelled `app.kubernetes.io/name: knight`, which covers Deployment knights and `runtime: sandbox` knights once their pods carry that label (#366).
 
 Limits and caveats:
@@ -236,7 +236,7 @@ See [dashboard.md](dashboard.md) for the pages, access and authentication.
 | `dashboard.env.FLEET_STREAM` | string | `fleet_a_results` | JetStream results stream the dashboard reads |
 | `dashboard.vault.enabled` | bool | `true` | Mount shared Obsidian vault |
 | `dashboard.vault.claimName` | string | `roundtable-vault` | Vault PVC name |
-| `dashboard.podSecurityContext` | object | `{runAsUser: 65532, runAsGroup: 65532}` | Dashboard pod `securityContext` (`runAsNonRoot` and the `RuntimeDefault` seccomp profile are always set). When `dashboard.vault.enabled` and `fsGroup` is not set, `fsGroup` defaults to `runAsGroup` so the pod can read the vault volume; set `fsGroup` explicitly to override |
+| `dashboard.podSecurityContext` | object | `{runAsUser: 65532, runAsGroup: 65532}` | Dashboard pod `securityContext` (`runAsNonRoot` and the `RuntimeDefault` seccomp profile are always set). When `dashboard.vault.enabled` and `fsGroup` is not set, `fsGroup` defaults to `runAsGroup` so the pod can read the vault volume; set `fsGroup` explicitly to override. The chart-defaulted `fsGroup` also sets `fsGroupChangePolicy: OnRootMismatch` so the shared vault is not recursively chgrped on every start. Many CSI drivers skip `fsGroup` on RWX volumes; the reliable way to read mode-600 vault files is `podSecurityContext.runAsUser: 1000` and `runAsGroup: 1000` (the owner of the files). An empty `{}` keeps the always-set defaults, and `runAsNonRoot`/`seccompProfile` set here override them |
 | `dashboard.gateway.tokenSecret` / `.tokenKey` | string | `""` | Secret and key of the token the dashboard sends to the gateway; empty = the gateway's own token Secret and key |
 | `dashboard.gateway.serviceAccountToken` | bool | `false` | Send a projected ServiceAccount token (audience `gateway.serviceAccountAuth.audience`) instead of the static token Secret; requires `gateway.serviceAccountAuth.enabled`, and `tokenSecret`/`tokenKey` are then ignored |
 
@@ -589,7 +589,7 @@ A try-it-out setup with Jaeger as the trace viewer is in
 
 ### Helm test
 
-`helm test <release>` runs a Pod (`templates/tests/connection.yaml`) that calls the gateway `/readyz` (when `gateway.enabled`) and the dashboard `/api/health` (when `dashboard.enabled`) and fails if either does not answer. Nothing is rendered when both are disabled. The Pod runs in the release namespace, which the default gateway NetworkPolicy admits.
+`helm test <release>` runs a Pod (`templates/tests/connection.yaml`) that calls the gateway `/readyz` (when `gateway.enabled`) and the dashboard `/api/health` (when `dashboard.enabled`) and fails if either does not answer. Nothing is rendered when both are disabled. The Pod runs in the release namespace, which the default gateway NetworkPolicy admits; the dashboard NetworkPolicy admits it by its `app.kubernetes.io/component: test` label.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

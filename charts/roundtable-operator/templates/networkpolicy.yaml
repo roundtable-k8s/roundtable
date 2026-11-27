@@ -34,7 +34,9 @@ spec:
           protocol: TCP
   {{- end }}
 {{- if .Values.dashboard.enabled }}
-{{- $dashboardPeers := concat ($np.dashboardFrom | default list) $metricsFrom }}
+{{- /* The `helm test` Pod (templates/tests/connection.yaml) is admitted by its component label. */}}
+{{- $testPeer := dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/component" "test" "app.kubernetes.io/instance" .Release.Name)) }}
+{{- $dashboardPeers := concat ($np.dashboardFrom | default list) $metricsFrom (list $testPeer) }}
 ---
 # Dashboard: the http port, reached from dashboardFrom and metricsFrom.
 apiVersion: networking.k8s.io/v1
