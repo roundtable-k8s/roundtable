@@ -99,7 +99,7 @@ type TriggerScheduleConfig struct {
 // CronJob runs as: trigger-<name>. The gateway accepts a firing of the
 // Trigger from this ServiceAccount.
 func TriggerServiceAccountName(trigger string) string {
-	return triggerObjectPrefix + trigger
+	return gateway.TriggerServiceAccountName(trigger)
 }
 
 // triggerCronJobName is trigger-<name>, shortened with a hash suffix when
@@ -128,9 +128,9 @@ func cronConcurrencyPolicy(p aiv1alpha1.TriggerConcurrencyPolicy) batchv1.Concur
 
 func triggerObjectLabels(trg *aiv1alpha1.Trigger) map[string]string {
 	return map[string]string{
-		aiv1alpha1.LabelTrigger:        trg.Name,
-		"app.kubernetes.io/managed-by": triggerManagedBy,
-		"app.kubernetes.io/component":  "trigger-schedule",
+		aiv1alpha1.LabelTrigger:       trg.Name,
+		labelManagedBy:                triggerManagedBy,
+		"app.kubernetes.io/component": "trigger-schedule",
 	}
 }
 
@@ -307,8 +307,7 @@ func podPlacementEqual(a, b corev1.PodSpec) bool {
 	return equality.Semantic.DeepEqual(a.Tolerations, b.Tolerations) &&
 		equality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets) &&
 		a.PriorityClassName == b.PriorityClassName &&
-		len(a.NodeSelector) == len(b.NodeSelector) &&
-		(len(a.NodeSelector) == 0 || equality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector))
+		equality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector)
 }
 
 // startingDeadlineEqual compares startingDeadlineSeconds exactly: nil means
@@ -370,11 +369,15 @@ func defaultImagePullPolicy(image string) corev1.PullPolicy {
 // owns once its schedule source is gone. Objects it does not control are
 // left alone.
 func (r *TriggerReconciler) deleteScheduleObjects(ctx context.Context, trg *aiv1alpha1.Trigger) error {
-	objs := map[string]client.Object{
-		"CronJob":        &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: trg.Namespace, Name: triggerCronJobName(trg.Name)}},
-		"ServiceAccount": &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: trg.Namespace, Name: TriggerServiceAccountName(trg.Name)}},
+	objs := []struct {
+		kind string
+		obj  client.Object
+	}{
+		{"CronJob", &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: trg.Namespace, Name: triggerCronJobName(trg.Name)}}},
+		{"ServiceAccount", &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: trg.Namespace, Name: TriggerServiceAccountName(trg.Name)}}},
 	}
-	for kind, obj := range objs {
+	for _, o := range objs {
+		kind, obj := o.kind, o.obj
 		if err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
@@ -420,7 +423,7 @@ func (r *TriggerReconciler) observeFireJobs(ctx context.Context, trg *aiv1alpha1
 	}
 	cond := metav1.Condition{
 		Type: aiv1alpha1.ConditionTriggerScheduleHealthy, Status: metav1.ConditionTrue,
-		Reason: aiv1alpha1.ReasonTriggerFireJobsHealthy, Message: "the CronJob's latest firing Job did not fail",
+		Reason: aiv1alpha1.ReasonTriggerFiringHealthy, Message: "the CronJob's latest firing Job did not fail",
 	}
 	if latest != nil {
 		for _, c := range latest.Status.Conditions {

@@ -545,9 +545,9 @@ const (
 	// Job failed (the message names it).
 	ReasonTriggerFireJobFailing = "FireJobFailing"
 
-	// ReasonTriggerFireJobsHealthy indicates the CronJob's most recent firing
+	// ReasonTriggerFiringHealthy indicates the CronJob's most recent firing
 	// Job did not fail.
-	ReasonTriggerFireJobsHealthy = "FiringHealthy"
+	ReasonTriggerFiringHealthy = "FiringHealthy"
 
 	// ConditionTriggerGitHubReady is True while a github-source Trigger's
 	// token resolves and its last poll succeeded.

@@ -840,8 +840,8 @@ var _ = Describe("Trigger controller", func() {
 			newJob("scoped-owned-unlabelled", nil, true)
 			rec := &jobListRecorder{Client: r.Client}
 			r.Client = rec
+			DeferCleanup(func() { r.Client = rec.Client })
 			reconcileTrigger("scoped")
-			r.Client = rec.Client
 			Expect(rec.selectors).NotTo(BeEmpty())
 			for _, s := range rec.selectors {
 				Expect(s.String()).To(Equal(aiv1alpha1.LabelTrigger + "=scoped"))
