@@ -41,6 +41,7 @@ func TestKnightChangedForTable(t *testing.T) {
 		{"readyReplicas change", base(), mut(func(k *aiv1alpha1.Knight) { k.Status.ReadyReplicas = 1 }), true},
 		{"model change", base(), mut(func(k *aiv1alpha1.Knight) { k.Status.Model = "m" }), true},
 		{"available appears", base(), mut(cond(metav1.ConditionTrue, "Ready")), true},
+		{"available removed", mut(cond(metav1.ConditionTrue, "Ready")), base(), true},
 		{"available reason change", mut(cond(metav1.ConditionFalse, "Waking")), mut(cond(metav1.ConditionFalse, "ScaledToZero")), true},
 		{"available status change", mut(cond(metav1.ConditionFalse, "X")), mut(cond(metav1.ConditionTrue, "X")), true},
 		{"ignored status fields", base(), mut(func(k *aiv1alpha1.Knight) {

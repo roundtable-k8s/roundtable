@@ -35,7 +35,9 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -814,9 +816,49 @@ func TestInvokeIdempotencyKeyReplayPending(t *testing.T) {
 	close(e.knight.release)
 }
 
+// histogramCount returns the sample count of one route's duration series.
+func histogramCount(t *testing.T, route string) uint64 {
+	t.Helper()
+	m, ok := metrics.GatewayRequestDurationSeconds.WithLabelValues(route).(prometheus.Metric)
+	if !ok {
+		t.Fatal("duration observer is not a prometheus.Metric")
+	}
+	var out dto.Metric
+	if err := m.Write(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out.GetHistogram().GetSampleCount()
+}
+
+// TestRequestMetrics asserts deltas, not absolute values: the metric vectors
+// are process-global and other tests also drive the gateway, so a Reset would
+// make this order-dependent under -shuffle.
 func TestRequestMetrics(t *testing.T) {
-	metrics.GatewayRequestsTotal.Reset()
-	metrics.GatewayRequestDurationSeconds.Reset()
+	type key struct{ route, code, table, caller string }
+	counter := func(k key) float64 {
+		return testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(k.route, k.code, k.table, k.caller))
+	}
+	wantReqs := map[key]float64{
+		// The table is the knight's RoundTable; the path holds no knight name.
+		{"POST /v1/knights/{name}/invoke", "200", "dev", CallerToken}:  1,
+		{"POST /v1/knights/{name}/invoke", "404", "none", CallerToken}: 1,
+		{"GET /v1/knights", "200", "none", CallerToken}:                1,
+		{"GET /v1/tasks/{taskId}", "404", "none", CallerToken}:         1,
+		// Unknown paths share one route label.
+		{"unmatched", "404", "none", CallerToken}: 2,
+		// A refused token has no caller.
+		{unmatchedRoute, "401", noTable, callerNone}: 1,
+	}
+	routes := []string{"POST /v1/knights/{name}/invoke", "GET /v1/knights", "GET /v1/tasks/{taskId}", unmatchedRoute}
+	beforeReqs := map[key]float64{}
+	for k := range wantReqs {
+		beforeReqs[k] = counter(k)
+	}
+	beforeDur := map[string]uint64{}
+	for _, r := range routes {
+		beforeDur[r] = histogramCount(t, r)
+	}
+
 	e := newEnv(t, Options{})
 	e.do(t, "POST", "/v1/knights/operator/invoke", testToken, InvokeRequest{Task: "hello"})
 	e.do(t, "POST", "/v1/knights/nobody/invoke", testToken, InvokeRequest{Task: "hello"})
@@ -826,27 +868,18 @@ func TestRequestMetrics(t *testing.T) {
 	e.do(t, "GET", "/scanner/probe-1", testToken, nil)
 	e.do(t, "GET", "/scanner/probe-2", testToken, nil)
 
-	for _, c := range []struct {
-		route, code, table string
-		want               float64
-	}{
-		// The table is the knight's RoundTable; the path holds no knight name.
-		{"POST /v1/knights/{name}/invoke", "200", "dev", 1},
-		{"POST /v1/knights/{name}/invoke", "404", "none", 1},
-		{"GET /v1/knights", "200", "none", 1},
-		{"GET /v1/tasks/{taskId}", "404", "none", 1},
-		// Unknown paths share one route label.
-		{"unmatched", "404", "none", 2},
-	} {
-		if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(c.route, c.code, c.table, CallerToken)); got != c.want {
-			t.Errorf("requests{%s,%s,%s} = %v, want %v", c.route, c.code, c.table, got, c.want)
+	for k, want := range wantReqs {
+		if got := counter(k) - beforeReqs[k]; got != want {
+			t.Errorf("requests{%s,%s,%s,%s} delta = %v, want %v", k.route, k.code, k.table, k.caller, got, want)
 		}
 	}
-	// A refused token has no caller.
-	if got := testutil.ToFloat64(metrics.GatewayRequestsTotal.WithLabelValues(unmatchedRoute, "401", noTable, callerNone)); got != 1 {
-		t.Errorf("refused requests = %v, want 1", got)
+	// One duration series per route template; a refused token counts as unmatched.
+	wantDur := map[string]uint64{
+		"POST /v1/knights/{name}/invoke": 2, "GET /v1/knights": 1, "GET /v1/tasks/{taskId}": 1, unmatchedRoute: 3, // two probes + the refused token
 	}
-	if n := testutil.CollectAndCount(metrics.GatewayRequestDurationSeconds); n != 4 {
-		t.Errorf("duration series = %d, want 4 (one per route template)", n)
+	for r, want := range wantDur {
+		if got := histogramCount(t, r) - beforeDur[r]; got != want {
+			t.Errorf("duration samples{%s} delta = %d, want %d", r, got, want)
+		}
 	}
 }
