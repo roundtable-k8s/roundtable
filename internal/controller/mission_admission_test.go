@@ -223,7 +223,7 @@ func TestMissionLeftActivePhasePredicate(t *testing.T) {
 		return p.Update(event.UpdateEvent{ObjectOld: mk(o), ObjectNew: mk(n)})
 	}
 	if !up(aiv1alpha1.MissionPhaseActive, aiv1alpha1.MissionPhaseSucceeded) {
-		t.Error("Running->Succeeded should pass")
+		t.Error("Active->Succeeded should pass")
 	}
 	if up(aiv1alpha1.MissionPhasePending, aiv1alpha1.MissionPhaseProvisioning) {
 		t.Error("Pending->Provisioning should not pass")
