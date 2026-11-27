@@ -3467,6 +3467,8 @@ spec:
                         for claude-knight images (into MCP_SERVERS_JSON); on any other runtime nothing is rendered and
                         the Degraded condition is set with reason MCPServersUnsupported.
                         Prefer a CLI in the tools image; use MCP for services with no CLI.
+                        A user MCP_SERVERS_JSON set in env via valueFrom cannot be merged: it is kept
+                        as is and none of these servers are added to it.
                       items:
                         description: KnightMCPServer is a remote MCP server wired
                           into a claude-knight pod.
