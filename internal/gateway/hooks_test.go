@@ -501,7 +501,7 @@ func TestHookNegativeCache(t *testing.T) {
 	e.svc.Hooks = countingReader{Reader: e.svc.Hooks, triggerGets: &gets}
 	auth := map[string]string{"Authorization": "Bearer " + hookBearer}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		resp, _ := e.post(t, "/v1/hooks/"+testNS+"/ghost", []byte(`{}`), auth)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("unknown probe %d: status %d", i, resp.StatusCode)
@@ -512,7 +512,7 @@ func TestHookNegativeCache(t *testing.T) {
 	}
 
 	gets = 0
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if resp, out := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), auth); resp.StatusCode != http.StatusAccepted {
 			t.Fatalf("found Trigger %d: status %d %v", i, resp.StatusCode, out)
 		}
