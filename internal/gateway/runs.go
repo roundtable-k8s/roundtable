@@ -56,6 +56,9 @@ const (
 	// started yet.
 	runPhasePending = "Pending"
 
+	// sourceAll is the list filter value that matches runs of every source.
+	sourceAll = "all"
+
 	// labelTrue is the value of an opt-in label.
 	labelTrue = "true"
 )
@@ -495,7 +498,7 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	switch source {
 	case "":
 		source = chainrun.SourceGateway
-	case chainrun.SourceGateway, chainrun.SourceTrigger, chainrun.SourcePickup, "all":
+	case chainrun.SourceGateway, chainrun.SourceTrigger, chainrun.SourcePickup, sourceAll:
 	default:
 		return nil, fmt.Errorf("%w: source must be gateway, trigger, pickup or all", ErrInvalid)
 	}
@@ -508,7 +511,7 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	}
 	var list aiv1alpha1.ChainList
 	opts := []client.ListOption{client.InNamespace(ns)}
-	if source != "all" {
+	if source != sourceAll {
 		opts = append(opts, client.MatchingLabels{chainrun.LabelRunSource: source})
 	}
 	if err := s.Runs.List(ctx, &list, opts...); err != nil {
@@ -528,7 +531,7 @@ func (s *Service) ListRuns(ctx context.Context, f RunFilter) ([]*RunRecord, erro
 	})
 	out := make([]*RunRecord, 0, min(len(items), limit))
 	for i := range items {
-		if source == "all" && !isRun(&items[i]) {
+		if source == sourceAll && !isRun(&items[i]) {
 			continue
 		}
 		r := s.record(&items[i], false)

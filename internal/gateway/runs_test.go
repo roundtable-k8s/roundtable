@@ -733,8 +733,9 @@ func TestListRunsAllSources(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("list %s: %d %v", q, resp.StatusCode, out)
 		}
-		var runs []map[string]any
-		for _, r := range out["runs"].([]any) {
+		raw := out["runs"].([]any)
+		runs := make([]map[string]any, 0, len(raw))
+		for _, r := range raw {
 			runs = append(runs, r.(map[string]any))
 		}
 		return runs
