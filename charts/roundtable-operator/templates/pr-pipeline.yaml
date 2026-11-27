@@ -384,6 +384,8 @@ spec:
         Reply with the URLs you labelled.
 {{- if $chainPostRun }}
 
+    # The timeout match in `when` mirrors isTimeoutError in
+    # internal/controller/pickup_merge_queued.go; change both together.
     - name: verify
       dependsOn: [merge]
       when: 'steps.merge.phase == "Succeeded" || (steps.merge.phase == "Failed" && (steps.merge.error.contains("timed out") || steps.merge.error.contains("timeout")))'

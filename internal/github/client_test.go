@@ -264,6 +264,34 @@ func TestEnableAutoMergeSendsGraphQL(t *testing.T) {
 	}
 }
 
+func TestLoadMergeQueueState(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = io.WriteString(w, `{"data":{"node":{"isInMergeQueue":false,"mergeQueueEntry":{"id":"E1"}}}}`)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "tok")
+	pr := &PullRequest{State: "open", NodeID: "PR_1"}
+	if err := c.LoadMergeQueueState(context.Background(), pr); err != nil {
+		t.Fatal(err)
+	}
+	if !pr.InMergeQueue || !pr.Queued() {
+		t.Fatalf("want queued via mergeQueueEntry: %+v", pr)
+	}
+	for _, skip := range []*PullRequest{
+		{State: "open", NodeID: "PR_1", AutoMerge: &struct{}{}}, {State: "closed", NodeID: "PR_1"},
+		{State: "open", NodeID: "PR_1", Draft: true}, {State: "open", Merged: true, NodeID: "PR_1"}, {State: "open"},
+	} {
+		if err := c.LoadMergeQueueState(context.Background(), skip); err != nil || skip.InMergeQueue {
+			t.Fatalf("skip %+v: %v", skip, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("graphql calls = %d, want 1", calls)
+	}
+}
+
 func TestCommentKeepsLiteralAngleBrackets(t *testing.T) {
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
