@@ -973,6 +973,7 @@ type ChainStatus struct {
 // +kubebuilder:printcolumn:name="Runs",type=integer,JSONPath=`.status.runsCompleted`
 // +kubebuilder:printcolumn:name="Table",type=string,JSONPath=`.spec.roundTableRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Complete")].message`,priority=1
+// +kubebuilder:printcolumn:name="Cost",type=string,JSONPath=`.status.costUSD`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Chain is the Schema for the chains API.

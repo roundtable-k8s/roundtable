@@ -37,6 +37,9 @@ spec:
       name: Message
       priority: 1
       type: string
+    - jsonPath: .status.totalCost
+      name: Cost
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
