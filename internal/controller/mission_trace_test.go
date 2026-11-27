@@ -26,6 +26,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/mission"
@@ -112,3 +116,46 @@ func TestMissionTraceOffStoresNothing(t *testing.T) {
 }
 
 func sdktraceNoop() trace.TracerProvider { return noop.NewTracerProvider() }
+
+// The reconciler emits the mission's root span once, as the mission moves from
+// its terminal phase to CleaningUp.
+func TestMissionReconcileEmitsSpanOnCleaningUp(t *testing.T) {
+	ctx := context.Background()
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec), sdktrace.WithIDGenerator(telemetry.NewIDGenerator()))
+
+	start := metav1.NewTime(time.Now().Add(-time.Minute))
+	m := &aiv1alpha1.Mission{ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "ns"}}
+	m.Spec.RoundTableRef = aiv1alpha1.LocalRef("rt")
+	m.Status.StartedAt = &start
+	m.Status.Phase = aiv1alpha1.MissionPhaseSucceeded
+	mission.EnsureTrace(ctx, tp, m)
+	if m.Status.TraceContext == nil {
+		t.Fatal("mission has no trace")
+	}
+	root := mission.RootSpanContext(m)
+
+	c := fake.NewClientBuilder().WithScheme(statusTestScheme()).WithObjects(m).WithStatusSubresource(m).Build()
+	r := &MissionReconciler{Client: c, Scheme: statusTestScheme(), Recorder: record.NewFakeRecorder(10), TracerProvider: tp}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(m)}
+	if _, err := r.reconcileOnce(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	got := &aiv1alpha1.Mission{}
+	if err := c.Get(ctx, req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != aiv1alpha1.MissionPhaseCleaningUp {
+		t.Fatalf("phase = %s, want CleaningUp", got.Status.Phase)
+	}
+	spans := rec.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("emitted %d spans, want 1: %v", len(spans), spans)
+	}
+	s := spans[0]
+	if s.Name() != "mission m1" || s.SpanContext().SpanID() != root.SpanID() ||
+		s.SpanContext().TraceID().String() != m.Status.TraceID || s.Parent().IsValid() {
+		t.Errorf("span %q is not the stored mission root", s.Name())
+	}
+}
