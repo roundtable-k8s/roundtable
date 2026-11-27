@@ -402,7 +402,9 @@ func (c *JetStreamClient) EnsureStream(ctx context.Context, config StreamConfig)
 	return c.applyMaxAge(ctx, js, stream, config.MaxAge)
 }
 
-func (c *JetStreamClient) createStream(ctx context.Context, js jetstream.JetStream, config StreamConfig) (jetstream.Stream, error) {
+func (c *JetStreamClient) createStream(
+	ctx context.Context, js jetstream.JetStream, config StreamConfig,
+) (jetstream.Stream, error) {
 	streamConfig := jetstream.StreamConfig{
 		Name:      config.Name,
 		Subjects:  config.Subjects,
@@ -441,7 +443,9 @@ func (c *JetStreamClient) EnsureStreamMaxAge(ctx context.Context, name string, m
 	return c.applyMaxAge(ctx, js, stream, maxAge)
 }
 
-func (c *JetStreamClient) applyMaxAge(ctx context.Context, js jetstream.JetStream, stream jetstream.Stream, maxAge time.Duration) (bool, error) {
+func (c *JetStreamClient) applyMaxAge(
+	ctx context.Context, js jetstream.JetStream, stream jetstream.Stream, maxAge time.Duration,
+) (bool, error) {
 	cfg := stream.CachedInfo().Config
 	if cfg.MaxAge == maxAge {
 		return false, nil
