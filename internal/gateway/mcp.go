@@ -36,6 +36,7 @@ const serverVersion = "v1alpha1"
 // ListKnightsInput is the input of the list_knights tool.
 type ListKnightsInput struct {
 	Namespace string `json:"namespace,omitempty" jsonschema:"namespace to list; omit for the default"`
+	Load      bool   `json:"load,omitempty" jsonschema:"also report each knight's queued (pending) and in-flight task counts"`
 }
 
 // ListKnightsOutput is the output of the list_knights tool.
@@ -130,10 +131,10 @@ func NewMCPServer(svc *Service) *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_knights",
-		Description: "List the Round Table knights (agents) that can be invoked, with their domain, model and readiness.",
+		Description: "List the Round Table knights (agents) that can be invoked, with their domain, model and readiness. Set load to include queued and in-flight task counts per knight.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListKnightsInput) (*mcp.CallToolResult, ListKnightsOutput, error) {
-		knights, err := svc.ListKnights(ctx, in.Namespace)
+		knights, err := svc.ListKnights(ctx, in.Namespace, in.Load)
 		return nil, ListKnightsOutput{Knights: knights}, err
 	})
 

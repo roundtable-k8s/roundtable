@@ -190,7 +190,8 @@ var openAPIOperations = map[string]obj{
 		"responses": errs(obj{"200": jsonResp("OpenAPI 3.1 document.", obj{"type": "object"})}, "401"),
 	},
 	"GET /v1/knights": listOp("List knights", "knights", "knights", "KnightInfo",
-		queryParam("namespace", "Namespace to list; omit for the gateway's default.")),
+		queryParam("namespace", "Namespace to list; omit for the gateway's default."),
+		queryParam("load", "Set to true to include each knight's queue (queued and in-flight task counts).")),
 	"GET /v1/knights/{name}/snapshots": {
 		"summary": "List a knight's workspace snapshots", "tags": []any{"knights"},
 		"description": "status.workspace.snapshots (oldest first), the WorkspaceSnapshots condition and the last handled snapshot request.",
@@ -444,6 +445,10 @@ var openAPISchemas = obj{
 	"KnightInfo": object([]string{"name", "namespace", "domain", "ready"}, obj{
 		"name": str(""), "namespace": str(""), "domain": str(""), "model": str(""), "runtime": str(""),
 		"phase": str(""), "ready": boolean(""), "suspended": boolean(""), "roundTable": str(""),
+		"queue": object([]string{"pending", "inFlight"}, obj{
+			"pending":  integer("Tasks queued for the knight."),
+			"inFlight": integer("Tasks delivered to the knight and not yet acknowledged."),
+		}),
 	}),
 	"DeadLetter": object([]string{"taskId", "knight", "state", "reason", "attempt", "updatedAt"}, obj{
 		"taskId": str(""), "table": str("RoundTable of the entry."), "knight": str(""),

@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -848,5 +850,84 @@ func TestRequestMetrics(t *testing.T) {
 	}
 	if n := testutil.CollectAndCount(metrics.GatewayRequestDurationSeconds); n != 4 {
 		t.Errorf("duration series = %d, want 4 (one per route template)", n)
+	}
+}
+
+// loadBus answers ConsumerLoad from a map keyed by consumer name; a missing
+// key is an error.
+type loadBus struct {
+	Bus
+	loads map[string][2]uint64
+	calls int
+}
+
+func (b *loadBus) ConsumerLoad(_ context.Context, stream, consumer string) (uint64, uint64, error) {
+	b.calls++
+	if stream != "rt_dev_tasks" {
+		return 0, 0, fmt.Errorf("unexpected stream %q", stream)
+	}
+	l, ok := b.loads[consumer]
+	if !ok {
+		return 0, 0, errors.New("nats down")
+	}
+	return l[0], l[1], nil
+}
+
+func queueOf(t *testing.T, body map[string]any, name string) (map[string]any, bool) {
+	t.Helper()
+	for _, k := range body["knights"].([]any) {
+		m := k.(map[string]any)
+		if m["name"] == name {
+			q, ok := m["queue"].(map[string]any)
+			return q, ok
+		}
+	}
+	t.Fatalf("knight %s not listed", name)
+	return nil, false
+}
+
+func TestListKnightsLoad(t *testing.T) {
+	e := newEnv(t, Options{})
+	bus := &loadBus{Bus: e.svc.Bus, loads: map[string][2]uint64{
+		"Operator-consumer": {3, 1},
+		"Sleepy-consumer":   {0, 0},
+	}}
+	e.svc.Bus = bus
+
+	// Off by default: NATS is not called and no queue is shown.
+	_, body := e.do(t, "GET", "/v1/knights", testToken, nil)
+	if bus.calls != 0 {
+		t.Fatalf("ConsumerLoad called %d times without load", bus.calls)
+	}
+	if _, ok := queueOf(t, body, "operator"); ok {
+		t.Fatal("queue present without load=true")
+	}
+
+	// On: counts per knight; a failing knight (reviewer) is left out, not an error.
+	resp, body := e.do(t, "GET", "/v1/knights?load=true", testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	q, ok := queueOf(t, body, "operator")
+	if !ok || q["pending"] != float64(3) || q["inFlight"] != float64(1) {
+		t.Fatalf("operator queue = %v", q)
+	}
+	q, ok = queueOf(t, body, "sleepy")
+	if !ok || q["pending"] != float64(0) || q["inFlight"] != float64(0) {
+		t.Fatalf("sleepy queue = %v", q)
+	}
+	if _, ok := queueOf(t, body, "reviewer"); ok {
+		t.Fatal("reviewer queue present despite NATS error")
+	}
+}
+
+func TestListKnightsLoadRealConsumer(t *testing.T) {
+	e := newEnv(t, Options{})
+	// "Fake-consumer" exists on the tasks stream; no knight is named fake, so
+	// every listed knight has no consumer yet and reports zeros.
+	_, body := e.do(t, "GET", "/v1/knights?load=true", testToken, nil)
+	q, ok := queueOf(t, body, "operator")
+	if !ok || q["pending"] != float64(0) || q["inFlight"] != float64(0) {
+		t.Fatalf("operator queue = %v", q)
 	}
 }

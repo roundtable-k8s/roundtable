@@ -301,6 +301,11 @@ func (c *JetStreamClient) consumerInfo(ctx context.Context, stream, consumer str
 	if err != nil {
 		return nil, err
 	}
+	return consumerInfoOn(ctx, js, stream, consumer)
+}
+
+// consumerInfoOn returns the named consumer's info using js.
+func consumerInfoOn(ctx context.Context, js jetstream.JetStream, stream, consumer string) (*jetstream.ConsumerInfo, error) {
 	cons, err := js.Consumer(ctx, stream, consumer)
 	if err != nil {
 		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, consumer, err)
@@ -329,6 +334,30 @@ func (c *JetStreamClient) ConsumerPending(ctx context.Context, stream, consumer 
 		return 0, err
 	}
 	return info.NumPending + uint64(info.NumAckPending), nil
+}
+
+// ConsumerLoad returns the consumer's queued (num_pending) and delivered but
+// unacknowledged (num_ack_pending) task counts. A consumer that does not exist
+// yet reports zeros.
+func (c *JetStreamClient) ConsumerLoad(ctx context.Context, stream, consumer string) (pending, ackPending uint64, err error) {
+	js, err := c.jetStream()
+	if err != nil {
+		return 0, 0, err
+	}
+	return ConsumerLoad(ctx, js, stream, consumer)
+}
+
+// ConsumerLoad is JetStreamClient.ConsumerLoad for a caller that holds its own
+// jetstream.JetStream handle.
+func ConsumerLoad(ctx context.Context, js jetstream.JetStream, stream, consumer string) (pending, ackPending uint64, err error) {
+	info, err := consumerInfoOn(ctx, js, stream, consumer)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	return info.NumPending, uint64(info.NumAckPending), nil
 }
 
 // CreateStream creates a JetStream stream with the given configuration. An

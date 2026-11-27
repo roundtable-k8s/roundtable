@@ -77,6 +77,13 @@ func TestStreamAndConsumerLifecycle(t *testing.T) {
 	if n, err := c.ConsumerPending(ctx, "rt_tasks", "knight-a"); err != nil || n != 1 {
 		t.Fatalf("ConsumerPending = %d, %v; want 1", n, err)
 	}
+	if p, a, err := c.ConsumerLoad(ctx, "rt_tasks", "knight-a"); err != nil || p != 1 || a != 0 {
+		t.Fatalf("ConsumerLoad = %d, %d, %v; want 1, 0, nil", p, a, err)
+	}
+	// A consumer that does not exist yet reports zeros.
+	if p, a, err := c.ConsumerLoad(ctx, "rt_tasks", "knight-missing"); err != nil || p != 0 || a != 0 {
+		t.Fatalf("ConsumerLoad(missing) = %d, %d, %v; want zeros", p, a, err)
+	}
 	if seq, err := c.ConsumerDeliveredSeq(ctx, "rt_tasks", "knight-a"); err != nil || seq != 0 {
 		t.Fatalf("ConsumerDeliveredSeq = %d, %v; want 0", seq, err)
 	}

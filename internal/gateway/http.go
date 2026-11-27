@@ -142,7 +142,7 @@ func (s *Service) routes() []route {
 }
 
 func (s *Service) handleListKnights(w http.ResponseWriter, r *http.Request) {
-	knights, err := s.ListKnights(r.Context(), r.URL.Query().Get("namespace"))
+	knights, err := s.ListKnights(r.Context(), r.URL.Query().Get("namespace"), r.URL.Query().Get("load") == "true")
 	if err != nil {
 		writeError(w, err)
 		return

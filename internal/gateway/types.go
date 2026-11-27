@@ -143,6 +143,17 @@ type KnightInfo struct {
 	Ready      bool   `json:"ready"`
 	Suspended  bool   `json:"suspended,omitempty"`
 	RoundTable string `json:"roundTable,omitempty"`
+	// Queue is the knight's task load; set only when asked for (load=true)
+	// and the NATS lookup succeeded.
+	Queue *KnightQueue `json:"queue,omitempty"`
+}
+
+// KnightQueue is how busy a knight is: tasks waiting for it and tasks it has
+// taken but not yet answered, from its durable consumer (so it includes work
+// started by chains).
+type KnightQueue struct {
+	Pending  uint64 `json:"pending"`
+	InFlight uint64 `json:"inFlight"`
 }
 
 // Errors the HTTP and MCP layers map to status codes.

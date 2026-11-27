@@ -52,6 +52,10 @@ type Bus interface {
 	// stream, standing in for the ack nobody else will send. Results in
 	// Limits/Interest streams are left to the stream's own retention.
 	Discard(ctx context.Context, stream, subject string) error
+	// ConsumerLoad returns the tasks queued (pending) and delivered but not
+	// yet acknowledged (ackPending) on a durable consumer. A consumer that
+	// does not exist yet reports zeros.
+	ConsumerLoad(ctx context.Context, stream, consumer string) (pending, ackPending uint64, err error)
 
 	// PutRecord stores a task record.
 	PutRecord(ctx context.Context, rec *TaskRecord) error
@@ -220,6 +224,11 @@ func (b *NATSBus) PublishEvent(ctx context.Context, stream, subject string, data
 		return 0, false, fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return ack.Sequence, ack.Duplicate, nil
+}
+
+// ConsumerLoad implements Bus.
+func (b *NATSBus) ConsumerLoad(ctx context.Context, stream, consumer string) (uint64, uint64, error) {
+	return natspkg.ConsumerLoad(ctx, b.js, stream, consumer)
 }
 
 // LastResult implements Bus.

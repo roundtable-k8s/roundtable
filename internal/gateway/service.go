@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
@@ -158,7 +159,9 @@ func (s *Service) namespace(ns string) (string, error) {
 }
 
 // ListKnights lists the knights in a namespace.
-func (s *Service) ListKnights(ctx context.Context, namespace string) ([]KnightInfo, error) {
+// With load, each knight's Queue is filled from its NATS consumer; a lookup
+// failure is logged and leaves that knight's Queue unset.
+func (s *Service) ListKnights(ctx context.Context, namespace string, load bool) ([]KnightInfo, error) {
 	ns, err := s.namespace(namespace)
 	if err != nil {
 		return nil, err
@@ -169,10 +172,32 @@ func (s *Service) ListKnights(ctx context.Context, namespace string) ([]KnightIn
 	}
 	out := make([]KnightInfo, 0, len(knights))
 	for i := range knights {
-		out = append(out, knightInfo(&knights[i], s.Opts.DefaultKnightImage))
+		info := knightInfo(&knights[i], s.Opts.DefaultKnightImage)
+		if load {
+			info.Queue = s.knightQueue(ctx, &knights[i])
+		}
+		out = append(out, info)
 	}
 	slices.SortFunc(out, func(a, b KnightInfo) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
+}
+
+// knightQueue reads a knight's consumer counters; nil when they are
+// unavailable.
+func (s *Service) knightQueue(ctx context.Context, k *aiv1alpha1.Knight) *KnightQueue {
+	stream, err := s.Resolver.TasksStream(ctx, k)
+	if err != nil || stream == "" {
+		if err != nil {
+			s.Log.Error(err, "Could not resolve knight tasks stream", "knight", k.Name)
+		}
+		return nil
+	}
+	pending, inFlight, err := s.Bus.ConsumerLoad(ctx, stream, natspkg.KnightTaskConsumerName(k.Name))
+	if err != nil {
+		s.Log.Error(err, "Could not read knight queue load", "knight", k.Name)
+		return nil
+	}
+	return &KnightQueue{Pending: pending, InFlight: inFlight}
 }
 
 // acquireSlot takes one maxInFlight slot without blocking and returns the func
