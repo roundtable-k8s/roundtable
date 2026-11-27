@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -110,13 +111,17 @@ var _ = Describe("IssuePickup trigger engine", func() {
 		}
 		return names
 	}
+	// finish marks a run succeeded. The Trigger consumer may still be writing
+	// to the same Chain, so re-read and retry on conflict.
 	finish := func(name string) {
-		c := getChain(name)
-		Expect(c).NotTo(BeNil())
-		c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
-		c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
-		c.Status.CompletedAt = &metav1.Time{Time: clock}
-		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+		Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			c := getChain(name)
+			Expect(c).NotTo(BeNil())
+			c.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
+			c.Status.LastRunTrigger = c.Annotations[aiv1alpha1.AnnotationChainRun]
+			c.Status.CompletedAt = &metav1.Time{Time: clock}
+			return k8sClient.Status().Update(ctx, c)
+		})).To(Succeed())
 	}
 	labelsOf := func(n int) func() []string { return func() []string { return gh.labels(repo, n) } }
 	githubReady := func() string {
@@ -366,6 +371,13 @@ var _ = Describe("IssuePickup trigger engine", func() {
 		Expect(gh.commentsOn(repo, 3)).To(HaveLen(1))
 
 		By("holding when the PR lookup fails")
+		Eventually(func() string {
+			c := getChain(run("7"))
+			if c == nil {
+				return ""
+			}
+			return c.Annotations[aiv1alpha1.AnnotationPickupClaimed]
+		}, wait, every).Should(Not(BeEmpty()))
 		finish(run("7"))
 		gh.add(repo, 9, "More", "", "rt:ready")
 		gh.failPRs = true
