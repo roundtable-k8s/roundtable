@@ -380,8 +380,9 @@ func (e *actionEnv) addTableTriggers(t *testing.T) {
 }
 
 func names(v any) []string {
-	var out []string
-	for _, x := range v.([]any) {
+	items := v.([]any)
+	out := make([]string, 0, len(items))
+	for _, x := range items {
 		out = append(out, x.(map[string]any)["name"].(string))
 	}
 	return out
