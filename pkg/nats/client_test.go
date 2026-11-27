@@ -18,6 +18,7 @@ package nats
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -633,5 +634,29 @@ func TestTokenUsageFractionalDecode(t *testing.T) {
 	want := TokenUsage{Input: 10, Output: 5, CacheRead: 1000, CacheWrite: 2}
 	if r.Tokens == nil || *r.Tokens != want {
 		t.Errorf("tokens = %+v, want %+v", r.Tokens, want)
+	}
+}
+
+func TestTokenUsageClamp(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   string
+		want int64
+	}{
+		"negative":     {`-5`, 0},
+		"very negative": {`-1e308`, 0},
+		"fraction<1":   {`0.9`, 0},
+		"very large": {`1e308`, math.MaxInt64},
+		"huge":         {`1e30`, math.MaxInt64},
+		"2^63":         {`9223372036854775808`, math.MaxInt64},
+		"normal":       {`42.9`, 42},
+	} {
+		var u TokenUsage
+		if err := json.Unmarshal([]byte(`{"input":`+tc.in+`}`), &u); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if u.Input != tc.want {
+			t.Errorf("%s: input = %d, want %d", name, u.Input, tc.want)
+		}
 	}
 }

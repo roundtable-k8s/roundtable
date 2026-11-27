@@ -62,7 +62,9 @@ func (r *Refusal) UnmarshalJSON(b []byte) error {
 // Refusal reasons a knight may report in TaskResult.Refused.
 const (
 	// RefusedUnspecified: the knight sent refused: true without a reason. A
-	// plain refusal, not a quota one.
+	// plain refusal, not a quota one. Not a contract enum value (credits,
+	// quota): the operator accepts refused: true for older runtimes, but
+	// re-encoding the TaskResult emits "refused".
 	RefusedUnspecified Refusal = "refused"
 	// RefusedCredits: the provider account is out of credits (pi-knight, e.g.
 	// OpenRouter 402). Does not reset on its own; the operator treats it as a
@@ -146,7 +148,8 @@ type TokenUsage struct {
 
 // UnmarshalJSON accepts any JSON number for each count (the contract allows
 // a fractional one) and rounds it down, so a fractional count does not fail
-// the whole TaskResult decode.
+// the whole TaskResult decode. NaN, negative and -Inf counts become 0 and
+// counts at or above MaxInt64 (including +Inf) become MaxInt64.
 func (t *TokenUsage) UnmarshalJSON(b []byte) error {
 	var raw struct {
 		Input      *float64 `json:"input"`
@@ -158,8 +161,11 @@ func (t *TokenUsage) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	floor := func(f *float64) int64 {
-		if f == nil || math.IsNaN(*f) {
+		switch {
+		case f == nil || math.IsNaN(*f) || *f <= 0:
 			return 0
+		case *f >= math.MaxInt64: // also +Inf; float64(MaxInt64) is 2^63
+			return math.MaxInt64
 		}
 		return int64(math.Floor(*f))
 	}

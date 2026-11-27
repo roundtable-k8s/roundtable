@@ -65,11 +65,6 @@ type Client interface {
 	// An existing stream is left as it is.
 	CreateStream(ctx context.Context, config StreamConfig) error
 
-	// EnsureStreamMaxAge makes the stream's MaxAge equal maxAge (0 =
-	// unlimited), updating the stream only when it differs and leaving every
-	// other setting as it is. It reports whether an update was issued.
-	EnsureStreamMaxAge(ctx context.Context, name string, maxAge time.Duration) (bool, error)
-
 	// EnsureStream creates the stream if missing, otherwise makes its MaxAge
 	// equal config.MaxAge (0 = unlimited), with a single stream lookup. It
 	// reports whether an existing stream was updated.
@@ -460,19 +455,6 @@ func (c *JetStreamClient) createStream(
 
 	c.log.Info("Created JetStream stream", "name", config.Name, "retention", config.Retention)
 	return nil
-}
-
-// EnsureStreamMaxAge updates the stream's MaxAge when it differs from maxAge.
-func (c *JetStreamClient) EnsureStreamMaxAge(ctx context.Context, name string, maxAge time.Duration) (bool, error) {
-	js, err := c.jetStream()
-	if err != nil {
-		return false, err
-	}
-	stream, err := js.Stream(ctx, name)
-	if err != nil {
-		return false, fmt.Errorf("failed to get stream %s: %w", name, err)
-	}
-	return c.applyMaxAge(ctx, js, stream, maxAge)
 }
 
 func (c *JetStreamClient) applyMaxAge(
