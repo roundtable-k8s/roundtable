@@ -345,10 +345,10 @@ func (s *Service) validateScheduleSpec(ctx context.Context, ns string, spec *aiv
 	switch spec.Concurrency.Policy {
 	case "", aiv1alpha1.TriggerConcurrencyAllow, aiv1alpha1.TriggerConcurrencyForbid, aiv1alpha1.TriggerConcurrencyReplace:
 	default:
-		return fieldErr("spec.concurrency.policy", "must be Allow, Forbid or Replace, not %q", spec.Concurrency.Policy)
+		return fieldErr(aiv1alpha1.ConcurrencyPolicyField, "must be Allow, Forbid or Replace, not %q", spec.Concurrency.Policy)
 	}
 	if err := aiv1alpha1.ValidateConcurrency(spec); err != nil {
-		return fieldErr("spec.concurrency.policy", "%s", strings.TrimPrefix(err.Error(), aiv1alpha1.ConcurrencyPolicyField+" "))
+		return fieldErr(aiv1alpha1.ConcurrencyPolicyField, "%s", strings.TrimPrefix(err.Error(), aiv1alpha1.ConcurrencyPolicyField+" "))
 	}
 	if spec.Concurrency.MaxActive < 0 {
 		return fieldErr("spec.concurrency.maxActive", "must be at least 0")

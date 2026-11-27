@@ -105,7 +105,10 @@ type KnightSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// skills defines which skill categories this knight has access to.
+	// skills defines which skill categories this knight has access to. An
+	// entry names either a <category> directory of <skill>/SKILL.md skills or,
+	// in the flat layout, a single skill directory <skill>/SKILL.md at the
+	// arsenal root.
 	// The operator will configure the skill-filter sidecar accordingly.
 	// +kubebuilder:validation:MinItems=1
 	Skills []string `json:"skills"`
@@ -274,7 +277,9 @@ type KnightSpec struct {
 	// arsenals is the single ordered list of skill sources merged into /skills.
 	// The first entry is the base; later entries override it per skill:
 	// /skills/<category>/<skill> links to the LAST arsenal that provides that
-	// skill. Each git entry runs its own git-sync-<name> sidecar. When empty
+	// skill. An arsenal may also use the flat layout, <skill>/SKILL.md at its
+	// root, where the directory is listed in spec.skills and linked as
+	// /skills/<skill>/<skill>. Each git entry runs its own git-sync-<name> sidecar. When empty
 	// (and no RoundTable default applies) it defaults to one entry
 	// {name: platform, repo: https://github.com/roundtable-k8s/arsenal}.
 	// +optional
