@@ -950,6 +950,35 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(gh.commentsOn(repo, 314)).To(HaveLen(2), "the marked comment is not posted again")
 		})
 
+		It("records a merge step timeout as succeeded when its PR is in the merge queue (auto_merge null)", func() {
+			name := fail()
+			gh.setPR(github.PullRequest{State: "open"}) // no auto_merge: only the merge queue holds it
+			gh.mu.Lock()
+			gh.inMergeQueue = map[string]bool{"acme/widgets#7": true}
+			gh.mu.Unlock()
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			c.Status.RunsFailed, c.Status.RunsCompleted = 1, 0
+			c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{
+				{Name: "review", Phase: aiv1alpha1.ChainStepPhaseSucceeded, Output: "PRs: https://github.com/acme/widgets/pull/7\nVerdict: ship it"},
+				{Name: "merge", Phase: aiv1alpha1.ChainStepPhaseFailed, Error: "step timed out after 3600s", TaskID: "t-merge"},
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+
+			tick()
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			Expect(c.Status.Phase).To(Equal(aiv1alpha1.ChainPhaseSucceeded))
+			Expect(c.Status.RunsFailed).To(BeZero())
+			Expect(c.Status.RunsCompleted).To(Equal(int64(1)))
+			merge := c.Status.StepStatuses[1]
+			Expect(merge.Phase).To(Equal(aiv1alpha1.ChainStepPhaseSucceeded))
+			Expect(merge.Reason).To(Equal(stepReasonQueuedAtTimeout))
+			Expect(merge.Output).To(ContainSubstring("https://github.com/acme/widgets/pull/7 queued"))
+			By("leaving the issue to the merge queue instead of handing it to a human")
+			Expect(gh.labels(repo, 314)).NotTo(ContainElement("needs-human"))
+			Expect(gh.autoMerged).To(BeEmpty())
+		})
+
 		It("labels the issue needs-human, removes in-progress and says which step failed", func() {
 			name := fail()
 			Expect(gh.labels(repo, 314)).To(ConsistOf("rt:in-progress"))

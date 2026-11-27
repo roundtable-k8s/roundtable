@@ -46,6 +46,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -928,12 +929,15 @@ var _ = Describe("Trigger GitHub source", func() {
 		Eventually(func() int { return len(runsOf("looped")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
 		Eventually(func() *metav1.Condition { return githubReady("looped") }, 5*time.Second, 100*time.Millisecond).ShouldNot(BeNil())
 
-		t := getTrigger("looped")
-		t.Spec.Suspend = true
-		Expect(k8sClient.Update(ctx, t)).To(Succeed())
+		// The poller writes status concurrently: re-read and retry on a 409.
+		Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			cur := getTrigger("looped")
+			cur.Spec.Suspend = true
+			return k8sClient.Update(ctx, cur)
+		})).To(Succeed())
 		reconcileTrigger("looped")
 		Expect(r.pollers.running(key)).To(BeFalse())
-		t = getTrigger("looped")
+		t := getTrigger("looped")
 		Expect(meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerGitHubReady)).To(BeNil())
 		Expect(t.Status.Consumer).To(BeEmpty())
 	})
