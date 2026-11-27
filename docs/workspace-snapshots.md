@@ -38,7 +38,11 @@ kubectl -n roundtable annotate knight galahad ai.roundtable.io/snapshot=$(date +
 The operator creates a `VolumeSnapshot` named `<knight>-ws-<unix-seconds>` in the knight's
 namespace, from the workspace PVC, and records the handled value in
 `status.workspace.lastSnapshotRequest`. Re-applying the same value does nothing; use a new
-value for each snapshot.
+value for each snapshot. Two different values set within the same second share a snapshot
+name and count as one request, so change the value at least a second apart.
+
+Snapshots are not taken while the knight is suspended; a pending request runs when the knight
+resumes.
 
 Each snapshot has the label `roundtable.io/knight=<knight>` and is owned by the Knight, so
 **deleting the Knight deletes its snapshots**. Copy anything you need to keep (or fork

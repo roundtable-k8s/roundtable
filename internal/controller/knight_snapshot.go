@@ -231,8 +231,9 @@ func (r *KnightReconciler) reconcileSnapshots(ctx context.Context, knight *aiv1a
 		if err := r.createSnapshot(ctx, knight, v, name); err != nil {
 			return err
 		}
-		// The new snapshot may not be visible in the cache yet; the
-		// request label keeps the next reconcile from duplicating it.
+		// Snapshots are read as unstructured objects, which are not
+		// cached; the re-list only mirrors the new snapshot into status.
+		// The request label keeps the next reconcile from duplicating it.
 		snaps, err = r.listSnapshots(ctx, knight)
 		return err
 	}
