@@ -113,6 +113,7 @@ type Service struct {
 	ScheduleReader client.Reader
 
 	hookLimits *hookLimiter
+	hookMisses *hookMissCache
 	now        func() time.Time
 	inflight   chan struct{}
 	// streams holds a slot per open event stream; closing ends them all.
@@ -133,7 +134,7 @@ func NewService(resolver *Resolver, bus Bus, opts Options, log logr.Logger) *Ser
 	opts.Runs.defaults()
 	opts.Hooks.defaults()
 	s := &Service{Resolver: resolver, Bus: bus, Opts: opts, Log: log, now: time.Now, closing: make(chan struct{}),
-		hookLimits: newHookLimiter(opts.Hooks.Rate, opts.Hooks.Burst)}
+		hookLimits: newHookLimiter(opts.Hooks.Rate, opts.Hooks.Burst), hookMisses: newHookMissCache()}
 	if opts.MaxStreams > 0 {
 		s.streams = make(chan struct{}, opts.MaxStreams)
 	}

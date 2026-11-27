@@ -131,6 +131,8 @@ func newHookEnv(t *testing.T, hooks HookOptions, enabled bool, allowed ...string
 		hookSecret(testNS, "hmac", hookHMACKey, true),
 		hookSecret(testNS, "unlabelled", hookBearer, false),
 		hookSecret(hookOtherNS, "bearer", hookBearer, true),
+		hookSecret(testNS, "short", "too-short", true),
+		hookTrigger(testNS, "short", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("short")}),
 		hookTrigger(testNS, "alerts", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("bearer")}),
 		hookTrigger(testNS, "signed", aiv1alpha1.TriggerWebhookAuth{HMACSecretRef: secretRef("hmac")}),
 		hookTrigger(testNS, "unlabelled", aiv1alpha1.TriggerWebhookAuth{BearerTokenSecretRef: secretRef("unlabelled")}),
@@ -452,5 +454,79 @@ func TestHookCredentialReadErrors(t *testing.T) {
 				t.Fatalf("401 body %q differs from a bad token's", raw)
 			}
 		})
+	}
+}
+
+// TestHookShortCredentialLooksLikeBadToken: a labelled Secret whose key is
+// shorter than minTokenLength is an unusable credential, answered with the
+// same 401 and headers as a wrong token, so the body does not tell a sender
+// that the Trigger is misconfigured.
+func TestHookShortCredentialLooksLikeBadToken(t *testing.T) {
+	e := newHookEnv(t, HookOptions{}, true)
+	auth := map[string]string{"Authorization": "Bearer too-short"}
+	badResp, badOut := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), auth)
+	shortResp, shortOut := e.post(t, "/v1/hooks/"+testNS+"/short", []byte(`{}`), map[string]string{"Authorization": "Bearer too-short"})
+	if shortResp.StatusCode != http.StatusUnauthorized || badResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status short %d, bad %d", shortResp.StatusCode, badResp.StatusCode)
+	}
+	if shortOut["_raw"] != badOut["_raw"] {
+		t.Fatalf("short-credential body %q differs from a bad token's %q", shortOut["_raw"], badOut["_raw"])
+	}
+	if shortResp.Header.Get("WWW-Authenticate") != badResp.Header.Get("WWW-Authenticate") {
+		t.Fatalf("WWW-Authenticate %q, want %q", shortResp.Header.Get("WWW-Authenticate"), badResp.Header.Get("WWW-Authenticate"))
+	}
+}
+
+// countingReader counts Gets of Triggers.
+type countingReader struct {
+	client.Reader
+	triggerGets *int
+}
+
+func (r countingReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*aiv1alpha1.Trigger); ok {
+		*r.triggerGets++
+	}
+	return r.Reader.Get(ctx, key, obj, opts...)
+}
+
+// TestHookNegativeCache: a repeated probe of an unknown Trigger within
+// hookMissTTL reads the API once; a found Trigger is read on every request;
+// after the window the unknown name is read again.
+func TestHookNegativeCache(t *testing.T) {
+	e := newHookEnv(t, HookOptions{}, true)
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { return clock }
+	gets := 0
+	e.svc.Hooks = countingReader{Reader: e.svc.Hooks, triggerGets: &gets}
+	auth := map[string]string{"Authorization": "Bearer " + hookBearer}
+
+	for i := range 3 {
+		resp, _ := e.post(t, "/v1/hooks/"+testNS+"/ghost", []byte(`{}`), auth)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("unknown probe %d: status %d", i, resp.StatusCode)
+		}
+	}
+	if gets != 1 {
+		t.Fatalf("unknown Trigger read %d times in the window, want 1", gets)
+	}
+
+	gets = 0
+	for i := range 2 {
+		if resp, out := e.post(t, "/v1/hooks/"+testNS+"/alerts", []byte(`{}`), auth); resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("found Trigger %d: status %d %v", i, resp.StatusCode, out)
+		}
+	}
+	if gets != 2 {
+		t.Fatalf("found Trigger read %d times for 2 requests, want 2", gets)
+	}
+
+	clock = clock.Add(hookMissTTL)
+	gets = 0
+	if resp, _ := e.post(t, "/v1/hooks/"+testNS+"/ghost", []byte(`{}`), auth); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d after the window", resp.StatusCode)
+	}
+	if gets != 1 {
+		t.Fatalf("unknown Trigger read %d times after the window, want 1", gets)
 	}
 }

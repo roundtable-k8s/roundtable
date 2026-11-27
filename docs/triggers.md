@@ -62,6 +62,12 @@ stream. The Trigger reads that subject like a NATS source, so the bus stays the
 system of record and everything under [Delivery](#delivery-nats-webhook-and-github-sources)
 applies.
 
+The credential guards the HTTP path only. A NATS publisher that can write to
+`<subjectPrefix>.events.webhook.<namespace>.<name>` (or any `<subjectPrefix>.events.>`
+subject) fires the Trigger directly, with no credential. NATS users and
+permissions are out of scope here (issue #234): restrict who can publish on
+the events subjects if a webhook Trigger must only be fired by its sender.
+
 [`examples/trigger-webhook.yaml`](../examples/trigger-webhook.yaml):
 
 ```yaml

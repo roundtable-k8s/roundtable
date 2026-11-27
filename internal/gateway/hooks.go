@@ -56,6 +56,12 @@ const (
 	// hookLimiterSweep is the limiter count above which idle ones are
 	// dropped.
 	hookLimiterSweep = 1024
+	// hookMissTTL is how long a namespace/name whose Trigger lookup returned
+	// not found is answered without another API GET. Found Triggers are never
+	// cached: a credential or spec change applies at once.
+	hookMissTTL = 5 * time.Second
+	// hookMissMax bounds the negative cache.
+	hookMissMax = 1024
 )
 
 // hookIDHeaders are the sender headers whose value becomes Nats-Msg-Id, in
@@ -157,6 +163,52 @@ func (l *hookLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 	return false, wait
 }
 
+// hookMissCache remembers namespace/name pairs whose Trigger lookup returned
+// not found, for hookMissTTL, so a sender probing many unknown names costs
+// the API one GET per name per window instead of one per request.
+type hookMissCache struct {
+	mu      sync.Mutex
+	expires map[string]time.Time
+}
+
+func newHookMissCache() *hookMissCache {
+	return &hookMissCache{expires: map[string]time.Time{}}
+}
+
+// missing reports whether key was not found and its entry has not expired.
+func (c *hookMissCache) missing(key string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	exp, ok := c.expires[key]
+	if !ok {
+		return false
+	}
+	if !now.Before(exp) {
+		delete(c.expires, key)
+		return false
+	}
+	return true
+}
+
+// add records key as not found from now on for hookMissTTL. When the cache
+// is full of live entries the key is not recorded: the lookup then runs as
+// it did before the cache existed.
+func (c *hookMissCache) add(key string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.expires) >= hookMissMax {
+		for k, exp := range c.expires {
+			if !now.Before(exp) {
+				delete(c.expires, k)
+			}
+		}
+		if len(c.expires) >= hookMissMax {
+			return
+		}
+	}
+	c.expires[key] = now.Add(hookMissTTL)
+}
+
 // lookupHook returns the webhook Trigger at namespace/name. An unknown
 // Trigger, one without source.webhook and one in a namespace callers may not
 // target all give the same ErrNotFound, so a sender learns nothing about
@@ -169,9 +221,15 @@ func (s *Service) lookupHook(ctx context.Context, namespace, name string) (*aiv1
 	if _, err := s.namespace(namespace); err != nil {
 		return nil, notFound
 	}
+	key := namespace + "/" + name
+	now := s.now()
+	if s.hookMisses.missing(key, now) {
+		return nil, notFound
+	}
 	trg := &aiv1alpha1.Trigger{}
 	if err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, trg); err != nil {
 		if apierrors.IsNotFound(err) {
+			s.hookMisses.add(key, now)
 			return nil, notFound
 		}
 		return nil, fmt.Errorf("%w: get trigger: %v", ErrUnavailable, err)
