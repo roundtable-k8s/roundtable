@@ -316,6 +316,24 @@ func TestDisabledTablePlannerFallsBackToRoleLabel(t *testing.T) {
 	}
 }
 
+// TestEnabledTablePlannerIsWaitedFor is the control for the disabled test
+// above: the same fixture with the planner enabled (not disabled) does not
+// fall back to the role-labelled knight, it waits for the table's own planner.
+func TestEnabledTablePlannerIsWaitedFor(t *testing.T) {
+	c := plannerTestClient(
+		onTableA(plannerTestMission(nil)),
+		plannerTestTable("a", nil), plannerTestTable("b", nil),
+		tablePlanner("b"),
+		roleKnight("planner", nil),
+	)
+
+	m := reconcilePlanning(t, c)
+
+	if got := aiv1alpha1.RefName(m.Spec.Planner.KnightRef); got != "" {
+		t.Fatalf("knightRef = %q, want unset while the table's planner is created", got)
+	}
+}
+
 // TestOtherTablesPlannerIsNeverUsed: a mission whose table has no planner
 // fails rather than borrowing another table's.
 func TestOtherTablesPlannerIsNeverUsed(t *testing.T) {

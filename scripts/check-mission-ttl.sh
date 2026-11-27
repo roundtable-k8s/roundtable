@@ -14,12 +14,14 @@ has() { grep -q -- "$2" <<<"$1" || fail "$3"; }
 
 has "$(render)" '--mission-results-ttl=720h$' "default TTL missing"
 has "$(render --set mission.resultsTTL=1h30m)" '--mission-results-ttl=1h30m$' "compound duration rejected or ignored"
+has "$(render --set-string mission.resultsTTL=0)" '--mission-results-ttl=0$' "0 is a valid Go duration"
 
 for bad in 30d 2w 720 abc ""; do
   [ -n "$bad" ] || continue
   if out="$(render --set-string mission.resultsTTL="$bad" 2>&1)"; then
     fail "mission.resultsTTL=$bad must fail"
   fi
-  has "$out" '720h' "unclear error for mission.resultsTTL=$bad"
+  # values.schema.json rejects it first; the template check is the backstop.
+  has "$out" 'resultsTTL' "unclear error for mission.resultsTTL=$bad"
 done
 echo "ok"

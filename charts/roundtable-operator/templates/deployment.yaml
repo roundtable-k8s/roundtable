@@ -10,7 +10,7 @@ metadata:
 {{- fail "leader election is disabled (leaderElect/leaderElection.enabled=false): replicaCount must be 1" }}
 {{- end }}
 {{- $ttl := toString (.Values.mission.resultsTTL | default "720h") }}
-{{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $ttl) }}
+{{- if not (or (eq $ttl "0") (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $ttl)) }}
 {{- fail (printf "mission.resultsTTL must be a Go duration such as 720h (d and w suffixes are not supported), got %q" $ttl) }}
 {{- end }}
 spec:

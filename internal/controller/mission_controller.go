@@ -812,6 +812,8 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 			// Continue with cleanup. resultsRef stays unset: it would point at an
 			// entry that was never written. Cleanup runs once, so there is no retry.
 			msg := boundMessage("Failed to store results to NATS KV: " + err.Error())
+			// Cleanup can retry this step; warn once, not on every retry.
+			alreadyReported := meta.IsStatusConditionFalse(mission.Status.Conditions, aiv1alpha1.ConditionMissionResultsRetained)
 			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionMissionResultsRetained,
 				Status:             metav1.ConditionFalse,
@@ -819,7 +821,9 @@ func (r *MissionReconciler) reconcileCleaningUp(ctx context.Context, mission *ai
 				Message:            msg,
 				ObservedGeneration: mission.Generation,
 			})
-			r.Recorder.Event(mission, corev1.EventTypeWarning, "ResultsNotRetained", msg)
+			if !alreadyReported {
+				r.Recorder.Event(mission, corev1.EventTypeWarning, "ResultsNotRetained", msg)
+			}
 		} else {
 			meta.SetStatusCondition(&mission.Status.Conditions, metav1.Condition{
 				Type:               aiv1alpha1.ConditionMissionResultsRetained,

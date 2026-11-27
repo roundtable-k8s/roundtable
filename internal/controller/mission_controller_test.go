@@ -984,6 +984,37 @@ var _ = Describe("Mission Controller", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
 		})
+
+		It("should fail on a duplicate knight template with a Complete condition and a Warning event", func() {
+			tmpl := aiv1alpha1.MissionKnightTemplate{Name: "dup", Spec: aiv1alpha1.KnightSpec{Domain: "d"}}
+			createMission(aiv1alpha1.MissionSpec{
+				Objective:       "duplicate templates",
+				KnightTemplates: []aiv1alpha1.MissionKnightTemplate{tmpl, tmpl},
+				TTLSeconds:      3600,
+				TimeoutSeconds:  1800,
+			})
+			r := newReconciler()
+			rec := record.NewFakeRecorder(10)
+			r.Recorder = rec
+
+			// First reconcile sets Pending, the next validates the spec.
+			for range 3 {
+				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: missionNN})
+			}
+
+			mission := &aiv1alpha1.Mission{}
+			Expect(k8sClient.Get(ctx, missionNN, mission)).To(Succeed())
+			Expect(mission.Status.Phase).To(Equal(aiv1alpha1.MissionPhaseFailed))
+			Expect(mission.Status.Result).To(ContainSubstring("Duplicate knight template name: dup"))
+
+			condition := meta.FindStatusCondition(mission.Status.Conditions, aiv1alpha1.ConditionMissionComplete)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal(aiv1alpha1.ReasonMissionFailed))
+
+			Expect(rec.Events).To(Receive(And(
+				ContainSubstring("Warning"), ContainSubstring("Failed"), ContainSubstring("Duplicate knight template name"))))
+		})
 	})
 
 	Context("When the mission is deleted before its cleanup phase ran", func() {
