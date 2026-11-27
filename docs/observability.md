@@ -401,6 +401,7 @@ below with their label values.
 | `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
 | `roundtable_github_pagination_truncated_total` | counter | `call` | GitHub list calls that stopped at the page cap (5 pages of 100) with more results available; the rest of the result set was not read |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` | Invoke gateway HTTP request duration |
+| `roundtable_build_info` | gauge | `component`, `version` | 1 for the version each component (`component` is `operator` or `gateway`) is running (the `-ldflags "-X main.version=..."` value, `dev` for unstamped builds); an upgrade shows as the old series disappearing and a new one appearing |
 
 ## Trigger and gateway metrics
 

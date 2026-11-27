@@ -239,6 +239,24 @@ var TriggerGitHubHoldStartedTimestampSeconds = prometheus.NewGaugeVec(
 	[]string{"namespace", "trigger", "repository"},
 )
 
+// BuildInfo is 1 for the version each component is running. Set once at
+// start-up through SetBuildInfo; the version comes from the -ldflags
+// "-X main.version=..." build variable ("dev" for unstamped builds).
+var BuildInfo = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_build_info",
+		Help: "Version of the running operator or gateway, always 1",
+	},
+	[]string{"component", "version"},
+)
+
+// SetBuildInfo records the running version of a component (operator or
+// gateway). A later call for the same component replaces its earlier series.
+func SetBuildInfo(component, version string) {
+	BuildInfo.DeletePartialMatch(prometheus.Labels{"component": component})
+	BuildInfo.WithLabelValues(component, version).Set(1)
+}
+
 // GatewayRequestsTotal counts invoke gateway HTTP requests. route is the
 // registered route pattern (never the raw path), code the HTTP status, table
 // the request's RoundTable (none when not known), caller_kind how the caller
@@ -300,5 +318,6 @@ func init() {
 		GatewayRequestsTotal,
 		GatewayRequestDurationSeconds,
 		GithubPaginationTruncatedTotal,
+		BuildInfo,
 	)
 }

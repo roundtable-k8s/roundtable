@@ -40,7 +40,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/telemetry"
 
 	// Register custom Prometheus metrics
-	_ "github.com/roundtable-k8s/roundtable/pkg/metrics"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -235,6 +235,8 @@ func main() {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 	}
+
+	metrics.SetBuildInfo("operator", version)
 
 	shutdownTelemetry, err := telemetry.Setup(context.Background(), version)
 	if err != nil {

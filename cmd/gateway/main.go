@@ -44,6 +44,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/gateway"
 	"github.com/roundtable-k8s/roundtable/internal/telemetry"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // gatewayServiceName is the service.name used when OTEL_SERVICE_NAME is unset.
@@ -148,6 +149,8 @@ func main() {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 	}
+	metrics.SetBuildInfo("gateway", version)
+
 	shutdownTelemetry, err := telemetry.SetupService(context.Background(), gatewayServiceName, version)
 	if err != nil {
 		log.Error(err, "Failed to set up OpenTelemetry; continuing without tracing")
