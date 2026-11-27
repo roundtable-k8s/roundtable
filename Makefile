@@ -145,7 +145,7 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 # TIER selects the e2e scenarios (Ginkgo labels in test/e2e). E2E_TIERS lists the
 # tiers that exist; test/e2e/tiers_test.go fails when it drifts from the tier
 # constants in e2e_suite_test.go. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
-E2E_TIERS := core trace trigger lost restart gateway chain schedule github webhook
+E2E_TIERS := core trace trigger lost restart gateway chain schedule mission github webhook
 define E2E_TIER_HELP
 core      the default: operator, NATS, Helm chart and a Chain run on the stub knight
 trace     the Chain trace case
@@ -155,6 +155,7 @@ restart   a Chain step in flight survives an operator rollout (needs the fix fro
 gateway   asking a knight and running a Chain through the invoke gateway with a ServiceAccount token
 chain     the Chain engine: step output, when, forEach, on the stub knight
 schedule  a scheduled Trigger created, run now, suspended and deleted through the gateway
+mission   a meta-Mission planned by the stub knight runs to Succeeded
 github    issue pickup on the trigger engine against a stub GitHub API
 webhook   an HTTP POST to a webhook Trigger on the gateway starting one Chain run
 all       every tier above

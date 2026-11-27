@@ -1,0 +1,63 @@
+# A table, one stub knight (test/e2e/stubknight, no LLM) and a meta-Mission for
+# the e2e mission tier. The stub knight answers the planning task with the plan
+# in STUB_PLAN_JSON: one chain, one step on the existing knight `stub` and no
+# knights[], so no ephemeral knight pods are created.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: e2e-table
+  namespace: roundtable-mission
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: e2em
+    tasksStream: e2em_tasks
+    resultsStream: e2em_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-mission
+  labels:
+    ai.roundtable.io/round-table: e2e-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: e2em_tasks
+    resultsStream: e2em_results
+    subjects:
+      - "e2em.tasks.e2e.>"
+  env:
+    - name: STUB_PLAN_JSON
+      value: '{"planVersion":"v1alpha1","metadata":{"objective":"Summarise the release"},"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}'
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Mission
+metadata:
+  name: planned
+  namespace: roundtable-mission
+spec:
+  objective: Summarise the release
+  roundTableRef: {name: e2e-table}
+  timeoutSeconds: 900
+  metaMission: true
+  planner:
+    knightRef: {name: stub}
+    timeoutSeconds: 120
+    maxChains: 1

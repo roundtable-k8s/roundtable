@@ -66,6 +66,7 @@ const (
 	tierGateway  = "gateway"
 	tierChain    = "chain"
 	tierSchedule = "schedule"
+	tierMission  = "mission"
 	tierGitHub   = "github"
 	tierWebhook  = "webhook"
 )
@@ -126,7 +127,7 @@ var _ = BeforeSuite(func() {
 	}
 
 	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) ||
-		tierSelected(tierGateway) || tierSelected(tierChain) || tierSelected(tierSchedule) ||
+		tierSelected(tierGateway) || tierSelected(tierChain) || tierSelected(tierSchedule) || tierSelected(tierMission) ||
 		tierSelected(tierGitHub) ||
 		tierSelected(tierWebhook) {
 		buildStubKnightImage()
