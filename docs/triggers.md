@@ -403,7 +403,9 @@ it would start again) starts now:
   across the repositories. Every repository is listed first, then items are
   visited round-robin, one per repository per pass (each repository keeping its
   own order), so one busy repository cannot fill every slot while another
-  waits. A repository without items costs no pass.
+  waits. A repository without items costs no pass. The turn is per candidate:
+  a candidate skipped in its turn (busy, duplicate or held) still uses up that
+  repository's turn in the pass, and its next candidate waits for the next pass.
 - `holdWhilePullRequestLabeled`: while a repository has an open pull request
   with this label, its items start no new run (counted as held in
   `GitHubReady`, with a `Held` event). If the pull requests cannot be listed,

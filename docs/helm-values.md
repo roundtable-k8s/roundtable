@@ -160,7 +160,7 @@ What each policy allows:
 Limits and caveats:
 
 - Policies only cover pods in the release namespace. Knights in other namespaces are not covered; write their policies yourself.
-- Kubelet probes come from the node, not from a pod. With Cilium they are allowed by default. Other CNIs may need an `ipBlock` for the node CIDRs; the chart does not guess node CIDRs. This applies to every policy here that opens a port the kubelet probes, not only the operator's: add the `ipBlock` peer to `networkPolicy.metricsFrom` (which feeds the operator, dashboard and knight policies) or the probed pods are reported unready.
+- Kubelet probes come from the node, not from a pod. With Cilium they are allowed by default. Other CNIs may need an `ipBlock` for the node CIDRs; the chart does not guess node CIDRs. This applies to every policy here that opens a port the kubelet probes, not only the operator's: add the `ipBlock` peer to `networkPolicy.metricsFrom` (which feeds the operator, dashboard and knight policies, and the gateway's metrics port rule in `templates/gateway.yaml`) or the probed pods are reported unready.
 - Egress is not restricted here (see #168) and NATS-level authorization is not covered (see #234).
 - The gateway has its own NetworkPolicy (`gateway.networkPolicy`), separate from this one.
 
