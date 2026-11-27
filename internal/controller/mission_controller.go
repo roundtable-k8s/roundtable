@@ -31,9 +31,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	missionpkg "github.com/roundtable-k8s/roundtable/internal/mission"
@@ -396,7 +401,13 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 		}
 	}
 
-	// Validate referenced chains exist
+	// Hold the mission back while its RoundTable is at policies.maxMissions.
+	if res, held, err := r.admitMission(ctx, mission); held || err != nil {
+		return res, err
+	}
+
+	// Validate referenced chains exist. This runs after admission so a held
+	// mission does not repeat the Gets on every requeue.
 	for _, chainRef := range mission.Spec.Chains {
 		chain := &aiv1alpha1.Chain{}
 		if err := r.Get(ctx, types.NamespacedName{
@@ -410,11 +421,6 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 			}
 			return ctrl.Result{}, err
 		}
-	}
-
-	// Hold the mission back while its RoundTable is at policies.maxMissions.
-	if res, held, err := r.admitMission(ctx, mission); held || err != nil {
-		return res, err
 	}
 
 	log.Info("Mission spec validation passed", "mission", mission.Name)
@@ -971,6 +977,9 @@ func (r *MissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&aiv1alpha1.Chain{}).
 		Owns(&aiv1alpha1.Knight{}).
 		Owns(&aiv1alpha1.RoundTable{}).
+		Watches(&aiv1alpha1.Mission{},
+			handler.EnqueueRequestsFromMapFunc(r.pendingMissionsOfFreedTable),
+			builder.WithPredicates(missionLeftActivePhase())).
 		Named("mission").
 		Complete(r)
 }
@@ -1011,3 +1020,51 @@ func (r *MissionReconciler) failedChainsMessage(ctx context.Context, mission *ai
 const maxConditionMessage = 1000
 
 func boundMessage(s string) string { return missionpkg.TruncateMessage(s, maxConditionMessage) }
+
+// missionLeftActivePhase passes only events that free a maxMissions slot: a
+// phase transition out of an active phase, or the deletion of an active mission.
+func missionLeftActivePhase() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			o, ok1 := e.ObjectOld.(*aiv1alpha1.Mission)
+			n, ok2 := e.ObjectNew.(*aiv1alpha1.Mission)
+			return ok1 && ok2 && o.Status.Phase.IsActive() && !n.Status.Phase.IsActive()
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			m, ok := e.Object.(*aiv1alpha1.Mission)
+			return ok && m.Status.Phase.IsActive()
+		},
+	}
+}
+
+// pendingMissionsOfFreedTable enqueues the Pending missions of the freed
+// mission's RoundTable so a held mission is admitted without waiting for its
+// requeue poll.
+func (r *MissionReconciler) pendingMissionsOfFreedTable(ctx context.Context, obj client.Object) []reconcile.Request {
+	m, ok := obj.(*aiv1alpha1.Mission)
+	if !ok {
+		return nil
+	}
+	table := aiv1alpha1.RefName(m.Spec.RoundTableRef)
+	if table == "" {
+		return nil
+	}
+	list := &aiv1alpha1.MissionList{}
+	if err := r.List(ctx, list, client.InNamespace(m.Namespace)); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list missions to wake held ones", "table", table)
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		p := &list.Items[i]
+		if p.UID == m.UID || aiv1alpha1.RefName(p.Spec.RoundTableRef) != table || !p.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if p.Status.Phase == aiv1alpha1.MissionPhasePending || p.Status.Phase == "" {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(p)})
+		}
+	}
+	return reqs
+}

@@ -183,6 +183,12 @@ waiting for it to be Ready. `skills`, `concurrency` and `taskTimeoutSeconds`
 come from Helm `planner.*`. `status.plannerKnight` on the table names its
 planner.
 
+A hand edit to the table-owned planner Knight lasts only until the table's
+planner settings change: the controller rewrites the Knight when the hash of
+those settings changes, not on every reconcile. To keep a customised planner,
+set `spec.planner.knightRef` to a Knight you manage, or set
+`spec.planner.enabled: false` and manage the planner yourself.
+
 **Mission knights and the sandbox runtime (#483):**
 
 Each mission knight is created as `<mission>-<knight>` with an owner

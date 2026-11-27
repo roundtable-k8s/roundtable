@@ -26,7 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -170,5 +172,83 @@ func TestReconcilePendingResetsStartedAtOnAdmission(t *testing.T) {
 	}
 	if got.Status.StartedAt == nil || time.Since(got.Status.StartedAt.Time) > time.Minute {
 		t.Errorf("StartedAt not reset on admission: %v", got.Status.StartedAt)
+	}
+}
+
+type getCountingClient struct {
+	client.Client
+	chainGets int
+}
+
+func (c *getCountingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*aiv1alpha1.Chain); ok {
+		c.chainGets++
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// A held mission must not repeat the chain-existence Gets on each requeue.
+func TestReconcilePendingHeldSkipsChainValidation(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	active := admissionMission("a", 2*time.Hour, "t", aiv1alpha1.MissionPhaseActive)
+	held := admissionMission("b", time.Hour, "t", aiv1alpha1.MissionPhasePending)
+	held.Spec.Chains = []aiv1alpha1.MissionChainRef{{Name: "c"}}
+	base := fake.NewClientBuilder().WithScheme(s).WithObjects(admissionRT(1), active, held).
+		WithStatusSubresource(&aiv1alpha1.Mission{}).Build()
+	c := &getCountingClient{Client: base}
+	r := &MissionReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
+	for range 3 {
+		var subject aiv1alpha1.Mission
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "b"}, &subject); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.reconcilePending(context.Background(), &subject); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.chainGets != 0 {
+		t.Errorf("chain Gets while held = %d, want 0", c.chainGets)
+	}
+}
+
+func TestMissionLeftActivePhasePredicate(t *testing.T) {
+	p := missionLeftActivePhase()
+	mk := func(ph aiv1alpha1.MissionPhase) *aiv1alpha1.Mission {
+		return &aiv1alpha1.Mission{Status: aiv1alpha1.MissionStatus{Phase: ph}}
+	}
+	up := func(o, n aiv1alpha1.MissionPhase) bool {
+		return p.Update(event.UpdateEvent{ObjectOld: mk(o), ObjectNew: mk(n)})
+	}
+	if !up(aiv1alpha1.MissionPhaseActive, aiv1alpha1.MissionPhaseSucceeded) {
+		t.Error("Active->Succeeded should pass")
+	}
+	if up(aiv1alpha1.MissionPhasePending, aiv1alpha1.MissionPhaseProvisioning) {
+		t.Error("Pending->Provisioning should not pass")
+	}
+	if up(aiv1alpha1.MissionPhaseSucceeded, aiv1alpha1.MissionPhaseSucceeded) {
+		t.Error("terminal no-op should not pass")
+	}
+	if !p.Delete(event.DeleteEvent{Object: mk(aiv1alpha1.MissionPhaseActive)}) {
+		t.Error("deleting an active mission should pass")
+	}
+}
+
+func TestPendingMissionsOfFreedTable(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := aiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	done := admissionMission("a", 2*time.Hour, "t", aiv1alpha1.MissionPhaseSucceeded)
+	held := admissionMission("b", time.Hour, "t", aiv1alpha1.MissionPhasePending)
+	other := admissionMission("c", time.Hour, "u", aiv1alpha1.MissionPhasePending)
+	running := admissionMission("d", time.Hour, "t", aiv1alpha1.MissionPhaseActive)
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(done, held, other, running).Build()
+	r := &MissionReconciler{Client: c, Scheme: s}
+	reqs := r.pendingMissionsOfFreedTable(context.Background(), done)
+	if len(reqs) != 1 || reqs[0].Name != "b" {
+		t.Fatalf("requests = %v, want only b", reqs)
 	}
 }
