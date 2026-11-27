@@ -356,6 +356,7 @@ func isRollingOut(d *appsv1.Deployment) bool {
 // ConfigMaps and PVCs are handled by owner references (garbage collection).
 func (b *DeploymentBackend) Cleanup(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
+	b.idleSince.Delete(knight.Namespace + "/" + knight.Name)
 
 	deploy := &appsv1.Deployment{}
 	err := b.Client.Get(ctx, types.NamespacedName{Name: knight.Name, Namespace: knight.Namespace}, deploy)
