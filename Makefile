@@ -102,6 +102,7 @@ update-agent-sandbox-crds: ## Re-download the agent-sandbox CRDs ($(AGENT_SANDBO
 .PHONY: test
 test: manifests generate fmt vet $(if $(KUBEBUILDER_ASSETS),,setup-envtest) ## Run tests (uses KUBEBUILDER_ASSETS when set, e.g. by `nix develop`).
 	KUBEBUILDER_ASSETS="$(or $(KUBEBUILDER_ASSETS),$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path))" go test $$(go list ./... | grep -v '/test/e2e$$') -coverprofile cover.out
+	go test ./test/e2e/ -run '^TestE2ETiers$$'
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -141,13 +142,39 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
 
-# TIER selects the e2e scenarios (Ginkgo labels in test/e2e): core (default),
-# trace, trigger, lost, restart, gateway, chain (engine: step output, when, forEach), schedule (create, run now, suspend, delete through the gateway), github, webhook, or all. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
+# TIER selects the e2e scenarios (Ginkgo labels in test/e2e). E2E_TIERS lists the
+# tiers that exist; test/e2e/tiers_test.go fails when it drifts from the tier
+# constants in e2e_suite_test.go. Needs docker, kind, helm and kubectl; see CONTRIBUTING.md.
+E2E_TIERS := core trace trigger lost restart gateway chain schedule github webhook
+define E2E_TIER_HELP
+core      the default: operator, NATS, Helm chart and a Chain run on the stub knight
+trace     the Chain trace case
+trigger   a NATS-source Trigger starting a Chain run on the stub knight
+lost      a knight that dies mid-task ends as a dead-letter entry
+restart   a Chain step in flight survives an operator rollout (needs the fix from #700)
+gateway   asking a knight and running a Chain through the invoke gateway with a ServiceAccount token
+chain     the Chain engine: step output, when, forEach, on the stub knight
+schedule  a scheduled Trigger created, run now, suspended and deleted through the gateway
+github    issue pickup on the trigger engine against a stub GitHub API
+webhook   an HTTP POST to a webhook Trigger on the gateway starting one Chain run
+all       every tier above
+endef
+export E2E_TIER_HELP
 TIER ?= core
 
+.PHONY: e2e-tiers
+e2e-tiers: ## List the e2e tiers and what each one proves.
+	@printf '%s\n' "$$E2E_TIER_HELP" | awk '{ printf "  \033[36m%-9s\033[0m %s\n", $$1, substr($$0, 11) }'
+
+# Fails before any cluster is created when TIER is not a tier or "all".
+.PHONY: check-e2e-tier
+check-e2e-tier:
+	@case " all $(E2E_TIERS) " in *" $(TIER) "*) ;; *) echo "unknown TIER \"$(TIER)\"; valid: all $(E2E_TIERS)" >&2; exit 2 ;; esac
+
 .PHONY: e2e
-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests of TIER (default core) on a Kind cluster with NATS and the Helm chart, then delete the cluster.
+e2e: check-e2e-tier setup-test-e2e manifests generate fmt vet ## Run the e2e tests of TIER (default core) on a Kind cluster with NATS and the Helm chart, then delete the cluster.
 	@status=0; \
+	echo "+ TIER=$(TIER) KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v"; \
 	TIER=$(TIER) KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v || status=$$?; \
 	$(MAKE) cleanup-test-e2e; \
 	exit $$status

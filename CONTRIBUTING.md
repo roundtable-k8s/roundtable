@@ -80,14 +80,9 @@ available replica. The cluster is deleted afterwards, also on failure.
 `make test-e2e` is an alias.
 
 Scenarios are gated by Ginkgo labels, one per tier; `TIER` picks the tier
-(`core` by default, `trace` for the Chain trace case, `trigger` for a NATS-source
-Trigger starting a Chain run on the stub knight, `lost` for the lost-task case:
-a knight that dies mid-task ends as a dead-letter entry, `restart` for a Chain step
-in flight surviving an operator rollout, `gateway` for asking a knight and running
-a Chain through the invoke gateway with a ServiceAccount token, `chain` for the Chain
-engine (step output, `when`, `forEach`) on the stub knight, `schedule` for a scheduled Trigger created, run now,
-suspended and deleted through the gateway, `github` for issue pickup on the
-trigger engine against a stub GitHub API, `webhook` for an HTTP POST to a webhook Trigger on the gateway starting one Chain run, `all` for everything). The `restart` tier
+(`core` by default). `make e2e-tiers` lists every tier and what it proves, and
+`make e2e TIER=<typo>` fails at once with the valid tiers, before any cluster
+is created. `all` runs everything. The `restart` tier
 needs the fix from #700 (chain steps stranded by an operator restart); without it
 the spec times out waiting for the step's result to be read. It is not part of
 the default `TIER=core` run.
