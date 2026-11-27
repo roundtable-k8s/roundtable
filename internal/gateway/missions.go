@@ -260,7 +260,10 @@ func (s *Service) StartMission(ctx context.Context, req StartMissionRequest) (*M
 	}
 	defer release()
 	if c := callerName(ctx); c != "" {
-		m.Annotations = map[string]string{aiv1alpha1.AnnotationCaller: c}
+		if m.Annotations == nil {
+			m.Annotations = map[string]string{}
+		}
+		m.Annotations[aiv1alpha1.AnnotationCaller] = c
 	}
 	if err := s.Missions.Create(ctx, m); err != nil {
 		return nil, k8sError("create mission", err)

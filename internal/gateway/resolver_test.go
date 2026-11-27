@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -88,7 +89,7 @@ func TestResolverKnightTable(t *testing.T) {
 	k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		table("labelled"), table("legacy"),
 		knight("by-label", map[string]string{aiv1alpha1.LabelRoundTable: "labelled"}),
-		knight("by-legacy", map[string]string{legacyTableLabel: "legacy"}),
+		knight("by-legacy", map[string]string{knightpkg.LegacyTableLabel: "legacy"}),
 		ownerless,
 	).Build()
 	r := &Resolver{Client: k8s}

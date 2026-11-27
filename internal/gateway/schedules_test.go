@@ -317,8 +317,8 @@ func TestDescribeCron(t *testing.T) {
 func TestScheduleViewKnightTarget(t *testing.T) {
 	tr := scheduleTrigger(testNS, "ping", "*/5 * * * *", "")
 	tr.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "ping"}}
-	v := scheduleView(tr, map[string]string{"": "fleet-a"})
-	want := ScheduleTarget{Kind: ScheduleTargetKnight, Summary: "knight galahad", Knight: "galahad"}
+	v := scheduleView(tr, map[string]string{"": "fleet-a"}, nil)
+	want := ScheduleTarget{Kind: ScheduleTargetKnight, Summary: "knight galahad: ping", Knight: "galahad"}
 	if v.Target != want {
 		t.Errorf("target = %+v, want %+v", v.Target, want)
 	}
@@ -334,9 +334,33 @@ func TestScheduleViewKnightFiringOutcome(t *testing.T) {
 		tr := scheduleTrigger(testNS, "ping", "*/5 * * * *", "")
 		tr.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "ping"}}
 		tr.Status.RecentFirings = []aiv1alpha1.TriggerFiring{{Time: metav1.Now(), Run: "task-1", Outcome: o}}
-		v := scheduleView(tr, nil)
+		v := scheduleView(tr, nil, nil)
 		if v.LastResult == nil || v.LastResult.Outcome != string(o) {
 			t.Errorf("lastResult = %+v, want outcome %q", v.LastResult, o)
 		}
+	}
+}
+
+func TestKnightSummary(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	cases := []struct{ task, want string }{
+		{"ping", "knight k: ping"},
+		{"\n  \nfirst line\nsecond", "knight k: first line"},
+		{long, "knight k: " + long[:80]},
+		{"  \n", "knight k"},
+	}
+	for _, tc := range cases {
+		if got := knightSummary("k", tc.task); got != tc.want {
+			t.Errorf("knightSummary(%q) = %q, want %q", tc.task, got, tc.want)
+		}
+	}
+}
+
+func TestScheduleViewKnightTargetTable(t *testing.T) {
+	tr := scheduleTrigger(testNS, "ping", "*/5 * * * *", "")
+	tr.Spec.Target = aiv1alpha1.TriggerTarget{Knight: &aiv1alpha1.TriggerKnightTarget{Name: "galahad", Task: "ping"}}
+	v := scheduleView(tr, nil, func(n string) string { return "table-of-" + n })
+	if v.Table != "table-of-galahad" {
+		t.Errorf("table = %q, want the knight's table", v.Table)
 	}
 }

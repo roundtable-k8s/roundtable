@@ -29,9 +29,6 @@ import (
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 )
 
-// legacyTableLabel is the older knight-to-table label.
-const legacyTableLabel = "ai.roundtable.io/table"
-
 // defaultTableName is the RoundTable used for knights without a table label
 // (the same fallback mission chains use).
 const defaultTableName = "default"
@@ -90,7 +87,7 @@ func (r *Resolver) resolve(ctx context.Context, namespace, name string) (*target
 	t := &target{Knight: k}
 
 	candidates := []string{}
-	for _, label := range []string{aiv1alpha1.LabelRoundTable, legacyTableLabel} {
+	for _, label := range []string{aiv1alpha1.LabelRoundTable, knightpkg.LegacyTableLabel} {
 		if v := k.Labels[label]; v != "" {
 			candidates = append(candidates, v)
 		}
@@ -175,7 +172,7 @@ func (r *Resolver) TriggerTable(ctx context.Context, trg *aiv1alpha1.Trigger) (s
 func knightInfo(k *aiv1alpha1.Knight, defaultImage string) KnightInfo {
 	table := k.Labels[aiv1alpha1.LabelRoundTable]
 	if table == "" {
-		table = k.Labels[legacyTableLabel]
+		table = k.Labels[knightpkg.LegacyTableLabel]
 	}
 	return KnightInfo{
 		Name:       k.Name,

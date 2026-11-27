@@ -566,3 +566,14 @@ func TestScheduleWritesDisabled(t *testing.T) {
 		t.Errorf("no token: status %d", resp.StatusCode)
 	}
 }
+
+func TestValidateConcurrencyMessageNotDuplicated(t *testing.T) {
+	e := newScheduleWriteEnv(t, true, nil, testKnight("galahad", "dev"))
+	body := map[string]any{"name": "x", "spec": knightSpec("galahad", "t")}
+	body["spec"].(map[string]any)["concurrency"] = map[string]any{"policy": "Replace"}
+	_, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, body)
+	msg, _ := out["error"].(string)
+	if strings.Count(msg, "spec.concurrency.policy") > 1 {
+		t.Errorf("field name repeated: %v", out)
+	}
+}
