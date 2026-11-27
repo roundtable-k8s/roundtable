@@ -293,12 +293,17 @@ func addScheduleRunTools(s *mcp.Server, svc *Service) {
 		Name:        "get_schedule_run",
 		Description: "Get the result of one run of a schedule: the output of its chain, knight task or mission. A failed run is a tool error.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetScheduleRunInput) (*mcp.CallToolResult, *ScheduleRunResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetScheduleRunInput) (*mcp.CallToolResult, any, error) {
 		res, err := svc.ScheduleRunResult(ctx, in.Namespace, in.Name, in.Run)
 		if err != nil {
 			return nil, nil, err
 		}
-		return scheduleRunResult(res), res, nil
+		// The result's shape depends on the target (the embedded run record is
+		// empty for knight and mission runs), so no output schema is derived
+		// from the type; the structured content keeps the REST shape.
+		out := scheduleRunResult(res)
+		out.StructuredContent = res
+		return out, nil, nil
 	})
 }
 

@@ -18,12 +18,16 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
 func connectMCP(ctx context.Context, t *testing.T, url string) *mcp.ClientSession {
@@ -101,7 +105,9 @@ func TestMCPSchedules(t *testing.T) {
 		}
 		var sc map[string]any
 		b, _ := json.Marshal(res.StructuredContent)
-		_ = json.Unmarshal(b, &sc)
+		if err := json.Unmarshal(b, &sc); err != nil {
+			t.Fatalf("%s: structured content: %v", name, err)
+		}
 		return res, sc
 	}
 
@@ -132,5 +138,84 @@ func TestMCPSchedules(t *testing.T) {
 	res, sc = call("run_schedule", map[string]any{"name": "git-digest"})
 	if res.IsError || sc["state"] != ScheduleRunStarted {
 		t.Fatalf("run_schedule: %+v %v", res, sc)
+	}
+}
+
+func mcpText(res *mcp.CallToolResult) string {
+	var out string
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			out += tc.Text
+		}
+	}
+	return out
+}
+
+func TestMCPScheduleRuns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := scheduleT0.Add(time.Minute)
+	missionTarget := func(t *aiv1alpha1.Trigger) {
+		t.Spec.Target = aiv1alpha1.TriggerTarget{Mission: &aiv1alpha1.TriggerMissionTarget{}}
+	}
+	chain := runScheduleTrigger("c", nil)
+	knight := knightScheduleTrigger("k",
+		aiv1alpha1.TriggerFiring{Run: "task-ok", Time: metav1.NewTime(scheduleT0), Key: "a"},
+		aiv1alpha1.TriggerFiring{Run: "task-bad", Time: metav1.NewTime(scheduleT0.Add(time.Hour)), Key: "b"})
+	mission := runScheduleTrigger("m", missionTarget)
+	mission.Status.RecentFirings = []aiv1alpha1.TriggerFiring{{Run: "m-1", Time: metav1.NewTime(scheduleT0), Key: "a"}}
+	e := newRunsEnv(t, chain, knight, mission,
+		scheduleRun(chain, "c-0", 0, aiv1alpha1.ChainPhaseSucceeded),
+		missionScheduleRun(mission, "m-1", "the report"))
+	e.svc.Bus = &stubBus{recs: map[string]*TaskRecord{
+		"task-ok":  {TaskID: "task-ok", Knight: "operator", Namespace: testNS, Status: TaskSucceeded, Output: "all done", CreatedAt: scheduleT0, CompletedAt: &done},
+		"task-bad": {TaskID: "task-bad", Knight: "operator", Namespace: testNS, Status: TaskFailed, Error: "boom", CreatedAt: scheduleT0},
+	}}
+	cs := connectMCP(ctx, t, e.server.URL)
+
+	get := func(schedule, run string) (*mcp.CallToolResult, map[string]any) {
+		t.Helper()
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "get_schedule_run",
+			Arguments: map[string]any{"name": schedule, "run": run}})
+		if err != nil {
+			t.Fatalf("get_schedule_run %s/%s: %v", schedule, run, err)
+		}
+		var sc map[string]any
+		if res.StructuredContent != nil {
+			b, _ := json.Marshal(res.StructuredContent)
+			if err := json.Unmarshal(b, &sc); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return res, sc
+	}
+
+	res, sc := get("k", "task-ok")
+	task, _ := sc["task"].(map[string]any)
+	if res.IsError || mcpText(res) != "all done" || sc["target"] != "knight" || task["output"] != "all done" {
+		t.Errorf("knight succeeded: %+v %v", res, sc)
+	}
+	res, _ = get("k", "task-bad")
+	if !res.IsError || mcpText(res) != "knight operator failed task task-bad: boom" {
+		t.Errorf("knight failed: %+v", res)
+	}
+	res, sc = get("m", "m-1")
+	mv, _ := sc["mission"].(map[string]any)
+	if res.IsError || sc["target"] != "mission" || mv["result"] != "the report" {
+		t.Errorf("mission: %+v %v", res, sc)
+	}
+	res, sc = get("c", "c-0")
+	if res.IsError || sc["target"] != "chain" || sc["phase"] != "Succeeded" || sc["output"] != "digest of c-0" {
+		t.Errorf("chain: %+v %v", res, sc)
+	}
+
+	lres, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "list_schedule_runs", Arguments: map[string]any{"name": "c"}})
+	if err != nil || lres.IsError {
+		t.Fatalf("list_schedule_runs: %v %+v", err, lres)
+	}
+	b, _ := json.Marshal(lres.StructuredContent)
+	var list struct{ Runs []map[string]any }
+	if err := json.Unmarshal(b, &list); err != nil || len(list.Runs) != 1 || fmt.Sprint(list.Runs[0]["run"]) != "c-0" {
+		t.Errorf("list_schedule_runs = %s (%v)", b, err)
 	}
 }
