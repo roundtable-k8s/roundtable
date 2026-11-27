@@ -503,7 +503,7 @@ var _ = Describe("Knight deprecated maxDeliver", func() {
 	It("is silent when only nix and flakes are set", func() {
 		got, rec := runTools("tools-nix", 0, aiv1alpha1.KnightTools{
 			Nix:    []string{"jq"},
-			Flakes: []aiv1alpha1.KnightToolsFlake{{Ref: "github:roundtable-k8s/roundtable/" + strings.Repeat("a", 40)}},
+			Flakes: []aiv1alpha1.KnightToolsFlake{{Ref: "github:roundtable-k8s/roundtable/" + strings.Repeat("a", 40), Packages: []string{"hello"}}},
 		})
 		Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDeprecatedFieldsUsed)).To(BeNil())
 		for _, e := range drainEvents(rec) {
