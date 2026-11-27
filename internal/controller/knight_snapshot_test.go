@@ -379,6 +379,40 @@ var _ = Describe("Knight workspace snapshots (#339)", func() {
 				Expect(cond(k).Status).To(Equal(metav1.ConditionFalse))
 			})
 
+			It("mirrors status and still prunes with an invalid cron and no annotation", func() {
+				k := schedKnight("snap-sched-bad-prune", "not a cron", "", new(int32(5)))
+				defer deleteKnight(k)
+				r, _ := snapReconciler(true)
+				for i := 1; i <= 3; i++ {
+					ts := time.Unix(1_700_000_000+int64(i), 0)
+					at(r, ts)
+					annotateSnapshot(k, fmt.Sprint(i))
+					reconcileKnight(r, k)
+					markSnapshotsReady(k)
+				}
+				reconcileKnight(r, k)
+				Expect(snapshotsOf(k)).To(HaveLen(3))
+
+				// Drop the annotation and tighten retention: only the
+				// invalid schedule remains.
+				got := getKnight(k)
+				delete(got.Annotations, aiv1alpha1.AnnotationKnightSnapshot)
+				got.Spec.Workspace.Snapshots.Keep = new(int32(1))
+				Expect(k8sClient.Update(ctx, got)).To(Succeed())
+				res := reconcileResult(r, k)
+				Expect(res.RequeueAfter).To(BeZero())
+
+				snaps := snapshotsOf(k)
+				Expect(snaps).To(HaveLen(1))
+				Expect(snaps[0].GetName()).To(Equal("snap-sched-bad-prune-ws-1700000003"))
+				status := getKnight(k).Status.Workspace.Snapshots
+				Expect(status).To(HaveLen(1))
+				Expect(status[0].Name).To(Equal(snaps[0].GetName()))
+				Expect(status[0].ReadyToUse).To(BeTrue())
+				Expect(cond(k).Reason).To(Equal(aiv1alpha1.ReasonSnapshotFailed))
+				Expect(cond(k).Status).To(Equal(metav1.ConditionFalse))
+			})
+
 			It("reports an ephemeral workspace", func() {
 				k := scalingKnight("default", "snap-sched-eph", ephemeral)
 				k.Spec.Workspace.Snapshots = &aiv1alpha1.WorkspaceSnapshots{Schedule: "0 3 * * *"}
@@ -479,6 +513,28 @@ var _ = Describe("Knight snapshot API recheck (#725)", func() {
 		// The positive answer is kept; no further probing.
 		reconcileRes()
 		Expect(calls).To(Equal(2))
+	})
+})
+
+var _ = Describe("Knight snapshot API probing for ephemeral workspaces", func() {
+	It("neither probes nor requeues for an ephemeral workspace", func() {
+		k := scalingKnight("default", "snap-eph-noprobe", func(s *aiv1alpha1.KnightSpec) {
+			s.Workspace = &aiv1alpha1.KnightWorkspace{Mode: aiv1alpha1.WorkspaceModeEphemeral}
+		})
+		k.Annotations = map[string]string{aiv1alpha1.AnnotationKnightSnapshot: "x"}
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+
+		r := newScalingReconciler(false)
+		calls := 0
+		r.SnapshotAPIProbe = func() (bool, error) { calls++; return false, nil }
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: k.Name, Namespace: k.Namespace}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(calls).To(BeZero())
+		Expect(res.RequeueAfter).To(BeZero())
+		c := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightWorkspaceSnapshots)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonWorkspaceNotPersistent))
 	})
 })
 
@@ -609,6 +665,40 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 		_, err = getPVC("fork-wait")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ready(k).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("creates the PVC once the snapshot API prober flips to true", func() {
+		newSnapshot("fork-src-late", true, int64(2<<30))
+		k := forkKnight("fork-late", "fork-src-late", "1Gi")
+		Expect(k8sClient.Create(ctx, k)).To(Succeed())
+		defer deleteKnight(k)
+
+		r := newScalingReconciler(false)
+		clock := time.Unix(1_700_000_000, 0)
+		r.Now = func() time.Time { return clock }
+		served, calls := false, 0
+		r.SnapshotAPIProbe = func() (bool, error) { calls++; return served, nil }
+
+		reconcileKnight(r, k)
+		Expect(calls).To(Equal(1))
+		_, err := getPVC("fork-late")
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		c := ready(k)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotAPIUnavailable))
+
+		served = true
+		clock = clock.Add(snapshotProbeInterval + time.Second)
+		reconcileKnight(r, k)
+		Expect(calls).To(Equal(2))
+		pvc, err := getPVC("fork-late")
+		Expect(err).NotTo(HaveOccurred())
+		ds := pvc.Spec.DataSourceRef
+		Expect(ds).NotTo(BeNil())
+		Expect(ds.Kind).To(Equal("VolumeSnapshot"))
+		Expect(ds.Name).To(Equal("fork-src-late"))
+		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonRestoredFromSnapshot))
 	})
 
 	It("leaves an existing PVC untouched and says fromSnapshot was ignored", func() {
