@@ -274,7 +274,7 @@ func (r *TriggerReconciler) fireMission(ctx context.Context, f missionFiring) (t
 	if err := r.recordFiring(ctx, f.nn, *f.firing, func(st *aiv1alpha1.TriggerStatus) {
 		at := metav1.NewTime(f.now)
 		st.LastFiredAt = &at
-		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(f.table, trg.Name).Set(float64(f.now.Unix()))
+		metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(trg.Namespace, f.table, trg.Name).Set(float64(f.now.Unix()))
 		if !slices.Contains(st.ActiveRuns, name) {
 			st.ActiveRuns = append(st.ActiveRuns, name)
 		}

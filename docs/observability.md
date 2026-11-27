@@ -395,7 +395,7 @@ below with their label values.
 | `roundtable_table_cost_usd` | gauge | `table` | Cumulative cost in USD of a table, set from `RoundTable.status.totalCost` |
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source`, `outcome` | Trigger events by source (`schedule`, `nats`, `webhook`, `github`) and outcome (`started`, `deduped`, `skipped`, `error`) |
 | `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` | Knight and mission Trigger runs that finished, by `outcome` (`succeeded`, `failed`, `lost`); chain targets are in `roundtable_chain_runs_total` |
-| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` | Unix time a Trigger last started a run |
+| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `namespace`, `table`, `trigger` | Unix time a Trigger last started a run |
 | `roundtable_trigger_github_held_items` | gauge | `namespace`, `trigger`, `repository` | Items a github-source Trigger held back in its last poll because an open pull request with its `holdWhilePullRequestLabeled` label exists in the repository; the series exists only while the repository is held |
 | `roundtable_trigger_github_hold_started_timestamp_seconds` | gauge | `namespace`, `trigger`, `repository` | Unix time that hold began; the series is removed when the hold ends or the Trigger is deleted |
 | `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
@@ -411,7 +411,7 @@ target chain's `roundTableRef`.
 |---|---|---|
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source` (`schedule`, `nats`, `webhook`, `github`), `outcome` |
 | `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` (`succeeded`, `failed`, `lost`) |
-| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` |
+| `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `namespace`, `table`, `trigger` |
 | `roundtable_gateway_requests_total` | counter | `table`, `route`, `code`, `caller_kind` (`serviceaccount`, `token`, `none`) |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` |
 

@@ -108,11 +108,12 @@ roundtable_trigger_firings_total{outcome="started",source="schedule",table="t1",
 
 func TestTriggerLastFiredNameAndLabels(t *testing.T) {
 	TriggerLastFiredTimestampSeconds.Reset()
-	TriggerLastFiredTimestampSeconds.WithLabelValues("t1", "nightly").Set(1700000000)
+	TriggerLastFiredTimestampSeconds.WithLabelValues("ns1", "t1", "nightly").Set(1700000000)
 	const want = `
-# HELP roundtable_trigger_last_fired_timestamp_seconds Unix time of the Trigger's last started run, by table and trigger
+# HELP roundtable_trigger_last_fired_timestamp_seconds ` +
+		`Unix time of the Trigger's last started run, by namespace, table and trigger
 # TYPE roundtable_trigger_last_fired_timestamp_seconds gauge
-roundtable_trigger_last_fired_timestamp_seconds{table="t1",trigger="nightly"} 1.7e+09
+roundtable_trigger_last_fired_timestamp_seconds{namespace="ns1",table="t1",trigger="nightly"} 1.7e+09
 `
 	if err := testutil.CollectAndCompare(TriggerLastFiredTimestampSeconds, strings.NewReader(want)); err != nil {
 		t.Error(err)

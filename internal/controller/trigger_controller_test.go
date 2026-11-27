@@ -381,7 +381,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(firings("on-deploy", "nats", "started")).To(Equal(1.0))
 			// The stream drops a repeated Nats-Msg-Id before the Trigger sees it.
 			Expect(firings("on-deploy", "nats", "deduped")).To(Equal(0.0))
-			Expect(testutil.ToFloat64(metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(rtName, "on-deploy"))).To(BeNumerically(">", 0))
+			Expect(testutil.ToFloat64(metrics.TriggerLastFiredTimestampSeconds.WithLabelValues(ns, rtName, "on-deploy"))).To(BeNumerically(">", 0))
 		})
 
 		It("starts nothing for a repeated dedupeKey", func() {

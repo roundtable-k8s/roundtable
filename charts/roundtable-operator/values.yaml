@@ -743,6 +743,9 @@ alerts:
   # Failed share (0-1) of chain runs over 1h above which
   # RoundtableChainRunsFailing fires.
   chainFailureRatio: 0.5
+  # Minimum chain runs in 1h a table needs before RoundtableChainRunsFailing can
+  # fire, so one failed run on a quiet table is not 100%.
+  chainMinRuns: 3
   # Minutes a dead letter may stay open before RoundtableDeadLettersOpen fires.
   deadLettersOpenMinutes: 15
   # Minutes a knight may stay Pending, Provisioning or Degraded before
