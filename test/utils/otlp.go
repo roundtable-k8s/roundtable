@@ -17,6 +17,8 @@ limitations under the License.
 package utils
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -223,4 +225,45 @@ func IsDescendant(spans []Span, span, ancestor Span) bool {
 		cur = next
 	}
 	return false
+}
+
+// ParseTempoTrace reads the spans from a Tempo trace-by-id response
+// (GET /api/v2/traces/<id>: {"trace":{"resourceSpans":[...]}}). Tempo may
+// render IDs as base64 (protobuf JSON) or hex; both come back as lower-cased hex.
+func ParseTempoTrace(body string) ([]Span, error) {
+	var resp struct {
+		Trace otlpTraces `json:"trace"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		return nil, fmt.Errorf("parse Tempo trace: %w", err)
+	}
+	var spans []Span
+	for _, rs := range resp.Trace.ResourceSpans {
+		res := attrMap(rs.Resource.Attributes)
+		for _, ss := range rs.ScopeSpans {
+			for _, s := range ss.Spans {
+				spans = append(spans, Span{
+					TraceID:      normalizeID(s.TraceID, 32),
+					SpanID:       normalizeID(s.SpanID, 16),
+					ParentSpanID: normalizeID(s.ParentSpanID, 16),
+					Name:         s.Name,
+					Attrs:        attrMap(s.Attributes),
+					Resource:     res,
+				})
+			}
+		}
+	}
+	return spans, nil
+}
+
+// normalizeID returns id as lower-cased hex of hexLen characters when id is
+// base64, and lower-cased id otherwise.
+func normalizeID(id string, hexLen int) string {
+	if id == "" || len(id) == hexLen {
+		return strings.ToLower(id)
+	}
+	if b, err := base64.StdEncoding.DecodeString(id); err == nil && len(b)*2 == hexLen {
+		return hex.EncodeToString(b)
+	}
+	return strings.ToLower(id)
 }

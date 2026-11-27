@@ -1,0 +1,87 @@
+# Grafana Tempo for the e2e trial (trial_tempo_test.go): one small
+# single-binary Deployment (-target=all, monolithic mode, no Kafka) with local
+# storage on an emptyDir, taken from Tempo's example/docker-compose/single-binary
+# at v3.1.1. The busybox sidecar shares the data volume so the test can `du` it
+# (the Tempo image has no shell tools worth relying on).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo
+  namespace: roundtable-e2e
+data:
+  tempo.yaml: |
+    stream_over_http_enabled: true
+    server:
+      http_listen_port: 3200
+      log_level: info
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+    usage_report:
+      reporting_enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: roundtable-e2e
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: tempo}
+  template:
+    metadata:
+      labels: {app: tempo}
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: tempo
+          image: grafana/tempo:3.1.1
+          args: ["-target=all", "-config.file=/etc/tempo/tempo.yaml"]
+          ports:
+            - {name: http, containerPort: 3200}
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 3
+          volumeMounts:
+            - {name: config, mountPath: /etc/tempo}
+            - {name: data, mountPath: /var/tempo}
+        - name: data-probe
+          image: busybox:1.37
+          command: ["sleep", "infinity"]
+          volumeMounts:
+            - {name: data, mountPath: /var/tempo, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: tempo}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: roundtable-e2e
+spec:
+  selector: {app: tempo}
+  ports:
+    - {name: http, port: 3200, targetPort: http}
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}

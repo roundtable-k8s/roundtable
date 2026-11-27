@@ -126,6 +126,31 @@ Questions only a live trial can answer:
   the `roundtable_*` metrics lack?
 - How does it cope with `gen_ai.system` to `gen_ai.provider.name` in queries?
 
+#### Trial results: Tempo
+
+Trial: `make e2e TIER=trial` (`test/e2e/trial_tempo_test.go`, CI job
+`e2e-trial`). Tempo `grafana/tempo:3.1.1`, monolithic mode (`-target=all`),
+local storage on an emptyDir (`test/e2e/testdata/tempo.yaml`, config from
+Tempo's `example/docker-compose/single-binary`). The chart's collector exports
+to it with an OTLP exporter next to the file exporter
+(`test/e2e/testdata/otel-trial-values.yaml`). Memory and CPU are read from
+Tempo's own `process_*` metrics (kind has no metrics-server); storage is `du`
+of `/var/tempo` from a sidecar sharing the volume. The CI run prints them as
+one `::notice title=Tempo trial` annotation.
+
+| Trial question | Answer | Evidence |
+| --- | --- | --- |
+| Does a small install need Kafka? | No. In monolithic mode Tempo runs all components in-process without Kafka; Kafka buffers only in microservices mode. | Read: Tempo v3.0 release notes (`docs/sources/tempo/release-notes/v3-0.md`); the test runs `-target=all` with no Kafka. |
+| Memory, CPU and storage at rest and after the sample load | See the `::notice` annotation of the `e2e-trial` run (`memory_rss_*`, `cpu_seconds_*`, `storage_*`). One two-step run is a small load, not a sizing. | Measured by the test. |
+| Is one two-step chain run stored as one tree (root, both steps, knight spans)? | Yes. | Asserted by the test: the trace by id (`/api/v2/traces/<id>`) passes the same checks as the collector-file test. |
+| Does filtering by `roundtable.table` work in TraceQL? | Yes, `{ .roundtable.table = "e2e-table" }` returns the run. | Asserted by the test. |
+| Are prompt and response content readable, and is the credential kept out? | Content attributes come back as plain attribute values; the fake credential is not returned. | Asserted by the test. |
+| Prompt text at the 16 KiB cap, a mission, an "ask", reading it in Grafana | Open. | The sample prompt is short; no Grafana in the trial. |
+| Grouping by `roundtable.table` in dashboards; a tenant per table | Open. | Not exercised. |
+| A trace open for the length of a long chain run; duration or size limits | Open. | The stub run takes seconds. |
+| Per-tenant retention; does the metrics-generator add anything | Open. | Not exercised (generator off, single tenant). |
+| `gen_ai.system` to `gen_ai.provider.name` in queries | Open. | Not exercised. |
+
 ### 2. Arize Phoenix (LLM viewer, fed from the same collector)
 
 Why: the only candidate documented to render `gen_ai.*` spans as LLM calls

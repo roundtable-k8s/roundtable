@@ -87,12 +87,16 @@ in flight surviving an operator rollout, `gateway` for asking a knight and runni
 a Chain through the invoke gateway with a ServiceAccount token, `chain` for the Chain
 engine (step output, `when`, `forEach`) on the stub knight, `schedule` for a scheduled Trigger created, run now,
 suspended and deleted through the gateway, `github` for issue pickup on the
-trigger engine against a stub GitHub API, `webhook` for an HTTP POST to a webhook Trigger on the gateway starting one Chain run, `all` for everything). The `restart` tier
+trigger engine against a stub GitHub API, `webhook` for an HTTP POST to a webhook Trigger on the gateway starting one Chain run, `trial` for the live Grafana
+Tempo trial of `docs/design/observability-standard.md`, `all` for everything). The `restart` tier
 needs the fix from #700 (chain steps stranded by an operator restart); without it
 the spec times out waiting for the step's result to be read. It is not part of
 the default `TIER=core` run.
 After the run, `make e2e` prints a table of passed, failed and skipped scenarios
 per tier with the time each tier took.
+The `trial` tier pulls Tempo from Docker Hub, so it runs in CI (job `e2e-trial`, not a
+required check, only when its own files change or when started by hand) and prints
+Tempo's memory and storage as a `::notice` line.
 A new tier adds its own label and files without touching core. Plain
 `go test ./...` does not build the e2e package (it needs `-tags=e2e`).
 

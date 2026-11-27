@@ -99,3 +99,29 @@ func TestCheckConnected(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTempoTrace(t *testing.T) {
+	body := `{"trace":{"resourceSpans":[{"resource":{"attributes":[{"key":"roundtable.table","value":{"stringValue":"t"}}]},` +
+		`"scopeSpans":[{"spans":[` +
+		`{"traceId":"AAECAwQFBgcICQoLDA0ODw==","spanId":"AAECAwQFBgc=","parentSpanId":"","name":"root","attributes":[{"key":"k","value":{"intValue":"3"}}]},` +
+		`{"traceId":"000102030405060708090a0b0c0d0e0f","spanId":"0807060504030201","parentSpanId":"0001020304050607","name":"child"}]}]}]}}`
+	spans, err := ParseTempoTrace(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spans) != 2 {
+		t.Fatalf("want 2 spans, got %d", len(spans))
+	}
+	if spans[0].TraceID != "000102030405060708090a0b0c0d0e0f" || spans[0].SpanID != "0001020304050607" || spans[0].ParentSpanID != "" {
+		t.Errorf("base64 ids not normalized: %+v", spans[0])
+	}
+	if spans[1].ParentSpanID != "0001020304050607" || spans[1].SpanID != "0807060504030201" {
+		t.Errorf("hex ids changed: %+v", spans[1])
+	}
+	if v, _ := spans[0].Attr("roundtable.table"); v != "t" || spans[0].Attrs["k"] != "3" {
+		t.Errorf("attributes: %+v", spans[0])
+	}
+	if err := CheckConnected(spans); err != nil {
+		t.Error(err)
+	}
+}
