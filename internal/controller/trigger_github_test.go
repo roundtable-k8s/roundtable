@@ -743,8 +743,8 @@ var _ = Describe("Trigger GitHub source", func() {
 		before := heldCond()
 		Expect(before).NotTo(BeNil())
 		Expect(before.Status).To(Equal(metav1.ConditionTrue))
+		// The condition's transition time is wall-clock, not the fake clock.
 		transition := before.LastTransitionTime
-		started := clock.Unix()
 
 		// The operator restarts: no hold start in memory or on the gauges.
 		r.clearRepositoryHolds(ns, "restart")
@@ -765,7 +765,7 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerBreakingPullRequest))
 		Expect(c.Message).To(ContainSubstring(repo + ": pull requests could not be listed, held for 30m0s"))
 		Expect(c.LastTransitionTime).To(Equal(transition))
-		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(transition.Unix())))
 	})
 
 	It("starts a second held repository's hold when it becomes held, not at the first one's start", func() {
