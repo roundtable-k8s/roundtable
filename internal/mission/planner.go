@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	"go.opentelemetry.io/otel/trace"
@@ -379,6 +380,15 @@ func LookupDefaultPlanner(ctx context.Context, rd client.Reader, namespace, tabl
 	return aiv1alpha1.RefName(m.Spec.Planner.KnightRef), nil
 }
 
+// logLookup logs at Info for the Mission path and at V(1) for a lookup with no
+// recorder (the Trigger path), which runs on every Trigger reconcile.
+func logLookup(log logr.Logger, rec record.EventRecorder, msg string, kv ...any) {
+	if rec == nil {
+		log = log.V(1)
+	}
+	log.Info(msg, kv...)
+}
+
 func defaultPlannerKnight(ctx context.Context, rd client.Reader, rec record.EventRecorder, mission *aiv1alpha1.Mission) (changed, wait bool, err error) {
 	if plannerHasSource(mission.Spec.Planner) {
 		return false, false, nil
@@ -400,7 +410,7 @@ func defaultPlannerKnight(ctx context.Context, rd client.Reader, rec record.Even
 					k := &aiv1alpha1.Knight{}
 					err := rd.Get(ctx, types.NamespacedName{Name: name, Namespace: mission.Namespace}, k)
 					if apierrors.IsNotFound(err) {
-						log.Info("Waiting for the table's planner Knight", "name", name, "table", table)
+						logLookup(log, rec, "Waiting for the table's planner Knight", "name", name, "table", table)
 						return false, true, nil
 					}
 					if err != nil {
@@ -408,7 +418,7 @@ func defaultPlannerKnight(ctx context.Context, rd client.Reader, rec record.Even
 					}
 				}
 				mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(name)
-				log.Info("Using the table's planner Knight", "name", name, "table", table)
+				logLookup(log, rec, "Using the table's planner Knight", "name", name, "table", table)
 				return true, false, nil
 			}
 		}
@@ -434,7 +444,7 @@ func defaultPlannerKnight(ctx context.Context, rd client.Reader, rec record.Even
 			continue
 		}
 		mission.Spec.Planner.KnightRef = aiv1alpha1.LocalRef(k.Name)
-		log.Info("Using role-labelled planner knight", "name", k.Name)
+		logLookup(log, rec, "Using role-labelled planner knight", "name", k.Name)
 		if rec != nil {
 			rec.Eventf(mission, corev1.EventTypeWarning, "DeprecatedPlanner",
 				"Planning with knight %s found by its %s=planner label; this is deprecated: "+
