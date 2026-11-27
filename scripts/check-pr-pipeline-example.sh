@@ -90,4 +90,13 @@ render_tiers "$tmp/cheap-deep.yaml" --set 'prPipeline.implementModels={cheap,dee
 assert_plan "$tmp/cheap-deep.yaml" present '"cheap" (Haiku drafts, the default): only for'
 assert_plan "$tmp/cheap-deep.yaml" present '"deep": design-heavy'
 assert_plan "$tmp/cheap-deep.yaml" absent '"fast": the default.'
+# A custom alias gets its own guidance line, and the default is always named.
+render_tiers "$tmp/custom.yaml" --set 'prPipeline.implementModels={turbo,deep}'
+assert_plan "$tmp/custom.yaml" present '"turbo" (the default): a custom tier; use it when the issue fits it.'
+assert_plan "$tmp/custom.yaml" present '"deep": design-heavy'
+assert_plan "$tmp/custom.yaml" absent '"fast": the default.'
+render_tiers "$tmp/custom-fast.yaml" --set 'prPipeline.implementModels={turbo,fast}'
+assert_plan "$tmp/custom-fast.yaml" present '"turbo": a custom tier'
+assert_plan "$tmp/custom-fast.yaml" present '"fast": the default.'
+
 echo "plan prompt describes only the allowed model tiers."
