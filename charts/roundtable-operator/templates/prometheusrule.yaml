@@ -123,11 +123,16 @@ spec:
               Tools image build Job {{`{{ $labels.job_name }}`}} in namespace {{`{{ $labels.namespace }}`}} failed;
               the knight's pod rollout is held until the image builds.
               kube_job_failed stays true until the failed Job's 1h TTL deletes it, so the alert is
-              suppressed (unless) while any Job of the same knight (the job_name prefix) reports a
-              succeeded build, and resolves as soon as a later build succeeds.
+              suppressed (unless) only when a Job of the same knight (the job_name prefix) that was
+              created after the failed Job (kube_job_created) has succeeded, so an older success
+              still inside its TTL does not hide a newer failure.
           expr: |
             max by (namespace, job_name, knight) (label_replace(kube_job_failed{condition="true", job_name=~".+-toolsimg-.+"}, "knight", "$1", "job_name", "(.+)-toolsimg-.+")) > 0
-              unless on (namespace, knight) max by (namespace, knight) (label_replace(kube_job_status_succeeded{job_name=~".+-toolsimg-.+"}, "knight", "$1", "job_name", "(.+)-toolsimg-.+") > 0)
+              unless on (namespace, job_name) (
+                max by (namespace, job_name, knight) (label_replace(kube_job_created{job_name=~".+-toolsimg-.+"} * on (namespace, job_name) group_left () (kube_job_failed{condition="true"} > 0), "knight", "$1", "job_name", "(.+)-toolsimg-.+"))
+                < on (namespace, knight) group_left ()
+                max by (namespace, knight) (label_replace(kube_job_created{job_name=~".+-toolsimg-.+"} * on (namespace, job_name) group_left () (kube_job_status_succeeded > 0), "knight", "$1", "job_name", "(.+)-toolsimg-.+"))
+              )
           labels:
             {{- toYaml $labels | nindent 12 }}
         - alert: KnightNotIsolated

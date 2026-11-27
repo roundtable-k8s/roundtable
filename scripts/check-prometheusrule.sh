@@ -85,7 +85,8 @@ grep -q 'for: 30m' <<<"$(grep -A12 'alert: RoundtableDeadLettersOpen$' <<<"$tune
 grep -q 'for: 15m' <<<"$(grep -A12 'alert: RoundtableDeadLettersOpen$' <<<"$on")" || fail "default deadLettersOpenMinutes not 15m"
 chainmin="$(render --set alerts.enabled=true "${api[@]}" --set alerts.chainMinRuns=8)"
 grep -q 'and on (table) sum by (table) (increase(roundtable_chain_runs_total\[1h\])) >= 8$' <<<"$chainmin" || fail "chainMinRuns not applied"
-grep -q 'unless on (namespace, knight)' <<<"$on" || fail "tools image build alert does not reset on a later success"
+grep -q 'unless on (namespace, job_name)' <<<"$on" || fail "tools image build alert does not reset on a later success"
+grep -q 'kube_job_created{job_name=~".+-toolsimg-.+"} \* on (namespace, job_name) group_left () (kube_job_status_succeeded > 0)' <<<"$on" || fail "tools image build alert does not compare kube_job_created of the succeeded Job"
 ! grep -E 'sum by \(' <<<"$on" | grep -E 'roundtable_(dead|knight_isolated|chain_runs)' | grep -qv 'table' \
   || fail "a platform aggregation drops table"
 

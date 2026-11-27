@@ -355,7 +355,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "roundtable_build_info{namespace=~\"$namespace\"}",
+          "expr": "max by (component, version, namespace, pod) (roundtable_build_info{namespace=~\"$namespace\"})",
           "format": "table",
           "instant": true
         }

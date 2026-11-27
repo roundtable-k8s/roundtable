@@ -91,7 +91,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (outcome) (rate(roundtable_trigger_firings_total{table=~\"$table\"}[5m])) * 60",
+          "expr": "sum by (outcome) (rate(roundtable_trigger_firings_total{namespace=~\"$namespace\", table=~\"$table\"}[5m])) * 60",
           "legendFormat": "{{outcome}}"
         }
       ],
@@ -124,7 +124,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "time() - max by (table, trigger) (roundtable_trigger_last_fired_timestamp_seconds{table=~\"$table\"})",
+          "expr": "time() - max by (table, trigger) (roundtable_trigger_last_fired_timestamp_seconds{namespace=~\"$namespace\", table=~\"$table\"})",
           "instant": true,
           "format": "table"
         }
@@ -158,7 +158,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(roundtable_trigger_firings_total{table=~\"$table\",outcome=\"error\"}[1h])) / sum(increase(roundtable_trigger_firings_total{table=~\"$table\"}[1h]))",
+          "expr": "sum(increase(roundtable_trigger_firings_total{namespace=~\"$namespace\", table=~\"$table\",outcome=\"error\"}[1h])) / sum(increase(roundtable_trigger_firings_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
           "legendFormat": "error"
         },
         {
@@ -167,7 +167,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(roundtable_trigger_firings_total{table=~\"$table\",outcome=\"skipped\"}[1h])) / sum(increase(roundtable_trigger_firings_total{table=~\"$table\"}[1h]))",
+          "expr": "sum(increase(roundtable_trigger_firings_total{namespace=~\"$namespace\", table=~\"$table\",outcome=\"skipped\"}[1h])) / sum(increase(roundtable_trigger_firings_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
           "legendFormat": "skipped"
         }
       ],
@@ -200,7 +200,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (route, code) (rate(roundtable_gateway_requests_total{table=~\"$table\"}[5m]))",
+          "expr": "sum by (route, code) (rate(roundtable_gateway_requests_total{namespace=~\"$namespace\", table=~\"$table\"}[5m]))",
           "legendFormat": "{{route}} {{code}}"
         }
       ],
@@ -233,7 +233,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(roundtable_gateway_request_duration_seconds_bucket[15m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(roundtable_gateway_request_duration_seconds_bucket{namespace=~\"$namespace\"}[15m])))",
           "legendFormat": "{{route}}"
         }
       ],
@@ -266,7 +266,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (route) (rate(roundtable_gateway_requests_total{table=~\"$table\",code=~\"5..\"}[5m]))",
+          "expr": "sum by (route) (rate(roundtable_gateway_requests_total{namespace=~\"$namespace\", table=~\"$table\",code=~\"5..\"}[5m]))",
           "legendFormat": "{{route}}"
         }
       ],
@@ -299,7 +299,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (reason) (increase(roundtable_tasks_dead_lettered_total{table=~\"$table\"}[1h]))",
+          "expr": "sum by (reason) (increase(roundtable_tasks_dead_lettered_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
           "legendFormat": "{{reason}}"
         }
       ],
@@ -332,7 +332,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(roundtable_dead_letters_open{table=~\"$table\"})",
+          "expr": "sum(roundtable_dead_letters_open{namespace=~\"$namespace\", table=~\"$table\"})",
           "legendFormat": "open"
         }
       ],
@@ -365,7 +365,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (outcome) (increase(roundtable_trigger_runs_finished_total{table=~\"$table\"}[1h]))",
+          "expr": "sum by (outcome) (increase(roundtable_trigger_runs_finished_total{namespace=~\"$namespace\", table=~\"$table\"}[1h]))",
           "legendFormat": "{{outcome}}"
         }
       ],
