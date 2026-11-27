@@ -518,3 +518,20 @@ var _ = Describe("Knight tools image rollout hold", func() {
 		Expect(string(rolled)).To(ContainSubstring(knightpkg.ToolsImageRef(cur)))
 	})
 })
+
+var _ = Describe("Knight invalid flake ref", func() {
+	It("sets ToolsImageReady=False with reason InvalidFlakeRef", func() {
+		rec := record.NewFakeRecorder(10)
+		r := &KnightReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		k := &aiv1alpha1.Knight{Spec: aiv1alpha1.KnightSpec{Tools: &aiv1alpha1.KnightTools{
+			Flakes: []aiv1alpha1.KnightToolsFlake{{Ref: "github:owner/repo?dir=../escape"}},
+		}}}
+		_, err := r.reconcileNixTools(context.Background(), k)
+		Expect(err).To(HaveOccurred())
+		Expect(rec.Events).To(Receive(ContainSubstring("InvalidFlakeRef")))
+		c := meta.FindStatusCondition(k.Status.Conditions, aiv1alpha1.ConditionKnightToolsImageReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonInvalidFlakeRef))
+	})
+})

@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
@@ -521,4 +522,37 @@ func TestDeploymentBackend_Reconcile_MaxConcurrentRollouts(t *testing.T) {
 
 		require.NoError(t, b.Reconcile(ctx, bumpedKnight("b")))
 	})
+}
+
+// A cold or lagging informer cache must not hide a mid-rollout Deployment:
+// with Reader set, the gate counts from it instead of Client.
+func TestDeploymentBackend_Reconcile_RolloutGateUsesUncachedReader(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	live := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&appsv1.Deployment{}).Build()
+	liveB := NewDeploymentBackend(live, s, "default:latest", stubPodSpecBuilder)
+	for _, n := range []string{"a", "b"} {
+		require.NoError(t, liveB.Reconcile(ctx, newTestKnight(n)))
+		setRolloutStatus(t, liveB, n, true)
+	}
+	require.NoError(t, liveB.Reconcile(ctx, bumpedKnight("a")))
+	setRolloutStatus(t, liveB, "a", false)
+
+	// Cold cache: it knows b (so Get works) but lists no Deployments at all.
+	cold := &emptyListClient{Client: live}
+	b := NewDeploymentBackend(cold, s, "default:latest", stubPodSpecBuilder)
+	b.MaxConcurrentRollouts = 1
+
+	require.NoError(t, b.Reconcile(ctx, bumpedKnight("b")), "cold cache sees no rolling knight")
+	require.NoError(t, b.Reconcile(ctx, newTestKnight("b")))
+	setRolloutStatus(t, b, "b", true)
+
+	b.Reader = live
+	require.ErrorIs(t, b.Reconcile(ctx, bumpedKnight("b")), ErrRolloutDeferred)
+}
+
+type emptyListClient struct{ client.Client }
+
+func (c *emptyListClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return nil
 }
