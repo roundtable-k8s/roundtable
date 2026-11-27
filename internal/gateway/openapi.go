@@ -365,6 +365,10 @@ var openAPIOperations = map[string]obj{
 		"responses": errs(obj{"200": jsonResp("The run's result.", schemaRef("ScheduleRunResult"))},
 			"400", "401", "404", "422", "503"),
 	},
+	"POST /v1/schedules/suspend": tableSchedulesOp("Suspend every schedule of a table",
+		"Sets the suspended annotation on each schedule of the table; spec.suspend and Git are untouched. One failing schedule does not stop the rest."),
+	"POST /v1/schedules/resume": tableSchedulesOp("Resume every schedule of a table",
+		"Removes the suspended annotation from each schedule of the table. A schedule suspended in its spec stays suspended (its state carries a message)."),
 	"POST /v1/hooks/{namespace}/{trigger}": {
 		"summary": "Deliver a webhook to a Trigger", "tags": []any{"hooks"},
 		"description": "Not behind the API bearer token: authenticated by the Trigger's own bearer token or HMAC signature (X-Hub-Signature-256 or X-Signature).",
@@ -519,6 +523,14 @@ var openAPISchemas = obj{
 		"namespace":   str("Namespace of the Chain; omit for the default."),
 		"waitSeconds": integer("Wait for the run to finish (capped by the gateway). 0 returns once the run is created."),
 	}),
+	"TableSchedulesRequest": object([]string{"table"}, obj{
+		"table": str("Table (RoundTable) whose schedules to change."), "namespace": str("Namespace of the table; omit for the default."),
+	}),
+	"TableSchedulesResult": object([]string{"changed", "unchanged", "failed"}, obj{
+		"changed":   array(object(nil, scheduleStateProps)),
+		"unchanged": array(object(nil, scheduleStateProps)),
+		"failed":    array(object([]string{"name", "error"}, obj{"name": str(""), "error": str("")})),
+	}),
 	"CancelRunRequest": object(nil, obj{
 		"reason": str("Recorded on the cancelled steps and the run's Cancelled condition."),
 	}),
@@ -595,4 +607,17 @@ var openAPISchemas = obj{
 		"seq":       integer("Stream sequence of the delivery."),
 		"duplicate": boolean("JetStream dropped the delivery as a repeat of an earlier one."),
 	}),
+}
+
+var scheduleStateProps = obj{
+	"name": str(""), "namespace": str(""), "suspended": boolean("Effective suspension after the change."),
+	"suspendedBy": str("spec, annotation or spec,annotation."), "message": str("Set when a resume left the schedule suspended."),
+}
+
+func tableSchedulesOp(summary, description string) obj {
+	return obj{
+		"summary": summary, "tags": []any{"schedules"}, "description": description,
+		"requestBody": jsonBody(schemaRef("TableSchedulesRequest"), true),
+		"responses":   errs(obj{"200": jsonResp("Per-schedule outcome.", schemaRef("TableSchedulesResult"))}, "400", "401", "403", "503"),
+	}
 }

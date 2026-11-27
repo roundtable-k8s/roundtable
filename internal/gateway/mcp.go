@@ -309,6 +309,22 @@ func addScheduleTools(s *mcp.Server, svc *Service) {
 		return nil, st, err
 	})
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "suspend_table_schedules",
+		Description: "Suspend every schedule of a table in one call (maintenance, incident). Annotation only: Trigger manifests in Git " +
+			"are untouched. Returns changed, unchanged and failed schedules. Undo with resume_table_schedules.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TableSchedulesRequest) (*mcp.CallToolResult, *TableSchedulesResult, error) {
+		res, err := svc.SuspendSchedules(ctx, in)
+		return nil, res, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "resume_table_schedules",
+		Description: "Resume every schedule of a table suspended with suspend_table_schedules. Schedules suspended in their spec (Git) " +
+			"stay suspended; their state says so.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TableSchedulesRequest) (*mcp.CallToolResult, *TableSchedulesResult, error) {
+		res, err := svc.ResumeSchedules(ctx, in)
+		return nil, res, err
+	})
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "run_schedule",
 		Description: "Fire a schedule once now, even while suspended and also for Git-managed schedules. Waits briefly for the operator " +
 			"to start the run; state is started, pending or skipped. Fetch the result with get_schedule_run.",

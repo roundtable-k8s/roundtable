@@ -361,3 +361,101 @@ func TestScheduleActionsDisabled(t *testing.T) {
 		}
 	}
 }
+
+// tableTriggers adds schedules to the fake API: two on the table "knights"
+// (one already suspended by annotation) and one on "other".
+func (e *actionEnv) addTableTriggers(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	for _, c := range []struct{ name, table string }{{"t-a", "knights"}, {"t-b", "knights"}, {"t-c", "other"}} {
+		trg := actionTrigger(c.name, nil)
+		trg.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: c.table}
+		if c.name == "t-b" {
+			trg.Annotations = map[string]string{aiv1alpha1.AnnotationTriggerSuspended: "someone"}
+		}
+		if err := e.k8s.Create(ctx, trg); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func names(v any) []string {
+	items := v.([]any)
+	out := make([]string, 0, len(items))
+	for _, x := range items {
+		out = append(out, x.(map[string]any)["name"].(string))
+	}
+	return out
+}
+
+func TestSuspendResumeTableSchedules(t *testing.T) {
+	e := newActionEnv(t, true)
+	e.addTableTriggers(t)
+	body := map[string]any{"table": "knights"}
+
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules/suspend", testToken, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("suspend: %d %v", resp.StatusCode, out)
+	}
+	if got := names(out["changed"]); len(got) != 1 || got[0] != "t-a" {
+		t.Errorf("changed = %v", got)
+	}
+	if got := names(out["unchanged"]); len(got) != 1 || got[0] != "t-b" {
+		t.Errorf("unchanged = %v", got)
+	}
+	if f, _ := out["failed"].([]any); len(f) != 0 {
+		t.Errorf("failed = %v", f)
+	}
+	if !e.trigger(t, "t-a").SuspendedByAnnotation() || !e.trigger(t, "t-b").SuspendedByAnnotation() {
+		t.Error("table schedules not suspended")
+	}
+	if e.trigger(t, "t-c").Suspended() {
+		t.Error("schedule of another table was suspended")
+	}
+
+	resp, out = e.do(t, http.MethodPost, "/v1/schedules/resume", testToken, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resume: %d %v", resp.StatusCode, out)
+	}
+	if got := names(out["changed"]); len(got) != 2 {
+		t.Errorf("changed = %v", got)
+	}
+	if e.trigger(t, "t-a").Suspended() || e.trigger(t, "t-b").Suspended() {
+		t.Error("table schedules still suspended")
+	}
+}
+
+func TestResumeTableSchedulesKeepsSpecSuspend(t *testing.T) {
+	e := newActionEnv(t, true)
+	e.addTableTriggers(t)
+	ctx := context.Background()
+	trg := e.trigger(t, "t-a")
+	trg.Spec.Suspend = true
+	if err := e.k8s.Update(ctx, trg); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"table": "knights"}
+	e.do(t, http.MethodPost, "/v1/schedules/suspend", testToken, body)
+	_, out := e.do(t, http.MethodPost, "/v1/schedules/resume", testToken, body)
+	if got := names(out["changed"]); len(got) != 2 {
+		t.Fatalf("changed = %v", got)
+	}
+	got := e.trigger(t, "t-a")
+	if !got.Spec.Suspend || got.SuspendedByAnnotation() {
+		t.Errorf("spec.suspend=%v annotation=%v", got.Spec.Suspend, got.SuspendedByAnnotation())
+	}
+	for _, c := range out["changed"].([]any) {
+		m := c.(map[string]any)
+		if m["name"] == "t-a" && (m["suspended"] != true || m["message"] == nil) {
+			t.Errorf("t-a state: %v", m)
+		}
+	}
+}
+
+func TestTableSchedulesRequiresTable(t *testing.T) {
+	e := newActionEnv(t, true)
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules/suspend", testToken, map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status %d %v", resp.StatusCode, out)
+	}
+}

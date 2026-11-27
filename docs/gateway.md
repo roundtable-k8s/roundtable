@@ -1104,6 +1104,31 @@ suspended in its spec stays suspended, and the answer says so:
  "message": "spec.suspend is still true: the schedule stays suspended until spec.suspend is cleared where the Trigger is defined"}
 ```
 
+### `POST /v1/schedules/suspend` and `POST /v1/schedules/resume`
+
+Suspend or resume **every schedule of a table** in one call, for maintenance
+or an incident. Body: `{"table": "knights", "namespace": "roundtable"}`
+(`table` is required; `namespace` defaults like the other routes). Each
+schedule gets the same change as the single-schedule routes: only the
+`ai.roundtable.io/suspended` annotation is set or removed, so the Trigger
+manifests in Git are untouched, and a resume leaves a schedule suspended in its
+spec suspended (its state carries the `message`). Mission-target schedules are
+included. The answer is **200** unless the list itself fails; one failing
+schedule does not stop the rest:
+
+```json
+{"changed": [{"name": "morning-digest", "namespace": "roundtable", "suspended": true, "suspendedBy": "annotation"}],
+ "unchanged": [{"name": "weekly", "namespace": "roundtable", "suspended": true, "suspendedBy": "annotation"}],
+ "failed": [{"name": "broken", "error": "..."}]}
+```
+
+`unchanged` are schedules already in the requested state. The MCP tools are
+`suspend_table_schedules` and `resume_table_schedules`.
+
+```bash
+curl -s -X POST -H "$AUTH" -d '{"table":"knights"}' "$GW/v1/schedules/suspend"
+```
+
 ### `POST /v1/schedules/{namespace}/{name}/run`
 
 Fires the schedule once now through the trigger controller's normal firing
