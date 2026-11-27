@@ -322,6 +322,13 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		is.Labels = slices.DeleteFunc(is.Labels, func(l github.Label) bool { return l.Name == name })
+	case m[3] == "/comments" && req.Method == http.MethodGet:
+		list := []map[string]string{}
+		for _, b := range f.comments[repo+"#"+m[2]] {
+			list = append(list, map[string]string{"body": b})
+		}
+		_ = json.NewEncoder(w).Encode(list)
+		return
 	case m[3] == "/comments":
 		if f.failComments > 0 {
 			f.failComments--
@@ -905,6 +912,23 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
 			return c.Annotations[aiv1alpha1.AnnotationPickupVerified] == c.Status.LastRunTrigger
 		}
+
+		It("does not post the hand-back comment twice when the label removal had failed", func() {
+			name := fail()
+			tick()
+			Expect(gh.commentsOn(repo, 314)).To(HaveLen(2))
+			Expect(gh.commentsOn(repo, 314)[1]).To(ContainSubstring("<!-- rt-run:"))
+
+			By("undoing the removal and the verified mark, as a failed removal would")
+			gh.setLabels(314, "rt:in-progress", "needs-human")
+			c := &aiv1alpha1.Chain{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, c)).To(Succeed())
+			delete(c.Annotations, aiv1alpha1.AnnotationPickupVerified)
+			Expect(k8sClient.Update(ctx, c)).To(Succeed())
+			tick()
+			Expect(gh.labels(repo, 314)).To(ConsistOf("needs-human"))
+			Expect(gh.commentsOn(repo, 314)).To(HaveLen(2), "the marked comment is not posted again")
+		})
 
 		It("labels the issue needs-human, removes in-progress and says which step failed", func() {
 			name := fail()

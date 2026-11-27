@@ -1321,6 +1321,9 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Trigger{}).
 		Owns(&aiv1alpha1.Chain{}).
+		// Runs of the issue pickup engine are owned by the RoundTable, not the
+		// Trigger, but carry its label: enqueue the Trigger when one changes.
+		Watches(&aiv1alpha1.Chain{}, handler.EnqueueRequestsFromMapFunc(triggerForLabelledChain)).
 		Owns(&aiv1alpha1.Mission{}).
 		// A CronJob's status.lastScheduleTime is the Trigger's lastScheduledAt.
 		Owns(&batchv1.CronJob{}).
@@ -1335,4 +1338,19 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		})).
 		Named("trigger").
 		Complete(r)
+}
+
+// triggerForLabelledChain maps a run labelled with its Trigger to that
+// Trigger. Runs the Trigger owns are skipped: Owns already enqueues them.
+func triggerForLabelledChain(_ context.Context, obj client.Object) []reconcile.Request {
+	name := obj.GetLabels()[aiv1alpha1.LabelTrigger]
+	if name == "" {
+		return nil
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller && ref.Kind == "Trigger" {
+			return nil
+		}
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
 }

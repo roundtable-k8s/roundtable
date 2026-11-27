@@ -1090,6 +1090,8 @@ func trimJobLog(raw string, limit int) string {
 func (r *PRFeedbackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.RoundTable{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		// Edits and deletes of the generated Triggers re-reconcile at once.
+		Owns(&aiv1alpha1.Trigger{}).
 		Named("prfeedback").
 		Complete(r)
 }

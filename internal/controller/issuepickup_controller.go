@@ -108,6 +108,12 @@ func (r *IssuePickupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	spec := rt.Spec.IssuePickup
 	if spec == nil || spec.Suspend || rt.Spec.Suspend || !rt.DeletionTimestamp.IsZero() {
+		// Keep status.issuePickup.engine/.trigger truthful on this path too.
+		if spec != nil && rt.Status.IssuePickup != nil {
+			if err := r.patchEngineStatus(ctx, rt); err != nil {
+				return ctrl.Result{}, errors.Join(triggerErr, err)
+			}
+		}
 		return ctrl.Result{}, triggerErr
 	}
 
@@ -271,7 +277,12 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 		}
 	}
 	if triggerEngine {
-		return res // the generated Trigger picks up ready issues
+		// The generated Trigger picks up ready issues; the labels it needs
+		// still have to exist (ensureLabels is cached per repo and label).
+		for _, repo := range spec.Repos {
+			r.ensureLabels(ctx, gh, repo, labels, &res)
+		}
+		return res
 	}
 	maxActive, maxPerRepo := max(spec.MaxActive, 1), max(spec.MaxActivePerRepo, 1)
 	for _, repo := range spec.Repos {

@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"net/http/httptest"
 	"time"
 
@@ -206,6 +207,24 @@ var _ = Describe("IssuePickup trigger engine", func() {
 		ghSrv.Close()
 		_ = cli.Close()
 		natsSrv.Shutdown()
+	})
+
+	It("creates the pickup labels on the trigger engine and keeps status fresh when suspended", func() {
+		reconcilePickup()
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:ready"))
+		Expect(gh.repoLabels[repo]).To(HaveKey("rt:in-progress"))
+		Expect(gh.repoLabels[repo]).To(HaveKey("needs-human"))
+		Expect(getRT().Status.IssuePickup.Engine).To(Equal(aiv1alpha1.IssuePickupEngineTrigger))
+
+		By("patching the engine status on the suspended early return")
+		rt := getRT()
+		rt.Spec.IssuePickup.Suspend = true
+		rt.Spec.IssuePickup.Engine = aiv1alpha1.IssuePickupEngineBuiltin
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		reconcilePickup()
+		st := getRT().Status.IssuePickup
+		Expect(st.Engine).To(Equal(aiv1alpha1.IssuePickupEngineBuiltin))
+		Expect(st.Trigger).To(BeEmpty())
 	})
 
 	It("creates no Trigger with engine unset", func() {
@@ -452,5 +471,27 @@ var _ = Describe("IssuePickup trigger engine helpers", func() {
 		Expect(pickupTable(trg)).To(Equal("t"))
 		trg.OwnerReferences[0].Name = "other"
 		Expect(pickupTable(trg)).To(BeEmpty())
+	})
+})
+
+var _ = Describe("triggerForLabelledChain", func() {
+	chain := func(labels map[string]string, owners ...metav1.OwnerReference) *aiv1alpha1.Chain {
+		return &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{
+			Name: "run", Namespace: "ns", Labels: labels, OwnerReferences: owners,
+		}}
+	}
+	yes := true
+
+	It("enqueues the labelled Trigger of a RoundTable-owned run", func() {
+		c := chain(map[string]string{aiv1alpha1.LabelTrigger: "t"},
+			metav1.OwnerReference{Kind: "RoundTable", Name: "rt", Controller: &yes})
+		Expect(triggerForLabelledChain(context.Background(), c)).To(ConsistOf(
+			reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "ns", Name: "t"}}))
+	})
+	It("skips runs without the label or that the Trigger owns", func() {
+		Expect(triggerForLabelledChain(context.Background(), chain(nil))).To(BeEmpty())
+		c := chain(map[string]string{aiv1alpha1.LabelTrigger: "t"},
+			metav1.OwnerReference{Kind: "Trigger", Name: "t", Controller: &yes})
+		Expect(triggerForLabelledChain(context.Background(), c)).To(BeEmpty())
 	})
 })

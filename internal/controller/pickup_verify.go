@@ -359,7 +359,7 @@ func (r *IssuePickupReconciler) labelFailedIssue(ctx context.Context, gh *github
 	if err := gh.AddLabels(ctx, repo, issue, labels.needsHuman); err != nil {
 		return err
 	}
-	if err := gh.Comment(ctx, repo, issue, body); err != nil {
+	if err := commentOnce(ctx, gh, repo, issue, c.Status.LastRunTrigger, body); err != nil {
 		return err
 	}
 	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
@@ -420,7 +420,7 @@ func (r *IssuePickupReconciler) linkOpenPR(ctx context.Context, gh *github.Clien
 	body := fmt.Sprintf("Chain `%s` (run `%s`) failed:\n\n- %s\n\n"+
 		"The run failed on a timeout, the PR %s is open and continues through checks and the merge queue.",
 		c.Name, c.Status.LastRunTrigger, chainFailureSummary(c), url)
-	if err := gh.Comment(ctx, repo, issue, body); err != nil {
+	if err := commentOnce(ctx, gh, repo, issue, c.Status.LastRunTrigger, body); err != nil {
 		return err
 	}
 	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
@@ -431,4 +431,21 @@ func (r *IssuePickupReconciler) linkOpenPR(ctx context.Context, gh *github.Clien
 	r.Recorder.Event(rt, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
 	r.Recorder.Event(c, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
 	return nil
+}
+
+// commentOnce posts body with a hidden marker of the chain run, unless the
+// issue already has a comment with that marker (a retry after the label
+// removal failed must not post it twice).
+func commentOnce(ctx context.Context, gh *github.Client, repo string, issue int, run, body string) error {
+	marker := fmt.Sprintf("<!-- rt-run:%s -->", run)
+	comments, err := gh.ListComments(ctx, repo, issue)
+	if err != nil {
+		return err
+	}
+	for _, c := range comments {
+		if strings.Contains(c.Body, marker) {
+			return nil
+		}
+	}
+	return gh.Comment(ctx, repo, issue, body+"\n\n"+marker)
 }

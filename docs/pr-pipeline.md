@@ -299,6 +299,11 @@ Switch with `kubectl patch roundtable <table> --type merge -p
 `"engine":"builtin"`: that deletes the generated Trigger, running Chains keep
 going and are not started twice. See [issue-pickup.md](issue-pickup.md#engines).
 
+The chart's CRDs are synced only at release, so a chart-installed CRD may lag
+the operator image: a newer field such as `spec.issuePickup.postRun: chain` is
+silently pruned until the next release ships the CRD. Apply the CRDs from the
+same revision as the operator (`make install`) before relying on a new field.
+
 ## Post-run checks: builtin or chain
 
 After a pickup run finishes, someone has to check GitHub: are the PRs merged
