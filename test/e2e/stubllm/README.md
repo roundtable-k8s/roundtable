@@ -1,6 +1,7 @@
-# stubllm: OpenAI-compatible stub LLM for e2e
+# stubllm: OpenAI- and Anthropic-compatible stub LLM for e2e
 
 A stdlib-only HTTP server that answers `POST /v1/chat/completions` (streaming and
+non-streaming), `POST /v1/messages` (Anthropic Messages API, streaming and
 non-streaming) and `GET /v1/models`, with scripted replies so e2e runs are
 deterministic and need no API key.
 
@@ -36,6 +37,30 @@ If `KNIGHT_MODEL_BASE_URL` is also set it takes precedence over `OPENAI_BASE_URL
 and `OPENAI_API_BASE` (`localBaseUrlFromEnv` in `packages/pi-knight/src/model.ts`
 in roundtable-k8s/knights). No API key is needed: with no auth configured
 pi-knight sets a dummy runtime key itself.
+
+## Anthropic Messages API
+
+`POST /v1/messages` takes the same tags. Both `content` as a string and as an
+array of `{"type":"text","text":...}` blocks are read; `system` is accepted and
+ignored. Without `stream` it returns a Messages object; with `"stream": true` it
+returns SSE events in this order: `message_start`, `content_block_start`, one
+`content_block_delta` (`text_delta`) per word, `content_block_stop`,
+`message_delta` (with `stop_reason` and `usage.output_tokens`), `message_stop`.
+An unknown tag returns HTTP 400 with an Anthropic error body
+(`{"type":"error","error":{"type":"invalid_request_error","message":...}}`).
+
+Point a client that honours `ANTHROPIC_BASE_URL` at the stub root, not at `/v1`:
+
+```bash
+curl -s localhost:8080/v1/messages -H 'Content-Type: application/json' \
+  -d '{"model":"claude-stub","max_tokens":64,"messages":[{"role":"user","content":"STUB:pong"}]}'
+# {"id":"msg_stub_1","type":"message","role":"assistant","model":"claude-stub",
+#  "content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn",
+#  "stop_sequence":null,"usage":{"input_tokens":...,"output_tokens":1}}
+
+curl -sN localhost:8080/v1/messages -H 'Content-Type: application/json' \
+  -d '{"model":"claude-stub","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"STUB:pong"}]}'
+```
 
 ## Build and run locally
 
