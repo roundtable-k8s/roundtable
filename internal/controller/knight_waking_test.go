@@ -80,7 +80,7 @@ func TestKnightWakingStatus(t *testing.T) {
 		{"zero replicas, tasks pending", 0, 0, "", 3, nil, aiv1alpha1.KnightPhaseSuspended, aiv1alpha1.ReasonKnightWaking},
 		{"zero replicas, lookup fails", 0, 0, "", 3, errors.New("boom"), aiv1alpha1.KnightPhaseSuspended, aiv1alpha1.ReasonKnightScaledToZero},
 		{"pod starting after sleep, tasks pending", 1, 0, aiv1alpha1.KnightPhaseSuspended, 1, nil, aiv1alpha1.KnightPhaseSuspended, aiv1alpha1.ReasonKnightWaking},
-		{"pod starting after sleep, queue drained", 1, 0, aiv1alpha1.KnightPhaseSuspended, 0, nil, aiv1alpha1.KnightPhaseSuspended, aiv1alpha1.ReasonKnightScaledToZero},
+		{"pod starting after sleep, queue drained", 1, 0, aiv1alpha1.KnightPhaseSuspended, 0, nil, aiv1alpha1.KnightPhaseProvisioning, aiv1alpha1.ReasonKnightProvisioning},
 		{"first provisioning is not waking", 1, 0, aiv1alpha1.KnightPhaseProvisioning, 5, nil, aiv1alpha1.KnightPhaseProvisioning, aiv1alpha1.ReasonKnightProvisioning},
 		{"one ready replica", 1, 1, aiv1alpha1.KnightPhaseSuspended, 5, nil, aiv1alpha1.KnightPhaseReady, aiv1alpha1.ReasonKnightReady},
 	}

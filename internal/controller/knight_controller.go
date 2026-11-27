@@ -43,9 +43,11 @@ import (
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
@@ -214,8 +216,10 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				log.Error(err, "Failed to delete agent cards")
 			}
 			deleteIsolatedMetric(knight)
+			// Merge patch, like the add path: never rewrites other fields.
+			base := knight.DeepCopy()
 			controllerutil.RemoveFinalizer(knight, knightFinalizer)
-			if err := r.Update(ctx, knight); err != nil {
+			if err := r.Patch(ctx, knight, client.MergeFrom(base)); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -252,6 +256,8 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	// Then the operator's isolation defaults and the knight's opt-out.
 	knightpkg.ApplyIsolationDefaults(knight, r.Isolation)
+	// A changed model is a status change even when the knight is parked.
+	modelChanged := knight.Status.Model != knight.Spec.Model
 	knight.Status.Model = knight.Spec.Model
 
 	// The durable task consumer exists whatever the runtime state (parked,
@@ -259,6 +265,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// A failure sets ConsumerReady=False and retries; it does not fail the
 	// rest of the reconcile.
 	consumerChanged, consumerErr := r.reconcileConsumer(ctx, knight)
+	consumerChanged = consumerChanged || modelChanged
 	if consumerErr != nil {
 		log.Info("Knight consumer not ready", "error", consumerErr.Error())
 	}
@@ -416,7 +423,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Waking: poll so the transition to Ready is visible without a pod event.
 	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil &&
-		c.Reason == aiv1alpha1.ReasonKnightWaking {
+		(c.Reason == aiv1alpha1.ReasonKnightWaking || c.Reason == aiv1alpha1.ReasonKnightWakeTimeout) {
 		if nixRequeue == 0 || wakingRequeue < nixRequeue {
 			nixRequeue = wakingRequeue
 		}
@@ -447,6 +454,10 @@ func (r *KnightReconciler) now() time.Time {
 
 // wakingRequeue is how often a waking knight is re-checked.
 const wakingRequeue = 5 * time.Second
+
+// knightWakeTimeout caps how long a knight reports Waking: past it the pod
+// is considered stuck and the knight reports Degraded (WakeTimeout).
+const knightWakeTimeout = 5 * time.Minute
 
 // ConsumerPendingSource reports how many tasks are queued or in flight on a
 // JetStream consumer (num_pending + num_ack_pending).
@@ -572,6 +583,17 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 	return ctrl.Result{RequeueAfter: RequeueVerySlow}, nil
 }
 
+// setRuntimeAvailable sets RuntimeAvailable=True for the knight's backend.
+func (r *KnightReconciler) setRuntimeAvailable(knight *aiv1alpha1.Knight) {
+	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
+		Status:             metav1.ConditionTrue,
+		Reason:             aiv1alpha1.ReasonRuntimeBackendAvailable,
+		Message:            fmt.Sprintf("Runtime backend %q is enabled", runtimeName(knight)),
+		ObservedGeneration: knight.Generation,
+	})
+}
+
 // reconcileSuspended scales the deployment to 0 and updates status.
 func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	log := logf.FromContext(ctx)
@@ -592,6 +614,8 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 
 	knight.Status.Phase = aiv1alpha1.KnightPhaseSuspended
 	knight.Status.Ready = false
+	// A suspended knight is not parked: drop a stale RuntimeAvailable=False.
+	r.setRuntimeAvailable(knight)
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,
@@ -611,6 +635,8 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alpha1.Knight) error {
 	knight.Status.Phase = aiv1alpha1.KnightPhaseSuspended
 	knight.Status.Ready = false
+	// A suspended knight is not parked: drop a stale RuntimeAvailable=False.
+	r.setRuntimeAvailable(knight)
 	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
 		Type:               aiv1alpha1.ConditionKnightAvailable,
 		Status:             metav1.ConditionFalse,
@@ -944,13 +970,13 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	// still starting after being at zero. Phase stays Suspended; the
 	// Available condition reason distinguishes it from idle ScaledToZero.
 	wasAsleep := knight.Status.Phase == aiv1alpha1.KnightPhaseSuspended
-	scaledToZero := atZero
+	// An empty queue with a starting pod is Provisioning, not ScaledToZero.
 	waking := false
 	if scaling.Autoscaled && deployFound && !isReady && reconcileErr == nil &&
 		(atZero || (wasAsleep && deploy.Status.ReadyReplicas == 0)) {
-		scaledToZero = true
 		waking = r.hasPendingTasks(ctx, knight)
 	}
+	scaledToZero := atZero || waking
 
 	// Remember when the knight entered Waking so the Waking -> Ready
 	// transition can be observed as wake latency. The observation is
@@ -962,6 +988,15 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		c.Reason == aiv1alpha1.ReasonKnightWaking {
 		wakingSince = c.LastTransitionTime.Time
 	}
+	// Waking for too long (or already timed out and still waiting): the pod
+	// is stuck, so don't stay Waking on the prior Suspended phase forever.
+	wakeTimedOut := false
+	if waking {
+		if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable); c != nil {
+			wakeTimedOut = c.Reason == aiv1alpha1.ReasonKnightWakeTimeout ||
+				(c.Reason == aiv1alpha1.ReasonKnightWaking && r.now().Sub(c.LastTransitionTime.Time) > knightWakeTimeout)
+		}
+	}
 
 	if reconcileErr != nil {
 		r.Recorder.Eventf(knight, corev1.EventTypeWarning, "ReconcileFailed", "Reconciliation failed: %v", reconcileErr)
@@ -972,6 +1007,17 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 			Status:             metav1.ConditionFalse,
 			Reason:             aiv1alpha1.ReasonKnightReconcileError,
 			Message:            reconcileErr.Error(),
+			ObservedGeneration: knight.Generation,
+		})
+	} else if wakeTimedOut {
+		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
+		knight.Status.Ready = false
+		meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
+			Type:   aiv1alpha1.ConditionKnightAvailable,
+			Status: metav1.ConditionFalse,
+			Reason: aiv1alpha1.ReasonKnightWakeTimeout,
+			Message: fmt.Sprintf("Tasks are queued on consumer %s but the knight pod did not become ready within %s",
+				knightpkg.TaskConsumerName(knight), knightWakeTimeout),
 			ObservedGeneration: knight.Generation,
 		})
 	} else if scaledToZero {
@@ -1027,13 +1073,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 		})
 	}
 
-	meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
-		Type:               aiv1alpha1.ConditionKnightRuntimeAvailable,
-		Status:             metav1.ConditionTrue,
-		Reason:             aiv1alpha1.ReasonRuntimeBackendAvailable,
-		Message:            fmt.Sprintf("Runtime backend %q is enabled", runtimeName(knight)),
-		ObservedGeneration: knight.Generation,
-	})
+	r.setRuntimeAvailable(knight)
 
 	r.setDeprecatedFieldsCondition(knight)
 	r.setMCPServersCondition(knight)
@@ -1247,7 +1287,13 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// A Service may move between pod and host network: re-render on its endpoints.
 		Watches(&discoveryv1.EndpointSlice{},
 			handler.EnqueueRequestsFromMapFunc(r.endpointSliceKnightRequests),
-			ctrlbuilder.WithPredicates(egressEndpointSliceChanged))
+			ctrlbuilder.WithPredicates(egressEndpointSliceChanged)).
+		// A knight parked with RuntimeClassNotFound recovers when the class appears.
+		Watches(&nodev1.RuntimeClass{},
+			handler.EnqueueRequestsFromMapFunc(r.runtimeClassKnightRequests),
+			ctrlbuilder.WithPredicates(predicate.Funcs{
+				UpdateFunc: func(event.UpdateEvent) bool { return false },
+			}))
 	if r.SandboxEnabled {
 		b = b.Owns(rtruntime.NewSandboxObject("", ""))
 	}
@@ -1262,6 +1308,25 @@ func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		b = b.Owns(vs)
 	}
 	return b.Named("knight").Complete(r)
+}
+
+// runtimeClassKnightRequests enqueues the knights whose effective
+// RuntimeClass is the one that changed.
+func (r *KnightReconciler) runtimeClassKnightRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	knights := &aiv1alpha1.KnightList{}
+	if err := r.List(ctx, knights); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list knights for RuntimeClass requeue")
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range knights.Items {
+		k := knightpkg.WithTableDefaults(ctx, r.Client, &knights.Items[i])
+		knightpkg.ApplyIsolationDefaults(k, r.Isolation)
+		if runtimeClassOf(k) == obj.GetName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&knights.Items[i])})
+		}
+	}
+	return reqs
 }
 
 // deriveResultsPrefix is a re-export from the knight package for backward compatibility with tests.
