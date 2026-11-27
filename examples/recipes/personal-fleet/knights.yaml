@@ -9,6 +9,8 @@ metadata:
 spec:
   domain: research
   model: sonnet
+  # The model alias needs the claude-knight runtime (pi-knight takes provider/model).
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   skills:
     - shared
   nats:
@@ -47,6 +49,8 @@ metadata:
 spec:
   domain: infrastructure
   model: sonnet
+  # The model alias needs the claude-knight runtime (pi-knight takes provider/model).
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   skills:
     - shared
   serviceAccountName: steward
@@ -86,6 +90,8 @@ spec:
   domain: editing
   # The editor only rewrites text it is given, so the cheapest model will do.
   model: haiku
+  # The model alias needs the claude-knight runtime (pi-knight takes provider/model).
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   skills:
     - shared
   nats:

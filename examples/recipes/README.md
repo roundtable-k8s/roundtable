@@ -23,6 +23,11 @@ Every recipe needs these; each recipe README says in one line which apply.
   [Adapting the examples](../README.md#adapting-the-examples) for a `sed` line).
 - **Model credentials.** Create the Secret your Knights read (for example
   `llm-api-keys` with `ANTHROPIC_API_KEY`); no credentials are in a recipe.
+- **Runtime image.** Recipes that name a Claude CLI alias (`sonnet`, `haiku`)
+  set `image: ghcr.io/roundtable-k8s/claude-knight:latest` on their Knights,
+  because the default knight image is pi-knight, which takes `provider/model`.
+  To run a recipe on pi-knight instead, drop that `image` line and use a
+  `provider/model` name or a full model ID such as `claude-sonnet-4-20250514`.
 - **Model aliases.** A recipe that uses an alias such as `deep` or `fast` needs
   it in the RoundTable's `spec.modelAliases`; otherwise use a model name.
 
