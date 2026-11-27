@@ -37,19 +37,37 @@ for p in "$doc_semver" "$helm_pin"; do
     fail "pins name different minor lines: flux=$semver_pin docs-semver=$doc_semver helm=$helm_pin"
 done
 
-# The comment above the semver pin spells the range out (`>=0.23.0 <0.24.0`);
-# it must be the range the pin means.
-range_comment() { sed -nE "s/.*\`?\^$ver_re means (>=$ver_re <$ver_re).*/\1/p" "$1" | head -n1; }
-want_range() { echo ">=$1 <${1%%.*}.$(( $(minor "$1" | cut -d. -f2) + 1 )).0"; }
-# Negative test: a stale range must be seen as different from the pin's range.
+# The comment above the semver pin spells the range out (`^0.23.0 means
+# >=0.23.0 <0.24.0`); the caret version must be the pin and the range must be
+# what a caret on that version means: next major for ^1.x, next minor for ^0.x,
+# next patch for ^0.0.x.
+range_comment() { sed -nE "s/.*\`?\^($ver_re) means (>=$ver_re <$ver_re).*/\1 \2/p" "$1" | head -n1; }
+want_range() {
+  local maj min pat
+  IFS=. read -r maj min pat <<<"$1"
+  if [ "$maj" -gt 0 ]; then up="$((maj + 1)).0.0"
+  elif [ "$min" -gt 0 ]; then up="0.$((min + 1)).0"
+  else up="0.0.$((pat + 1))"; fi
+  echo "$1 >=$1 <$up"
+}
+# Negative tests: a stale range, a caret version that is not the pin, and the
+# non-0.x bounds must all be told apart.
 neg="$(mktemp)"; trap 'rm -f "$neg"' EXIT
 printf '%s\n' '# For 0.x versions ^0.23.0 means >=0.22.0 <0.24.0, so' >"$neg"
 [ "$(range_comment "$neg")" != "$(want_range 0.23.0)" ] || fail "negative test: stale range comment accepted"
-[ "$(want_range 0.23.0)" = ">=0.23.0 <0.24.0" ] || fail "negative test: want_range wrong"
+printf '%s\n' '# For 0.x versions ^0.22.0 means >=0.22.0 <0.23.0, so' >"$neg"
+[ "$(range_comment "$neg")" != "$(want_range 0.23.0)" ] || fail "negative test: caret version differing from the pin accepted"
+printf '%s\n' '# ^1.2.3 means >=1.2.3 <1.3.0' >"$neg"
+[ "$(range_comment "$neg")" != "$(want_range 1.2.3)" ] || fail "negative test: ^1.x minor-bounded range accepted"
+[ "$(want_range 0.23.0)" = "0.23.0 >=0.23.0 <0.24.0" ] || fail "negative test: want_range wrong for ^0.x"
+[ "$(want_range 1.2.3)" = "1.2.3 >=1.2.3 <2.0.0" ] || fail "negative test: want_range wrong for ^1.x"
+[ "$(want_range 0.0.4)" = "0.0.4 >=0.0.4 <0.0.5" ] || fail "negative test: want_range wrong for ^0.0.x"
 got_range="$(range_comment "$flux")"
 [ -n "$got_range" ] || fail "no '^X.Y.Z means >=X.Y.Z <X.Y.Z' range comment found in $flux"
+[ "${got_range%% *}" = "$semver_pin" ] ||
+  fail "range comment in $flux names ^${got_range%% *} but the semver pin is ^$semver_pin"
 [ "$got_range" = "$(want_range "$semver_pin")" ] ||
-  fail "range comment in $flux says '$got_range' but semver ^$semver_pin means '$(want_range "$semver_pin")'"
+  fail "range comment in $flux says '${got_range#* }' but semver ^$semver_pin means '$(want_range "$semver_pin" | cut -d' ' -f2-)'"
 
 highest="$(printf '%s\n%s\n%s\n' "$semver_pin" "$doc_semver" "$helm_pin" | sort -V | tail -n1)"
 [ "$(printf '%s\n%s\n' "$highest" "$chart_ver" | sort -V | tail -n1)" = "$chart_ver" ] ||
