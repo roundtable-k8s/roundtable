@@ -82,7 +82,11 @@ available replica. The cluster is deleted afterwards, also on failure.
 Scenarios are gated by Ginkgo labels, one per tier; `TIER` picks the tier
 (`core` by default, `trace` for the Chain trace case, `trigger` for a NATS-source
 Trigger starting a Chain run on the stub knight, `lost` for the lost-task case:
-a knight that dies mid-task ends as a dead-letter entry, `all` for everything).
+a knight that dies mid-task ends as a dead-letter entry, `restart` for a Chain step
+in flight surviving an operator rollout, `all` for everything). The `restart` tier
+needs the fix from #700 (chain steps stranded by an operator restart); without it
+the spec times out waiting for the step's result to be read. It is not part of
+the default `TIER=core` run.
 A new tier adds its own label and files without touching core. Plain
 `go test ./...` does not build the e2e package (it needs `-tags=e2e`).
 

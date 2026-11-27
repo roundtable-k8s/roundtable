@@ -1,0 +1,66 @@
+# A table, one stub knight (test/e2e/stubknight, no LLM) and a two-step Chain
+# for the e2e restart tier. The first step makes the stub wait 40 s before it
+# answers, long enough to replace the operator pod while the step is in flight.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: restart-table
+  namespace: roundtable-restart
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: restart
+    tasksStream: restart_tasks
+    resultsStream: restart_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-restart
+  labels:
+    ai.roundtable.io/round-table: restart-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: restart_tasks
+    resultsStream: restart_results
+    subjects:
+      - "restart.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 120
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Chain
+metadata:
+  name: restart-e2e
+  namespace: roundtable-restart
+spec:
+  roundTableRef: {name: restart-table}
+  timeoutSeconds: 600
+  steps:
+    - name: slow
+      knightRef: {name: stub}
+      timeoutSeconds: 300
+      task: |
+        STUB:sleep=40
+        Take your time.
+    - name: after
+      dependsOn: [slow]
+      knightRef: {name: stub}
+      timeoutSeconds: 120
+      task: |
+        Continue from: {{ .Steps.slow.Output }}
