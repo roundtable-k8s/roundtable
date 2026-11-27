@@ -76,10 +76,12 @@ func parseMCPURL(raw string) (mcpDestination, error) {
 }
 
 // hostCovers reports whether an allowedHosts name (exact or "*." wildcard)
-// matches host.
+// matches host. A "*." wildcard covers exactly one DNS label, as Cilium's
+// matchPattern does: "*.x" covers "a.x" but not "a.b.x".
 func hostCovers(pattern, host string) bool {
 	if rest, ok := strings.CutPrefix(pattern, "*."); ok {
-		return strings.HasSuffix(host, "."+rest)
+		label, ok := strings.CutSuffix(host, "."+rest)
+		return ok && label != "" && !strings.Contains(label, ".")
 	}
 	return pattern == host
 }
