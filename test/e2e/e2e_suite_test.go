@@ -41,6 +41,9 @@ const (
 	// stubLLMImage is the stub LLM (test/e2e/stubllm), built by `make stubllm-image`.
 	stubLLMImage = "stubllm:e2e"
 
+	// stubGitHubImage is the stub GitHub API (test/e2e/stubgithub), built by `make stubgithub-image`.
+	stubGitHubImage = "stubgithub:e2e"
+
 	// NATS is installed once for the whole suite, by every tier, at the
 	// operator's default URL (nats://nats.database.svc:4222).
 	natsNamespace = "database"
@@ -62,6 +65,7 @@ const (
 	tierRestart = "restart"
 	tierGateway = "gateway"
 	tierChain   = "chain"
+	tierGitHub  = "github"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -108,8 +112,17 @@ var _ = BeforeSuite(func() {
 	}
 
 	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) ||
-		tierSelected(tierGateway) || tierSelected(tierChain) {
+		tierSelected(tierGateway) || tierSelected(tierChain) ||
+		tierSelected(tierGitHub) {
 		buildStubKnightImage()
+	}
+
+	if tierSelected(tierGitHub) {
+		By("building and loading the stub GitHub image")
+		_, err = utils.Run(exec.Command("make", "stubgithub-image"))
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the stub GitHub image")
+		err = utils.LoadImageToKindClusterWithName(stubGitHubImage)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the stub GitHub image into Kind")
 	}
 
 	By("installing NATS with JetStream")

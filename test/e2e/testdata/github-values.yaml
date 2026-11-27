@@ -1,0 +1,22 @@
+# Chart values for the e2e github tier: the operator from the locally built
+# image, pointed at the stub GitHub API (github.yaml) instead of api.github.com.
+fullnameOverride: rt-github
+image:
+  repository: example.com/roundtable-operator
+  tag: v0.0.1
+  pullPolicy: IfNotPresent
+extraArgs:
+  - --github-api-url=http://stubgithub.roundtable-github.svc:8080
+# kind has no gVisor; the test knight also opts out.
+isolation:
+  runtimeClassName: ""
+  egress:
+    mode: "off"
+missionNetworkPolicy:
+  enabled: false
+dashboard:
+  enabled: false
+gateway:
+  enabled: false
+planner:
+  enabled: false

@@ -66,3 +66,11 @@ in `hack/tilt-values.yaml`. Use a tag other than `latest` so the kubelet does no
 tilt down            # remove what Tilt deployed, keep the cluster
 make tilt-down       # delete the kind cluster
 ```
+
+## End-to-end tiers
+
+`make e2e TIER=<tier>` runs the scenarios of one tier on a throwaway kind
+cluster: `core` (default), `trace`, `trigger`, `lost`, `restart`, `gateway`,
+`github` (issue pickup on the trigger engine against the stub GitHub API in
+`test/e2e/stubgithub`; no network or token needed) or `all`. See
+[CONTRIBUTING.md](../CONTRIBUTING.md).
