@@ -95,6 +95,9 @@ type ScheduleRun struct {
 	ToolCalls *int `json:"toolCalls,omitempty"`
 	// ResultAvailable is true while the run's result can still be fetched.
 	ResultAvailable bool `json:"resultAvailable"`
+	// TraceID is the run's trace: the Chain's or Mission's status.traceID, or
+	// the task record's traceId. Omitted when unknown or the run is gone.
+	TraceID string `json:"traceId,omitempty"`
 }
 
 // ScheduleTaskResult is the result of a knight-target run: the task the
@@ -105,6 +108,7 @@ type ScheduleTaskResult struct {
 	Knight string `json:"knight"`
 	// Status is pending, succeeded or failed.
 	Status      string          `json:"status"`
+	TraceID     string          `json:"traceId,omitempty"`
 	Output      string          `json:"output,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Model       string          `json:"model,omitempty"`
@@ -268,6 +272,7 @@ func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trig
 			}
 			if m, err := s.firedMission(ctx, trg, r.Run); err == nil && m != nil {
 				r.ResultAvailable = true
+				r.TraceID = validTraceID(m.Status.TraceID)
 			}
 		}
 	}
@@ -279,11 +284,15 @@ func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trig
 // without a loaded record is left as it was.
 func fillKnightUsage(runs []*ScheduleRun, recs map[string]*TaskRecord) {
 	for _, r := range runs {
-		if !strings.HasPrefix(r.Run, TaskIDPrefix) || r.DurationSeconds != nil || r.CostUSD != "" {
+		if !strings.HasPrefix(r.Run, TaskIDPrefix) || (r.DurationSeconds != nil || r.CostUSD != "") && r.TraceID != "" {
 			continue
 		}
 		rec := recs[r.Run]
-		if rec == nil || !rec.Done() {
+		if rec == nil {
+			continue
+		}
+		r.TraceID = validTraceID(rec.TraceID)
+		if !rec.Done() || r.DurationSeconds != nil || r.CostUSD != "" {
 			continue
 		}
 		if rec.DurationMs > 0 {
@@ -306,6 +315,7 @@ func chainScheduleRun(c *aiv1alpha1.Chain) *ScheduleRun {
 		Key:             c.Annotations[aiv1alpha1.AnnotationTriggerKey],
 		Outcome:         scheduleChainOutcome(rec),
 		ResultAvailable: true,
+		TraceID:         rec.TraceID,
 	}
 	if rec.Done {
 		r.CostUSD = c.Status.CostUSD
@@ -387,7 +397,7 @@ func (s *Service) knightScheduleRunResult(ctx context.Context, trg *aiv1alpha1.T
 	}
 	return &ScheduleRunResult{Schedule: trg.Name, Target: "knight", Task: &ScheduleTaskResult{
 		Run: rec.TaskID, Knight: rec.Knight, Status: string(rec.Status), Output: rec.Output, Error: rec.Error,
-		Model: rec.Model, Verdict: rec.Verdict, PRs: rec.PRs, CreatedAt: rec.CreatedAt.UTC(),
+		TraceID: validTraceID(rec.TraceID), Model: rec.Model, Verdict: rec.Verdict, PRs: rec.PRs, CreatedAt: rec.CreatedAt.UTC(),
 		CompletedAt: rec.CompletedAt,
 	}}, nil
 }

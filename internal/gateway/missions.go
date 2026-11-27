@@ -161,11 +161,14 @@ type MissionView struct {
 	Chains           []MissionChainView  `json:"chains,omitempty"`
 	Knights          []MissionKnightView `json:"knights,omitempty"`
 	Result           string              `json:"result,omitempty"`
-	TotalCost        string              `json:"totalCost,omitempty"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	StartedAt        *time.Time          `json:"startedAt,omitempty"`
-	CompletedAt      *time.Time          `json:"completedAt,omitempty"`
-	ExpiresAt        *time.Time          `json:"expiresAt,omitempty"`
+	// TraceID is the mission's trace (status.traceID); omitted when empty or
+	// not a valid trace ID.
+	TraceID     string     `json:"traceId,omitempty"`
+	TotalCost   string     `json:"totalCost,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 }
 
 // ConditionView is a Mission condition.
@@ -607,6 +610,7 @@ func (s *Service) missionView(ctx context.Context, m *aiv1alpha1.Mission, withSt
 		Done:             missionDone(st.Phase),
 		CreatedByGateway: m.Labels[aiv1alpha1.LabelCreatedBy] == aiv1alpha1.CreatedByGateway,
 		Result:           st.Result,
+		TraceID:          validTraceID(st.TraceID),
 		TotalCost:        st.TotalCost,
 		CreatedAt:        m.CreationTimestamp.UTC(),
 		StartedAt:        timePtr(st.StartedAt),

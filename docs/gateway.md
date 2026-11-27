@@ -566,6 +566,7 @@ env, Secret or log fields:
   "knights": [{"name": "researcher", "ready": true, "tasksCompleted": 3, "ephemeral": false}],
   "result": "",
   "totalCost": "0.84",
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
   "createdAt": "…", "startedAt": "…", "completedAt": null, "expiresAt": "…"
 }
 ```
@@ -669,6 +670,7 @@ the existing run, whatever the new input says, and starts nothing.
   "chain": "blog-drafter",
   "namespace": "roundtable",
   "runId": "2b9c…",
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
   "phase": "Succeeded",
   "done": true,
   "createdAt": "2026-11-24T07:00:00Z",
@@ -686,7 +688,9 @@ the existing run, whatever the new input says, and starts nothing.
 run, then `Running`, `Succeeded`, `PartiallySucceeded` or `Failed`). Each
 step's `output` is cut at 64 KiB (`outputTruncated: true`). `output` is the
 output of the final step: the one step no other step depends on. If several
-steps have no dependents, `output` is omitted; read `steps`.
+steps have no dependents, `output` is omitted; read `steps`. `traceId` is the
+Chain's `status.traceID`; a mission's view carries the Mission's. Both are
+omitted when empty or not a valid 32-hex trace ID.
 
 ### `POST /v1/runs/{namespace}/{run}/cancel`
 
@@ -1067,6 +1071,7 @@ entry:
 | `turns`, `toolCalls` | Knight target only, while the task record is kept and the knight reported them; `toolCalls` is omitted, not 0, when not reported |
 | `run` | What to fetch the result with: the Chain run's name (a knight target: the task ID). Empty for a skipped firing |
 | `resultAvailable` | The result can still be fetched |
+| `traceId` | The run's trace: the Chain's or Mission's `status.traceID`, or the task record's `traceId`. Omitted when unknown, invalid (not 32 hex) or the run is gone |
 | `key` | The firing's dedupe key |
 
 History is built from the Chains the Trigger started (found by their
