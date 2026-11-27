@@ -85,7 +85,8 @@ Trigger starting a Chain run on the stub knight, `lost` for the lost-task case:
 a knight that dies mid-task ends as a dead-letter entry, `restart` for a Chain step
 in flight surviving an operator rollout, `gateway` for asking a knight and running
 a Chain through the invoke gateway with a ServiceAccount token, `chain` for the Chain
-engine (step output, `when`, `forEach`) on the stub knight, `github` for issue pickup on the
+engine (step output, `when`, `forEach`) on the stub knight, `schedule` for a scheduled Trigger created, run now,
+suspended and deleted through the gateway, `github` for issue pickup on the
 trigger engine against a stub GitHub API, `all` for everything). The `restart` tier
 needs the fix from #700 (chain steps stranded by an operator restart); without it
 the spec times out waiting for the step's result to be read. It is not part of

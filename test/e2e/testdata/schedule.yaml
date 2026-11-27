@@ -1,0 +1,42 @@
+# A table and one stub knight (test/e2e/stubknight, no LLM) for the e2e schedule tier.
+apiVersion: ai.roundtable.io/v1alpha1
+kind: RoundTable
+metadata:
+  name: e2e-table
+  namespace: roundtable-schedule
+spec:
+  nats:
+    url: nats://nats.database.svc:4222
+    subjectPrefix: e2e
+    tasksStream: e2e_tasks
+    resultsStream: e2e_results
+    createStreams: true
+    streamRetention: WorkQueue
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: stub
+  namespace: roundtable-schedule
+  labels:
+    ai.roundtable.io/round-table: e2e-table
+spec:
+  domain: e2e
+  image: example.com/roundtable-e2e-stub-knight:v0.0.1
+  model: stub-model
+  skills: [e2e]
+  nats:
+    url: nats://nats.database.svc:4222
+    stream: e2e_tasks
+    resultsStream: e2e_results
+    subjects:
+      - "e2e.tasks.e2e.>"
+  isolation:
+    runtime: none
+    egress: unrestricted
+    reason: e2e stub knight on kind (no gVisor, no LLM)
+  workspace:
+    mode: ephemeral
+    size: 1Gi
+  concurrency: 1
+  taskTimeoutSeconds: 60

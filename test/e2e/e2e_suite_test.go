@@ -58,14 +58,15 @@ const (
 // runs the scenarios of that tier (TIER=all runs every tier). A later tier
 // adds its own label and files without touching core.
 const (
-	tierCore    = "core"
-	tierTrace   = "trace"
-	tierTrigger = "trigger"
-	tierLost    = "lost"
-	tierRestart = "restart"
-	tierGateway = "gateway"
-	tierChain   = "chain"
-	tierGitHub  = "github"
+	tierCore     = "core"
+	tierTrace    = "trace"
+	tierTrigger  = "trigger"
+	tierLost     = "lost"
+	tierRestart  = "restart"
+	tierGateway  = "gateway"
+	tierChain    = "chain"
+	tierSchedule = "schedule"
+	tierGitHub   = "github"
 )
 
 // tier is the selected tier (TIER env, default core).
@@ -112,7 +113,7 @@ var _ = BeforeSuite(func() {
 	}
 
 	if tierSelected(tierTrace) || tierSelected(tierTrigger) || tierSelected(tierLost) || tierSelected(tierRestart) ||
-		tierSelected(tierGateway) || tierSelected(tierChain) ||
+		tierSelected(tierGateway) || tierSelected(tierChain) || tierSelected(tierSchedule) ||
 		tierSelected(tierGitHub) {
 		buildStubKnightImage()
 	}
