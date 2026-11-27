@@ -41,6 +41,7 @@ User-defined `spec.env` is applied after these and can override them.
 | `ts` | string | RFC 3339 UTC with milliseconds. |
 | `knight` | string | `KNIGHT_NAME`. |
 | `table` | string | Optional (additive, stays `v: 1`). `ROUNDTABLE_TABLE`; `none` when the knight has no table. |
+| `traceId` | string | Optional. W3C trace id (32 lowercase hex) of the task's trace; the same on every event of a task. Omitted when there is no trace context. |
 | `pod` | string | `POD_NAME`. |
 | `node` | string | `NODE_NAME`; omitted if unset. |
 | `taskId` | string | Task id (`roundtable.task.id`). |

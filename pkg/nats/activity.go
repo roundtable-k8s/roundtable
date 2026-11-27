@@ -96,9 +96,10 @@ type ActivityEvent struct {
 	Type      ActivityType `json:"type"`
 	Timestamp string       `json:"ts"` // RFC 3339, UTC, millisecond precision
 	Knight    string       `json:"knight"`
-	Table     string       `json:"table,omitempty"` // the knight's RoundTable
-	Pod       string       `json:"pod"`             // POD_NAME
-	Node      string       `json:"node,omitempty"`  // NODE_NAME
+	Table     string       `json:"table,omitempty"`   // the knight's RoundTable
+	TraceID   string       `json:"traceId,omitempty"` // W3C trace id (32 hex) of the task's trace
+	Pod       string       `json:"pod"`               // POD_NAME
+	Node      string       `json:"node,omitempty"`    // NODE_NAME
 	TaskID    string       `json:"taskId"`
 	RunID     string       `json:"runId,omitempty"`
 	Chain     string       `json:"chainName,omitempty"`

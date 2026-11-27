@@ -91,6 +91,10 @@ type TaskActivityEvent struct {
 	// ToolCallID corresponds to the JSON schema field "toolCallId".
 	ToolCallID *string `json:"toolCallId,omitempty,omitzero"`
 
+	// W3C trace id (32 lowercase hex) of the task's trace; the same on every event of
+	// a task. Omitted when there is no trace context.
+	TraceID *string `json:"traceId,omitempty,omitzero"`
+
 	// Truncated corresponds to the JSON schema field "truncated".
 	Truncated *bool `json:"truncated,omitempty,omitzero"`
 
@@ -277,7 +281,7 @@ type TaskResult struct {
 	// Echo of the task's `retryOf` (set only on a manual retry).
 	RetryOf *string `json:"retry_of,omitempty,omitzero"`
 
-	// claude-knight: `claude-knight`.
+	// The knight runtime: `claude-knight` or `pi-knight`.
 	Runtime *string `json:"runtime,omitempty,omitzero"`
 
 	// False when the task produced no deliverable; `error` then says why.
@@ -296,7 +300,7 @@ type TaskResult struct {
 	// Tokens corresponds to the JSON schema field "tokens".
 	Tokens TaskResultTokens `json:"tokens"`
 
-	// pi-knight: tool calls the agent made.
+	// Tool calls the agent made (pi-knight and claude-knight).
 	ToolCalls *float64 `json:"tool_calls,omitempty,omitzero"`
 
 	// The task failed because the model provider was briefly unavailable, after the
@@ -309,7 +313,7 @@ type TaskResult struct {
 	// or timeout to the provider.
 	TransientReason *TaskResultTransientReason `json:"transientReason,omitempty,omitzero"`
 
-	// claude-knight: agent turns.
+	// Agent turns (pi-knight and claude-knight).
 	Turns *float64 `json:"turns,omitempty,omitzero"`
 
 	// Deprecated: use `refused: "quota"`. claude-knight still sends it alongside

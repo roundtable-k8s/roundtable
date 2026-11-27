@@ -86,16 +86,16 @@
     "tool_calls": {
       "type": "number",
       "minimum": 0,
-      "description": "pi-knight: tool calls the agent made."
+      "description": "Tool calls the agent made (pi-knight and claude-knight)."
     },
     "turns": {
       "type": "number",
       "minimum": 0,
-      "description": "claude-knight: agent turns."
+      "description": "Agent turns (pi-knight and claude-knight)."
     },
     "runtime": {
       "type": "string",
-      "description": "claude-knight: `claude-knight`."
+      "description": "The knight runtime: `claude-knight` or `pi-knight`."
     },
     "billing": {
       "enum": [
