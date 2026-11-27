@@ -229,15 +229,19 @@ var _ = Describe("Gateway", Ordered, Label(tierGateway), func() {
 		}, 5*time.Minute).Should(Succeed())
 	})
 
-	It("lists no dead letters", func() {
+	It("lists no dead letters for this tier's table", func() {
 		code, body := call(http.MethodGet, "/v1/dead-letters", token, nil)
 		Expect(code).To(Equal(http.StatusOK), string(body))
+		// The dead-letter bucket is shared by every e2e tier (the lost tier
+		// leaves an entry on purpose), so only assert on this tier's table.
 		var list struct {
-			DeadLetters []json.RawMessage `json:"deadLetters"`
-			Total       int               `json:"total"`
+			DeadLetters []struct {
+				Table string `json:"table"`
+			} `json:"deadLetters"`
 		}
 		Expect(json.Unmarshal(body, &list)).To(Succeed())
-		Expect(list.DeadLetters).To(BeEmpty())
-		Expect(list.Total).To(BeZero())
+		for _, dl := range list.DeadLetters {
+			Expect(dl.Table).NotTo(Equal("e2e-table"), string(body))
+		}
 	})
 })
