@@ -162,10 +162,10 @@ func TestCheckBudget(t *testing.T) {
 	}{
 		{"no budget", budgetMission(""), BudgetStatus{}, ""},
 		{"zero budget", budgetMission("0"), BudgetStatus{}, ""},
-		{"under budget", budgetMission("2.0"), BudgetStatus{Total: 1.5, Budget: 2}, "1.5000"},
-		{"over budget", budgetMission("1.0"), BudgetStatus{Total: 1.5, Budget: 1, Exceeded: true}, "1.5000"},
-		{"chain cost higher", budgetMission("2.0", "2.5"), BudgetStatus{Total: 2.5, Budget: 2, Exceeded: true}, "2.5000"},
-		{"unparseable budget", budgetMission("abc"), BudgetStatus{Total: 1.5}, "1.5000"},
+		{"under budget", budgetMission("2.0"), BudgetStatus{Total: 1.5, Budget: 2, Aggregated: true}, "1.5000"},
+		{"over budget", budgetMission("1.0"), BudgetStatus{Total: 1.5, Budget: 1, Exceeded: true, Aggregated: true}, "1.5000"},
+		{"chain cost higher", budgetMission("2.0", "2.5"), BudgetStatus{Total: 2.5, Budget: 2, Exceeded: true, Aggregated: true}, "2.5000"},
+		{"unparseable budget", budgetMission("abc"), BudgetStatus{Total: 1.5, Aggregated: true}, "1.5000"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -287,5 +287,54 @@ func TestAggregateMissionCostPerKnightSplit(t *testing.T) {
 		if bc.Name == "" || want[bc.Name] != bc.CostUSD {
 			t.Errorf("line %+v, want %v", bc, want)
 		}
+	}
+}
+
+func TestAggregateMissionCostEmptyNameAndMixedSteps(t *testing.T) {
+	cases := []struct {
+		name  string
+		steps []aiv1alpha1.ChainStepStatus
+		want  map[string]string
+	}{
+		{"empty name goes to unknown", []aiv1alpha1.ChainStepStatus{
+			{Knight: "a", CostUSD: "0.3", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "", CostUSD: "0.3"}}},
+		}, map[string]string{"unknown": "0.3000"}},
+		{"old cost before upgrade is kept", []aiv1alpha1.ChainStepStatus{
+			{Knight: "a", CostUSD: "0.5", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "b", CostUSD: "0.2"}}},
+		}, map[string]string{"a": "0.3000", "b": "0.2000"}},
+		{"covered step has no remainder", []aiv1alpha1.ChainStepStatus{
+			{Knight: "a", CostUSD: "0.5", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "b", CostUSD: "0.2"}, {Name: "c", CostUSD: "0.3"}}},
+		}, map[string]string{"b": "0.2000", "c": "0.3000"}},
+		{"remainder with no knight is unknown", []aiv1alpha1.ChainStepStatus{
+			{CostUSD: "0.5", KnightCosts: []aiv1alpha1.StepKnightCost{{Name: "b", CostUSD: "0.2"}}},
+		}, map[string]string{"b": "0.2000", "unknown": "0.3000"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			chain := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "ns"},
+				Status:     aiv1alpha1.ChainStatus{StepStatuses: tc.steps},
+			}
+			ct := &CostTracker{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(chain).Build()}
+			m := &aiv1alpha1.Mission{
+				ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "ns"},
+				Status:     aiv1alpha1.MissionStatus{ChainStatuses: []aiv1alpha1.MissionChainStatus{{Name: "x", ChainCRName: "c1"}}},
+			}
+			if _, err := ct.AggregateMissionCost(t.Context(), m); err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			for _, bc := range m.Status.CostBreakdown {
+				got[bc.Name] = bc.CostUSD
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
 	}
 }

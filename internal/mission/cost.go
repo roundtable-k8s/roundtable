@@ -13,6 +13,13 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
+const (
+	unknownKnight = "unknown"
+	// costEpsilon absorbs float noise when comparing a step's costUSD with the
+	// sum of its knightCosts.
+	costEpsilon = 1e-9
+)
+
 // CostTracker aggregates per-knight cost for a mission and suspends mission
 // chains when the budget is exceeded.
 type CostTracker struct {
@@ -57,9 +64,12 @@ func (c *CostTracker) SuspendMissionChains(ctx context.Context, mission *aiv1alp
 }
 
 // AggregateMissionCost sums the cost of the mission's chains per knight, sets
-// Status.CostBreakdown from it and returns the total. Each step's costUSD
-// (already summed over its retries, fan-out items and loop rounds) is charged
-// to the knight that ran it. The breakdown has one line per knight in
+// Status.CostBreakdown from it and returns the total. A step's knightCosts
+// entries are charged to the knight each names ("unknown" for an empty name).
+// Any part of the step's costUSD (already summed over its retries, fan-out
+// items and loop rounds) that knightCosts does not cover (all of it for steps
+// recorded before knightCosts existed) is charged to the step's knight, the
+// chain step's knight, a loop body's single knight, or "unknown". The breakdown has one line per knight in
 // Spec.Knights (zero for a knight that ran nothing), then one line per other
 // knight that ran a chain step (e.g. a fallback), by name.
 func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alpha1.Mission) (float64, error) {
@@ -79,18 +89,28 @@ func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alp
 			return 0, err
 		}
 		for i, ss := range chain.Status.StepStatuses {
-			if len(ss.KnightCosts) > 0 {
-				for _, kc := range ss.KnightCosts {
-					if v, err := strconv.ParseFloat(kc.CostUSD, 64); err == nil && v > 0 && kc.Name != "" {
-						perKnight[kc.Name] += v
-					}
+			var charged float64
+			for _, kc := range ss.KnightCosts {
+				v, err := strconv.ParseFloat(kc.CostUSD, 64)
+				if err != nil || v <= 0 {
+					continue
 				}
+				charged += v
+				name := kc.Name
+				if name == "" {
+					name = unknownKnight
+				}
+				perKnight[name] += v
+			}
+			// Legacy path: whatever part of the step's costUSD knightCosts
+			// does not cover (all of it for steps recorded before knightCosts
+			// existed) is charged to the step's current knight.
+			v, err := strconv.ParseFloat(ss.CostUSD, 64)
+			if err != nil {
 				continue
 			}
-			// Steps recorded before knightCosts existed: charge the whole
-			// step to its current knight; never to an empty name.
-			v, err := strconv.ParseFloat(ss.CostUSD, 64)
-			if err != nil || v == 0 {
+			rest := v - charged
+			if rest <= costEpsilon {
 				continue
 			}
 			knight := ss.Knight
@@ -101,9 +121,9 @@ func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alp
 				knight = loopBodyKnight(chain.Spec.Steps[i])
 			}
 			if knight == "" {
-				knight = "unknown"
+				knight = unknownKnight
 			}
-			perKnight[knight] += v
+			perKnight[knight] += rest
 		}
 	}
 
@@ -144,6 +164,9 @@ type BudgetStatus struct {
 	Total    float64
 	Budget   float64
 	Exceeded bool
+	// Aggregated is true when CheckBudget ran AggregateMissionCost, so
+	// Status.CostBreakdown reflects the chain statuses at that moment.
+	Aggregated bool
 }
 
 // CheckBudget aggregates the mission's cost (the larger of the per-knight
@@ -168,9 +191,9 @@ func (c *CostTracker) CheckBudget(ctx context.Context, mission *aiv1alpha1.Missi
 
 	var budget float64
 	if _, err := fmt.Sscanf(mission.Spec.CostBudgetUSD, "%f", &budget); err != nil {
-		return BudgetStatus{Total: total}, nil
+		return BudgetStatus{Total: total, Aggregated: true}, nil
 	}
-	return BudgetStatus{Total: total, Budget: budget, Exceeded: total > budget}, nil
+	return BudgetStatus{Total: total, Budget: budget, Exceeded: total > budget, Aggregated: true}, nil
 }
 
 // ApplyChainUsage exposes the chains' tokens and cost on the mission status.
