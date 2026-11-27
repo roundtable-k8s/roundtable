@@ -445,7 +445,8 @@ Lists dead-lettered tasks (see the task contract's dead-letter section), newest
 first, each with its `state` (`open`, `retried` or `resolved`). The limit
 defaults to and is capped at 100. The list omits the original task payload.
 An entry carries `traceId` (32 hex) when the original task had a valid
-`traceparent` header, and omits it otherwise.
+`traceparent` header, and omits it otherwise. The entry's `traceId` is
+the same ID the dashboard's "View trace" link uses.
 
 ### `GET /v1/dead-letters/{taskId}`
 
@@ -621,6 +622,10 @@ env, Secret or log fields:
 
 `planning.rawOutput` holds only the first 4 KiB of the planner's output.
 
+`traceId` is the mission's trace (its `status.traceID`). It is omitted when the
+mission has no trace or the value is not a valid trace ID (32 hex). It is the
+same ID the dashboard's "View trace" link uses.
+
 ### `GET /v1/missions?namespace=&phase=&limit=`
 
 Lists missions in a namespace, newest first, in the same projection but
@@ -766,6 +771,11 @@ Returns a run the gateway started (any other Chain is a **404**), with the
 same 200/202 convention. `waitSeconds` long-polls (capped at
 `gateway.maxTimeout`), so a caller whose connection dropped resumes waiting
 where it left off.
+
+The record's `traceId` is the run's trace, taken only from the Chain's
+`status.traceID`. It is omitted when the trace is unknown, is not a valid trace
+ID (32 hex) or the run is still `Pending` (any trace on the Chain is from before
+the run). It is the same ID the dashboard's "View trace" link uses.
 
 ### `GET /v1/runs/{namespace}/{run}/events`
 
@@ -1200,6 +1210,10 @@ History is built from the Chains the Trigger started (found by their
 are retained, not only the 10 entries of `status.recentFirings`. Those add
 the skipped firings and the outcome of runs whose Chain is already deleted.
 
+Each entry's `traceId` is the run's trace, omitted when it is unknown, not a
+valid trace ID or the run is gone. It is the same ID the dashboard's "View
+trace" link uses.
+
 ### `GET /v1/schedules/{namespace}/{name}/runs/{run}`
 
 The run's result, by `target`:
@@ -1414,7 +1428,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `run_chain` | `chain`, `input?` (a string or any JSON value), `waitSeconds?`, `namespace?` | Text content is the final step's output once done, else a note to call `get_run`. Structured content is the run record. A failed run is a tool error. |
 | `get_run` | `run`, `namespace?`, `waitSeconds?` | The run record (same text/error conventions) |
 | `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
-| `list_runs` | `namespace?`, `chain?`, `phase?`, `limit?` | `{runs: [...]}` |
+| `list_runs` | `namespace?`, `chain?`, `phase?`, `source?`, `active?`, `issue?`, `limit?` | `{runs: [...]}`, the same filters and records as `GET /v1/runs` |
 | `list_knight_snapshots` | `name`, `namespace?` | The `GET /v1/knights/{name}/snapshots` answer |
 | `snapshot_knight` | `name`, `namespace?`, `waitSeconds?` | Requests a workspace snapshot (see `POST /v1/knights/{name}/snapshot`); listed when `gateway.knightSnapshots.enabled` is true |
 | `list_schedules` | `namespace?`, `table?` | `{schedules: [...]}`: the same list as `GET /v1/schedules` |
