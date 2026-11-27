@@ -445,10 +445,6 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 	}
 	src := trg.Spec.Source.GitHub
 	if src == nil || trg.Suspended() || !trg.DeletionTimestamp.IsZero() {
-		if src != nil && trg.DeletionTimestamp.IsZero() {
-			// Suspended: polling stops, so the hold no longer applies.
-			r.recordRepositoryHolds(ctx, trg, nil, nil, nil, nil, r.now())
-		}
 		return triggerGitHubDefaultInterval
 	}
 	interval := githubPollInterval(src)
@@ -984,7 +980,13 @@ func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1
 			metrics.TriggerGitHubHoldStartedTimestampSeconds.Delete(labels)
 			continue
 		}
-		since, _ := r.holdSince.LoadOrStore(key, now)
+		first := now
+		// After an operator restart, resume the hold's age from the
+		// condition rather than restarting it.
+		if c := meta.FindStatusCondition(trg.Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld); c != nil && c.Status == metav1.ConditionTrue && c.LastTransitionTime.Time.Before(now) {
+			first = c.LastTransitionTime.Time
+		}
+		since, _ := r.holdSince.LoadOrStore(key, first)
 		started := since.(time.Time)
 		metrics.TriggerGitHubHeldItems.With(labels).Set(float64(heldBy[repo]))
 		metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels).Set(float64(started.Unix()))

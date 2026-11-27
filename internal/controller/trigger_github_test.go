@@ -36,6 +36,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -606,8 +607,8 @@ var _ = Describe("Trigger GitHub source", func() {
 		c = heldCond()
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerNoHold))
-		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHeldItems)).To(BeZero())
-		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(BeZero())
+		Expect(triggerSeries(metrics.TriggerGitHubHeldItems, ns, "held")).To(BeZero())
+		Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held")).To(BeZero())
 	})
 
 	It("drops hold state when the label is removed, the Trigger is suspended or the repository is removed", func() {
@@ -627,12 +628,15 @@ var _ = Describe("Trigger GitHub source", func() {
 		hold := func() {
 			poll("held2")
 			Expect(heldCond().Status).To(Equal(metav1.ConditionTrue))
-			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(Equal(1))
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held2")).To(Equal(1))
+		}
+		noSeries := func() {
+			Expect(triggerSeries(metrics.TriggerGitHubHeldItems, ns, "held2")).To(BeZero())
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, ns, "held2")).To(BeZero())
 		}
 		cleared := func() {
 			Expect(heldCond().Status).To(Equal(metav1.ConditionFalse))
-			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHeldItems)).To(BeZero())
-			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(BeZero())
+			noSeries()
 		}
 
 		hold()
@@ -642,9 +646,11 @@ var _ = Describe("Trigger GitHub source", func() {
 
 		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.HoldWhilePullRequestLabeled = "breaking" })
 		hold()
+		// Suspending stops the poller, so Reconcile does the clearing.
 		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = true })
-		poll("held2")
-		cleared()
+		reconcileTrigger("held2")
+		Expect(heldCond()).To(BeNil())
+		noSeries()
 
 		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = false })
 		hold()
@@ -850,4 +856,29 @@ func TestGithubRepoListed(t *testing.T) {
 			t.Errorf("githubRepoListed(%q) = %v, want %v", tc.repo, got, tc.want)
 		}
 	}
+}
+
+// triggerSeries counts a collector's series for one Trigger, so specs do not
+// depend on series other specs left in the shared gauges.
+func triggerSeries(c prometheus.Collector, namespace, trigger string) int {
+	ch := make(chan prometheus.Metric, 64)
+	go func() { c.Collect(ch); close(ch) }()
+	n := 0
+	for m := range ch {
+		d := &dto.Metric{}
+		_ = m.Write(d)
+		var ns, tr string
+		for _, l := range d.Label {
+			switch l.GetName() {
+			case "namespace":
+				ns = l.GetValue()
+			case "trigger":
+				tr = l.GetValue()
+			}
+		}
+		if ns == namespace && tr == trigger {
+			n++
+		}
+	}
+	return n
 }

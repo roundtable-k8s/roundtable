@@ -234,6 +234,10 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if latest.Spec.Source.GitHub == nil || trg.Suspended() {
 		meta.RemoveStatusCondition(&latest.Status.Conditions, aiv1alpha1.ConditionTriggerGitHubReady)
 		latest.Status.LastPolledAt = nil
+		// A stopped (or absent) poller never clears its holds: drop the
+		// series, start times and condition here.
+		r.clearRepositoryHolds(latest.Namespace, latest.Name)
+		meta.RemoveStatusCondition(&latest.Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
 	}
 	patch := client.MergeFrom(orig)
 	if latest.Spec.Source.GitHub != nil || latest.Spec.Target.Knight != nil || latest.Spec.Target.Mission != nil {
