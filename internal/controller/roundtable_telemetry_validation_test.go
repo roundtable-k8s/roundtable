@@ -16,7 +16,10 @@ var _ = Describe("RoundTable spec.telemetry validation", func() {
 	create := func(name string, tel aiv1alpha1.RoundTableTelemetry) error {
 		rt := &aiv1alpha1.RoundTable{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec:       aiv1alpha1.RoundTableSpec{Telemetry: &tel},
+			Spec: aiv1alpha1.RoundTableSpec{
+				NATS:      aiv1alpha1.RoundTableNATS{SubjectPrefix: name},
+				Telemetry: &tel,
+			},
 		}
 		err := k8sClient.Create(ctx, rt)
 		if err == nil {
@@ -27,14 +30,15 @@ var _ = Describe("RoundTable spec.telemetry validation", func() {
 	ratio := func(s string) *string { return &s }
 
 	DescribeTable("rejects",
-		func(name string, tel aiv1alpha1.RoundTableTelemetry) {
+		func(name, field string, tel aiv1alpha1.RoundTableTelemetry) {
 			err := create(name, tel)
 			Expect(err).To(HaveOccurred())
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "got %v", err)
+			Expect(err.Error()).To(ContainSubstring(field))
 		},
-		Entry("an unknown protocol", "tel-bad-proto", aiv1alpha1.RoundTableTelemetry{OTLPProtocol: "bogus"}),
-		Entry("a ratio above 1", "tel-ratio-high", aiv1alpha1.RoundTableTelemetry{SamplingRatio: ratio("1.5")}),
-		Entry("a negative ratio", "tel-ratio-neg", aiv1alpha1.RoundTableTelemetry{SamplingRatio: ratio("-0.1")}),
+		Entry("an unknown protocol", "tel-bad-proto", "spec.telemetry.otlpProtocol", aiv1alpha1.RoundTableTelemetry{OTLPProtocol: "bogus"}),
+		Entry("a ratio above 1", "tel-ratio-high", "spec.telemetry.samplingRatio", aiv1alpha1.RoundTableTelemetry{SamplingRatio: ratio("1.5")}),
+		Entry("a negative ratio", "tel-ratio-neg", "spec.telemetry.samplingRatio", aiv1alpha1.RoundTableTelemetry{SamplingRatio: ratio("-0.1")}),
 	)
 
 	DescribeTable("accepts",
