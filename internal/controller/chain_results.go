@@ -177,6 +177,23 @@ func (r *ChainReconciler) collectStepResult(ctx context.Context, chain *aiv1alph
 	// The step timeout runs from knight pickup, not from publish, so
 	// time spent queued behind a busy knight doesn't eat the budget.
 	r.detectPickup(ctx, nc, ss, spec)
+	// A result already published wins over the deadline (#776): after a
+	// restart or a late read the clock can say "timed out" while a good
+	// result sits in the stream.
+	result, err := r.pollResult(ctx, nc, chain.Name, ss.Name, ss.TaskID)
+	if err != nil {
+		log.Error(err, "Failed to poll result", "step", ss.Name)
+		result = nil
+	}
+	if result == nil && err == nil {
+		// The result may have been acked off the stream by an earlier
+		// reconcile whose status write failed (#683); recover it from KV.
+		result = r.recoverStepResultFromKV(ctx, chain, ss)
+	}
+	if result != nil {
+		r.applyStepResult(ctx, nc, chain, spec, ss, result)
+		return
+	}
 	if ss.StartedAt != nil && spec != nil {
 		now := metav1.Now()
 		if ss.PickedUpAt != nil {
@@ -194,21 +211,6 @@ func (r *ChainReconciler) collectStepResult(ctx context.Context, chain *aiv1alph
 			ss.CompletedAt = &now
 			return
 		}
-	}
-
-	// Try to get result from NATS
-	result, err := r.pollResult(ctx, nc, chain.Name, ss.Name, ss.TaskID)
-	if err != nil {
-		log.Error(err, "Failed to poll result", "step", ss.Name)
-		return
-	}
-	if result == nil {
-		// The result may have been acked off the stream by an earlier
-		// reconcile whose status write failed (#683); recover it from KV.
-		result = r.recoverStepResultFromKV(ctx, chain, ss)
-	}
-	if result != nil {
-		r.applyStepResult(ctx, nc, chain, spec, ss, result)
 	}
 }
 
