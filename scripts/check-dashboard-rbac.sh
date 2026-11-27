@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Renders the dashboard Role with and without the KEDA and metrics APIs served
-# and checks the read access the dashboard needs (Deployments, HPAs, events,
-# plus ScaledObjects and pod metrics only when served) and that none of it can
-# write.
+# and checks the read access the dashboard needs (Deployments, HPAs, events and
+# Triggers, plus ScaledObjects and pod metrics only when served) and that none
+# of it can write.
 #
 # Usage: HELM=bin/helm scripts/check-dashboard-rbac.sh
 set -euo pipefail

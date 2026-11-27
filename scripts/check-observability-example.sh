@@ -15,7 +15,17 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 rendered="$("$HELM" template rt "$chart" -n roundtable -f "$dir/values-telemetry.yaml")"
 
 endpoint="http://rt-roundtable-operator-otel-collector.roundtable:4317"
-[ "$(grep -c "value: \"$endpoint\"" <<<"$rendered")" = 3 ] || fail "operator, gateway and dashboard must export to $endpoint"
+# endpoint_of <manifests> <deployment>: the OTLP endpoint a Deployment exports to.
+endpoint_of() {
+  yq -r 'select(.kind == "Deployment" and .metadata.name == "'"$2"'")
+    | .spec.template.spec.containers[].env[] | select(.name == "OTEL_EXPORTER_OTLP_ENDPOINT") | .value' <<<"$1"
+}
+for d in rt-roundtable-operator rt-roundtable-operator-gateway rt-roundtable-operator-dashboard; do
+  [ "$(endpoint_of "$rendered" "$d")" = "$endpoint" ] || fail "$d must export to $endpoint"
+done
+# Negative test: a Deployment exporting elsewhere must be caught.
+[ "$(endpoint_of "${rendered//$endpoint/http://elsewhere:4317}" rt-roundtable-operator-gateway)" != "$endpoint" ] \
+  || fail "negative test: wrong endpoint not detected"
 
 cfg="$(mktemp)"; trap 'rm -f "$cfg"' EXIT
 yq 'select(.kind == "ConfigMap" and .metadata.name == "rt-roundtable-operator-otel-collector") | .data["config.yaml"]' <<<"$rendered" >"$cfg"

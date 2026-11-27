@@ -20,5 +20,8 @@ out="$("$HELM" template roundtable-operator "$chart" -n roundtable "${QUICKSTART
 ! grep -q 'nats\.database\.svc' <<<"$out" || fail "nats.database.svc rendered"
 ! grep -q 'claimName' <<<"$out" || fail "a claimName is rendered (missing PVC)"
 grep -q -- "--nats-url=$NATS_URL" <<<"$out" || fail "gateway not pointed at $NATS_URL"
-grep -q "value: \"\?$NATS_URL" <<<"$out" || fail "dashboard NATS_URL not $NATS_URL"
+dash_nats() { grep -A1 -E '^ +- name: NATS_URL$' <<<"$1" | grep -qE "value: \"?$NATS_URL\"?$"; }
+dash_nats "$out" || fail "dashboard NATS_URL not $NATS_URL"
+# Negative test: the operator's MISSION_DEFAULT_NATS_URL must not satisfy the check.
+! dash_nats "$(printf '%s\n' '- name: MISSION_DEFAULT_NATS_URL' "  value: \"$NATS_URL\"")" || fail "negative test: operator env matched dashboard NATS_URL"
 echo "quickstart values OK"

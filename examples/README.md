@@ -52,6 +52,7 @@ parallel, then one knight combines their output and writes a dated note.
   `dependsOn`, so they run in parallel; `synthesis` (kay) depends on both and sets
   `outputPath: "Briefings/{{ .Date }}-{{ .Chain }}.md"`. `outputKnightRef: kay` is
   the knight that writes that file.
+- [`galahad.yaml`](galahad.yaml) and [`tristan.yaml`](tristan.yaml) — the security and infrastructure knights.
 - [`kay.yaml`](kay.yaml) — the writer knight. It may write only to `Briefings/`.
 
 Apply it with the fleet and its knights:

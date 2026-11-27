@@ -31,7 +31,10 @@ done
 has "$on" 'value: parentbased_traceidratio' "sampler missing"
 has "$on" 'value: "alpha=b,zeta=1"' "resource attributes not sorted/joined"
 has "$on" 'name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' "capture content missing"
-has "$on" 'value: "true"' "capture content should default true"
+[ "$(grep -A1 'name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' <<<"$on" | grep -c 'value: "true"')" = 3 ] || fail "capture content should default true on all three Deployments"
+# Negative test: a value: "true" elsewhere must not satisfy the anchored check.
+neg="$(printf '%s\n' '- name: OTHER' '  value: "true"' '- name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' '  value: "false"')"
+[ "$(grep -A1 'name: ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT' <<<"$neg" | grep -c 'value: "true"')" = 0 ] || fail "negative test: loose value: \"true\" matched"
 has "$on" 'name: TRACE_URL_TEMPLATE' "dashboard trace URL missing"
 [ "$(grep -c 'name: TRACE_URL_TEMPLATE' <<<"$on")" = 1 ] || fail "TRACE_URL_TEMPLATE only on dashboard"
 

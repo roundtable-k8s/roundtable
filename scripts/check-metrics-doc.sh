@@ -13,17 +13,32 @@ doc="$root/docs/observability.md"
 src=("$root/pkg/metrics/metrics.go" "$root/internal/gateway/metrics.go")
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# One line per metric: "name label...". The labels are the first []string{...}
-# after the metric's Name: line.
-code="$(awk '
-  /Name:/ && match($0, /"roundtable_[a-z0-9_]+"/) {
-    name = substr($0, RSTART + 1, RLENGTH - 2); pending = 1; next
-  }
-  pending && /\[\]string\{/ {
-    labels = $0; sub(/.*\[\]string\{/, "", labels); sub(/\}.*/, "", labels)
-    gsub(/[^A-Za-z0-9_]+/, " ", labels)
-    print name, labels; pending = 0
-  }' "${src[@]}")"
+# One line per metric: "name label...". The labels are the []string{...} between
+# the metric's Name: line and the end of its declaration; a metric without one
+# (a plain Counter/Gauge) has no labels.
+extract() {
+  awk '
+    function flush() { if (name != "") print name, labels; name = ""; labels = "" }
+    /Name:/ && match($0, /"roundtable_[a-z0-9_]+"/) {
+      flush(); name = substr($0, RSTART + 1, RLENGTH - 2); next
+    }
+    name != "" && /\[\]string\{/ {
+      labels = $0; sub(/.*\[\]string\{/, "", labels); sub(/\}.*/, "", labels)
+      gsub(/[^A-Za-z0-9_]+/, " ", labels)
+      flush(); next
+    }
+    # A closing "})" ends a declaration without a label list.
+    name != "" && /^[ \t]*(\}\)|\))/ { flush() }
+    END { flush() }' "$@"
+}
+code="$(extract "${src[@]}")"
+
+# Negative test: a label-less metric must not take the next metric's labels.
+neg="$(mktemp)"; trap 'rm -f "$neg"' EXIT
+printf '%s\n' 'a := prometheus.NewCounter(prometheus.CounterOpts{' '  Name: "roundtable_plain_total",' '})' \
+  'b := prometheus.NewCounterVec(prometheus.CounterOpts{' '  Name: "roundtable_vec_total",' '}, []string{"table"})' >"$neg"
+[ "$(extract "$neg" | tr -s ' ' | sed 's/ $//' | paste -sd'|' -)" = "roundtable_plain_total|roundtable_vec_total table" ] \
+  || fail "negative test: label-less metric mishandled"
 [ -n "$code" ] || fail "no roundtable_* metrics found in the Go sources"
 
 # The table: rows of the "Operator and gateway metrics" section, whose first
