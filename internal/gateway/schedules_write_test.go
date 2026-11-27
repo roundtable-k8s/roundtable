@@ -571,7 +571,10 @@ func TestValidateConcurrencyMessageNotDuplicated(t *testing.T) {
 	e := newScheduleWriteEnv(t, true, nil, testKnight("galahad", "dev"))
 	body := map[string]any{"name": "x", "spec": knightSpec("galahad", "t")}
 	body["spec"].(map[string]any)["concurrency"] = map[string]any{"policy": "Replace"}
-	_, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, body)
+	resp, out := e.do(t, http.MethodPost, "/v1/schedules", testToken, body)
+	if resp.StatusCode != http.StatusBadRequest || out["field"] != "spec.concurrency.policy" {
+		t.Fatalf("status %d, field %v, want 400 spec.concurrency.policy: %v", resp.StatusCode, out["field"], out)
+	}
 	msg, _ := out["error"].(string)
 	if strings.Count(msg, "spec.concurrency.policy") > 1 {
 		t.Errorf("field name repeated: %v", out)

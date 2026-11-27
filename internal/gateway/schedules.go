@@ -258,7 +258,7 @@ func (s *Service) knightTables(ctx context.Context, ns string) func(string) stri
 // knightSummary is "knight <name>: <first non-empty line of the task>", the
 // line cut to 80 characters.
 func knightSummary(name, task string) string {
-	for _, line := range strings.Split(task, "\n") {
+	for line := range strings.SplitSeq(task, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
