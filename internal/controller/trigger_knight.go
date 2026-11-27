@@ -325,7 +325,7 @@ func taskFailureReason(rec *gateway.TaskRecord) string {
 // result after timeoutSeconds is no longer active, and its firing gets the
 // outcome. It updates trg's status in place and returns when to look again
 // (0: nothing is in flight).
-func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Trigger, now time.Time) (time.Duration, error) {
+func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Trigger, now time.Time) time.Duration {
 	var tracked []string
 	for _, id := range trg.Status.ActiveRuns {
 		// Runs of an earlier chainRef target are not tasks.
@@ -335,14 +335,14 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	}
 	if len(tracked) == 0 {
 		trg.Status.ActiveRuns = nil
-		return 0, nil
+		return 0
 	}
 	svc, err := r.taskService(ctx)
 	if err != nil {
 		// Keep tracking them; look again later.
 		trg.Status.ActiveRuns = tracked
 		logf.FromContext(ctx).Error(err, "Could not read Trigger task results")
-		return triggerTaskPoll, nil
+		return triggerTaskPoll
 	}
 	timeout := time.Duration(trg.Spec.Target.Knight.EffectiveTimeoutSeconds()) * time.Second
 	var active []string
@@ -379,7 +379,7 @@ func (r *TriggerReconciler) collectTasks(ctx context.Context, trg *aiv1alpha1.Tr
 	}
 	trg.Status.ActiveRuns = active
 	if len(active) == 0 {
-		return 0, nil
+		return 0
 	}
-	return triggerTaskPoll, nil
+	return triggerTaskPoll
 }
