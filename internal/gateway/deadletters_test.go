@@ -48,19 +48,23 @@ func seedDeadLetters(t *testing.T, e *env) func(entry deadletter.Entry, state de
 	}
 	return func(entry deadletter.Entry, state deadletter.State) {
 		t.Helper()
-		entry.Table = "dev"
+		if entry.Table == "" {
+			entry.Table = "dev"
+		}
 		if entry.Attempt == 0 {
 			entry.Attempt = 1
 		}
-		entry.DeadLetteredAt = time.Now().UTC()
+		if entry.DeadLetteredAt.IsZero() {
+			entry.DeadLetteredAt = time.Now().UTC()
+		}
 		subject := deadletter.Subject(prefix, entry.Knight, entry.TaskID)
 		body, _ := json.Marshal(entry)
 		if _, err := js.Publish(ctx, subject, body); err != nil {
 			t.Fatal(err)
 		}
 		rec, _ := json.Marshal(deadletter.Record{State: state, Reason: entry.Reason, Knight: entry.Knight,
-			Attempt: entry.Attempt, Subject: subject, UpdatedAt: entry.DeadLetteredAt})
-		if _, err := kv.Put(ctx, deadletter.Key("dev", entry.TaskID), rec); err != nil {
+			Attempt: entry.Attempt, Subject: subject, UpdatedAt: entry.DeadLetteredAt, DeadLetteredAt: entry.DeadLetteredAt})
+		if _, err := kv.Put(ctx, deadletter.Key(entry.Table, entry.TaskID), rec); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -280,5 +284,78 @@ func TestMCPDeadLetters(t *testing.T) {
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "retry_task", Arguments: map[string]any{"taskId": "t-mcp"}})
 	if err == nil && !res.IsError {
 		t.Fatalf("second retry should fail: %+v", res)
+	}
+}
+
+func TestDeadLetterRetryOfRetryID(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	add(deadletter.Entry{TaskID: "t-r2", Knight: "reviewer", Reason: deadletter.ReasonFailed, Attempt: 2,
+		Task: &natspkg.TaskPayload{TaskID: "t-r2", Task: "x"}}, deadletter.StateOpen)
+	add(deadletter.Entry{TaskID: "u-r2", Knight: "reviewer", Reason: deadletter.ReasonFailed, Attempt: 2, RetryOf: "u",
+		Task: &natspkg.TaskPayload{TaskID: "u-r2", Task: "x"}}, deadletter.StateOpen)
+	for in, want := range map[string]string{"t-r2": "t-r3", "u-r2": "u-r3"} {
+		resp, body := e.do(t, "POST", "/v1/dead-letters/"+in+"/retry", testToken, nil)
+		if resp.StatusCode != http.StatusAccepted || body["taskId"] != want {
+			t.Fatalf("retry %s: %d %v", in, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestDeadLetterRetryLostHasPreviousFailure(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	add(deadletter.Entry{TaskID: "t-lost", Knight: "reviewer", Reason: deadletter.ReasonLost,
+		Task: &natspkg.TaskPayload{TaskID: "t-lost", Task: "x"}}, deadletter.StateOpen)
+	if resp, body := e.do(t, "POST", "/v1/dead-letters/t-lost/retry", testToken, nil); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("retry: %d %v", resp.StatusCode, body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for countTasks(t, e, "t-lost-r2") == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pf := e.knight.lastPayload().PreviousFailure; !strings.Contains(pf, "lost") {
+		t.Fatalf("previousFailure: %q", pf)
+	}
+}
+
+func TestDeadLetterRetryRefusesOtherTable(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	add(deadletter.Entry{TaskID: "t-other", Table: "other", Knight: "reviewer", Reason: deadletter.ReasonFailed,
+		Task: &natspkg.TaskPayload{TaskID: "t-other", Task: "x"}}, deadletter.StateOpen)
+	resp, body := e.do(t, "POST", "/v1/dead-letters/t-other/retry", testToken, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("other table: %d %v", resp.StatusCode, body)
+	}
+	if n := countTasks(t, e, "t-other-r2"); n != 0 {
+		t.Fatalf("published %d", n)
+	}
+}
+
+func TestDeadLetterListNewestFirstByDeadLetteredAt(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	now := time.Now().UTC()
+	add(deadletter.Entry{TaskID: "t-old", Knight: "reviewer", Reason: deadletter.ReasonLost, DeadLetteredAt: now.Add(-time.Hour)}, deadletter.StateOpen)
+	add(deadletter.Entry{TaskID: "t-new", Knight: "reviewer", Reason: deadletter.ReasonLost, DeadLetteredAt: now}, deadletter.StateOpen)
+	// Resolving the old one moves its UpdatedAt but must not reorder the list.
+	js, _ := jetstream.New(e.nc)
+	kv, _ := js.KeyValue(context.Background(), deadletter.KVBucket)
+	ent, err := kv.Get(context.Background(), deadletter.Key("dev", "t-old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec deadletter.Record
+	_ = json.Unmarshal(ent.Value(), &rec)
+	rec.State, rec.UpdatedAt = deadletter.StateResolved, now.Add(time.Hour)
+	b, _ := json.Marshal(rec)
+	if _, err := kv.Put(context.Background(), deadletter.Key("dev", "t-old"), b); err != nil {
+		t.Fatal(err)
+	}
+	_, body := e.do(t, "GET", "/v1/dead-letters", testToken, nil)
+	l := body["deadLetters"].([]any)
+	if len(l) != 2 || l[0].(map[string]any)["taskId"] != "t-new" {
+		t.Fatalf("order: %v", l)
 	}
 }

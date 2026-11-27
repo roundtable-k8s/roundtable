@@ -429,6 +429,7 @@ Optional body: `{"force": true, "namespace": "...", "table": "..."}`.
 | Status | When |
 |--------|------|
 | `202` | Published. Body: `{taskId, retryOf, attempt, knight}`. |
+| `400` | The task ID is dead-lettered in several RoundTables and `table` is missing, the body is invalid, or the resolved knight belongs to another RoundTable than the entry. |
 | `404` | No such entry. |
 | `409` | The entry isn't `open` (body has the current `state`), or it belongs to a chain: rerun the chain or let its `retryPolicy` handle it. `force` retries the chain step on its own; the chain doesn't continue. |
 | `422` | The entry has no original task payload. |

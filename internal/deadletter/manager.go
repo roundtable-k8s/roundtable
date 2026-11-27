@@ -549,7 +549,7 @@ func (w *watcher) capture(ctx context.Context, e *Entry) error {
 	}
 	rec, _ := json.Marshal(Record{
 		State: state, Reason: e.Reason, Knight: e.Knight, Attempt: e.Attempt,
-		Subject: subject, UpdatedAt: e.DeadLetteredAt,
+		Subject: subject, UpdatedAt: e.DeadLetteredAt, DeadLetteredAt: e.DeadLetteredAt,
 	})
 	if _, err := w.kv.Put(ctx, key, rec); err != nil {
 		return fmt.Errorf("dead-letter state %s: %w", key, err)
