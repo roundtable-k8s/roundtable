@@ -28,7 +28,9 @@ var _ = Describe("Knight RolloutPending condition", func() {
 	setRolling := func(n string, rolling bool) {
 		d := &appsv1.Deployment{}
 		ExpectWithOffset(1, k8sClient.Get(ctx, nn(n), d)).To(Succeed())
-		d.Status = appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1, UpdatedReplicas: 1}
+		d.Status = appsv1.DeploymentStatus{
+			Replicas: 1, ReadyReplicas: 1, UpdatedReplicas: 1, ObservedGeneration: d.Generation,
+		}
 		if rolling {
 			d.Status.UpdatedReplicas = 0
 			d.Status.UnavailableReplicas = 1
@@ -55,7 +57,7 @@ var _ = Describe("Knight RolloutPending condition", func() {
 			k := &aiv1alpha1.Knight{
 				ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
 				Spec: aiv1alpha1.KnightSpec{
-					Domain: "security", Image: "example.com/knight:v1",
+					Domain: "security", Skills: []string{"security"}, Image: "example.com/knight:v1",
 					NATS: aiv1alpha1.KnightNATS{
 						URL: "nats://nats.test:4222", Subjects: []string{"test.tasks.security.>"},
 						Stream: "test_tasks", ResultsStream: "test_results", MaxDeliver: 1,
