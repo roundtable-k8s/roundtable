@@ -270,6 +270,14 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 		return r.updateStatus(ctx, chain, 0)
 	}
 
+	// A run in flight keeps going when the spec changes (a chart upgrade bumps
+	// the generation), but the new spec is accepted: record that right away so
+	// kstatus (Helm --wait, Flux) never reads an active run as InProgress.
+	if chain.Status.ObservedGeneration != chain.Generation {
+		chain.Status.ObservedGeneration = chain.Generation
+		return r.updateStatus(ctx, chain, 0)
+	}
+
 	// Handle run-now / retry-failed annotations.
 	if handled, res, err := r.handleRunTriggers(ctx, chain); handled {
 		return res, err
