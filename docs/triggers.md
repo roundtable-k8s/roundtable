@@ -970,7 +970,9 @@ status:
       reason: Listening
 ```
 
-`Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject,
+`Ready` is True for `Listening` and `Suspended` (a paused Trigger is where its
+spec put it, and Helm/Flux read `Ready=False` as not yet healthy) and False for
+the others. Reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject,
 cron, or `spec.concurrency.policy: Replace` with a knight or mission target),
 `TargetNotFound`, `TargetWrongTable` (knight target), `RoundTableNotFound`,
 `ConsumerError` (for example no events stream: set `createStreams` or create

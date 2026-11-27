@@ -562,14 +562,17 @@ const (
 	// ===== Trigger Condition Types and Reasons =====
 
 	// ConditionTriggerReady is True while a Trigger is listening for events
-	// (its consumer runs, or its schedule is registered).
+	// (its consumer runs, or its schedule is registered) or is suspended on
+	// purpose (reason Suspended). It is False while the Trigger cannot work
+	// until its spec or target is fixed.
 	ConditionTriggerReady = "Ready"
 
 	// ReasonTriggerListening indicates the Trigger is listening.
 	ReasonTriggerListening = "Listening"
 
 	// ReasonTriggerSuspended indicates spec.suspend or the
-	// ai.roundtable.io/suspended annotation is set.
+	// ai.roundtable.io/suspended annotation is set (Ready stays True so
+	// kstatus reads the paused Trigger as Current).
 	ReasonTriggerSuspended = "Suspended"
 
 	// ReasonTriggerInvalidSpec indicates a template, subject or schedule

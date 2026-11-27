@@ -867,5 +867,16 @@ does not stay `InProgress` after a spec change. It never sets `Reconciling` or
 `Stalled`. Mission state lives in `status.phase` and its conditions.
 `TestMissionKstatus` pins this.
 
-Trigger and RoundTable have not been audited against kstatus
-yet; follow-ups: Trigger #929, RoundTable #931.
+**Trigger.** kstatus also treats a `Ready` condition that is False (or Unknown)
+as `InProgress`, and the Trigger reports `Ready`. So `Ready` is True while the
+Trigger listens and while it is suspended on purpose (`spec.suspend` or the
+suspend annotation; reason `Suspended`, `status.suspendedBy` says why): both are
+`Current`. A Trigger that cannot work until someone fixes it (reasons
+`InvalidSpec`, `TargetNotFound`, `CronJobError` and the like) keeps `Ready` False
+and reads `InProgress`. `ScheduleHealthy` and `GitHubReady` are not read by
+kstatus: a failing firing Job or poll does not change the verdict. The operator
+writes `status.observedGeneration` on every reconcile that reaches the status
+patch, so a changed spec is `InProgress` only until the next reconcile.
+`TestTriggerKstatus` pins this.
+
+RoundTable has not been audited against kstatus yet; follow-up: #931.
