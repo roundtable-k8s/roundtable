@@ -970,6 +970,8 @@ func TestListKnightsLoadRealConsumer(t *testing.T) {
 // the Admit error unchanged, publishing nothing.
 func TestInvokeAdmitAfterReplayAndDeclined(t *testing.T) {
 	e := newEnv(t, Options{})
+	published := 0
+	e.svc.Bus = publishCounter{Bus: e.svc.Bus, n: &published}
 	zero := 0
 	ctx := context.Background()
 	first, err := e.svc.Invoke(ctx, "operator", InvokeRequest{Task: "hello", IdempotencyKey: "k-admit", TimeoutSeconds: &zero})
@@ -994,7 +996,18 @@ func TestInvokeAdmitAfterReplayAndDeclined(t *testing.T) {
 	if admitted != 1 {
 		t.Fatalf("Admit ran %d times, want 1", admitted)
 	}
-	if n := e.knight.received(); n != 1 {
-		t.Fatalf("published %d tasks after a declined invoke, want 1", n)
+	if published != 1 {
+		t.Fatalf("published %d tasks after a declined invoke, want 1", published)
 	}
+}
+
+// publishCounter counts the tasks the gateway publishes.
+type publishCounter struct {
+	Bus
+	n *int
+}
+
+func (b publishCounter) Publish(ctx context.Context, subject string, p natspkg.TaskPayload, table string) error {
+	*b.n++
+	return b.Bus.Publish(ctx, subject, p, table)
 }
