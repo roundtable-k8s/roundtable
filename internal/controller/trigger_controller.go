@@ -855,6 +855,11 @@ func (r *TriggerReconciler) fire(ctx context.Context, nn types.NamespacedName, e
 			item = &it
 		}
 	}
+	if item != nil && !githubRepoListed(trg.Spec.Source.GitHub, item.Repo) {
+		// The events subject is writable by any NATS client, and repositories
+		// may have been edited since the event was published.
+		return skip(triggerHandled, "%s", githubRepoNotListedReason(item.Repo))
+	}
 	stateItem := item != nil && githubStateSource(trg.Spec.Source.GitHub)
 	feedbackTable := ""
 	if item != nil {
