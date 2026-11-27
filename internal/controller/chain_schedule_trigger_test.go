@@ -333,7 +333,7 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(r.cronEntries).NotTo(HaveKey(nn.String()))
 		last, ok := r.conflictWarned.Load(nn)
 		Expect(ok).To(BeTrue())
-		Expect(last).To(Equal(getChain().Generation))
+		Expect(last).To(Equal(conflictWarning{uid: getChain().UID, generation: getChain().Generation}))
 
 		// A generation bump re-emits the warning once; a repeat does not.
 		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Input = "changed" })
@@ -354,6 +354,32 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		// ...and each of those forgets the recorded warning.
 		_, ok = r.conflictWarned.Load(nn)
 		Expect(ok).To(BeFalse())
+	})
+
+	It("warns again when a Chain is recreated under the same name before its NotFound reconcile", func() {
+		foreign := &aiv1alpha1.Trigger{
+			ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: namespace},
+			Spec: aiv1alpha1.TriggerSpec{
+				Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "0 12 * * *"}},
+				Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "other"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, foreign)).To(Succeed())
+		create()
+		Expect(conflicts(events())).To(Equal(1))
+		oldUID := getChain().UID
+
+		// Delete and recreate with no reconcile in between: the new Chain is
+		// generation 1 again, as the old one was, so only the UID tells them apart.
+		c := getChain()
+		c.Finalizers = nil
+		Expect(k8sClient.Update(ctx, c)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, c)).To(Succeed())
+		create()
+		Expect(getChain().UID).NotTo(Equal(oldUID))
+		Expect(conflicts(events())).To(Equal(1))
+		reconcileN(1)
+		Expect(conflicts(events())).To(BeZero())
 	})
 
 	It("forgets the conflict warning when the schedule is cleared, the mode changes or the Chain goes", func() {

@@ -170,10 +170,12 @@ func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1
 	}
 	key := client.ObjectKeyFromObject(chain)
 	if !metav1.IsControlledBy(trg, chain) {
-		// Warn once per Chain generation: reconciles that follow without a
-		// spec change would only repeat the event.
-		if last, ok := r.conflictWarned.Load(key); !ok || last != chain.Generation {
-			r.conflictWarned.Store(key, chain.Generation)
+		// Warn once per Chain (UID and generation): reconciles that follow
+		// without a spec change would only repeat the event, while a Chain
+		// recreated under the same name is a new object and warns again.
+		want := conflictWarning{uid: chain.UID, generation: chain.Generation}
+		if last, ok := r.conflictWarned.Load(key); !ok || last != want {
+			r.conflictWarned.Store(key, want)
 			r.event(chain, corev1.EventTypeWarning, "ScheduleTriggerConflict",
 				"Trigger %s exists and is not controlled by this Chain; spec.schedule is not run. Rename or delete that Trigger", name)
 		}
@@ -196,6 +198,14 @@ func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1
 	}
 	log.Info("Updated schedule Trigger", "trigger", name, "schedule", chain.Spec.Schedule, "suspend", chain.Spec.Suspend)
 	return trg, nil
+}
+
+// conflictWarning identifies the Chain object a ScheduleTriggerConflict event
+// was recorded for. The UID tells a recreated Chain apart from the old one,
+// whose generation may be the same.
+type conflictWarning struct {
+	uid        types.UID
+	generation int64
 }
 
 // deleteScheduleTrigger deletes the Chain's schedule Trigger if the Chain

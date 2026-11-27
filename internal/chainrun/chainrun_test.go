@@ -138,6 +138,7 @@ func TestNameEmptyLastPart(t *testing.T) {
 		{"no parts and empty base", "", nil, ""},
 		{"empty base skips leading dash", "", []string{"mid", ""}, "mid"},
 		{"empty base and middle part", "", []string{"mid", "x"}, "mid-x"},
+		{"empty base and empty middle part", "", []string{"", "x"}, "x"},
 		{"empty middle part skips doubled dash", "b", []string{"", "x"}, "b-x"},
 	}
 	for _, tc := range cases {
