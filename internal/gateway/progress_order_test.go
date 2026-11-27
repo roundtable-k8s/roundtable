@@ -82,17 +82,16 @@ func TestInvokeProgressSeesActivityPublishedRightAfterPublish(t *testing.T) {
 
 	var mu sync.Mutex
 	var msgs []string
+	var first sync.Once
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ctx = withProgress(ctx, func(msg string, _ bool) {
 		mu.Lock()
 		msgs = append(msgs, msg)
 		mu.Unlock()
+		// Release the knight once the first progress message has arrived.
+		first.Do(func() { close(e.knight.release) })
 	})
-	go func() {
-		time.Sleep(700 * time.Millisecond)
-		close(e.knight.release)
-	}()
 	if _, err := e.svc.Invoke(ctx, "operator", InvokeRequest{Task: "hold on"}); err != nil {
 		t.Fatal(err)
 	}

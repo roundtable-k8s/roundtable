@@ -162,7 +162,11 @@ func instrument(next http.Handler, log logr.Logger) http.Handler {
 		elapsed := time.Since(start)
 		traceID := ""
 		if traced {
-			span.SetName(r.Method + " " + routeTemplate(route))
+			if route == unmatchedRoute {
+				span.SetName(r.Method)
+			} else {
+				span.SetName(r.Method + " " + routeTemplate(route))
+			}
 			attrs := []attribute.KeyValue{
 				attribute.String("http.request.method", r.Method),
 				attribute.Int("http.response.status_code", code),

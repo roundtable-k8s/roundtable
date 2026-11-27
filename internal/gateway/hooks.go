@@ -240,6 +240,28 @@ func (s *Service) lookupHook(ctx context.Context, namespace, name string) (*aiv1
 	return trg, nil
 }
 
+// hookTable is the table label of a webhook request, resolved like the
+// controller's triggerTable: the target chain's or knight's table first, then
+// the Trigger's own.
+func (s *Service) hookTable(ctx context.Context, trg *aiv1alpha1.Trigger) string {
+	switch target := trg.Spec.Target; {
+	case target.Knight != nil:
+		if s.Resolver != nil {
+			if name, err := s.Resolver.KnightTable(ctx, trg.Namespace, target.Knight.Name); err == nil && name != "" {
+				return name
+			}
+		}
+	case target.ChainRef != nil:
+		chain := &aiv1alpha1.Chain{}
+		if err := s.Hooks.Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: target.ChainRef.Name}, chain); err == nil {
+			if name := aiv1alpha1.RefName(chain.Spec.RoundTableRef); name != "" {
+				return name
+			}
+		}
+	}
+	return aiv1alpha1.RefName(trg.Spec.RoundTableRef)
+}
+
 // hookCredential reads the Trigger's credential: the referenced key of a
 // Secret in the Trigger's namespace labelled ai.roundtable.io/webhook-secret.
 func (s *Service) hookCredential(ctx context.Context, trg *aiv1alpha1.Trigger) ([]byte, error) {
@@ -360,7 +382,7 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	setRequestTable(ctx, aiv1alpha1.RefName(trg.Spec.RoundTableRef))
+	setRequestTable(ctx, s.hookTable(ctx, trg))
 	if ok, wait := s.hookLimits.allow(ns+"/"+name, s.now()); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(max(wait.Seconds(), 1)))))
 		writeError(w, fmt.Errorf("%w: rate limit for this hook exceeded", ErrBusy))

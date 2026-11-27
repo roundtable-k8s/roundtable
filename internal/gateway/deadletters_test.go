@@ -218,14 +218,14 @@ func TestDeadLettersTotalBeyondLimit(t *testing.T) {
 		t.Fatalf("list: %d %v", resp.StatusCode, body)
 	}
 	if n := len(body["deadLetters"].([]any)); n != 100 {
-		t.Fatalf("items: %d", n)
+		t.Fatalf("items: %d, want 100", n)
 	}
 	if body["total"] != float64(137) {
 		t.Fatalf("total: %v", body["total"])
 	}
 	_, body = e.do(t, "GET", "/v1/dead-letters?state=open&limit=5", testToken, nil)
 	if len(body["deadLetters"].([]any)) != 5 || body["total"] != float64(137) {
-		t.Fatalf("limit=5: %v", body["total"])
+		t.Fatalf("limit=5: items = %d, total = %v", len(body["deadLetters"].([]any)), body["total"])
 	}
 }
 

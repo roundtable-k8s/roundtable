@@ -298,6 +298,7 @@ func TestDescribeCron(t *testing.T) {
 		"5 * * * *":       "every hour at minute 5",
 		"0 */6 * * *":     "every 6 hours at minute 0",
 		"0 9 1 * *":       "at 09:00 on day 1 of the month",
+		"0 9 1 * 1":       "cron 0 9 1 * 1",
 		"0 9 * 1,7 MON":   "at 09:00 in January and July on Monday",
 		"0 8,20 * * *":    "every day at minute 0 past hour 8 and 20",
 		"@hourly":         "every hour",

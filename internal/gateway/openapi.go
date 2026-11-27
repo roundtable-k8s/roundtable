@@ -54,7 +54,7 @@ func (s *Service) openAPIDocument() (obj, error) {
 			paths[path] = item
 		}
 		o := maps.Clone(op)
-		if resp, ok := o["responses"].(obj); ok && method != "" && path != "/healthz" {
+		if resp, ok := o["responses"].(obj); ok && path != "/healthz" {
 			resp = maps.Clone(resp)
 			resp["500"] = ref("responses", "Error500")
 			o["responses"] = resp

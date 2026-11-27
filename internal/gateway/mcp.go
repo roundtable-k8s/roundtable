@@ -477,14 +477,19 @@ func cancelResult(rec *RunRecord) *mcp.CallToolResult {
 	if !rec.Done || rec.Phase != string(aiv1alpha1.ChainPhaseFailed) {
 		return runResult(rec)
 	}
-	text := "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled."
 	for _, st := range rec.Steps {
-		if r, ok := strings.CutPrefix(st.Error, "cancelled: "); ok && r != "" {
-			text = "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled: " + r
-			break
+		if r, ok := strings.CutPrefix(st.Error, "cancelled:"); ok {
+			text := "Run " + rec.Namespace + "/" + rec.Run + " of chain " + rec.Chain + " was cancelled"
+			if r = strings.TrimSpace(r); r != "" {
+				text += ": " + r
+			} else {
+				text += "."
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 		}
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+	// Failed for another reason while a cancel was in flight.
+	return runResult(rec)
 }
 
 // missionResult puts a finished mission's result first in the text content

@@ -380,6 +380,10 @@ func DescribeCron(expr string) string {
 	if !ok {
 		return "cron " + expr
 	}
+	if dom != "*" && dow != "*" {
+		// Cron fires when either day field matches; don't word it as an AND.
+		return "cron " + expr
+	}
 	var parts []string
 	parts = append(parts, timePart)
 	if dom != "*" {

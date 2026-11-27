@@ -530,3 +530,19 @@ func TestHookNegativeCache(t *testing.T) {
 		t.Fatalf("unknown Trigger read %d times after the window, want 1", gets)
 	}
 }
+
+// The webhook request's table label follows the target chain's table, like
+// the controller's trigger metrics, before the Trigger's own roundTableRef.
+func TestHookTablePrefersTargetChain(t *testing.T) {
+	e := newHookEnv(t, HookOptions{}, true)
+	trg := hookTrigger(testNS, "alerts", aiv1alpha1.TriggerWebhookAuth{})
+	trg.Spec.Target.ChainRef.Name = "tabled"
+	trg.Spec.RoundTableRef = &corev1.LocalObjectReference{Name: "own"}
+	if got := e.svc.hookTable(context.Background(), trg); got != "dev" {
+		t.Fatalf("table = %q, want the chain's dev", got)
+	}
+	trg.Spec.Target.ChainRef.Name = "missing"
+	if got := e.svc.hookTable(context.Background(), trg); got != "own" {
+		t.Fatalf("table = %q, want the trigger's own", got)
+	}
+}
