@@ -500,12 +500,12 @@ var _ = Describe("PR feedback watcher", func() {
 		Expect(prRecord(6).LastFailure).To(Equal("conflict:h6"))
 	})
 
-	It("clears a queued CI failure to Watching while the merge state is unset or unknown", func() {
+	It("clears a queued CI failure fixed by a push while the merge state is unset or unknown", func() {
 		busyWithPR5()
-		poll := func(state string) {
+		poll := func(head, state string) {
 			pr5 := fakePull(5, "h5")
 			pr5["mergeable_state"] = "dirty"
-			pr6 := fakePull(6, "h6")
+			pr6 := fakePull(6, head)
 			if state != "" {
 				pr6["mergeable_state"] = state
 			}
@@ -514,21 +514,40 @@ var _ = Describe("PR feedback watcher", func() {
 			reconcileOnce()
 		}
 		gh.checks["h6"] = []map[string]any{fakeCheck(601, "lint", "failure", "2026-11-23T11:00:00Z")}
-		poll("clean")
+		poll("h6", "clean")
 		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
 
-		// The failure is fixed (re-run passed); the merge state is unset.
-		gh.checks["h6"] = []map[string]any{fakeCheck(601, "lint", "success", "2026-11-23T11:20:00Z")}
-		poll("")
-		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		// A push fixed it: new head, merge state unset.
+		poll("h6b", "")
+		rec := prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
 
 		// Same again with an explicit unknown merge state.
-		gh.checks["h6"] = []map[string]any{fakeCheck(602, "test", "failure", "2026-11-23T11:30:00Z")}
-		poll("clean")
+		gh.checks["h6b"] = []map[string]any{fakeCheck(602, "test", "failure", "2026-11-23T11:30:00Z")}
+		poll("h6b", "clean")
 		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
-		gh.checks["h6"] = []map[string]any{fakeCheck(602, "test", "success", "2026-11-23T11:40:00Z")}
-		poll("unknown")
-		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		poll("h6c", "unknown")
+		rec = prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
+	})
+
+	It("clears a queued conflict whose head moved while the merge state is unknown", func() {
+		busyWithPR5()
+		pollPR6("dirty")
+		Expect(prRecord(6).Phase).To(Equal(aiv1alpha1.PRFeedbackQueued))
+
+		pr5 := fakePull(5, "h5")
+		pr5["mergeable_state"] = "dirty"
+		pr6 := fakePull(6, "h6b")
+		pr6["mergeable_state"] = "unknown"
+		gh.pulls = []map[string]any{pr5, pr6}
+		now = now.Add(5 * time.Minute)
+		reconcileOnce()
+		rec := prRecord(6)
+		Expect(rec.Phase).To(Equal(aiv1alpha1.PRFeedbackWatching))
+		Expect(rec.LastFailure).To(BeEmpty())
 	})
 
 	It("leaves a clean PR alone", func() {
