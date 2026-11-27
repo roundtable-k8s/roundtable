@@ -300,7 +300,7 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 	})
 
 	It("creates the PVC with the snapshot data source and the larger size", func() {
-		newSnapshot("fork-src-big", true, 5<<30)
+		newSnapshot("fork-src-big", true, int64(5<<30))
 		k := forkKnight("fork-big", "fork-src-big", "1Gi")
 		Expect(k8sClient.Create(ctx, k)).To(Succeed())
 		defer deleteKnight(k)
@@ -318,7 +318,7 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 		Expect(ready(k).Reason).To(Equal(aiv1alpha1.ReasonRestoredFromSnapshot))
 
 		// spec.workspace.size wins when it is larger than restoreSize.
-		newSnapshot("fork-src-small", true, 1<<30)
+		newSnapshot("fork-src-small", true, int64(1<<30))
 		k2 := forkKnight("fork-small", "fork-src-small", "3Gi")
 		Expect(k8sClient.Create(ctx, k2)).To(Succeed())
 		defer deleteKnight(k2)
@@ -370,7 +370,7 @@ var _ = Describe("Knight workspace from a snapshot (#341)", func() {
 		Expect(c.Status).To(Equal(metav1.ConditionFalse))
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonSnapshotNotReady))
 
-		newSnapshot("fork-src-wait", false, 0)
+		newSnapshot("fork-src-wait", false, int64(0))
 		reconcileKnight(r, k)
 		_, err = getPVC("fork-wait")
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
