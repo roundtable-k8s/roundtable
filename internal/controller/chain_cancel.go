@@ -29,7 +29,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
-	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 // handleCancel acts on the ai.roundtable.io/cancel annotation. On an active
