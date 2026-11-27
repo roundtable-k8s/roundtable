@@ -17,8 +17,11 @@ Point the operator at it with `--github-api-url=http://stubgithub:8080`.
 | POST | `/repos/{owner}/{repo}/labels` | Body `{"name", "color", "description"}`; 422 if it exists |
 
 Every `/repos/` route needs a non-empty `Authorization` header; without one the
-stub answers 401, so a missing token Secret fails the test. Any unknown route
-answers 404 with a JSON body and is logged as `unhandled route`.
+stub answers 401, so a missing token Secret fails the test. The first `/repos/`
+call that names a repository creates it (empty), so `EnsureLabel` works before
+anything is seeded; unlike GitHub, an unknown repository is not a 404. Any
+unknown route answers 404 with a JSON body and is logged as `unhandled route`.
+Issues carry `assignees` as `[]` when none are assigned, never `null`.
 
 ## Control routes (no auth)
 
@@ -26,7 +29,8 @@ answers 404 with a JSON body and is logged as `unhandled route`.
   opens an issue (creating the repository on first use) and returns it with 201.
   A repo that is not `owner/name` gets 400.
 - `GET /_stub/state?repo=owner/name` returns the repository's labels and every
-  issue with its label names and comment bodies. An unseeded repo gets 404.
+  issue with its assignee logins, label names and comment bodies. A repo the
+  stub has never seen (no seed and no `/repos/` call) gets 404.
 
 ## Build and run locally
 
