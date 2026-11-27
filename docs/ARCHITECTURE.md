@@ -270,8 +270,8 @@ Sources: `internal/controller/trigger_cronjob.go` (`desiredTriggerCronJob`), `in
 | RoundTable (`roundtable_controller.go`) | `RoundTable` | Creates the table's JetStream streams and tracks member knights (KV buckets are created on first use by shared helpers) |
 | Chain (`chain_controller.go`) | `Chain` | Dispatches steps as tasks, polls results, stores step outputs |
 | Mission (`mission_controller.go`) | `Mission` | Runs the mission lifecycle below |
-| IssuePickup (`issuepickup_controller.go`) | `RoundTable` | Polls GitHub for issues labelled ready in `spec.issuePickup.repos` and starts one PR-pipeline Chain per issue |
-| PRFeedback (`prfeedback_controller.go`) | `RoundTable` | Watches PRs of `spec.prFeedback` repos and starts feedback runs for review comments |
+| IssuePickup (`issuepickup_controller.go`) | `RoundTable` | Polls GitHub for issues labelled ready in `spec.issuePickup.repos` and starts one PR-pipeline Chain per issue (with `engine: trigger` it generates a Trigger instead) |
+| PRFeedback (`prfeedback_controller.go`) | `RoundTable` | Watches PRs of `spec.prFeedback` repos and starts feedback runs for failed checks, failed merge-queue runs and merge conflicts |
 | Trigger (`trigger_controller.go`) | `Trigger` | Fires Chain runs or knight tasks on cron, NATS, webhook or GitHub events |
 
 ## Mission Lifecycle
