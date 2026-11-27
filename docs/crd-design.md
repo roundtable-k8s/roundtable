@@ -887,4 +887,4 @@ and the operator never sets `Reconciling` or `Stalled`. `status.observedGenerati
 is written on every path that reads the spec, including a failed knight
 discovery (e.g. an invalid `knightSelector`, reason `KnightDiscoveryFailed`), so
 a bad spec does not leave the table `InProgress` forever. A RoundTable is only
-`InProgress` before its first reconcile. `TestRoundTableKstatus` pins this.
+`InProgress` before its first reconcile. `TestRoundTableKstatus` pins this for every phase (Provisioning, Ready, Degraded, Suspended, OverBudget) and for the failed-discovery case.

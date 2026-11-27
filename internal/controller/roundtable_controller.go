@@ -166,7 +166,7 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 			Type:               aiv1alpha1.ConditionRoundTableAvailable,
 			Status:             metav1.ConditionFalse,
 			Reason:             aiv1alpha1.ReasonKnightDiscoveryFailed,
-			Message:            err.Error(),
+			Message:            "Failed to discover knights; see the operator log (check spec.knightSelector)",
 			ObservedGeneration: rt.Generation,
 		})
 		rt.Status.ObservedGeneration = rt.Generation

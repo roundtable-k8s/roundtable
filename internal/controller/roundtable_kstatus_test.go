@@ -49,7 +49,7 @@ func roundTableKstatusOf(t *testing.T, rt *aiv1alpha1.RoundTable) status.Status 
 	return res.Status
 }
 
-func kstatusTestReconciler(t *testing.T, objs ...client.Object) *RoundTableReconciler {
+func roundTableKstatusReconciler(t *testing.T, objs ...client.Object) *RoundTableReconciler {
 	t.Helper()
 	s := k8sruntime.NewScheme()
 	if err := aiv1alpha1.AddToScheme(s); err != nil {
@@ -59,10 +59,6 @@ func kstatusTestReconciler(t *testing.T, objs ...client.Object) *RoundTableRecon
 		WithStatusSubresource(&aiv1alpha1.RoundTable{}).Build()
 	return &RoundTableReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50)}
 }
-
-// anyPhase skips the phase assertion: the table-owned planner knight is created
-// on the first reconcile and not ready yet, so the phase is not what is tested.
-const anyPhase aiv1alpha1.RoundTablePhase = "*"
 
 // TestRoundTableKstatus checks what Helm's --wait and Flux health checks see:
 // a RoundTable in any phase is Current once the operator has accepted its
@@ -75,19 +71,29 @@ func TestRoundTableKstatus(t *testing.T) {
 			Status:     aiv1alpha1.KnightStatus{Phase: phase, Ready: ready},
 		}
 	}
+	noPlanner := func(rt *aiv1alpha1.RoundTable) {
+		off := false
+		rt.Spec.Planner = &aiv1alpha1.RoundTablePlanner{Enabled: &off}
+	}
+	mission := &aiv1alpha1.Mission{
+		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
+		Spec:       aiv1alpha1.MissionSpec{RoundTableRef: aiv1alpha1.LocalRef("table")},
+		Status:     aiv1alpha1.MissionStatus{TotalCost: "5.0000"},
+	}
 	cases := []struct {
 		name      string
 		mutate    func(rt *aiv1alpha1.RoundTable)
 		knights   []client.Object
 		wantPhase aiv1alpha1.RoundTablePhase
 	}{
-		{"provisioning", func(*aiv1alpha1.RoundTable) {}, nil, anyPhase},
-		{"ready", func(*aiv1alpha1.RoundTable) {}, []client.Object{knight("k1", aiv1alpha1.KnightPhaseReady, true)}, anyPhase},
-		{"degraded", func(*aiv1alpha1.RoundTable) {}, []client.Object{knight("k1", aiv1alpha1.KnightPhaseDegraded, false)}, anyPhase},
+		{"provisioning", noPlanner, nil, aiv1alpha1.RoundTablePhaseProvisioning},
+		{"ready", noPlanner, []client.Object{knight("k1", aiv1alpha1.KnightPhaseReady, true)}, aiv1alpha1.RoundTablePhaseReady},
+		{"degraded", noPlanner, []client.Object{knight("k1", aiv1alpha1.KnightPhaseDegraded, false)}, aiv1alpha1.RoundTablePhaseDegraded},
 		{"suspended", func(rt *aiv1alpha1.RoundTable) { rt.Spec.Suspend = true }, nil, aiv1alpha1.RoundTablePhaseSuspended},
-		{"budgeted", func(rt *aiv1alpha1.RoundTable) {
+		{"overBudget", func(rt *aiv1alpha1.RoundTable) {
+			noPlanner(rt)
 			rt.Spec.Policies = &aiv1alpha1.RoundTablePolicies{CostBudgetUSD: "1"}
-		}, []client.Object{knight("k1", aiv1alpha1.KnightPhaseReady, true)}, anyPhase},
+		}, []client.Object{knight("k1", aiv1alpha1.KnightPhaseReady, true), mission}, aiv1alpha1.RoundTablePhaseOverBudget},
 		{"invalidKnightSelector", func(rt *aiv1alpha1.RoundTable) {
 			rt.Spec.KnightSelector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
 				{Key: "x", Operator: "Bogus"},
@@ -104,7 +110,7 @@ func TestRoundTableKstatus(t *testing.T) {
 			if got := roundTableKstatusOf(t, rt); got != status.InProgressStatus {
 				t.Fatalf("unobserved spec: kstatus = %s, want InProgress", got)
 			}
-			r := kstatusTestReconciler(t, append([]client.Object{rt.DeepCopy()}, tc.knights...)...)
+			r := roundTableKstatusReconciler(t, append([]client.Object{rt.DeepCopy()}, tc.knights...)...)
 			_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "table"}})
 			if tc.wantPhase == "" {
 				if err == nil {
@@ -117,7 +123,7 @@ func TestRoundTableKstatus(t *testing.T) {
 			if err := r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "table"}, got); err != nil {
 				t.Fatal(err)
 			}
-			if tc.wantPhase != anyPhase && got.Status.Phase != tc.wantPhase {
+			if got.Status.Phase != tc.wantPhase {
 				t.Errorf("phase = %q, want %q", got.Status.Phase, tc.wantPhase)
 			}
 			if got.Status.ObservedGeneration != got.Generation {
