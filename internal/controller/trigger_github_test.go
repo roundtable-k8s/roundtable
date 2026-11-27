@@ -659,6 +659,33 @@ var _ = Describe("Trigger GitHub source", func() {
 		cleared()
 	})
 
+	It("starts a second held repository's hold when it becomes held, not at the first one's start", func() {
+		const other = "acme/gadgets"
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held3", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.Repositories = []string{repo, other}
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held3") })
+		series := func(name string) float64 {
+			return testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(prometheus.Labels{"namespace": ns, "trigger": "held3", "repository": name}))
+		}
+
+		poll("held3")
+		first := clock.Unix()
+		Expect(series(repo)).To(Equal(float64(first)))
+
+		clock = clock.Add(2 * time.Hour)
+		gh.mu.Lock()
+		gh.items[other] = append(gh.items[other], &triggerGitHubItem{number: 9, title: "other", author: "bob", pull: true, branch: "rt/9-x", labels: []string{"breaking"}})
+		gh.mu.Unlock()
+		poll("held3")
+		Expect(series(repo)).To(Equal(float64(first)))
+		Expect(series(other)).To(Equal(float64(clock.Unix())))
+		msg := meta.FindStatusCondition(getTrigger("held3").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld).Message
+		Expect(msg).To(ContainSubstring(other + ": #9 (rt/9-x) for 0s"))
+	})
+
 	It("shares the total cap across repositories with fairShare", func() {
 		addTo := func(r string, n int) {
 			gh.mu.Lock()

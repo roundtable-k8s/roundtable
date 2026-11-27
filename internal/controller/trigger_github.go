@@ -936,6 +936,17 @@ func (l *triggerPoller) stop() {
 	<-l.done
 }
 
+// conditionNamesRepository reports whether a RepositoryHeld message (lines of
+// "<repo>: ..." joined by "; ") has a line for repo.
+func conditionNamesRepository(message, repo string) bool {
+	for _, line := range strings.Split(message, "; ") {
+		if strings.HasPrefix(line, repo+": ") {
+			return true
+		}
+	}
+	return false
+}
+
 func holdKey(namespace, name, repo string) string { return namespace + "/" + name + "/" + repo }
 
 // recordRepositoryHolds publishes the repositories held by an open pull
@@ -982,8 +993,10 @@ func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1
 		}
 		first := now
 		// After an operator restart, resume the hold's age from the
-		// condition rather than restarting it.
-		if c := meta.FindStatusCondition(trg.Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld); c != nil && c.Status == metav1.ConditionTrue && c.LastTransitionTime.Time.Before(now) {
+		// condition rather than restarting it, but only for a repository the
+		// condition's message names: the condition covers the whole Trigger,
+		// so a newly held repository must not inherit another's age.
+		if c := meta.FindStatusCondition(trg.Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld); c != nil && c.Status == metav1.ConditionTrue && c.LastTransitionTime.Time.Before(now) && conditionNamesRepository(c.Message, repo) {
 			first = c.LastTransitionTime.Time
 		}
 		since, _ := r.holdSince.LoadOrStore(key, first)
