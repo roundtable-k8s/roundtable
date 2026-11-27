@@ -101,6 +101,10 @@ chains:
   # triggers.gatewayURL or the chart's gateway). Switching either way does not
   # fire a schedule twice. See docs/triggers.md.
   scheduleMode: inprocess
+  # How many Chains the operator reconciles in parallel. 1 keeps the single
+  # worker; raise it when many chains run at once. A given Chain is never
+  # reconciled twice at the same time.
+  maxConcurrentReconciles: 1
 
 # Additional args to pass to the manager
 extraArgs: []

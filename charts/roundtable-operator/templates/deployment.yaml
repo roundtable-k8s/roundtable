@@ -57,6 +57,7 @@ spec:
             - --provider-overload-max-retries={{ .Values.providerOverload.maxRetries }}
             - --mission-results-ttl={{ .Values.mission.resultsTTL | default "720h" }}
             - --chain-schedule-mode={{ (.Values.chains | default dict).scheduleMode | default "inprocess" }}
+            - --chain-max-concurrent-reconciles={{ (.Values.chains | default dict).maxConcurrentReconciles | default 1 }}
             - --trigger-task-bucket={{ .Values.gateway.taskBucket | default "roundtable_gateway_tasks" }}
             - --trigger-task-ttl={{ .Values.gateway.taskTTL | default "168h" }}
             - --schedule-result-retention={{ (.Values.gateway.scheduleRuns | default dict).resultRetention | default "720h" }}
