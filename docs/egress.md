@@ -98,7 +98,8 @@ egress:
   a knight without `egress` gets the table's services, a knight with its own
   `egress` gets only its own.
 - The table default applies to the table's standing knights (those labelled
-  `ai.roundtable.io/round-table`).
+  `ai.roundtable.io/round-table`; the legacy `ai.roundtable.io/table` label is
+  still honoured when the newer one is absent).
 - The operator renders `CiliumNetworkPolicy knight-<name>-egress` allowing the
   baseline and each allowed host on the allowed ports. Everything else is
   denied.
@@ -117,7 +118,11 @@ ClusterIP, which Cilium treats as a cluster identity, so the FQDN rule never
 matches it. One shared `allowedPorts` list would also open every in-cluster
 port to every allowed host. The operator warns about such entries: an
 `allowedHosts` entry ending in `.svc` or `.cluster.local` adds a note to the
-`EgressRestricted` message and a Warning event (`InClusterAllowedHost`).
+`EgressRestricted` message and a Warning event (`InClusterAllowedHost`). The check is on the
+suffix, so a short in-cluster name (`svc.ns` or a bare `svc`) is not
+recognised as in-cluster: it is not warned about, not derived as a Service from
+an MCP URL, and, as the OTLP endpoint or NATS URL, is treated as an external
+host. Use the full `<service>.<namespace>.svc[.cluster.local]` form.
 
 Use `allowedServices` instead:
 
@@ -173,7 +178,11 @@ message says so (`Service ns/name uses the host network: reaches every node on
 port N`). The operator watches EndpointSlices, so the rule changes back to
 `toEndpoints` when the Service's pods move to the pod network, and the other
 way round. A Service with a mix of host-network and ordinary pods, or with no
-ready endpoint, keeps the pod-selector rule. Node addresses or CIDRs listed
+ready endpoint, keeps the pod-selector rule. A *named* `targetPort` is
+resolved from the EndpointSlice ports; if it cannot be resolved (no ready
+endpoint carries the name), that port is skipped and allows nothing, so check
+the `EgressRestricted` message after a rename. A numeric `targetPort` (or, if
+unset, the Service `port`) is the fallback. Node addresses or CIDRs listed
 directly and selector-less Services with manual endpoints are not covered.
 
 See [`examples/egress/in-cluster-services.yaml`](../examples/egress/in-cluster-services.yaml).
@@ -318,6 +327,11 @@ Cilium policy, so it applies only where `cilium.io/v2` is served.
 read access, package documentation, model providers, a research knight and a
 feed-reading knight. They are not bound to anything by default: copy what you
 need into a knight or a table's `defaults.egress`.
+
+`package-docs.yaml` is for documentation and registry metadata only: it
+allows the doc sites and registry APIs, not the hosts that serve package
+downloads (for example `files.pythonhosted.org` or `static.crates.io`), so it
+is not enough to install dependencies.
 
 ## Out of scope
 

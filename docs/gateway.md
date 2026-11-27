@@ -318,6 +318,11 @@ Responses:
   not retry or defer the task itself.
 - **202**: still running when the wait ended. The `Location` header is
   `/v1/tasks/{taskId}`.
+- **400**: bad request, bad model, a bad `Idempotency-Key`, or a namespace that isn't allowed.
+- **404**: unknown knight.
+- **422**: an `Idempotency-Key` repeated with a different `task`, `model` or `runId`.
+- **429**: `maxInFlight` waits are already open.
+- **503**: the knight is suspended, or NATS is unavailable (also when the idempotency key cannot be looked up, so a replay can fail with 503 and be retried).
 
 **Idempotency.** Send an `Idempotency-Key` header (1 to 255 printable ASCII
 characters, else **400**) to make the call safe to retry after a dropped
@@ -327,11 +332,6 @@ returns the original task (**200** or **202** as the current state says) with
 the response header `Idempotent-Replay: true`. A repeat with a different
 `task`, `model` or `runId` is a **422**. The key lives as long as the task
 record (`gateway.taskTTL`); a call that fails before publishing releases it.
-
-- **400**: bad request, bad model, or a namespace that isn't allowed.
-- **404**: unknown knight.
-- **429**: `maxInFlight` waits are already open.
-- **503**: the knight is suspended, or NATS is unavailable.
 
 Both 200 and 202 return the task record:
 
@@ -493,7 +493,9 @@ own narrow body, not a Mission spec, and rejects unknown fields with 400:
 
 The gateway gets `get`/`list`/`watch`/`create`/`delete` on Missions through a
 Role in `gateway.namespace` and in each of `gateway.allowedNamespaces` (a
-ClusterRole if that list holds `"*"`).
+ClusterRole if that list holds `"*"`). Each Role and RoleBinding is a chart
+resource in that namespace, so `helm install` fails if a listed namespace does
+not exist yet: create it first.
 
 ### `POST /v1/missions`
 
@@ -567,7 +569,9 @@ env, Secret or log fields:
 
 Lists missions in a namespace, newest first, in the same projection but
 without chain steps. `phase` matches case-insensitively. The default limit
-is 20 and the maximum is 200.
+is 20 and the maximum is 200. The list is not limited to missions the gateway
+created (`createdByGateway` tells them apart): it also returns missions made by
+kubectl or GitOps, including their `result`.
 
 ### `DELETE /v1/missions/{namespace}/{name}`
 
@@ -649,6 +653,8 @@ Kubernetes `AlreadyExists` and returns the existing run with
 `Idempotent-Replay: true` instead of starting another. The key lasts as long
 as the run copy: once the janitor deletes it (`gateway.runs.ttl` after it
 finished), the key can start a new run.
+A repeat of the same key with different input is not an error here: it returns
+the existing run, whatever the new input says, and starts nothing.
 
 ```json
 {
@@ -940,7 +946,9 @@ retry).
 
 ### `DELETE /v1/schedules/{namespace}/{name}`
 
-Deletes the schedule; runs it already started are left to their own TTL.
+Deletes the schedule; runs it already started are not deleted with it and are
+removed by their own `ttlSecondsAfterFinished` (a run created without one is
+kept).
 404 if there is no such schedule, 409 if it is Git-managed.
 
 ### Example: a weekday digest
@@ -1192,7 +1200,10 @@ makes (`manager fire-trigger`, below). Served with the webhook endpoint
   `trigger-<name>` ServiceAccount in another namespace, gets **403**.
 - **Body (optional).** `{"scheduledTime": "<RFC 3339>"}`, the CronJob's
   scheduled time. Without it the gateway uses now. Either way the time is
-  truncated to the minute.
+  truncated to the minute. An explicit old `scheduledTime` is accepted and
+  published, but the trigger controller skips the firing when it is older than
+  the schedule's `startingDeadlineSeconds` (`skipReason: missed schedule time
+  … by more than startingDeadlineSeconds`).
 - **Publish, don't run.** The gateway publishes a schedule event to
   `<subjectPrefix>.events.schedule.<namespace>.<name>` on the Trigger's
   RoundTable events stream (its `roundTableRef`, else its target Chain's, else its target knight's, else `default`, the same table the trigger controller reads) and answers **202**:

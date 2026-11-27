@@ -860,6 +860,9 @@ its run is deleted (`ttlSecondsAfterFinished`). The same name makes redelivery
 safe: if the operator restarts after creating a run but before acking the
 message, the redelivered message finds the run and is skipped.
 
+Under `concurrency.policy: Replace` the replaced run is deleted, so its dedupe
+key is forgotten at once: a redelivery or repeat of that key starts a new run.
+
 JetStream also drops a repeated `Nats-Msg-Id` within the stream's duplicate
 window (2 minutes) before the Trigger sees it.
 
@@ -928,7 +931,9 @@ status:
 `Ready` reasons: `Listening`, `Suspended`, `InvalidSpec` (template, subject, cron, or `spec.concurrency.policy: Replace` with a
 knight or mission target), `TargetNotFound`, `TargetWrongTable` (knight target),
 `RoundTableNotFound`, `ConsumerError` (for example no
-events stream: set `createStreams` or create the stream yourself),
+events stream: set `createStreams` or create the stream yourself; Mission
+(ephemeral) RoundTables never have an events stream, so a Trigger that
+resolves to one gets `ConsumerError`),
 `CronJobError` (schedule source: no gateway URL, or a CronJob or
 ServiceAccount of that name not owned by the Trigger). A github
 source also has `GitHubReady` (see [Rate limits and GitHubReady](#rate-limits-and-githubready))
