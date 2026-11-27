@@ -8,6 +8,13 @@ on:
   merge_group:
     types: [checks_requested]
 
+# Cancel the superseded runs of a pull request when it is pushed again. Push to
+# main and merge_group runs get a unique group (run_id), so they are never
+# cancelled or queued behind each other: the merge queue and publishing need them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # On main, the merge queue already ran build + lint on this exact commit (the
   # queue fast-forwards main to the commit it tested). Skip re-testing it and go

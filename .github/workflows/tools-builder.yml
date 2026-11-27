@@ -28,6 +28,12 @@ on:
 permissions:
   contents: read
 
+# Cancel the superseded runs of a pull request when it is pushed again. Push to
+# main runs get a unique group (run_id), so they are never cancelled or queued.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tools-builder:
     runs-on: ubuntu-latest
