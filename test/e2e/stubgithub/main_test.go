@@ -107,6 +107,14 @@ func TestClientClaimFlow(t *testing.T) {
 		t.Fatalf("ListOpenIssues(other) = %+v, %v; want empty", none, err)
 	}
 
+	prs, err := c.ListOpenPullRequests(ctx, testRepo, "breaking")
+	if err != nil || len(prs) != 0 {
+		t.Fatalf("ListOpenPullRequests = %+v, %v; want empty", prs, err)
+	}
+	if err := c.AddAssignees(ctx, testRepo, num, "octocat"); err != nil {
+		t.Fatalf("AddAssignees: %v", err)
+	}
+
 	got, err := c.GetIssue(ctx, testRepo, num)
 	if err != nil || got.Number != num || !got.HasLabel("ready") {
 		t.Fatalf("GetIssue = %+v, %v", got, err)
@@ -188,7 +196,7 @@ func TestRawRoutesAndStatuses(t *testing.T) {
 		want   int
 	}{
 		{"no auth on repos route", http.MethodGet, "/repos/acme/widgets/issues", false, "", http.StatusUnauthorized},
-		{"unknown route", http.MethodGet, "/repos/acme/widgets/pulls", true, "", http.StatusNotFound},
+		{"unknown route", http.MethodGet, "/repos/acme/widgets/milestones", true, "", http.StatusNotFound},
 		{"unknown repo", http.MethodGet, "/repos/acme/nope/issues", true, "", http.StatusNotFound},
 		{"bad issue number", http.MethodGet, "/repos/acme/widgets/issues/abc", true, "", http.StatusNotFound},
 		{"comment without body", http.MethodPost, "/repos/acme/widgets/issues/" + strconv.Itoa(num) + "/comments", true, `{}`, http.StatusUnprocessableEntity},
@@ -217,7 +225,7 @@ func TestRawRoutesAndStatuses(t *testing.T) {
 
 func TestUnknownRouteAnswersJSON(t *testing.T) {
 	srv := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/repos/acme/widgets/pulls", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/repos/acme/widgets/milestones", nil)
 	req.Header.Set("Authorization", "token test-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

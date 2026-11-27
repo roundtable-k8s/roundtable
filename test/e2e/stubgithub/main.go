@@ -60,14 +60,15 @@ type comment struct {
 // JSON: GitHub's "comments" field is a count, and the stub state endpoint
 // reports them separately.
 type issue struct {
-	Number   int        `json:"number"`
-	Title    string     `json:"title"`
-	Body     string     `json:"body"`
-	State    string     `json:"state"`
-	HTMLURL  string     `json:"html_url"`
-	User     user       `json:"user"`
-	Labels   []labelRef `json:"labels"`
-	comments []comment
+	Number    int        `json:"number"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	State     string     `json:"state"`
+	HTMLURL   string     `json:"html_url"`
+	User      user       `json:"user"`
+	Labels    []labelRef `json:"labels"`
+	Assignees []user     `json:"assignees"`
+	comments  []comment
 }
 
 func (i *issue) hasLabel(name string) bool {
@@ -149,6 +150,8 @@ func handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues", s.listIssues)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/{number}", s.getIssue)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", s.listPulls)
+	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/assignees", s.addAssignees)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/labels", s.addLabels)
 	mux.HandleFunc("DELETE /repos/{owner}/{repo}/issues/{number}/labels/{name}", s.removeLabel)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/comments", s.createComment)
@@ -201,6 +204,40 @@ func (s *stub) listIssues(w http.ResponseWriter, r *http.Request) {
 		out = append(out, iss)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// listPulls answers the open-pull-request poll that issue pickup makes before
+// claiming anything (the breaking-PR hold). The stub has no pull requests.
+func (s *stub) listPulls(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+
+// addAssignees takes {"assignees": [...]} and adds each login not yet assigned.
+func (s *stub) addAssignees(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Assignees []string `json:"assignees"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeMessage(w, http.StatusUnprocessableEntity, "body must be {\"assignees\": [...]}")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	iss, ok := s.lookupIssue(r)
+	if !ok {
+		writeMessage(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	for _, login := range req.Assignees {
+		found := false
+		for _, a := range iss.Assignees {
+			found = found || strings.EqualFold(a.Login, login)
+		}
+		if !found {
+			iss.Assignees = append(iss.Assignees, user{Login: login})
+		}
+	}
+	writeJSON(w, http.StatusCreated, iss)
 }
 
 func (s *stub) getIssue(w http.ResponseWriter, r *http.Request) {
