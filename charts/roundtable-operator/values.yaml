@@ -1,4 +1,7 @@
 # Default values for roundtable-operator
+# Optional chart-name overrides read by templates/_helpers.tpl.
+nameOverride: ""
+fullnameOverride: ""
 replicaCount: 1
 
 image:
@@ -601,6 +604,9 @@ planner:
   # configMapRef), as in Knight spec.prompt. Empty = the runtime's own.
   prompt: {}
   concurrency: 1
+  # NATS subject prefix of the install-wide planner; envFrom is passed to its container.
+  natsPrefix: fleet-a
+  envFrom: []
   taskTimeoutSeconds: 600
   # runtimeClassName, the scheduling fields and github apply to the
   # install-wide planner only; table planners take them from their RoundTable.

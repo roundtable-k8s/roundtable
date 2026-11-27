@@ -19,10 +19,14 @@ install file `values-minimal.yaml` are described in [dependencies.md](dependenci
 
 ## Values Reference
 
+The chart ships a permissive `values.schema.json`: `helm install`, `helm template` and `helm lint` reject a value of the wrong type (for example `gateway.replicas=abc`), but unknown keys are accepted. `sandboxBackend`, `keda` and `isolation.egress.mode` accept a string or a boolean.
+
 ### Operator
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `nameOverride` | string | `""` | Overrides the chart name in resource names |
+| `fullnameOverride` | string | `""` | Overrides the full resource name prefix |
 | `replicaCount` | int | `1` | Operator replicas (leader election handles HA) |
 | `image.repository` | string | `ghcr.io/roundtable-k8s/roundtable` | Operator image |
 | `image.tag` | string | `""` | Operator image tag; empty uses the chart `appVersion` |
@@ -419,11 +423,13 @@ is rendered only with `planner.enabled: true`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `planner.enabled` | bool | `false` | Deploy the old install-wide planner knight (no table, `fleet-a.tasks.operator.>`; the prefix can be overridden with `planner.natsPrefix`, which `values.yaml` does not set). Deprecated: missions fall back to it only when their table has no planner |
+| `planner.enabled` | bool | `false` | Deploy the old install-wide planner knight (no table, `fleet-a.tasks.operator.>`; the prefix can be overridden with `planner.natsPrefix`). Deprecated: missions fall back to it only when their table has no planner |
 | `planner.domain` | string | `operator` | Install-wide planner domain (table planners use `planner`) |
 | `planner.model` | string | `claude-sonnet-4-20250514` | Planner model; default for table planners |
 | `planner.skills` | list | `[operator, shared]` | Planner skills; default for table planners |
 | `planner.prompt` | object | `{}` | Prompt overrides (`identity`, `instructions`, `configMapRef`) for table planners |
+| `planner.natsPrefix` | string | `fleet-a` | NATS subject prefix of the install-wide planner |
+| `planner.envFrom` | list | `[]` | `envFrom` sources (ConfigMap/Secret refs) for the planner container |
 | `planner.concurrency` | int | `1` | Max concurrent tasks; default for table planners |
 | `planner.taskTimeoutSeconds` | int | `600` | Task timeout in seconds; default for table planners |
 | `planner.runtimeClassName` | string | `""` | Install-wide planner `spec.runtimeClassName` (table planners: `spec.planner.runtimeClassName`, then the table's defaults) |
