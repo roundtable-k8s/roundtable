@@ -34,6 +34,8 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +47,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/github"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -55,6 +58,7 @@ type triggerGitHubItem struct {
 	author string
 	pull   bool
 	closed bool
+	branch string
 	labels []string
 }
 
@@ -77,6 +81,8 @@ type triggerFakeGitHub struct {
 
 // triggerTestRepo is the repository the github-source tests poll.
 const triggerTestRepo = "acme/widgets"
+
+var triggerPullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
 
 var triggerIssuesRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)/labels(?:/(.+))?)?$`)
 
@@ -116,6 +122,25 @@ func (f *triggerFakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	if req.Header.Get("Authorization") != "Bearer "+f.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		return
+	}
+	if pm := triggerPullsRoute.FindStringSubmatch(req.URL.EscapedPath()); pm != nil && req.Method == http.MethodGet {
+		repo, _ := url.PathUnescape(pm[1])
+		out := []map[string]any{}
+		for _, it := range f.items[repo] {
+			if !it.pull || it.closed {
+				continue
+			}
+			labels := []map[string]string{}
+			for _, l := range it.labels {
+				labels = append(labels, map[string]string{"name": l})
+			}
+			out = append(out, map[string]any{
+				"number": it.number, "title": it.title, "state": "open", "labels": labels,
+				"head": map[string]string{"ref": it.branch}, "user": map[string]string{"login": it.author},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	m := triggerIssuesRoute.FindStringSubmatch(req.URL.EscapedPath())
@@ -574,6 +599,52 @@ var _ = Describe("Trigger GitHub source", func() {
 		poll("fair")
 		Eventually(func() []string { return repoKeys("fair") }, 10*time.Second, 100*time.Millisecond).
 			Should(ConsistOf("acme/widgets#1", "acme/gadgets#7"))
+	})
+
+	It("reports a repository held by a breaking pull request and clears it when the pull request closes", func() {
+		gh.add(&triggerGitHubItem{number: 1, title: "item", author: "alice", labels: []string{"rt:ready"}})
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("held").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		labels := prometheus.Labels{"namespace": ns, "trigger": "held", "repository": repo}
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held") })
+
+		Expect(poll("held")).To(BeNumerically(">", 0))
+		Expect(runsOf("held")).To(BeEmpty())
+		c := heldCond()
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerBreakingPullRequest))
+		Expect(c.Message).To(Equal("acme/widgets: #7 (rt/7-big) for 0s"))
+		started := clock.Unix()
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHeldItems.With(labels))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
+		transition := c.LastTransitionTime
+
+		// Still held later: the age grows, the transition time and start do not.
+		clock = clock.Add(45 * time.Minute)
+		poll("held")
+		c = heldCond()
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(Equal("acme/widgets: #7 (rt/7-big) for 45m0s"))
+		Expect(c.LastTransitionTime).To(Equal(transition))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
+
+		// The pull request closes: condition False, series gone, item published.
+		gh.mu.Lock()
+		gh.items[repo][1].closed = true
+		gh.mu.Unlock()
+		poll("held")
+		Eventually(func() int { return len(runsOf("held")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+		c = heldCond()
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerNoHold))
+		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHeldItems)).To(BeZero())
+		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(BeZero())
 	})
 
 	It("selects pull requests with kind pullRequest", func() {

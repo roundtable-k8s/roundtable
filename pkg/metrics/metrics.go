@@ -216,6 +216,29 @@ var TriggerLastFiredTimestampSeconds = prometheus.NewGaugeVec(
 	[]string{"table", "trigger"},
 )
 
+// TriggerGitHubHeldItems is the number of items a github-source Trigger held
+// back in its last poll because an open pull request with its hold label
+// exists in the repository. Labels: namespace, trigger, repository. The series
+// exists only while the repository is held.
+var TriggerGitHubHeldItems = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_trigger_github_held_items",
+		Help: "Items held back by an open breaking pull request in the last poll, by namespace, trigger and repository",
+	},
+	[]string{"namespace", "trigger", "repository"},
+)
+
+// TriggerGitHubHoldStartedTimestampSeconds is the Unix time a repository's
+// hold by an open pull request began. Labels: namespace, trigger, repository.
+// The series is removed when the hold ends.
+var TriggerGitHubHoldStartedTimestampSeconds = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "roundtable_trigger_github_hold_started_timestamp_seconds",
+		Help: "Unix time the repository's hold by an open breaking pull request began, by namespace, trigger and repository",
+	},
+	[]string{"namespace", "trigger", "repository"},
+)
+
 // GatewayRequestsTotal counts invoke gateway HTTP requests. route is the
 // registered route pattern (never the raw path), code the HTTP status, table
 // the request's RoundTable (none when not known), caller_kind how the caller
@@ -272,6 +295,8 @@ func init() {
 		TriggerFiringsTotal,
 		TriggerRunsFinishedTotal,
 		TriggerLastFiredTimestampSeconds,
+		TriggerGitHubHeldItems,
+		TriggerGitHubHoldStartedTimestampSeconds,
 		GatewayRequestsTotal,
 		GatewayRequestDurationSeconds,
 		GithubPaginationTruncatedTotal,

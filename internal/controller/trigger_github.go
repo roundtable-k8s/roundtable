@@ -31,6 +31,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -502,6 +504,8 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 		waiting                                  int
 		problems                                 []string
 		prHolds                                  = map[string]string{}
+		prHeldBy                                 = map[string]int{}
+		prHoldUnknown                            = map[string]bool{}
 	)
 	stateSource := githubStateSource(src)
 	feedbackTable := prFeedbackTable(trg)
@@ -534,6 +538,17 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 			return nil, 0, false
 		}
 		problems = append(problems, repoProblems...)
+		if label := src.HoldWhilePullRequestLabeled; label != "" {
+			hold, err := breakingHold(ctx, gh, repo, label)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("list %s pull requests in %s: %v", label, repo, err))
+				hold = "could not list " + label + " pull requests"
+				prHoldUnknown[repo] = true
+			} else if hold != "" && len(candidates) > 0 {
+				r.event(trg, corev1.EventTypeNormal, "Held", "%s: new items held, open %s pull request(s): %s", repo, label, hold)
+			}
+			prHolds[repo] = hold
+		}
 		return candidates, 0, false
 	}
 	if src.FairShare {
@@ -635,22 +650,10 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 					held++
 					continue
 				}
-				if label := src.HoldWhilePullRequestLabeled; label != "" {
-					if _, ok := prHolds[repo]; !ok {
-						hold, err := breakingHold(ctx, gh, repo, label)
-						if err != nil {
-							problems = append(problems, fmt.Sprintf("list %s pull requests in %s: %v", label, repo, err))
-							hold = "could not list " + label + " pull requests"
-						}
-						prHolds[repo] = hold
-						if hold != "" {
-							r.event(trg, corev1.EventTypeNormal, "Held", "%s: new items held, open %s pull request(s): %s", repo, label, hold)
-						}
-					}
-					if prHolds[repo] != "" {
-						prHeld++
-						continue
-					}
+				if src.HoldWhilePullRequestLabeled != "" && prHolds[repo] != "" {
+					prHeld++
+					prHeldBy[repo]++
+					continue
 				}
 				if feedbackTable != "" {
 					// PR feedback: only pull requests whose author knight is
@@ -672,6 +675,10 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 				return interval
 			}
 		}
+	}
+
+	if src.HoldWhilePullRequestLabeled != "" {
+		r.recordRepositoryHolds(ctx, trg, src.Repositories, prHolds, prHeldBy, prHoldUnknown, now)
 	}
 
 	msg := fmt.Sprintf("%d matching %s(s) in %d repositories: %d published, %d claim retries, %d held back by concurrency",
@@ -917,4 +924,91 @@ func (t *triggerPollers) stopAll() {
 func (l *triggerPoller) stop() {
 	l.cancel()
 	<-l.done
+}
+
+func holdKey(namespace, name, repo string) string { return namespace + "/" + name + "/" + repo }
+
+// recordRepositoryHolds publishes the repositories held by an open pull
+// request this poll: the RepositoryHeld condition (lastTransitionTime is the
+// age of the hold) and the held-items and hold-started gauges, whose series
+// are deleted once a repository is no longer held. A repository whose pull
+// requests could not be listed keeps its previous state.
+func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1alpha1.Trigger, repos []string, holds map[string]string, heldBy map[string]int, unknown map[string]bool, now time.Time) {
+	var lines []string
+	for _, repo := range repos {
+		key := holdKey(trg.Namespace, trg.Name, repo)
+		labels := prometheus.Labels{"namespace": trg.Namespace, "trigger": trg.Name, "repository": repo}
+		if unknown[repo] {
+			if v, ok := r.holdSince.Load(key); ok {
+				lines = append(lines, fmt.Sprintf("%s: pull requests could not be listed, held for %s", repo, holdAge(now.Sub(v.(time.Time)))))
+			}
+			continue
+		}
+		hold, ok := holds[repo]
+		if !ok {
+			continue
+		}
+		if hold == "" {
+			r.holdSince.Delete(key)
+			metrics.TriggerGitHubHeldItems.Delete(labels)
+			metrics.TriggerGitHubHoldStartedTimestampSeconds.Delete(labels)
+			continue
+		}
+		since, _ := r.holdSince.LoadOrStore(key, now)
+		started := since.(time.Time)
+		metrics.TriggerGitHubHeldItems.With(labels).Set(float64(heldBy[repo]))
+		metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels).Set(float64(started.Unix()))
+		lines = append(lines, fmt.Sprintf("%s: %s for %s", repo, hold, holdAge(now.Sub(started))))
+	}
+	cond := metav1.Condition{Type: aiv1alpha1.ConditionTriggerRepositoryHeld}
+	if len(lines) > 0 {
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, aiv1alpha1.ReasonTriggerBreakingPullRequest, strings.Join(lines, "; ")
+	} else {
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, aiv1alpha1.ReasonTriggerNoHold, "no repository is held by an open pull request"
+	}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cur := &aiv1alpha1.Trigger{}
+		if err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Name}, cur); err != nil {
+			return err
+		}
+		if cur.Spec.Source.GitHub == nil || cur.Suspended() {
+			return nil
+		}
+		old := meta.FindStatusCondition(cur.Status.Conditions, cond.Type)
+		if old == nil && cond.Status == metav1.ConditionFalse {
+			return nil // never held: no condition
+		}
+		if old != nil && old.Status == cond.Status && old.Reason == cond.Reason && old.Message == cond.Message && old.ObservedGeneration == cur.Generation {
+			return nil
+		}
+		cond.ObservedGeneration = cur.Generation
+		meta.SetStatusCondition(&cur.Status.Conditions, cond)
+		return r.Status().Update(ctx, cur)
+	})
+	if err != nil && !apierrors.IsNotFound(err) {
+		logf.Log.WithName("trigger-github").Error(err, "Failed to record repository hold", "trigger", trg.Name)
+	}
+}
+
+// clearRepositoryHolds drops a deleted Trigger's hold gauges and start times.
+func (r *TriggerReconciler) clearRepositoryHolds(namespace, name string) {
+	labels := prometheus.Labels{"namespace": namespace, "trigger": name}
+	metrics.TriggerGitHubHeldItems.DeletePartialMatch(labels)
+	metrics.TriggerGitHubHoldStartedTimestampSeconds.DeletePartialMatch(labels)
+	prefix := namespace + "/" + name + "/"
+	r.holdSince.Range(func(k, _ any) bool {
+		if strings.HasPrefix(k.(string), prefix) {
+			r.holdSince.Delete(k)
+		}
+		return true
+	})
+}
+
+// holdAge renders a hold's age, to the minute once it has lasted one, so the
+// condition message does not change on every poll.
+func holdAge(d time.Duration) string {
+	if d < time.Minute {
+		return max(d, 0).Round(time.Second).String()
+	}
+	return d.Round(time.Minute).String()
 }

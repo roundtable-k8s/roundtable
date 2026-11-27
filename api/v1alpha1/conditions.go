@@ -553,6 +553,20 @@ const (
 	// poller waits for it to reset.
 	ReasonTriggerRateLimited = "RateLimited"
 
+	// ConditionTriggerRepositoryHeld is True while a github-source Trigger
+	// holds a repository back because of an open pull request carrying its
+	// holdWhilePullRequestLabeled label. The message lists each held
+	// repository, the pull request and how long the hold has lasted. It is
+	// absent until a first hold, then False once none remains.
+	ConditionTriggerRepositoryHeld = "RepositoryHeld"
+
+	// ReasonTriggerBreakingPullRequest indicates an open pull request with
+	// the hold label holds a repository back.
+	ReasonTriggerBreakingPullRequest = "BreakingPullRequest"
+
+	// ReasonTriggerNoHold indicates no repository is held any more.
+	ReasonTriggerNoHold = "NoHold"
+
 	// ===== Issue pickup Condition Types and Reasons =====
 
 	// ConditionIssuePickupBuiltinDeprecated is set on
