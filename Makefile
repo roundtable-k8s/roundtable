@@ -163,6 +163,14 @@ stubllm-image: ## Build the e2e stub LLM image as stubllm:e2e.
 	CGO_ENABLED=0 go build -o bin/stubllm-image/stubllm ./test/e2e/stubllm
 	$(CONTAINER_TOOL) build -t stubllm:e2e -f test/e2e/stubllm/Dockerfile bin/stubllm-image
 
+# Image of the e2e stub GitHub API (test/e2e/stubgithub): in-memory REST routes
+# for the issue pickup controller. Built like stubllm-image.
+.PHONY: stubgithub-image
+stubgithub-image: ## Build the e2e stub GitHub API image as stubgithub:e2e.
+	mkdir -p bin/stubgithub-image
+	CGO_ENABLED=0 go build -o bin/stubgithub-image/stubgithub ./test/e2e/stubgithub
+	$(CONTAINER_TOOL) build -t stubgithub:e2e -f test/e2e/stubgithub/Dockerfile bin/stubgithub-image
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
