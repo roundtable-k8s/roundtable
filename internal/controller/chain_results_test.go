@@ -274,18 +274,16 @@ func TestChainReconciler_ConcurrentChains(t *testing.T) {
 	nc := natsConfig{SubjectPrefix: "p", ResultsStream: "res"}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		name := fmt.Sprintf("chain-%d", i)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 20; j++ {
+		wg.Go(func() {
+			for range 20 {
 				if _, err := r.pollResult(context.Background(), nc, name, "build", "task-"+name); err != nil {
 					t.Error(err)
 				}
 				r.removeCronEntry(types.NamespacedName{Namespace: "ns", Name: name})
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if len(fake.waits) != 40 {
