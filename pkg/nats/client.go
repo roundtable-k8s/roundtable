@@ -134,7 +134,13 @@ type JetStreamClient struct {
 	nc     *nats.Conn
 	js     jetstream.JetStream
 	mu     sync.Mutex
-	log    logr.Logger
+	// dialMu serialises dialers only; the dial itself runs without mu so a
+	// NATS outage does not block IsConnected, Conn, Close or the KV cache.
+	dialMu sync.Mutex
+	// kvs caches KeyValue handles per bucket for the current connection
+	// (guarded by mu). It is dropped whenever the connection changes.
+	kvs map[string]jetstream.KeyValue
+	log logr.Logger
 }
 
 // NewClient creates a new NATS client with the given configuration.
@@ -147,11 +153,15 @@ func NewClient(config Config, log logr.Logger) Client {
 
 // Connect establishes a connection to NATS if not already connected.
 func (c *JetStreamClient) Connect() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.nc != nil && c.nc.IsConnected() {
+	if c.IsConnected() {
 		return nil // Already connected
+	}
+
+	// Only one caller dials at a time; the others wait here, not on c.mu.
+	c.dialMu.Lock()
+	defer c.dialMu.Unlock()
+	if c.IsConnected() {
+		return nil // Another caller connected while we waited
 	}
 
 	opts := []nats.Option{}
@@ -176,8 +186,15 @@ func (c *JetStreamClient) Connect() error {
 		return fmt.Errorf("JetStream context failed: %w", err)
 	}
 
+	c.mu.Lock()
+	old := c.nc
 	c.nc = nc
 	c.js = js
+	c.kvs = nil // handles belong to the previous connection
+	c.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 	c.log.Info("Connected to NATS", "url", c.config.URL)
 
 	return nil
@@ -192,6 +209,7 @@ func (c *JetStreamClient) Close() error {
 		c.nc.Close()
 		c.nc = nil
 		c.js = nil
+		c.kvs = nil
 		c.log.Info("Closed NATS connection")
 	}
 	return nil
@@ -449,6 +467,20 @@ func (c *JetStreamClient) FetchOne(
 			return nil, fmt.Errorf("consumer %s on stream %s: %w (lookup by subject: %v)", config.Durable, stream, err, lerr)
 		}
 		cons, err = js.CreateOrUpdateConsumer(ctx, found, config)
+		if err == nil {
+			// Callers delete the consumer on the configured (missing)
+			// stream, so remove the one created here ourselves; otherwise
+			// the durable would stay behind and block later consumers on
+			// the subject.
+			defer func() {
+				dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if derr := js.DeleteConsumer(dctx, found, config.Durable); derr != nil {
+					c.log.Info("Failed to delete fallback consumer (best effort)",
+						"stream", found, "consumer", config.Durable, "error", derr.Error())
+				}
+			}()
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("consumer %s on stream %s: %w", config.Durable, stream, err)
@@ -493,10 +525,45 @@ func (c *JetStreamClient) FetchOne(
 func (c *JetStreamClient) kvBucket(ctx context.Context, bucket string) (jetstream.KeyValue, error) {
 	c.mu.Lock()
 	js := c.js
+	kv, ok := c.kvs[bucket]
 	c.mu.Unlock()
 	if js == nil {
 		return nil, errors.New("JetStream not connected")
 	}
+	if ok {
+		return kv, nil
+	}
+	kv, err := c.openKVBucket(ctx, js, bucket)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	// Cache only if the connection did not change while we were opening.
+	if c.js == js {
+		if c.kvs == nil {
+			c.kvs = map[string]jetstream.KeyValue{}
+		}
+		c.kvs[bucket] = kv
+	}
+	c.mu.Unlock()
+	return kv, nil
+}
+
+// dropKV forgets the cached handle for bucket after the bucket went away.
+func (c *JetStreamClient) dropKV(bucket string, err error) {
+	if errors.Is(err, jetstream.ErrBucketNotFound) || errors.Is(err, jetstream.ErrStreamNotFound) ||
+		errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrNoStreamResponse) {
+		c.mu.Lock()
+		delete(c.kvs, bucket)
+		c.mu.Unlock()
+	}
+}
+
+// openKVBucket looks the bucket up (creating it if missing) and, for the
+// results bucket, aligns its TTL. kvBucket caches the result.
+func (c *JetStreamClient) openKVBucket(
+	ctx context.Context, js jetstream.JetStream, bucket string,
+) (jetstream.KeyValue, error) {
 	ttl := c.config.kvTTL(bucket)
 	kv, err := js.KeyValue(ctx, bucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
@@ -534,6 +601,7 @@ func (c *JetStreamClient) KVPut(ctx context.Context, bucket, key string, value [
 		return err
 	}
 	if _, err := kv.Put(ctx, key, value); err != nil {
+		c.dropKV(bucket, err)
 		return fmt.Errorf("failed to put key %s in bucket %s: %w", key, bucket, err)
 	}
 	return nil
@@ -547,6 +615,7 @@ func (c *JetStreamClient) KVGet(ctx context.Context, bucket, key string) ([]byte
 	}
 	entry, err := kv.Get(ctx, key)
 	if err != nil {
+		c.dropKV(bucket, err)
 		return nil, fmt.Errorf("failed to get key %s from bucket %s: %w", key, bucket, err)
 	}
 	return entry.Value(), nil
@@ -558,7 +627,9 @@ func (c *JetStreamClient) KVDelete(ctx context.Context, bucket, key string) erro
 	if err != nil {
 		return err
 	}
-	return kv.Delete(ctx, key)
+	err = kv.Delete(ctx, key)
+	c.dropKV(bucket, err)
+	return err
 }
 
 // KVKeys lists all keys in a NATS KV bucket.
@@ -572,6 +643,7 @@ func (c *JetStreamClient) KVKeys(ctx context.Context, bucket string) ([]string, 
 		return []string{}, nil
 	}
 	if err != nil {
+		c.dropKV(bucket, err)
 		return nil, fmt.Errorf("failed to list keys in bucket %s: %w", bucket, err)
 	}
 	return keys, nil
