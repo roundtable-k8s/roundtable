@@ -1372,6 +1372,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `get_task` | `taskId` | The task record (same text/error conventions) |
 | `list_tasks` | `knight?`, `runId?`, `status?`, `limit?` | `{tasks: [...]}` |
 | `list_dead_letters` | `knight?`, `reason?`, `state?`, `limit?` | `{deadLetters: [...]}` |
+| `get_dead_letter` | `taskId`, `table?` | The dead-letter view including the original task payload (`task`). A missing entry is a tool error. |
 | `retry_task` | `taskId`, `force?`, `table?`, `namespace?` | Same semantics as the retry endpoint. A refused retry is a tool error. Poll the returned `taskId` with `get_task`. |
 | `start_mission` | The `POST /v1/missions` body | Text content is the result once done, else a note to call `get_mission`. Structured content is the mission projection. A failed or expired mission is a tool error. Unknown arguments fail the input schema. |
 | `get_mission` | `name`, `namespace?`, `waitSeconds?` | The mission projection (same text/error conventions) |

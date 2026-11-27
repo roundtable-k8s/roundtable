@@ -287,6 +287,34 @@ func TestMCPDeadLetters(t *testing.T) {
 	}
 }
 
+func TestMCPGetDeadLetter(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	add(deadletter.Entry{TaskID: "t-get", Knight: "reviewer", Reason: deadletter.ReasonFailed, Error: "oops",
+		Task: &natspkg.TaskPayload{TaskID: "t-get", Task: "review the diff"}}, deadletter.StateOpen)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cs := connectMCP(ctx, t, e.server.URL)
+	if !mcpToolNames(ctx, t, cs)["get_dead_letter"] {
+		t.Fatal("get_dead_letter not listed")
+	}
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "get_dead_letter", Arguments: map[string]any{"taskId": "t-get"}})
+	if err != nil || res.IsError {
+		t.Fatalf("get_dead_letter: %v %+v", err, res)
+	}
+	b, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(b), "review the diff") || !strings.Contains(string(b), `"state":"open"`) {
+		t.Fatalf("get_dead_letter should return the payload: %s", b)
+	}
+
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "get_dead_letter", Arguments: map[string]any{"taskId": "t-unknown"}})
+	if err == nil && !res.IsError {
+		t.Fatalf("unknown dead letter should be a tool error: %+v", res)
+	}
+}
+
 func TestDeadLetterRetryOfRetryID(t *testing.T) {
 	e := newEnv(t, Options{})
 	add := seedDeadLetters(t, e)
