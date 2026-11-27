@@ -336,14 +336,17 @@ var _ = Describe("Mission Integration Tests", func() {
 				time.Sleep(100 * time.Millisecond)
 			}
 
-			// Set knight cost BEFORE next reconcile (reconcileActive checks budget)
+			// Record chain cost BEFORE next reconcile (reconcileActive checks
+			// budget); the mission's cost comes from its chains.
 			Eventually(func() error {
-				k := &aiv1alpha1.Knight{}
-				if err := k8sClient.Get(ctx, knightNN, k); err != nil {
+				m := &aiv1alpha1.Mission{}
+				if err := k8sClient.Get(ctx, missionNN, m); err != nil {
 					return err
 				}
-				k.Status.TotalCost = "2.5000" // Exceeds budget of 1.00
-				return k8sClient.Status().Update(ctx, k)
+				m.Status.ChainStatuses = []aiv1alpha1.MissionChainStatus{
+					{Name: "budget-chain", CostUSD: "2.5000"}, // Exceeds budget of 1.00
+				}
+				return k8sClient.Status().Update(ctx, m)
 			}, timeout, interval).Should(Succeed())
 
 			// Reconcile to detect budget exceeded
