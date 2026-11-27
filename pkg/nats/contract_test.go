@@ -212,8 +212,8 @@ func loadFixtures(t *testing.T) []fixture {
 		f := fixture{name: filepath.Base(p), data: data}
 		switch {
 		case strings.HasPrefix(f.name, "consumer."):
-			// A JetStream consumer config the knights pin for their own
-			// tests; it is not a payload with a schema or a pkg/nats type.
+			// Consumer settings, not payloads: checked by
+			// TestKnightTaskConsumerMatchesFixture.
 			continue
 		case strings.HasPrefix(f.name, "task."):
 			f.schema, f.ignore = contract.TaskPayloadSchema, operatorIgnoredTaskFields
