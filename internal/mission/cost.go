@@ -15,9 +15,11 @@ import (
 
 const (
 	unknownKnight = "unknown"
-	// costEpsilon absorbs float noise when comparing a step's costUSD with the
-	// sum of its knightCosts.
-	costEpsilon = 1e-9
+	// costEpsilon absorbs float noise and the 6-decimal rounding of costUSD
+	// and knightCosts when comparing a step's costUSD with the sum of its
+	// knightCosts: each rounded value is within 5e-7 of its true value, so the
+	// difference can be off by up to 1e-6.
+	costEpsilon = 2e-6
 )
 
 // CostTracker aggregates per-knight cost for a mission and suspends mission
@@ -69,9 +71,11 @@ func (c *CostTracker) SuspendMissionChains(ctx context.Context, mission *aiv1alp
 // Any part of the step's costUSD (already summed over its retries, fan-out
 // items and loop rounds) that knightCosts does not cover (all of it for steps
 // recorded before knightCosts existed) is charged to the step's knight, the
-// chain step's knight, a loop body's single knight, or "unknown". The breakdown has one line per knight in
-// Spec.Knights (zero for a knight that ran nothing), then one line per other
-// knight that ran a chain step (e.g. a fallback), by name.
+// chain step's knight, a loop body's single knight, or "unknown". A remainder
+// within costEpsilon of zero is rounding noise and is not charged. The
+// breakdown has one line per knight in Spec.Knights (zero for a knight that
+// ran nothing), then one line per other knight that ran a chain step (e.g. a
+// fallback), by name.
 func (c *CostTracker) AggregateMissionCost(ctx context.Context, mission *aiv1alpha1.Mission) (float64, error) {
 	perKnight := map[string]float64{}
 	for _, cs := range mission.Status.ChainStatuses {

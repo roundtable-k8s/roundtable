@@ -77,3 +77,9 @@ func TestSamplePlanDecodesAsPlannerOutput(t *testing.T) {
 		t.Errorf("step knightRef = %q, want stub", got)
 	}
 }
+
+func TestPlannerPromptMatchesOperator(t *testing.T) {
+	if plannerPrompt != mission.PlanningPromptPreamble {
+		t.Fatalf("plannerPrompt = %q, want mission.PlanningPromptPreamble %q", plannerPrompt, mission.PlanningPromptPreamble)
+	}
+}

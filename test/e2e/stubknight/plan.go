@@ -19,7 +19,9 @@ package main
 import "strings"
 
 // plannerPrompt opens the mission planning prompt the operator sends to a
-// planner knight (buildPlanningPrompt in internal/mission/planner.go).
+// planner knight (mission.PlanningPromptPreamble, used by buildPlanningPrompt).
+// It is a copy because this main package cannot import the operator's
+// internal/mission; plan_test.go guards it against the exported constant.
 const plannerPrompt = "You are a mission planner for the Round Table AI agent orchestration system."
 
 // plannerReply returns the canned plan for a mission planning task: ok only

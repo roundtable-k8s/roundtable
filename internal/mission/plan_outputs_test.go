@@ -2,11 +2,13 @@ package mission
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
@@ -121,5 +123,28 @@ func TestPlanningPromptSaysOutputStaysInChain(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt does not contain %q", want)
 		}
+	}
+}
+
+// stubSamplePlan is the plan in test/e2e/stubknight/plan_test.go (samplePlan),
+// which the e2e stub returns for planning tasks. It must stay a plan the
+// planner accepts, including its knights[] entry.
+const stubSamplePlan = `{"planVersion":"v1alpha1","metadata":{"objective":"Summarise the release"},` +
+	`"knights":[{"name":"stub","ephemeral":false}],` +
+	`"chains":[{"name":"summarise","steps":[{"name":"gather","knightRef":{"name":"stub"},"task":"Gather facts."}]}]}`
+
+func TestValidatePlanAcceptsStubSamplePlan(t *testing.T) {
+	var plan PlannerOutput
+	if err := json.Unmarshal([]byte(stubSamplePlan), &plan); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The plan's non-ephemeral knight "stub" must exist on the table.
+	stub := &aiv1alpha1.Knight{
+		ObjectMeta: metav1.ObjectMeta{Name: "stub", Namespace: "default", Labels: map[string]string{"ai.roundtable.io/table": "dev"}},
+		Spec:       aiv1alpha1.KnightSpec{Domain: "dev", Model: "sonnet"},
+	}
+	m := existingChainsMission()
+	if err := existingChainsPlanner(t, nil, stub).validatePlan(context.Background(), m, &plan); err != nil {
+		t.Fatalf("validatePlan rejected the e2e stub sample plan: %v", err)
 	}
 }
