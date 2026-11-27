@@ -49,5 +49,12 @@ for p in docs/*.md; do
   fi
 done
 
+# The gateway Service listens on port 80, so docs must not write :8080 after
+# it, and the release-derived name is <fullname>-gateway (not roundtable-gateway).
+if grep -nE 'gateway\.roundtable\.svc:8080|roundtable-gateway\.roundtable\.svc' docs/*.md; then
+  echo "gateway address: use http://\$FULLNAME-gateway.roundtable.svc with no port (docs/gateway.md#reaching-the-gateway)"
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "doc links OK"
 exit "$fail"

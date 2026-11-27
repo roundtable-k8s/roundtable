@@ -94,8 +94,10 @@ spec:
   dedupeKey: "{{ .Event.Data.groupKey }}/{{ .Event.Data.status }}"
 ```
 
+Send a test event, with `FULLNAME` set as in [Reaching the gateway](gateway.md#reaching-the-gateway):
+
 ```bash
-curl -X POST http://<fullname>-gateway.roundtable.svc/v1/hooks/roundtable/alerts \
+curl -X POST http://$FULLNAME-gateway.roundtable.svc/v1/hooks/roundtable/alerts \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"status":"firing","groupKey":"g1","commonLabels":{"alertname":"DiskFull"}}'
 # {"subject":"fleet-a.events.webhook.roundtable.alerts","stream":"fleet_a_tasks_EVENTS","seq":42}

@@ -10,6 +10,30 @@ The gateway speaks the [knight task contract](knight-task-contract.md). It
 publishes a `TaskPayload` on `<prefix>.tasks.<domain>.<knight>` and reads the
 result from `<prefix>.results.<taskId>`. Knights need no changes.
 
+## Reaching the gateway
+
+The chart names the gateway Service `<fullname>-gateway`. It listens on port 80
+(`gateway.service.port`); 8080 is the container port, not the Service port. So
+callers in the cluster use `http://<fullname>-gateway.roundtable.svc` with no port.
+
+`<fullname>` is the chart's `roundtable-operator.fullname`: `fullnameOverride` if
+set; otherwise, with `nameOverride` taking the place of `roundtable-operator` below,
+the release name when it already contains `roundtable-operator`
+(release `roundtable-operator` gives `roundtable-operator`); otherwise
+`<release>-roundtable-operator` (release `roundtable` gives
+`roundtable-roundtable-operator`). To find the Service:
+
+```bash
+kubectl -n roundtable get svc -l app.kubernetes.io/component=gateway
+```
+
+The shell examples on this page set the name once and use `$FULLNAME` (a bare
+`<fullname>` is a redirect in a shell, so it cannot be pasted):
+
+```bash
+FULLNAME=roundtable-roundtable-operator   # your <fullname>, see above
+```
+
 ## Design
 
 - **A separate Deployment, built from the operator image.** The gateway is
@@ -219,7 +243,7 @@ spec:
               image: curlimages/curl:8.11.0
               env:
                 - name: GW
-                  value: http://roundtable-roundtable-operator-gateway.roundtable.svc
+                  value: http://<fullname>-gateway.roundtable.svc
               command: ["/bin/sh", "-c"]
               args:
                 - |
@@ -553,7 +577,7 @@ with it). Any other mission is a **403**.
 ### Example: launch a research mission and poll it
 
 ```bash
-GW=http://roundtable-roundtable-operator-gateway.roundtable.svc
+GW=http://$FULLNAME-gateway.roundtable.svc
 AUTH="Authorization: Bearer $TOKEN"
 
 NAME=$(curl -s -H "$AUTH" -H 'Content-Type: application/json' "$GW/v1/missions" -d '{
@@ -748,7 +772,7 @@ spec:
                   set -eu
                   code=$(curl -sS --max-time 1560 -o /tmp/run.json -w '%{http_code}' \
                     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-                    http://roundtable-roundtable-operator-gateway.roundtable.svc/v1/chains/blog-drafter/runs \
+                    http://<fullname>-gateway.roundtable.svc/v1/chains/blog-drafter/runs \
                     -d '{"input": {"week": "'"$(date +%G-W%V)"'"}, "waitSeconds": 1500}')
                   cat /tmp/run.json
                   # 200 = finished; 202 = still running after 1500 s.
@@ -763,7 +787,7 @@ Moving a kagent caller to these endpoints, with a Python helper: [Migrating from
 ### Example: run, then poll
 
 ```bash
-GW=http://roundtable-roundtable-operator-gateway.roundtable.svc
+GW=http://$FULLNAME-gateway.roundtable.svc
 AUTH="Authorization: Bearer $TOKEN"
 
 LOC=$(curl -s -D - -o /dev/null -H "$AUTH" -H 'Content-Type: application/json' \
@@ -922,7 +946,7 @@ Deletes the schedule; runs it already started are left to their own TTL.
 ### Example: a weekday digest
 
 ```bash
-GW=http://roundtable-roundtable-operator-gateway.roundtable.svc
+GW=http://$FULLNAME-gateway.roundtable.svc
 AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
 
 curl -s -H "$AUTH" -H 'Content-Type: application/json' "$GW/v1/schedules" -d '{
@@ -1054,7 +1078,7 @@ gone, is a **404**. `resultAvailable` in the run list is true for knight runs
 whose task record still exists and for Missions that still exist.
 
 ```bash
-GW=http://roundtable-operator-gateway.roundtable.svc:8080
+GW=http://$FULLNAME-gateway.roundtable.svc
 AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
 # The last failed firing of the morning digest and its output.
 run=$(curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/morning-digest/runs?limit=50" \
@@ -1198,7 +1222,7 @@ no other image and no Kubernetes client:
 
 ```bash
 /manager fire-trigger \
-  --gateway http://roundtable-gateway.roundtable.svc:8080 \
+  --gateway http://$FULLNAME-gateway.roundtable.svc \
   --trigger roundtable/nightly \
   --token-file /var/run/secrets/roundtable/gateway/token \
   [--job-name "$JOB_NAME" | --scheduled-time 2026-11-25T02:00:00Z] [--timeout 30s]
@@ -1250,7 +1274,7 @@ To register the endpoint with Claude Code:
 
 ```bash
 claude mcp add --transport http roundtable \
-  http://roundtable-roundtable-operator-gateway.roundtable.svc/mcp \
+  http://$FULLNAME-gateway.roundtable.svc/mcp \
   --header "Authorization: Bearer $TOKEN"
 ```
 
