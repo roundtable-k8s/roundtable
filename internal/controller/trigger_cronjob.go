@@ -286,10 +286,11 @@ func (r *TriggerReconciler) ensureScheduleObjects(ctx context.Context, trg *aiv1
 	// must propagate.
 	wantPod := want.Spec.JobTemplate.Spec.Template.Spec
 	gotPod := cj.Spec.JobTemplate.Spec.Template.Spec
+	wantFire, gotFire := fireContainer(wantPod), fireContainer(gotPod)
 	if equality.Semantic.DeepDerivative(want.Spec, cj.Spec) && equality.Semantic.DeepDerivative(want.Labels, cj.Labels) &&
 		podPlacementEqual(wantPod, gotPod) &&
 		startingDeadlineEqual(want.Spec.StartingDeadlineSeconds, cj.Spec.StartingDeadlineSeconds) &&
-		pullPolicyEqual(firePullPolicy(wantPod), firePullPolicy(gotPod), firePullImage(wantPod)) {
+		pullPolicyEqual(wantFire, gotFire) {
 		return cj, nil
 	}
 	cj.Spec = want.Spec
@@ -319,47 +320,49 @@ func startingDeadlineEqual(a, b *int64) bool {
 	return *a == *b
 }
 
-// firePullPolicy returns the pull policy of the firing container, or "" when
-// the container is absent.
-func firePullPolicy(pod corev1.PodSpec) corev1.PullPolicy {
-	for _, c := range pod.Containers {
-		if c.Name == "fire" {
-			return c.ImagePullPolicy
+// fireContainer returns the firing container of pod, or nil when absent.
+func fireContainer(pod corev1.PodSpec) *corev1.Container {
+	for i := range pod.Containers {
+		if pod.Containers[i].Name == "fire" {
+			return &pod.Containers[i]
 		}
 	}
-	return ""
+	return nil
 }
 
-// firePullImage returns the image of the firing container, or "" when absent.
-func firePullImage(pod corev1.PodSpec) string {
-	for _, c := range pod.Containers {
-		if c.Name == "fire" {
-			return c.Image
-		}
+// pullPolicyEqual compares the pull policy of a desired and an observed
+// firing container. An unset desired policy matches the value the API server
+// defaults it to for the desired image, so that defaulting does not cause an
+// update on every reconcile.
+func pullPolicyEqual(want, got *corev1.Container) bool {
+	var w, g corev1.PullPolicy
+	var image string
+	if want != nil {
+		w, image = want.ImagePullPolicy, want.Image
 	}
-	return ""
-}
-
-// pullPolicyEqual compares a desired and an observed pull policy. An unset
-// desired policy matches the value the API server defaults it to for image,
-// so that defaulting does not cause an update on every reconcile.
-func pullPolicyEqual(want, got corev1.PullPolicy, image string) bool {
-	if want != "" {
-		return want == got
+	if got != nil {
+		g = got.ImagePullPolicy
 	}
-	return got == "" || got == defaultImagePullPolicy(image)
+	if w != "" {
+		return w == g
+	}
+	return g == "" || g == defaultImagePullPolicy(image)
 }
 
 // defaultImagePullPolicy mirrors the API server's defaulting of an empty
-// container pull policy: an image whose tag is "latest" (or that has no tag)
-// is pulled Always, any other image IfNotPresent.
+// container pull policy: an image whose tag is "latest", or that has neither
+// a tag nor a digest, is pulled Always, any other image IfNotPresent.
 func defaultImagePullPolicy(image string) corev1.PullPolicy {
 	ref := image
+	digest := false
 	if i := strings.Index(ref, "@"); i >= 0 {
-		ref = ref[:i]
+		ref, digest = ref[:i], true
 	}
 	last := ref[strings.LastIndex(ref, "/")+1:]
 	if i := strings.LastIndex(last, ":"); i >= 0 && last[i+1:] != "latest" {
+		return corev1.PullIfNotPresent
+	}
+	if digest && !strings.HasSuffix(last, ":latest") {
 		return corev1.PullIfNotPresent
 	}
 	return corev1.PullAlways

@@ -61,29 +61,40 @@ func TestTriggerCronJobDriftFields(t *testing.T) {
 
 	t.Run("defaultImagePullPolicy mirrors the API server", func(t *testing.T) {
 		for image, want := range map[string]corev1.PullPolicy{
-			"operator:test":        corev1.PullIfNotPresent,
-			"ghcr.io/x/op:1.2.3":   corev1.PullIfNotPresent,
-			"localhost:5000/op:v1": corev1.PullIfNotPresent,
-			"op:latest":            corev1.PullAlways,
-			"op":                   corev1.PullAlways,
-			"localhost:5000/op":    corev1.PullAlways,
-			"op:1.0@sha256:abcdef": corev1.PullIfNotPresent,
+			"operator:test":                   corev1.PullIfNotPresent,
+			"ghcr.io/x/op:1.2.3":              corev1.PullIfNotPresent,
+			"localhost:5000/op:v1":            corev1.PullIfNotPresent,
+			"op:latest":                       corev1.PullAlways,
+			"op":                              corev1.PullAlways,
+			"localhost:5000/op":               corev1.PullAlways,
+			"op:1.0@sha256:abcdef":            corev1.PullIfNotPresent,
+			"op@sha256:abcdef":                corev1.PullIfNotPresent,
+			"localhost:5000/op@sha256:abcdef": corev1.PullIfNotPresent,
+			"op:latest@sha256:abcdef":         corev1.PullAlways,
 		} {
 			require.Equal(t, want, defaultImagePullPolicy(image), image)
 		}
 	})
 
+	fc := func(image string, p corev1.PullPolicy) *corev1.Container {
+		return &corev1.Container{Name: "fire", Image: image, ImagePullPolicy: p}
+	}
+	t.Run("a digest-only image's server default is not drift", func(t *testing.T) {
+		require.True(t, pullPolicyEqual(fc("op@sha256:abcdef", ""), fc("op@sha256:abcdef", corev1.PullIfNotPresent)))
+		require.False(t, pullPolicyEqual(fc("op@sha256:abcdef", ""), fc("op@sha256:abcdef", corev1.PullAlways)))
+	})
+
 	t.Run("an unset desired pull policy matches only the API server default", func(t *testing.T) {
 		img := "op:1.2.3"
-		require.True(t, pullPolicyEqual("", "", img))
-		require.True(t, pullPolicyEqual("", corev1.PullIfNotPresent, img), "server default is not drift")
-		require.False(t, pullPolicyEqual("", corev1.PullAlways, img), "clearing Always must be drift")
-		require.True(t, pullPolicyEqual(corev1.PullAlways, corev1.PullAlways, img))
-		require.False(t, pullPolicyEqual(corev1.PullAlways, corev1.PullIfNotPresent, img))
+		require.True(t, pullPolicyEqual(fc(img, ""), fc(img, "")))
+		require.True(t, pullPolicyEqual(fc(img, ""), fc(img, corev1.PullIfNotPresent)), "server default is not drift")
+		require.False(t, pullPolicyEqual(fc(img, ""), fc(img, corev1.PullAlways)), "clearing Always must be drift")
+		require.True(t, pullPolicyEqual(fc(img, corev1.PullAlways), fc(img, corev1.PullAlways)))
+		require.False(t, pullPolicyEqual(fc(img, corev1.PullAlways), fc(img, corev1.PullIfNotPresent)))
 
 		latest := "op:latest"
-		require.True(t, pullPolicyEqual("", corev1.PullAlways, latest), "latest's server default is Always")
-		require.False(t, pullPolicyEqual("", corev1.PullIfNotPresent, latest))
+		require.True(t, pullPolicyEqual(fc(latest, ""), fc(latest, corev1.PullAlways)), "latest's server default is Always")
+		require.False(t, pullPolicyEqual(fc(latest, ""), fc(latest, corev1.PullIfNotPresent)))
 	})
 
 	t.Run("each operator-set field cleared in the desired spec is drift", func(t *testing.T) {
@@ -100,8 +111,8 @@ func TestTriggerCronJobDriftFields(t *testing.T) {
 		gotPod := set.Spec.JobTemplate.Spec.Template.Spec
 		wantPod := cleared.Spec.JobTemplate.Spec.Template.Spec
 		require.False(t, startingDeadlineEqual(cleared.Spec.StartingDeadlineSeconds, set.Spec.StartingDeadlineSeconds))
-		require.False(t, pullPolicyEqual(firePullPolicy(wantPod), firePullPolicy(gotPod), firePullImage(wantPod)))
-		require.True(t, pullPolicyEqual(firePullPolicy(gotPod), firePullPolicy(gotPod), firePullImage(gotPod)))
+		require.False(t, pullPolicyEqual(fireContainer(wantPod), fireContainer(gotPod)))
+		require.True(t, pullPolicyEqual(fireContainer(gotPod), fireContainer(gotPod)))
 		require.False(t, podPlacementEqual(wantPod, gotPod))
 	})
 }

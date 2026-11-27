@@ -236,23 +236,29 @@ func (s *Service) ListScheduleRuns(ctx context.Context, f ScheduleRunsFilter) ([
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	s.markResultsAvailable(ctx, trg, out)
-	s.fillKnightUsage(ctx, trg, out)
+	recs := s.markResultsAvailable(ctx, trg, out)
+	fillKnightUsage(out, recs)
 	return out, nil
 }
 
 // markResultsAvailable sets ResultAvailable on the knight-target runs whose
 // task record is still kept and the mission-target runs whose Mission still
-// exists. A lookup that fails leaves the run marked unavailable.
-func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trigger, runs []*ScheduleRun) {
+// exists. A lookup that fails leaves the run marked unavailable. It returns
+// the knight task records it loaded, by run, for fillKnightUsage.
+func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trigger, runs []*ScheduleRun) map[string]*TaskRecord {
+	var recs map[string]*TaskRecord
 	switch {
 	case trg.Spec.Target.Knight != nil && s.Bus != nil:
 		for _, r := range runs {
 			if r.Run == "" || r.ResultAvailable {
 				continue
 			}
-			if _, err := s.firedTask(ctx, trg, r.Run); err == nil {
+			if rec, err := s.firedTask(ctx, trg, r.Run); err == nil {
 				r.ResultAvailable = true
+				if recs == nil {
+					recs = make(map[string]*TaskRecord, len(runs))
+				}
+				recs[r.Run] = rec
 			}
 		}
 	case trg.Spec.Target.Mission != nil:
@@ -265,21 +271,19 @@ func (s *Service) markResultsAvailable(ctx context.Context, trg *aiv1alpha1.Trig
 			}
 		}
 	}
+	return recs
 }
 
 // fillKnightUsage sets the duration, cost, turns and tool calls on the
-// knight-target runs from their task records. A record that is gone or
-// unreadable leaves the run as it was.
-func (s *Service) fillKnightUsage(ctx context.Context, trg *aiv1alpha1.Trigger, runs []*ScheduleRun) {
-	if trg.Spec.Target.Knight == nil || s.Bus == nil {
-		return
-	}
+// knight-target runs from the task records markResultsAvailable loaded. A run
+// without a loaded record is left as it was.
+func fillKnightUsage(runs []*ScheduleRun, recs map[string]*TaskRecord) {
 	for _, r := range runs {
 		if !strings.HasPrefix(r.Run, TaskIDPrefix) || r.DurationSeconds != nil || r.CostUSD != "" {
 			continue
 		}
-		rec, err := s.Bus.GetRecord(ctx, r.Run)
-		if err != nil || rec == nil || !rec.Done() {
+		rec := recs[r.Run]
+		if rec == nil || !rec.Done() {
 			continue
 		}
 		if rec.DurationMs > 0 {

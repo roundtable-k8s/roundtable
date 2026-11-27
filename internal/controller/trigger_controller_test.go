@@ -1008,7 +1008,7 @@ var _ = Describe("Trigger controller", func() {
 			reconcileTrigger("clr")
 			cj := getCronJob("trigger-clr")
 			Expect(cj.Spec.StartingDeadlineSeconds).To(HaveValue(Equal(int64(3600))))
-			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullAlways))
+			Expect(fireContainer(cj.Spec.JobTemplate.Spec.Template.Spec).ImagePullPolicy).To(Equal(corev1.PullAlways))
 
 			// Cleared on the Trigger and in the operator config: both reach the CronJob.
 			t := getTrigger("clr")
@@ -1020,7 +1020,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(cj.Spec.StartingDeadlineSeconds).To(BeNil())
 			// The API server defaults the empty policy for the image; that
 			// defaulted value is the one the operator must not churn on.
-			Expect(firePullPolicy(cj.Spec.JobTemplate.Spec.Template.Spec)).To(Equal(corev1.PullIfNotPresent))
+			Expect(fireContainer(cj.Spec.JobTemplate.Spec.Template.Spec).ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
 
 			// Unchanged, including the server-defaulted policy: no update.
 			rv := cj.ResourceVersion
