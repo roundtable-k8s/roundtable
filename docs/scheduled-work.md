@@ -209,4 +209,6 @@ is read-only through the API: `PUT` and `DELETE` are refused with 409, because
 the next reconcile would revert them. Suspend, resume and run now still work,
 since they only patch annotations.
 
-The schedule views (`GET /v1/schedules`, `list_schedules`) report each schedule's `concurrency` (policy, maxActive), `startingDeadlineSeconds` and effective suspension (`suspended`, `suspendedBy`).
+The schedule views (`GET /v1/schedules`, `list_schedules`) report each
+schedule's `concurrency` (policy, maxActive), `startingDeadlineSeconds` and
+effective suspension (`suspended`, `suspendedBy`).

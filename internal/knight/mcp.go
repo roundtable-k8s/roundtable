@@ -59,10 +59,11 @@ func UniqueMCPHeaders(headers []aiv1alpha1.KnightMCPHeader) []aiv1alpha1.KnightM
 }
 
 // renderMCP renders the MCP config JSON and the header env vars. taken holds
-// env var names already in use on the container; a header whose base name is taken (or was assigned to an earlier header, e.g.
-// server "a-b"/header "c" and server "a"/header "b-c") gets a numeric
-// suffix (_2, _3, ...), assigned in spec order. The JSON only ever contains
-// "${NAME}" placeholders, never a header value.
+// env var names already in use on the container; a header whose base name is
+// taken (or was assigned to an earlier header, e.g. server "a-b"/header "c" and
+// server "a"/header "b-c") gets a numeric suffix (_2, _3, ...), assigned in
+// spec order. The JSON only ever contains "${NAME}" placeholders, never a
+// header value.
 func renderMCP(servers []aiv1alpha1.KnightMCPServer, taken map[string]bool) (string, []MCPHeaderVar) {
 	if len(servers) == 0 {
 		return "", nil

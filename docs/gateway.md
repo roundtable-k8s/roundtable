@@ -373,11 +373,11 @@ knight's message in `error`.
 `traceId` is the OpenTelemetry trace of the call. It is present when tracing is
 on (`OTEL_EXPORTER_OTLP_ENDPOINT` set; the chart does this when telemetry is
 enabled) and is also echoed from an incoming `traceparent` header when the
-gateway has no tracing. The gateway starts a server span per request (named `<METHOD> <route
-template>`, none for `/healthz`), honours an incoming `traceparent` header
-(the span becomes its child), and publishes the task with that span's context, so
-the knight's `invoke_agent` span is in the same trace. The `Request` log line
-carries the same `trace_id`.
+gateway has no tracing. The gateway starts a server span per request (named
+`<METHOD> <route template>`, none for `/healthz`), honours an incoming
+`traceparent` header (the span becomes its child), and publishes the task with
+that span's context, so the knight's `invoke_agent` span is in the same trace.
+The `Request` log line carries the same `trace_id`.
 
 Empty output counts as a failure, as it does in the task contract.
 

@@ -773,7 +773,8 @@ spec:
   roundTableRef: {name: fleet-a}   # required: the Mission runs on this table
   target:
     mission:
-      objective: "Investigate {{ .Event.Data.alert }}"   # Go template, same data as spec.input
+      # Go template, same data as spec.input
+      objective: "Investigate {{ .Event.Data.alert }}"
       successCriteria: "A root cause and a proposed fix"  # also a template
       metaMission: true             # default; false needs chains
       recruitExisting: false
@@ -793,8 +794,8 @@ set. The Mission is built by the gateway's mission builder
 Secret, pod or knight spec.
 
 - A firing creates a Mission named `<trigger>-<8 hex of the dedupe key>` on
-  `roundTableRef`, labelled `ai.roundtable.io/trigger=<trigger>` and owned by the
-  Trigger. The Mission runs, then cleans itself up after `ttlSeconds`.
+  `roundTableRef`, labelled `ai.roundtable.io/trigger=<trigger>` and owned by
+  the Trigger. The Mission runs, then cleans itself up after `ttlSeconds`.
 - `status.recentFirings[].run` is the Mission name; once it finishes `phase` is
   its final phase and `outcome` is `succeeded`, `failed` or `lost` (expired or
   already cleaned up).
@@ -804,8 +805,8 @@ Secret, pod or knight spec.
 - Dedupe: a Mission already named for the key means it fired; this holds until
   the Mission is cleaned up.
 - A firing while the RoundTable is at `policies.maxMissions` is recorded as
-  skipped with the reason, not left queued in `Pending`. The `maxMissions`
-  check counts every Mission in the namespace that holds or waits for a slot,
+  skipped with the reason, not left queued in `Pending`. The `maxMissions` check
+  counts every Mission in the namespace that holds or waits for a slot,
   including queued (`Pending`) ones.
 - `spec.input` is not used (put the text in `target.mission.objective`), and a
   github source needs a Chain target.
@@ -914,12 +915,14 @@ tasks and results streams:
 - subjects: `<subjectPrefix>.events.>`
 - Limits retention, max age `spec.nats.eventsMaxAge` (default 168h)
 
-The results stream has no max age by default. The operator owns this setting: with `resultsMaxAge` unset, it resets a `MaxAge` set outside the operator (for example with the `nats` CLI) to unlimited on the next reconcile. Set `spec.nats.resultsMaxAge`
-(for example `168h`) to drop unread task results, such as those that arrive
-after their step timed out, was cancelled or lost its Chain. It must be longer
-than the longest step timeout and, where the gateway keeps task results in the
-stream, longer than the task TTL. Changing or removing it updates the existing
-stream; the tasks stream never expires.
+The results stream has no max age by default. The operator owns this setting:
+with `resultsMaxAge` unset, it resets a `MaxAge` set outside the operator (for
+example with the `nats` CLI) to unlimited on the next reconcile. Set
+`spec.nats.resultsMaxAge` (for example `168h`) to drop unread task results, such
+as those that arrive after their step timed out, was cancelled or lost its
+Chain. It must be longer than the longest step timeout and, where the gateway
+keeps task results in the stream, longer than the task TTL. Changing or removing
+it updates the existing stream; the tasks stream never expires.
 
 Each Trigger gets one durable pull consumer on
 it, `trigger-<namespace>_<name>`, filtered to `source.nats.subject` (webhook:

@@ -115,15 +115,15 @@ Listing `searxng.selfhosted.svc.cluster.local` under `allowedHosts` does **not**
 open the Service. `toFQDNs` rules match names resolved through Cilium's DNS
 proxy to addresses outside the cluster; an in-cluster name resolves to a
 ClusterIP, which Cilium treats as a cluster identity, so the FQDN rule never
-matches it. One shared `allowedPorts` list would also open every in-cluster
-port to every allowed host. The operator warns about such entries: an
-`allowedHosts` entry ending in `.svc` or `.cluster.local` adds a note to the
-`EgressRestricted` message and a Warning event (`InClusterAllowedHost`). The check is on the
-suffix, so a short in-cluster name (`svc.ns` or a bare `svc`) is not
-recognised as in-cluster: it is not warned about, not derived as a Service from
-an MCP URL, and, as the OTLP endpoint or NATS URL, is treated as an external
-host: it gets a `toFQDNs` rule, which cannot match the DNS query the pod sends
-(the resolver expands a short name with the search domains, so the query is for
+matches it. One shared `allowedPorts` list would also open every in-cluster port
+to every allowed host. The operator warns about such entries: an `allowedHosts`
+entry ending in `.svc` or `.cluster.local` adds a note to the `EgressRestricted`
+message and a Warning event (`InClusterAllowedHost`). The check is on the
+suffix, so a short in-cluster name (`svc.ns` or a bare `svc`) is not recognised
+as in-cluster: it is not warned about, not derived as a Service from an MCP URL,
+and, as the OTLP endpoint or NATS URL, is treated as an external host: it gets a
+`toFQDNs` rule, which cannot match the DNS query the pod sends (the resolver
+expands a short name with the search domains, so the query is for
 `<name>.<ns>.svc.cluster.local`). Use the full
 `<service>.<namespace>.svc[.cluster.local]` form for `allowedHosts`, the OTLP
 endpoint and the NATS URL.

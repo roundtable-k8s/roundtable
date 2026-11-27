@@ -23,14 +23,19 @@ POST /v1/chains/summarize-note/runs   Chain summarize-note (on demand)
 
 ## Before you start
 
-Ships its own `fleet-a` RoundTable. Needs the [shared "Before you start"](../README.md#before-you-start): operator and NATS, the NATS URL in `roundtable.yaml` and `spec.nats.url` on each Knight, model credentials (the `sonnet`/`haiku` aliases run on the claude-knight image the manifests set); plus:
+Ships its own `fleet-a` RoundTable. Needs the [shared "Before you
+start"](../README.md#before-you-start): operator and NATS, the NATS URL in
+`roundtable.yaml` and `spec.nats.url` on each Knight, model credentials (the
+`sonnet`/`haiku` aliases run on the claude-knight image the manifests set);
+plus:
 
 - The operator is installed and NATS is reachable at the URL in
   `roundtable.yaml`. If you already have a RoundTable named `fleet-a`, delete
   that document from your copy and keep the PVC. Rename `fleet-a` (and the
   `fleet-a.tasks.` subjects) if your table differs.
-- The knights set `image: ghcr.io/roundtable-k8s/claude-knight:latest` (the table default does too) and need a model
-  provider credential, as any knight does. No credentials are in this recipe.
+- The knights set `image: ghcr.io/roundtable-k8s/claude-knight:latest` (the
+  table default does too) and need a model provider credential, as any knight
+  does. No credentials are in this recipe.
 - Optionally create `Topics.md` in the notes volume with the topics the scout
   should follow.
 

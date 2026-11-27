@@ -228,25 +228,24 @@ and [See and control schedules](scheduled-work.md#see-and-control-schedules).
 
 1. Deploy the new Trigger writing to a **separate** folder: a different
    `OUTPUT_DIR` for the script and a matching `writablePaths` entry
-   (`Reports/nightly-new` next to the old `Reports/nightly`). `OUTPUT_DIR` is
-   an environment variable of the script; set it where the Trigger task text
-   runs the script, for example
-   `OUTPUT_DIR=/vault/Reports/nightly-new python3 job.py --file answers.json`.
-   Leave the old cron job running.
+   (`Reports/nightly-new` next to the old `Reports/nightly`). `OUTPUT_DIR` is an
+   environment variable of the script; set it where the Trigger task text runs
+   the script, for example `OUTPUT_DIR=/vault/Reports/nightly-new python3 job.py
+   --file answers.json`. Leave the old cron job running.
 2. Let both run for 3 to 7 runs, then compare them with the arsenal `shared`
-   skill `side-by-side`: `bash /skills/shared/side-by-side/scripts/compare-outputs <old-dir> <new-dir>`
-   prints one line per day for the last N days (`--days N`, default 7; `--diff DATE` shows the
-   content diff for one day) (same days written or not). The skill checks
-   the days, not the content, so the owner still reads a few days by hand:
-   same items, differences you can explain. Check `status.recentFirings` for
-   failed or skipped firings.
+   skill `side-by-side`: `bash
+   /skills/shared/side-by-side/scripts/compare-outputs <old-dir> <new-dir>`
+   prints one line per day for the last N days (`--days N`, default 7; `--diff
+   DATE` shows the content diff for one day). Each line says whether both runs
+   wrote that day. The skill checks the days, not the content, so the owner
+   still reads a few days by hand: same items, differences you can explain.
+   Check `status.recentFirings` for failed or skipped firings.
 3. Cutover, in this order. First suspend the old cron job, so the two jobs
-   cannot both write the same day's file. If Flux or Helm manages the
-   CronJob, set `suspend: true` in Git: a
-   `kubectl -n <ns> patch cronjob <name> -p '{"spec":{"suspend":true}}'` is
-   reverted at the next reconcile. Then, in the same change or right after,
-   point `OUTPUT_DIR` and `writablePaths` at the real folder (drop the `-new`
-   one).
+   cannot both write the same day's file. If Flux or Helm manages the CronJob,
+   set `suspend: true` in Git: a `kubectl -n <ns> patch cronjob <name> -p
+   '{"spec":{"suspend":true}}'` is reverted at the next reconcile. Then, in the
+   same change or right after, point `OUTPUT_DIR` and `writablePaths` at the
+   real folder (drop the `-new` one).
 4. Delete the old cron job a week later, once nothing needed it.
 
 A job that another job links to must keep its output path at cutover: change

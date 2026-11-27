@@ -1,7 +1,7 @@
 # A pi-knight for the e2e core round trip: its model is routed to the stub LLM
 # (OPENAI_BASE_URL), so a task completes with no real provider; pi-knight
-# supplies a dummy key itself, so none is set. Its own subject (core.tasks.rt.>) keeps the
-# minimal core-knight from seeing the task.
+# supplies a dummy key itself, so none is set. Its own subject
+# (core.tasks.rt.>) keeps the minimal core-knight from seeing the task.
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Knight
 metadata:
