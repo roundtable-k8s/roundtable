@@ -126,8 +126,8 @@ func (r *ChainReconciler) pollResult(ctx context.Context, nc natsConfig, chainNa
 		return nil, nil // No result yet
 	}
 
-	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg, natspkg.WithTable(nc.Table), natspkg.WithTaskID(taskID))
-	consumeSpan.End()
+	ctx, consumeSpan := natspkg.StartConsumeSpan(ctx, msg, natspkg.WithTable(nc.Table), natspkg.WithTaskID(taskID))
+	defer consumeSpan.End()
 
 	log.Info("Received result message", "subject", msg.Subject(), "dataLen", len(msg.Data()))
 

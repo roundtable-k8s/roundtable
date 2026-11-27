@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func clearEnv(t *testing.T) {
@@ -21,8 +22,10 @@ func clearEnv(t *testing.T) {
 
 func setup(t *testing.T) func(context.Context) error {
 	t.Helper()
-	prev := otel.GetTracerProvider()
-	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	// Restore a no-op provider rather than the previous global: that one may
+	// be the delegating provider, which logs and would keep pointing at the
+	// SDK provider shut down by the test.
+	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
 	shutdown, err := Setup(context.Background(), "v1.2.3")
 	if err != nil {
 		t.Fatalf("Setup: %v", err)

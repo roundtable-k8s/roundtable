@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 // DefaultServiceName is used when OTEL_SERVICE_NAME is not set.
@@ -61,8 +61,8 @@ func SetupService(ctx context.Context, serviceName, version string) (func(contex
 	// OTEL_RESOURCE_ATTRIBUTES on top.
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			attribute.String("service.name", serviceName),
-			attribute.String("service.version", version),
+			semconv.ServiceName(serviceName),
+			semconv.ServiceVersion(version),
 		),
 		resource.WithFromEnv(),
 	)
