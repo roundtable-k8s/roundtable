@@ -119,9 +119,11 @@ func TestTemplatesOnlyGuard(t *testing.T) {
 		t.Errorf("checkTemplatesOnly(non-gateway) = %v, want nil", err)
 	}
 
-	// Env fires before tools, and the messages name only the arm that fired.
-	if err := checkTemplatesOnly(gateway, everything); err == nil || strings.Contains(err.Error(), "specOverrides.tools") {
-		t.Errorf("checkTemplatesOnly(everything) = %v, want the env error only", err)
+	// Env fires before tools, and the message names only the arm that fired.
+	envAndTools := PlannerKnight{Name: "k", SpecOverrides: everything.SpecOverrides}
+	err := checkTemplatesOnly(gateway, envAndTools)
+	if err == nil || !strings.Contains(err.Error(), "specOverrides.env is not allowed") || strings.Contains(err.Error(), "specOverrides.tools") {
+		t.Errorf("checkTemplatesOnly(env+tools) = %v, want the env error only", err)
 	}
 
 	tests := []struct {
