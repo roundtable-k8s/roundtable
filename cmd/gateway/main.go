@@ -49,6 +49,10 @@ import (
 // gatewayServiceName is the service.name used when OTEL_SERVICE_NAME is unset.
 const gatewayServiceName = "roundtable-gateway"
 
+// version is the build version reported as service.version; set with
+// -ldflags "-X main.version=...".
+var version = "dev"
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -142,7 +146,7 @@ func main() {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 	}
-	shutdownTelemetry, err := telemetry.SetupService(context.Background(), gatewayServiceName, apiVersion)
+	shutdownTelemetry, err := telemetry.SetupService(context.Background(), gatewayServiceName, version)
 	if err != nil {
 		log.Error(err, "Failed to set up OpenTelemetry; continuing without tracing")
 		shutdownTelemetry = func(context.Context) error { return nil }

@@ -208,6 +208,7 @@ func TestConsumeSpanRedeliveryLinks(t *testing.T) {
 		if sp.Name != "process "+msg.Subject() {
 			continue
 		}
+		seenCount := false
 		if sp.Parent.SpanID() == producer.SpanContext().SpanID() {
 			t.Error("redelivered span must not parent to producer")
 		}
@@ -215,10 +216,65 @@ func TestConsumeSpanRedeliveryLinks(t *testing.T) {
 			t.Errorf("expected one link, got %v", sp.Links)
 		}
 		for _, a := range sp.Attributes {
-			if a.Key == "messaging.nats.delivery_count" && a.Value.AsInt64() < 2 {
-				t.Errorf("delivery_count = %d", a.Value.AsInt64())
+			if a.Key == "messaging.nats.delivery_count" {
+				seenCount = true
+				if a.Value.AsInt64() < 2 {
+					t.Errorf("delivery_count = %d", a.Value.AsInt64())
+				}
 			}
 		}
+		if !seenCount {
+			t.Error("delivery_count attribute missing")
+		}
+		return
+	}
+	t.Fatal("consumer span not recorded")
+}
+
+func TestConsumeSpanFirstDeliveryParentsToProducer(t *testing.T) {
+	exp, tracer := setupTracing(t)
+	s := runJS(t)
+	c := NewClient(Config{URL: s.ClientURL()}, logr.Discard())
+	defer func() { _ = c.Close() }()
+	mustStream(t, c)
+	ctx, producer := tracer.Start(context.Background(), "producer")
+	defer producer.End()
+	if err := c.PublishJSONCtx(ctx, "t.d", map[string]string{"a": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	msg := nextMsg(t, testConsumer(t, s, "t.d", jetstream.AckExplicitPolicy, 0))
+	cctx, cs := StartConsumeSpan(context.Background(), msg)
+	cs.End()
+
+	if got := trace.SpanFromContext(cctx).SpanContext().SpanID(); got != cs.SpanContext().SpanID() {
+		t.Error("returned ctx does not carry the consume span")
+	}
+	for _, sp := range exp.GetSpans() {
+		if sp.Name != "process "+msg.Subject() {
+			continue
+		}
+		// The header carries the publish (producer-kind) span, itself a child of "producer".
+		var pub trace.SpanID
+		for _, o := range exp.GetSpans() {
+			if o.SpanKind == trace.SpanKindProducer && o.Parent.SpanID() == producer.SpanContext().SpanID() {
+				pub = o.SpanContext.SpanID()
+			}
+		}
+		if !pub.IsValid() || sp.Parent.SpanID() != pub {
+			t.Errorf("consumer parent = %s, want publish span %s", sp.Parent.SpanID(), pub)
+		}
+		if len(sp.Links) != 0 {
+			t.Errorf("first delivery must not link, got %v", sp.Links)
+		}
+		for _, a := range sp.Attributes {
+			if a.Key == "messaging.nats.delivery_count" {
+				if a.Value.AsInt64() != 1 {
+					t.Errorf("delivery_count = %d, want 1", a.Value.AsInt64())
+				}
+				return
+			}
+		}
+		t.Error("delivery_count attribute missing")
 		return
 	}
 	t.Fatal("consumer span not recorded")

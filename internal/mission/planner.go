@@ -841,9 +841,9 @@ func (p *Planner) pollPlanningResult(ctx context.Context, mission *aiv1alpha1.Mi
 		return nil, nil
 	}
 
-	_, consumeSpan := natspkg.StartConsumeSpan(ctx, msg,
+	ctx, consumeSpan := natspkg.StartConsumeSpan(ctx, msg,
 		natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef)), natspkg.WithTaskID(taskID))
-	consumeSpan.End()
+	defer consumeSpan.End()
 
 	_ = natsClient.DeleteConsumer(ctx, resultsStream, consumerName)
 
