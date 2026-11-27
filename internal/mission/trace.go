@@ -134,11 +134,22 @@ type SpanEnd struct {
 }
 
 // Table is the roundtable.table attribute value of a mission.
+// It is the roundTableRef, else the ephemeral table recorded in status, else
+// "none".
 func Table(m *aiv1alpha1.Mission) string {
-	if name := aiv1alpha1.RefName(m.Spec.RoundTableRef); name != "" {
+	if name := TableName(m); name != "" {
 		return name
 	}
 	return "none"
+}
+
+// TableName returns the name of the RoundTable a mission runs on: its
+// roundTableRef, else the ephemeral table recorded in status; "" if neither.
+func TableName(m *aiv1alpha1.Mission) string {
+	if name := aiv1alpha1.RefName(m.Spec.RoundTableRef); name != "" {
+		return name
+	}
+	return m.Status.RoundTableName
 }
 
 // EmitSpan emits the mission's span for key ("" is the root span, named
@@ -193,9 +204,6 @@ func EmitPlanSpan(ctx context.Context, tp trace.TracerProvider, m *aiv1alpha1.Mi
 	}
 	EmitSpan(ctx, tp, m, planSpanKey, "plan", SpanEnd{Start: start, End: time.Now(), ErrMsg: errMsg, Attrs: attrs})
 }
-
-// PlanSpanKey is the span key of the plan span.
-func PlanSpanKey() string { return planSpanKey }
 
 // KnightAttr is the roundtable.knight attribute.
 func KnightAttr(name string) attribute.KeyValue { return attribute.String(attrKnight, name) }

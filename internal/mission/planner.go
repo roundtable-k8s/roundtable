@@ -586,7 +586,7 @@ func (p *Planner) dispatchPlanningTask(ctx context.Context, mission *aiv1alpha1.
 	subject := natspkg.TaskSubject(prefix, plannerKnight.Spec.Domain, plannerKnight.Name)
 
 	// The planner's task is a child of the mission's plan span.
-	if err := natsClient.PublishJSONCtx(WithSpan(ctx, mission, planSpanKey), subject, payload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
+	if err := natsClient.PublishJSONCtx(WithSpan(ctx, mission, planSpanKey), subject, payload, natspkg.WithTable(TableName(mission))); err != nil {
 		return "", fmt.Errorf("failed to publish planning task: %w", err)
 	}
 
@@ -873,7 +873,7 @@ func (p *Planner) pollPlanningResult(ctx context.Context, mission *aiv1alpha1.Mi
 	}
 
 	ctx, consumeSpan := natspkg.StartConsumeSpan(ctx, msg,
-		natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef)), natspkg.WithTaskID(taskID))
+		natspkg.WithTable(TableName(mission)), natspkg.WithTaskID(taskID))
 	defer consumeSpan.End()
 
 	_ = natsClient.DeleteConsumer(ctx, resultsStream, consumerName)

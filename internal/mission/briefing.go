@@ -104,7 +104,7 @@ func (b *Briefer) PublishBriefing(ctx context.Context, mission *aiv1alpha1.Missi
 		// task a child of it.
 		span := BriefingSpanKey(mk.Name)
 		started := time.Now()
-		if err := natsCli.PublishJSONCtx(WithSpan(ctx, mission, span), taskSubject, taskPayload, natspkg.WithTable(aiv1alpha1.RefName(mission.Spec.RoundTableRef))); err != nil {
+		if err := natsCli.PublishJSONCtx(WithSpan(ctx, mission, span), taskSubject, taskPayload, natspkg.WithTable(TableName(mission))); err != nil {
 			log.Error(err, "Failed to publish briefing to knight", "knight", mk.Name, "subject", taskSubject)
 			continue
 		}

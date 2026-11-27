@@ -60,7 +60,6 @@ func TestMissionPlanAndChainShareOneTrace(t *testing.T) {
 		Name: "mission-m1-c", Namespace: "ns", Annotations: mission.ParentAnnotations(m),
 	}}
 	chain.Spec.RoundTableRef = aiv1alpha1.LocalRef("rt")
-	chain.Status.Phase = aiv1alpha1.ChainPhaseSucceeded
 	chain.Status.StartedAt = &start
 	done := metav1.Now()
 	chain.Status.CompletedAt = &done
