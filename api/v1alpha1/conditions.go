@@ -454,6 +454,10 @@ const (
 	// ReasonKnightsDegraded indicates some knights are not ready.
 	ReasonKnightsDegraded = "KnightsDegraded"
 
+	// ReasonKnightDiscoveryFailed indicates the roundtable could not list its
+	// knights (e.g. an invalid knightSelector).
+	ReasonKnightDiscoveryFailed = "KnightDiscoveryFailed"
+
 	// ReasonRoundTableSuspended indicates the roundtable was manually suspended.
 	ReasonRoundTableSuspended = "Suspended"
 

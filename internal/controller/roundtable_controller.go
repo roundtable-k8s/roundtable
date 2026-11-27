@@ -159,6 +159,20 @@ func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) 
 	knights, err := r.discoverKnights(ctx, rt)
 	if err != nil {
 		log.Error(err, "Failed to discover knights")
+		// The spec was read, so record it as observed: an unobserved spec reads
+		// as InProgress to kstatus (Helm --wait, Flux) for as long as the error
+		// lasts, e.g. with an invalid knightSelector.
+		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
+			Type:               aiv1alpha1.ConditionRoundTableAvailable,
+			Status:             metav1.ConditionFalse,
+			Reason:             aiv1alpha1.ReasonKnightDiscoveryFailed,
+			Message:            err.Error(),
+			ObservedGeneration: rt.Generation,
+		})
+		rt.Status.ObservedGeneration = rt.Generation
+		if uerr := r.Status().Update(ctx, rt); uerr != nil {
+			log.Error(uerr, "Failed to update status after knight discovery error")
+		}
 		return ctrl.Result{RequeueAfter: RequeueSlow}, err
 	}
 
