@@ -177,7 +177,7 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 			Phase(aiv1alpha1.MissionPhasePending).
 			Apply(ctx, r.Client)
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		r.Recorder.Eventf(mission, corev1.EventTypeNormal, "PhaseTransition", "Mission transitioned to %s", aiv1alpha1.MissionPhasePending)
 		return ctrl.Result{}, err
@@ -246,7 +246,7 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 		mission.Status.ObservedGeneration = mission.Generation
 		err := r.Status().Update(ctx, mission)
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		if err == nil {
 			// The mission ends here; once its status says so, so does its trace.
@@ -267,7 +267,7 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 		mission.Status.Phase = aiv1alpha1.MissionPhaseCleaningUp
 		err := r.Status().Update(ctx, mission)
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		return ctrl.Result{RequeueAfter: RequeueDefault}, err
 	}
@@ -297,7 +297,7 @@ func (r *MissionReconciler) reconcileTTLExpiry(ctx context.Context, mission *aiv
 		Condition(aiv1alpha1.ConditionMissionComplete, aiv1alpha1.ReasonMissionExpired, "Mission TTL expired", metav1.ConditionTrue).
 		Apply(ctx, r.Client)
 	if apierrors.IsConflict(err) {
-		return ctrl.Result{Requeue: true}, true, nil
+		return ctrl.Result{RequeueAfter: RequeueFast}, true, nil
 	}
 	if err == nil {
 		r.emitMissionSpan(ctx, mission, "mission expired (TTL exceeded)")
@@ -439,7 +439,7 @@ func (r *MissionReconciler) reconcilePending(ctx context.Context, mission *aiv1a
 		Condition(aiv1alpha1.ConditionMissionAdmitted, aiv1alpha1.ReasonMissionAdmitted, "Mission admitted", metav1.ConditionTrue).
 		Apply(ctx, r.Client)
 	if apierrors.IsConflict(err) {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: RequeueFast}, nil
 	}
 	r.Recorder.Eventf(mission, corev1.EventTypeNormal, "PhaseTransition", "Mission transitioned to %s", aiv1alpha1.MissionPhaseProvisioning)
 	return ctrl.Result{RequeueAfter: RequeueFast}, err
@@ -551,12 +551,12 @@ func (r *MissionReconciler) reconcileProvisioning(ctx context.Context, mission *
 	mission.Status.ObservedGeneration = mission.Generation
 	if err := r.Status().Update(ctx, mission); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to transition to Assembling: %w", err)
 	}
 
-	return ctrl.Result{Requeue: true}, nil
+	return ctrl.Result{RequeueAfter: RequeueFast}, nil
 }
 
 // reconcileAssembling creates ephemeral knights and validates all knight references for readiness.
@@ -639,7 +639,7 @@ func (r *MissionReconciler) reconcileBriefing(ctx context.Context, mission *aiv1
 	mission.Status.ObservedGeneration = mission.Generation
 	err := r.Status().Update(ctx, mission)
 	if apierrors.IsConflict(err) {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: RequeueFast}, nil
 	}
 	r.Recorder.Eventf(mission, corev1.EventTypeNormal, "PhaseTransition", "Mission transitioned to %s", aiv1alpha1.MissionPhaseActive)
 	return ctrl.Result{RequeueAfter: RequeueFast}, err
@@ -661,7 +661,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 					metav1.ConditionTrue).
 				Apply(ctx, r.Client)
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: RequeueFast}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -686,7 +686,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 				metav1.ConditionTrue).
 			Apply(ctx, r.Client)
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -745,7 +745,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 			mission.Status.ObservedGeneration = mission.Generation
 			err := r.Status().Update(ctx, mission)
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: RequeueFast}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -765,7 +765,7 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 			mission.Status.ObservedGeneration = mission.Generation
 			err := r.Status().Update(ctx, mission)
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: RequeueFast}, nil
 			}
 			return ctrl.Result{}, err
 		}

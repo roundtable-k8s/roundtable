@@ -367,7 +367,7 @@ func (r *IssuePickupReconciler) labelFailedIssue(ctx context.Context, gh *github
 	if err := gh.AddLabels(ctx, repo, issue, labels.needsHuman); err != nil {
 		return err
 	}
-	if err := commentOnce(ctx, gh, repo, issue, c.Status.LastRunTrigger, body); err != nil {
+	if err := commentOnce(ctx, gh, repo, issue, runMarkerKey(c), body); err != nil {
 		return err
 	}
 	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
@@ -428,7 +428,7 @@ func (r *IssuePickupReconciler) linkOpenPR(ctx context.Context, gh *github.Clien
 	body := fmt.Sprintf("Chain `%s` (run `%s`) failed:\n\n- %s\n\n"+
 		"The run failed on a timeout, the PR %s is open and continues through checks and the merge queue.",
 		c.Name, c.Status.LastRunTrigger, chainFailureSummary(c), url)
-	if err := commentOnce(ctx, gh, repo, issue, c.Status.LastRunTrigger, body); err != nil {
+	if err := commentOnce(ctx, gh, repo, issue, runMarkerKey(c), body); err != nil {
 		return err
 	}
 	if err := gh.RemoveLabel(ctx, repo, issue, labels.inProgress); err != nil {
@@ -439,6 +439,16 @@ func (r *IssuePickupReconciler) linkOpenPR(ctx context.Context, gh *github.Clien
 	r.Recorder.Event(rt, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
 	r.Recorder.Event(c, corev1.EventTypeNormal, "FailedRunHasOpenPR", msg)
 	return nil
+}
+
+// runMarkerKey is the key of the chain run in the commentOnce marker: the run
+// trigger, or the Chain name when no run trigger is recorded (an empty key
+// would make every such comment on the issue share one marker).
+func runMarkerKey(c *aiv1alpha1.Chain) string {
+	if c.Status.LastRunTrigger != "" {
+		return c.Status.LastRunTrigger
+	}
+	return c.Name
 }
 
 // commentOnce posts body with a hidden marker of the chain run, unless the

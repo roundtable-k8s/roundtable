@@ -138,7 +138,7 @@ func (r *ChainReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // resetRequeuePriority sets the requeue priority of a result that requeues
 // (or errors); shared by the Chain and Mission reconcilers.
 func resetRequeuePriority(res ctrl.Result, err error) (ctrl.Result, error) {
-	if err != nil || res.RequeueAfter > 0 || res.Requeue { //nolint:staticcheck // Requeue is still honoured by controller-runtime
+	if err != nil || res.RequeueAfter > 0 {
 		p := requeuePriority
 		res.Priority = &p
 	}
@@ -242,7 +242,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 		// Catch up a missed fire (e.g. operator downtime).
 		log.Info("Missed scheduled run detected, triggering catch-up")
 		r.triggerChain(ctx, req.NamespacedName)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: RequeueFast}, nil
 	}
 
 	// Handle suspended
@@ -293,7 +293,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 		chain.Status.ObservedGeneration = chain.Generation
 		if err := r.Status().Update(ctx, chain); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: RequeueFast}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -336,7 +336,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 func (r *ChainReconciler) updateStatus(ctx context.Context, chain *aiv1alpha1.Chain, requeueAfter time.Duration) (ctrl.Result, error) {
 	if err := r.Status().Update(ctx, chain); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}
 		return ctrl.Result{}, err
 	}

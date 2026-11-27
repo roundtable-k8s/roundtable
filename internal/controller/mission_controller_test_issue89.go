@@ -6,7 +6,7 @@ package controller
 //
 // Test 1: Conflict errors cause clean requeue
 // Test case: When a status update returns IsConflict error, the reconciler
-// should return ctrl.Result{Requeue: true}, nil to trigger a clean retry
+// should return ctrl.Result{RequeueAfter: RequeueFast}, nil to trigger a clean retry
 // without side effects.
 //
 // Expected behavior:
@@ -58,8 +58,7 @@ func TestConflictErrorsCauseCleanRequeue(t *testing.T) {
 
 	// Assert: Should requeue without error
 	assert.Nil(t, err)
-	assert.True(t, result.Requeue)
-	assert.Equal(t, 0*time.Second, result.RequeueAfter)
+	assert.Equal(t, RequeueFast, result.RequeueAfter)
 }
 
 func TestMissionWaitsForAllChainsTerminal(t *testing.T) {
