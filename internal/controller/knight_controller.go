@@ -23,6 +23,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -77,6 +78,14 @@ type KnightReconciler struct {
 	// Pod informer just to tell host-network endpoints apart. Optional;
 	// without it Pods are read through Client.
 	APIReader client.Reader
+
+	// serviceIndexed is set once the egress field indexes are registered
+	// (SetupWithManager); without it Service events list every Knight.
+	serviceIndexed bool
+	// hostNetPods caches pod UID -> spec.hostNetwork (immutable), so the
+	// steady-state reconcile does no Pod read. Bounded by hostNetPodCacheMax.
+	hostNetPods     sync.Map
+	hostNetPodCount atomic.Int64
 
 	// KnightSecurity is the pod-level security context applied to both knight
 	// Deployments and Nix build Jobs. Chart-driven (KNIGHT_* env vars); zero
@@ -1385,6 +1394,9 @@ func runtimeName(knight *aiv1alpha1.Knight) string {
 // Sandbox objects are only watched when SandboxEnabled is true: a watch on a
 // kind the API server doesn't serve never syncs, and the manager exits.
 func (r *KnightReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := r.registerEgressIndexes(context.Background(), mgr); err != nil {
+		return err
+	}
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Knight{}).
 		Owns(&appsv1.Deployment{}).

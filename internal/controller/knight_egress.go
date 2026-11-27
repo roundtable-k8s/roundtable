@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -829,6 +830,14 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 			}
 			key := types.NamespacedName{Namespace: cmp.Or(ep.TargetRef.Namespace, svc.Namespace), Name: ep.TargetRef.Name}
 			isHost, seen := podHost[key]
+			if !seen && ep.TargetRef.UID != "" {
+				// spec.hostNetwork is immutable, so the answer for a pod UID
+				// never changes: no Pod read in the steady state.
+				if v, ok := r.hostNetPods.Load(ep.TargetRef.UID); ok {
+					isHost, seen = v.(bool), true
+					podHost[key] = isHost
+				}
+			}
 			if !seen {
 				pod := &corev1.Pod{}
 				if err := reader.Get(ctx, key, pod); err != nil {
@@ -840,6 +849,7 @@ func (r *KnightReconciler) hostNetworkEndpoints(ctx context.Context, svc *corev1
 				}
 				isHost = pod.Spec.HostNetwork
 				podHost[key] = isHost
+				r.rememberHostNetPod(pod.UID, isHost)
 			}
 			if !isHost {
 				return false, nil, nil, nil
@@ -1005,17 +1015,133 @@ func serviceTargetPorts(svc *corev1.Service, listed []int32) []EgressServicePort
 	return slices.Compact(out)
 }
 
+// Field indexes behind serviceKnightRequests. The Knight index holds the
+// Services a knight's egress names ("svc:<ns>/<name>", resolved like
+// egressServiceRefs, a superset of the effective list) and, for a knight with
+// no egress of its own, its table ("table:<ns>/<name>"), whose defaults may
+// name Services. The RoundTable index holds the Services its defaults name.
+const (
+	knightEgressServiceIndex = "spec.egress.services"
+	tableEgressServiceIndex  = "spec.defaults.egress.services"
+	hostNetPodCacheMax       = 4096
+)
+
+// knightEgressIndexValues is the Knight field index function.
+func knightEgressIndexValues(obj client.Object) []string {
+	k, ok := obj.(*aiv1alpha1.Knight)
+	if !ok {
+		return nil
+	}
+	probe := k
+	if k.Spec.Egress == nil {
+		// Isolation defaults may create an empty egress, and MCP servers
+		// derive Services from it.
+		probe = k.DeepCopy()
+		probe.Spec.Egress = &aiv1alpha1.KnightEgress{}
+	}
+	var out []string
+	for _, ref := range egressServiceRefs(probe) {
+		out = append(out, "svc:"+ref.Namespace+"/"+ref.Name)
+	}
+	if k.Spec.Egress == nil {
+		for _, label := range []string{aiv1alpha1.LabelRoundTable, knightpkg.LegacyTableLabel} {
+			if name := k.Labels[label]; name != "" {
+				out = append(out, "table:"+k.Namespace+"/"+name)
+			}
+		}
+	}
+	return out
+}
+
+// tableEgressIndexValues is the RoundTable field index function.
+func tableEgressIndexValues(obj client.Object) []string {
+	rt, ok := obj.(*aiv1alpha1.RoundTable)
+	if !ok || rt.Spec.Defaults == nil || rt.Spec.Defaults.Egress == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range rt.Spec.Defaults.Egress.AllowedServices {
+		out = append(out, cmp.Or(s.Namespace, rt.Namespace)+"/"+s.Name)
+	}
+	return out
+}
+
+func (r *KnightReconciler) registerEgressIndexes(ctx context.Context, mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &aiv1alpha1.Knight{}, knightEgressServiceIndex, knightEgressIndexValues); err != nil {
+		return err
+	}
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &aiv1alpha1.RoundTable{}, tableEgressServiceIndex, tableEgressIndexValues); err != nil {
+		return err
+	}
+	r.serviceIndexed = true
+	return nil
+}
+
+// rememberHostNetPod records a pod's immutable host-network flag by UID.
+func (r *KnightReconciler) rememberHostNetPod(uid types.UID, hostNet bool) {
+	if uid == "" {
+		return
+	}
+	if r.hostNetPodCount.Add(1) > hostNetPodCacheMax {
+		r.hostNetPods.Clear()
+		r.hostNetPodCount.Store(1)
+	}
+	r.hostNetPods.Store(uid, hostNet)
+}
+
+// serviceCandidateKnights lists the knights that may name the Service: through
+// the field indexes when registered, else every knight.
+func (r *KnightReconciler) serviceCandidateKnights(ctx context.Context, obj client.Object) ([]aiv1alpha1.Knight, error) {
+	if !r.serviceIndexed {
+		knights := &aiv1alpha1.KnightList{}
+		if err := r.List(ctx, knights); err != nil {
+			return nil, err
+		}
+		return knights.Items, nil
+	}
+	key := obj.GetNamespace() + "/" + obj.GetName()
+	seen := map[types.NamespacedName]bool{}
+	var out []aiv1alpha1.Knight
+	add := func(field, value string) error {
+		list := &aiv1alpha1.KnightList{}
+		if err := r.List(ctx, list, client.MatchingFields{field: value}); err != nil {
+			return err
+		}
+		for _, k := range list.Items {
+			if nn := client.ObjectKeyFromObject(&k); !seen[nn] {
+				seen[nn] = true
+				out = append(out, k)
+			}
+		}
+		return nil
+	}
+	if err := add(knightEgressServiceIndex, "svc:"+key); err != nil {
+		return nil, err
+	}
+	tables := &aiv1alpha1.RoundTableList{}
+	if err := r.List(ctx, tables, client.MatchingFields{tableEgressServiceIndex: key}); err != nil {
+		return nil, err
+	}
+	for i := range tables.Items {
+		rt := &tables.Items[i]
+		if err := add(knightEgressServiceIndex, "table:"+rt.Namespace+"/"+rt.Name); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // serviceKnightRequests maps a Service to the knights whose effective egress
 // allowlist (their own, or their table's default) names it.
 func (r *KnightReconciler) serviceKnightRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	knights := &aiv1alpha1.KnightList{}
-	if err := r.List(ctx, knights); err != nil {
+	candidates, err := r.serviceCandidateKnights(ctx, obj)
+	if err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list knights for allowed Service requeue")
 		return nil
 	}
 	var reqs []reconcile.Request
-	for i := range knights.Items {
-		k := knightpkg.WithTableDefaults(ctx, r.Client, &knights.Items[i])
+	for i := range candidates {
+		k := knightpkg.WithTableDefaults(ctx, r.Client, &candidates[i])
 		knightpkg.ApplyIsolationDefaults(k, r.Isolation)
 		if k.Spec.Isolation.EgressOptedOut() {
 			continue
