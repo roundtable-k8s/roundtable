@@ -585,13 +585,8 @@ func (r *KnightReconciler) wakeBackoffDelay(key client.ObjectKey) time.Duration 
 		return wakeBackoffSteps[0]
 	}
 	d := v.(wakeBackoffState).next.Sub(r.now())
-	if d < wakingRequeue {
-		d = wakingRequeue
-	}
-	if max := wakeBackoffSteps[len(wakeBackoffSteps)-1]; d > max {
-		d = max
-	}
-	return d
+	d = max(d, wakingRequeue)
+	return min(d, wakeBackoffSteps[len(wakeBackoffSteps)-1])
 }
 
 // knightWakeTimeout caps how long a knight reports Waking: past it the pod

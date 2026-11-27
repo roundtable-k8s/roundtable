@@ -29,12 +29,12 @@ func statusTestScheme() *runtime.Scheme {
 	return s
 }
 
-func newParkedKnight(model string, suspend bool) *aiv1alpha1.Knight {
+func newParkedKnight(model string) *aiv1alpha1.Knight {
 	rc := "gvisor"
 	return &aiv1alpha1.Knight{
 		ObjectMeta: metav1.ObjectMeta{Name: "parked", Namespace: "default", Finalizers: []string{knightFinalizer}},
 		Spec: aiv1alpha1.KnightSpec{
-			Model: model, Suspend: suspend, RuntimeClassName: &rc,
+			Model: model, RuntimeClassName: &rc,
 			NATS: aiv1alpha1.KnightNATS{Stream: "rt_tasks", URL: "nats://nats.test:4222", Subjects: []string{"t.>"}},
 		},
 		Status: aiv1alpha1.KnightStatus{Phase: aiv1alpha1.KnightPhaseProvisioning},
@@ -52,7 +52,7 @@ func reconcileByName(t *testing.T, r *KnightReconciler, name string) reconcile.R
 
 func TestParkedKnightPicksUpNewModel(t *testing.T) {
 	s := statusTestScheme()
-	k := newParkedKnight("model-a", false)
+	k := newParkedKnight("model-a")
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
 	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50)}
 
@@ -76,7 +76,7 @@ func TestParkedKnightPicksUpNewModel(t *testing.T) {
 
 func TestSuspendedKnightDropsStaleRuntimeAvailableFalse(t *testing.T) {
 	s := statusTestScheme()
-	k := newParkedKnight("m", false)
+	k := newParkedKnight("m")
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
 	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(50)}
 	reconcileByName(t, r, "parked")
@@ -170,7 +170,7 @@ func TestWakingKnightRequeuesEvery5s(t *testing.T) {
 func TestKnightFinalizerRemovalUsesPatch(t *testing.T) {
 	s := statusTestScheme()
 	now := metav1.Now()
-	k := newParkedKnight("m", false)
+	k := newParkedKnight("m")
 	k.DeletionTimestamp = &now
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
 	r := &KnightReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
@@ -263,7 +263,7 @@ func TestWakeTimeoutSticksAtOneReplicaAndBacksOff(t *testing.T) {
 	// Delay grows to the bound and stays there.
 	var last time.Duration
 	now := t0
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		now = now.Add(2 * time.Minute)
 		update(now)
 		last = r.wakeBackoffDelay(client.ObjectKeyFromObject(k))
@@ -275,7 +275,7 @@ func TestWakeTimeoutSticksAtOneReplicaAndBacksOff(t *testing.T) {
 
 func TestParkedModelChangeRaisesNoSecondEvent(t *testing.T) {
 	s := statusTestScheme()
-	k := newParkedKnight("model-a", false)
+	k := newParkedKnight("model-a")
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(k).WithStatusSubresource(k).Build()
 	rec := record.NewFakeRecorder(50)
 	r := &KnightReconciler{Client: c, Scheme: s, Recorder: rec}
