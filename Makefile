@@ -335,6 +335,10 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 		exit 1; \
 	}
 
+.PHONY: print-envtest-assets
+print-envtest-assets: ## Print the absolute envtest binaries path (run setup-envtest first), for CI to export as KUBEBUILDER_ASSETS.
+	@"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -i -p path
+
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): | $(LOCALBIN)
