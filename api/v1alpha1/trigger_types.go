@@ -303,6 +303,14 @@ type TriggerGitHubSource struct {
 	// +optional
 	MaxActivePerRepository int32 `json:"maxActivePerRepository,omitempty"`
 
+	// fairShare shares the Trigger's total concurrency.maxActive slots across
+	// its repositories: candidates are visited round-robin, one per
+	// repository per pass (each repository keeping its own order), instead of
+	// repository by repository, so one busy repository cannot fill every slot
+	// while another waits. Default false.
+	// +optional
+	FairShare bool `json:"fairShare,omitempty"`
+
 	// holdWhilePullRequestLabeled holds a repository while it has an open
 	// pull request with this label: its items start no new run until the
 	// pull request is merged or closed (for example a pull request that

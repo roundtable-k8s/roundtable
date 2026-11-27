@@ -107,6 +107,7 @@ func pickupTriggerSpec(rt *aiv1alpha1.RoundTable, spec *aiv1alpha1.IssuePickupSp
 				Comment:      claimComment,
 			},
 			MaxActivePerRepository:      max(spec.MaxActivePerRepo, 1),
+			FairShare:                   spec.FairShare,
 			HoldWhilePullRequestLabeled: breakingLabel(spec),
 			SkipIfBodyMatches: &aiv1alpha1.TriggerGitHubSkip{
 				Patterns: append([]string(nil), spec.HumanPatterns...),

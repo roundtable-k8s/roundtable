@@ -1709,6 +1709,12 @@ spec:
                     - builtin
                     - trigger
                     type: string
+                  fairShare:
+                    description: |-
+                      fairShare shares maxActive across the repositories round-robin, so one
+                      repository cannot fill every slot while another waits. Only the trigger
+                      engine honors it. Default false.
+                    type: boolean
                   humanPatterns:
                     default:
                     - \.github/workflows

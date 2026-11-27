@@ -505,7 +505,15 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 	)
 	stateSource := githubStateSource(src)
 	feedbackTable := prFeedbackTable(trg)
-	for _, repo := range src.Repositories {
+	// Default: one repository after the other, listed lazily. fairShare:
+	// list every repository first, then visit one candidate per repository
+	// per pass.
+	type repoBatch struct {
+		repo       string
+		candidates []githubCandidate
+	}
+	var batches []repoBatch
+	listRepo := func(repo string) ([]githubCandidate, time.Duration, bool) {
 		candidates, rl, repoProblems, err := listGitHubCandidates(ctx, gh, src, repo)
 		if rl.Limit > 0 {
 			rate = rl
@@ -519,13 +527,47 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 			setCond(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerRateLimited,
 				fmt.Sprintf("GitHub rate limit reached listing %s; next poll in %s", repo, wait.Round(time.Second)), false)
 			log.Info("GitHub rate limit reached, backing off", "repo", repo, "wait", wait)
-			return wait
+			return nil, wait, true
 		}
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("list %s: %v", repo, err))
-			continue
+			return nil, 0, false
 		}
 		problems = append(problems, repoProblems...)
+		return candidates, 0, false
+	}
+	if src.FairShare {
+		lists := make([][]githubCandidate, len(src.Repositories))
+		longest := 0
+		for i, repo := range src.Repositories {
+			cands, wait, limited := listRepo(repo)
+			if limited {
+				return wait
+			}
+			lists[i] = cands
+			longest = max(longest, len(cands))
+		}
+		for pass := 0; pass < longest; pass++ {
+			for i, repo := range src.Repositories {
+				if pass < len(lists[i]) {
+					batches = append(batches, repoBatch{repo, lists[i][pass : pass+1]})
+				}
+			}
+		}
+	} else {
+		for _, repo := range src.Repositories {
+			batches = append(batches, repoBatch{repo: repo})
+		}
+	}
+	for _, batch := range batches {
+		repo, candidates := batch.repo, batch.candidates
+		if !src.FairShare {
+			var wait time.Duration
+			var limited bool
+			if candidates, wait, limited = listRepo(repo); limited {
+				return wait
+			}
+		}
 		for _, cand := range candidates {
 			matched++
 			item := cand.item

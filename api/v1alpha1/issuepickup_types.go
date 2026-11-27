@@ -205,6 +205,12 @@ type IssuePickupSpec struct {
 	// +optional
 	MaxActive int32 `json:"maxActive,omitempty"`
 
+	// fairShare shares maxActive across the repositories round-robin, so one
+	// repository cannot fill every slot while another waits. Only the trigger
+	// engine honors it. Default false.
+	// +optional
+	FairShare bool `json:"fairShare,omitempty"`
+
 	// ttlSecondsAfterFinished deletes a finished pickup Chain this long after
 	// it completed. 0 keeps finished Chains.
 	// +kubebuilder:default=604800

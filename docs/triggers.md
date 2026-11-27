@@ -369,6 +369,11 @@ it would start again) starts now:
   "handed back" in `GitHubReady`, with a `HandedBack` event.
 - `maxActivePerRepository`: at most this many active runs per repository
   (under `Allow`); more items wait for a later poll.
+- `fairShare` (default `false`): share the total `concurrency.maxActive` slots
+  across the repositories. Every repository is listed first, then items are
+  visited round-robin, one per repository per pass (each repository keeping its
+  own order), so one busy repository cannot fill every slot while another
+  waits. A repository without items costs no pass.
 - `holdWhilePullRequestLabeled`: while a repository has an open pull request
   with this label, its items start no new run (counted as held in
   `GitHubReady`, with a `Held` event). If the pull requests cannot be listed,
@@ -804,6 +809,7 @@ and the `Suspended` condition's message names it too.
 | `source.github.claim.addLabels` / `removeLabels` | Labels added to and removed from an item once its run was created. |
 | `source.github.claim.assignees` / `comment` | Logins assigned to the item, and a comment template posted once per run (`.Run.Name`, `.Run.ID`). |
 | `source.github.maxActivePerRepository` | Active runs per repository under `Allow` (0: no cap). |
+| `source.github.fairShare` | Visit items round-robin across repositories so they share `maxActive` (default `false`). |
 | `source.github.holdWhilePullRequestLabeled` | Hold a repository while it has an open pull request with this label. |
 | `source.github.skipIfBodyMatches` | `patterns` on title and body, and `handBack` (`addLabels`, `removeLabels`, `comment` with `.Reason`) for items handed back instead of run. |
 | `target.chainRef` | The Chain (same namespace) each firing copies. |
