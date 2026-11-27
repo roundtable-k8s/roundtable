@@ -109,7 +109,24 @@ func (r *ChainReconciler) natsClient() (natspkg.Client, error) {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
-func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, retErr error) {
+// requeuePriority is the workqueue priority a requeued chain is added back
+// with. controller-runtime's priority queue gives an item enqueued by the
+// initial cache list (every chain after an operator restart) a low priority,
+// and an unset Result.Priority keeps it, so the 5s result-polling requeues of
+// in-flight steps would be starved behind other work (#700).
+const requeuePriority = 0
+
+// Reconcile runs one reconcile of a Chain and resets the requeue priority.
+func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcileOnce(ctx, req)
+	if err != nil || res.RequeueAfter > 0 || res.Requeue { //nolint:staticcheck // Requeue is still honoured by controller-runtime
+		p := requeuePriority
+		res.Priority = &p
+	}
+	return res, err
+}
+
+func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (_ ctrl.Result, retErr error) {
 	log := logf.FromContext(ctx)
 
 	chain := &aiv1alpha1.Chain{}
