@@ -196,8 +196,14 @@ const providerFallbackAfter = 2
 // providerBackoffBase is the first retry's delay; it doubles each retry.
 const providerBackoffBase = time.Minute
 
-// transientStatusRe matches an HTTP status of a transient provider failure.
-var transientStatusRe = regexp.MustCompile(`(?i)\b(?:api error|http(?: status)?(?: code)?|status(?: code)?|error)[:= ]+(?:529|503|502|500)\b`)
+// transientOverloadedRe matches an overloaded provider failure: the
+// overloaded_error type, or an HTTP 529 status with its prefix. A bare
+// "overloaded" in ordinary task output does not match.
+var transientOverloadedRe = regexp.MustCompile(`(?i)\boverloaded_error\b|\b(?:api error|http(?: status)?(?: code)?|status(?: code)?)[:= ]+529\b`)
+
+// transientStatusRe matches an HTTP 503/502/500 status of a transient provider
+// failure, with its prefix. A bare "error 500" in task output does not match.
+var transientStatusRe = regexp.MustCompile(`(?i)\b(?:api error|http(?: status)?(?: code)?|status(?: code)?)[:= ]+(?:503|502|500)\b`)
 
 // Transient failure reasons, as set by knights in transientReason (and
 // inferred from the error text for knights that do not set the flag).
@@ -231,7 +237,7 @@ func transientProviderReason(res *natspkg.TaskResult) (string, bool) {
 	if msg == "" {
 		return "", false
 	}
-	if strings.Contains(strings.ToLower(msg), "overloaded") {
+	if transientOverloadedRe.MatchString(msg) {
 		return transientOverloaded, true
 	}
 	if transientStatusRe.MatchString(msg) {

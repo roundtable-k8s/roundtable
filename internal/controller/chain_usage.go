@@ -41,6 +41,14 @@ func parseCostUSD(s string) float64 {
 
 func formatCostUSD(v float64) string { return fmt.Sprintf("%.6f", v) }
 
+// nonNegative clamps a reported token count at zero.
+func nonNegative(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
 // metricsChainName is the chain label of the usage metrics: the template's
 // name for a run copy started by issue pickup, a Trigger or the gateway, so
 // cardinality stays bounded; the chain's own name otherwise.
@@ -67,14 +75,19 @@ func (r *ChainReconciler) recordUsage(ctx context.Context, chain *aiv1alpha1.Cha
 	if ss == nil || res == nil {
 		return
 	}
+	// A knight reporting a negative count or cost must not lower the totals:
+	// each value is clamped at zero before it is added.
 	var tok aiv1alpha1.TokenTotals
 	if res.Tokens != nil {
 		tok = aiv1alpha1.TokenTotals{
-			Input: res.Tokens.Input, Output: res.Tokens.Output,
-			CacheRead: res.Tokens.CacheRead, CacheWrite: res.Tokens.CacheWrite,
+			Input: nonNegative(res.Tokens.Input), Output: nonNegative(res.Tokens.Output),
+			CacheRead: nonNegative(res.Tokens.CacheRead), CacheWrite: nonNegative(res.Tokens.CacheWrite),
 		}
 	}
 	cost := res.Cost
+	if cost < 0 {
+		cost = 0
+	}
 	if cost <= 0 && tok.IsZero() {
 		return
 	}
