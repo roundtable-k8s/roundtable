@@ -361,3 +361,28 @@ func TestDeadLetterListNewestFirstByDeadLetteredAt(t *testing.T) {
 		t.Fatalf("order: %v", l)
 	}
 }
+
+func TestDeadLetterTraceID(t *testing.T) {
+	e := newEnv(t, Options{})
+	add := seedDeadLetters(t, e)
+	const tid = "4bf92f3577b34da6a3ce929d0e0e4736"
+	add(deadletter.Entry{TaskID: "t-traced", Knight: "reviewer", Reason: deadletter.ReasonLost, TraceID: tid}, deadletter.StateOpen)
+	add(deadletter.Entry{TaskID: "t-untraced", Knight: "reviewer", Reason: deadletter.ReasonLost}, deadletter.StateOpen)
+
+	resp, body := e.do(t, "GET", "/v1/dead-letters/t-traced", testToken, nil)
+	if resp.StatusCode != 200 || body["traceId"] != tid {
+		t.Fatalf("get traced: %d %v", resp.StatusCode, body)
+	}
+	resp, body = e.do(t, "GET", "/v1/dead-letters/t-untraced", testToken, nil)
+	if _, has := body["traceId"]; resp.StatusCode != 200 || has {
+		t.Fatalf("get untraced: %d %v", resp.StatusCode, body)
+	}
+	_, body = e.do(t, "GET", "/v1/dead-letters", testToken, nil)
+	for _, it := range body["deadLetters"].([]any) {
+		m := it.(map[string]any)
+		_, has := m["traceId"]
+		if has != (m["taskId"] == "t-traced") {
+			t.Fatalf("list traceId presence wrong for %v", m)
+		}
+	}
+}

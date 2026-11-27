@@ -54,6 +54,7 @@ type DeadLetterView struct {
 	ChainName      string               `json:"chainName,omitempty"`
 	StepName       string               `json:"stepName,omitempty"`
 	RunID          string               `json:"runId,omitempty"`
+	TraceID        string               `json:"traceId,omitempty"`
 	DeadLetteredAt *time.Time           `json:"deadLetteredAt,omitempty"`
 	UpdatedAt      time.Time            `json:"updatedAt"`
 	RetriedAs      string               `json:"retriedAs,omitempty"`
@@ -184,6 +185,7 @@ func deadLetterView(r DeadLetterRecord, e *deadletter.Entry) *DeadLetterView {
 	}
 	v.TaskID, v.Table, v.Error = e.TaskID, e.Table, e.Error
 	v.RetryOf, v.ChainName, v.StepName, v.RunID = e.RetryOf, e.ChainName, e.StepName, e.RunID
+	v.TraceID = e.TraceID
 	v.Task = e.Task
 	if !e.DeadLetteredAt.IsZero() {
 		t := e.DeadLetteredAt

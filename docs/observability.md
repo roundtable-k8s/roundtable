@@ -36,6 +36,8 @@ knights over NATS with `traceparent`/`tracestate` headers (#155), so the
 knight's spans join the same trace. A single "ask a knight" call through the
 gateway is its own trace (or continues the caller's, when the request carries a `traceparent`); the gateway's server span is the parent of the knight's `invoke_agent` span, and the task record's `traceId` names the trace. A `retry-failed` resume starts a new trace.
 
+A dead-lettered task keeps the trace: the dead-letter entry (`GET /v1/dead-letters`) carries `traceId`, taken from the original task's `traceparent`, when the task had a valid one.
+
 ```
 chain <chain>                          (operator, root)
 └─ step <step>                         (forEach/loop steps add item <step>[<i>] /
