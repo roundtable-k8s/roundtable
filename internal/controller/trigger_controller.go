@@ -206,10 +206,7 @@ func (r *TriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	} else if latest.Spec.Target.Knight != nil {
 		// A knight target's active runs are its tasks without a result.
-		pollAfter, err := r.collectTasks(ctx, latest, now)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+		pollAfter := r.collectTasks(ctx, latest, now)
 		if pollAfter > 0 && (gcAfter == 0 || pollAfter < gcAfter) {
 			gcAfter = pollAfter
 		}
