@@ -10,7 +10,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 )
 
-// TestEventReasonMarkers asserts that each `// event-reasons:` marker (read by
+// TestEventReasonMarkers asserts that each reasons marker comment (read by
 // scripts/check-events-doc.sh) names exactly the reasons its variable-reason
 // Warning path can emit, taken from the Reason* constants. A new reason on a
 // marked path must be added both here and in the marker, so the marker cannot
@@ -33,7 +33,8 @@ func TestEventReasonMarkers(t *testing.T) {
 			{aiv1alpha1.ReasonPlannerKnightMissing, aiv1alpha1.ReasonPlannerKnightNotInTable},
 		},
 	}
-	re := regexp.MustCompile(`// event-reasons:(.*)`)
+	// The marker text is split so the guard script does not read this file as one.
+	re := regexp.MustCompile(`// event-` + `reasons:(.*)`)
 	files, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
