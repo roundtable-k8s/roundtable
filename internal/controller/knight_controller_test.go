@@ -616,6 +616,27 @@ var _ = Describe("Knight mcpServers headersFrom", func() {
 		return got, res
 	}
 
+	It("sets Degraded=MCPServersIgnored when MCP_SERVERS_JSON is valueFrom or unparsable", func() {
+		for name, env := range map[string]corev1.EnvVar{
+			"mcp-ignored-vf":  {Name: "MCP_SERVERS_JSON", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "k"}}},
+			"mcp-ignored-bad": {Name: "MCP_SERVERS_JSON", Value: "{not json"},
+		} {
+			k := newKnight(name)
+			k.Spec.Env = []corev1.EnvVar{env}
+			create(k)
+			got, _ := reconcileKnight(k)
+			c := meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)
+			Expect(c).NotTo(BeNil(), name)
+			Expect(c.Status).To(Equal(metav1.ConditionTrue))
+			Expect(c.Reason).To(Equal(aiv1alpha1.ReasonMCPServersIgnored))
+
+			got.Spec.Env = nil
+			Expect(k8sClient.Update(ctx, got)).To(Succeed())
+			got, _ = reconcileKnight(k)
+			Expect(meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightDegraded)).To(BeNil(), name)
+		}
+	})
+
 	It("sets MCPHeadersReady=False naming a missing key, and clears it once the key exists", func() {
 		sec := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "mcp-hdr-secret", Namespace: "default"},
@@ -640,6 +661,24 @@ var _ = Describe("Knight mcpServers headersFrom", func() {
 		c = meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
 		Expect(c).NotTo(BeNil())
 		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+
+		// Resolved references keep being polled so a later delete is noticed.
+		_, res = reconcileKnight(k)
+		Expect(res.RequeueAfter).To(Equal(RequeueVerySlow))
+		Expect(k8sClient.Delete(ctx, sec)).To(Succeed())
+		got, res = reconcileKnight(k)
+		c = meta.FindStatusCondition(got.Status.Conditions, aiv1alpha1.ConditionKnightMCPHeadersReady)
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonMCPHeaderSecretMissing))
+		Expect(res.RequeueAfter).To(Equal(RequeueSlow))
+		sec2 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "mcp-hdr-secret", Namespace: "default"},
+			Data:       map[string][]byte{"token": []byte(secretValue)},
+		}
+		Expect(k8sClient.Create(ctx, sec2)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, sec2) })
+		got, _ = reconcileKnight(k)
 
 		// The value never reaches status, the ConfigMap or the Deployment.
 		for _, o := range []struct {
