@@ -1,5 +1,6 @@
-# Chart values for the Tempo trial (trial_tempo_test.go), as otel-values.yaml plus an
-# OTLP exporter to the trial Tempo in the traces pipeline. Chain trace test: telemetry on, the chart collector
+# Chart values for the Tempo trial (trial_tempo_test.go): the same as
+# otel-values.yaml plus an OTLP exporter to the trial Tempo in the traces
+# pipeline. As in the Chain trace test: telemetry on, the chart collector
 # on with a file exporter, captureContent left at its default (true). The
 # file exporter writes OTLP JSON lines to the collector's stdout (its root
 # filesystem is read-only), so the test reads spans with kubectl logs.

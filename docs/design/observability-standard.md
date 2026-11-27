@@ -141,10 +141,10 @@ one `::notice title=Tempo trial` annotation.
 | Trial question | Answer | Evidence |
 | --- | --- | --- |
 | Does a small install need Kafka? | No. In monolithic mode Tempo runs all components in-process without Kafka; Kafka buffers only in microservices mode. | Read: Tempo v3.0 release notes (`docs/sources/tempo/release-notes/v3-0.md`); the test runs `-target=all` with no Kafka. |
-| Memory, CPU and storage at rest and after the sample load | See the `::notice` annotation of the `e2e-trial` run (`memory_rss_*`, `cpu_seconds_*`, `storage_*`). One two-step run is a small load, not a sizing. | Measured by the test. |
-| Is one two-step chain run stored as one tree (root, both steps, knight spans)? | Yes. | Asserted by the test: the trace by id (`/api/v2/traces/<id>`) passes the same checks as the collector-file test. |
-| Does filtering by `roundtable.table` work in TraceQL? | Yes, `{ .roundtable.table = "e2e-table" }` returns the run. | Asserted by the test. |
-| Are prompt and response content readable, and is the credential kept out? | Content attributes come back as plain attribute values; the fake credential is not returned. | Asserted by the test. |
+| Memory, CPU and storage at rest and after the sample load | Pending the first green `e2e-trial` run. To fill in from its `::notice` line (`memory_rss_*`, `cpu_seconds_*`, `storage_*`), with the Tempo version and a link to the run. One two-step run is a small load, not a sizing. | Measured by the test. |
+| Is one two-step chain run stored as one tree (root, both steps, knight spans)? | Pending the first green `e2e-trial` run. | Asserted by the test: the trace by id (`/api/v2/traces/<id>`) passes the same checks as the collector-file test. |
+| Does filtering by `roundtable.table` work in TraceQL? | Pending the first green `e2e-trial` run: `{ .roundtable.table = "e2e-table" }` should return the run. | Asserted by the test. |
+| Are prompt and response content readable, and is the credential kept out? | Pending the first green `e2e-trial` run: content attributes should come back as plain values and the fake credential should not. | Asserted by the test. |
 | Prompt text at the 16 KiB cap, a mission, an "ask", reading it in Grafana | Open. | The sample prompt is short; no Grafana in the trial. |
 | Grouping by `roundtable.table` in dashboards; a tenant per table | Open. | Not exercised. |
 | A trace open for the length of a long chain run; duration or size limits | Open. | The stub run takes seconds. |

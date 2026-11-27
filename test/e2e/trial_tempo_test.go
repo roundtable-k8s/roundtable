@@ -50,7 +50,11 @@ var _ = Describe("Trial: Grafana Tempo", Ordered, Label(tierTrial), func() {
 
 	BeforeAll(func() {
 		By("creating the namespace and Tempo")
-		_, err := utils.Run(exec.Command("kubectl", "create", "namespace", traceNamespace))
+		// The trace tier shares this namespace; wait out a previous deletion.
+		_, err := utils.Run(exec.Command("kubectl", "delete", "namespace", traceNamespace,
+			"--ignore-not-found", "--wait=true", "--timeout=5m"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = utils.Run(exec.Command("kubectl", "create", "namespace", traceNamespace))
 		Expect(err).NotTo(HaveOccurred())
 		manifests, err := readProjectFile(tempoManifests)
 		Expect(err).NotTo(HaveOccurred())
@@ -93,7 +97,7 @@ var _ = Describe("Trial: Grafana Tempo", Ordered, Label(tierTrial), func() {
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "chain,knight,roundtable", "--all",
 			"-n", traceNamespace, "--ignore-not-found", "--timeout=2m"))
 		_, _ = utils.Run(exec.Command("helm", "uninstall", traceRelease, "-n", traceNamespace, "--wait"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", traceNamespace, "--ignore-not-found", "--wait=false"))
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", traceNamespace, "--ignore-not-found", "--wait=true", "--timeout=5m"))
 	})
 
 	AfterEach(func() {
@@ -158,7 +162,12 @@ var _ = Describe("Trial: Grafana Tempo", Ordered, Label(tierTrial), func() {
 // tempoGet GETs a path of Tempo's HTTP port through the API server's service proxy.
 func tempoGet(path string) (string, error) {
 	cmd := exec.Command("kubectl", "get", "--raw", "/api/v1/namespaces/"+traceNamespace+"/services/tempo:http/proxy"+path)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if err != nil {
+		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
 	return string(out), err
 }
 
