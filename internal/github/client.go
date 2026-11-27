@@ -405,6 +405,31 @@ func (c *Client) Comment(ctx context.Context, repo string, number int, body stri
 	return err
 }
 
+// Comment is an issue comment.
+type Comment struct {
+	Body string `json:"body"`
+}
+
+// ListComments returns the comments of an issue, oldest first.
+func (c *Client) ListComments(ctx context.Context, repo string, number int) ([]Comment, error) {
+	g, err := c.api()
+	if err != nil {
+		return nil, err
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := paginate("list_comments", func(lo gh.ListOptions) ([]*gh.IssueComment, *gh.Response, error) {
+		return g.Issues.ListComments(ctx, owner, name, number, &gh.IssueListCommentsOptions{ListOptions: lo})
+	})
+	out := make([]Comment, 0, len(raw))
+	for _, cm := range raw {
+		out = append(out, Comment{Body: cm.GetBody()})
+	}
+	return out, err
+}
+
 // CloseIssue closes an issue as completed.
 func (c *Client) CloseIssue(ctx context.Context, repo string, number int) error {
 	g, err := c.api()
