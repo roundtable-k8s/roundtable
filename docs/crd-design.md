@@ -346,6 +346,17 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   must be ReadWriteMany: the operator and CEL cannot read a claim's access
   modes, so a ReadWriteOnce claim with `replicas > 1` is not rejected and
   leaves a surge pod stuck instead.
+- **Rollouts of single-replica knights (#949).** A knight with one replica
+  (and `maxReplicas` unset or 1) rolls with `RollingUpdate` (`maxSurge: 1`,
+  `maxUnavailable: 0`: the new pod is Ready before the old one drains) when
+  every PVC its pod mounts (workspace, memory, vault, the table's shared
+  workspace) allows ReadWriteMany or ReadOnlyMany, or it mounts none. A
+  ReadWriteOnce or ReadWriteOncePod claim, or one whose access modes can't
+  be read (e.g. not created yet), keeps `Recreate`. The `RollingUpdate`
+  condition says which: `True` (`VolumesShareable`) or `False`
+  (`VolumeNotShareable`, message naming the volume and PVC). The strategy is
+  updated on the Deployment without rolling the pods. Knights that can run
+  more than one pod keep the workspace rule above.
 - **Tools flakes.** `spec.tools.flakes` refs that use `git+ssh` need matching
   SSH credentials on the tools builder Job; without them the build fails.
 - **Memory.** `spec.memory` adds a persistent memory volume separate from the

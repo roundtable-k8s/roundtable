@@ -217,6 +217,77 @@ var _ = Describe("Horizontally scaled knights (#215)", func() {
 			Expect(d.Spec.Strategy.RollingUpdate).To(BeNil())
 			// taskTimeoutSeconds is unset: the operator default (120s) applies.
 			Expect(*d.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(knightpkg.DefaultTaskTimeoutSeconds) + 60))
+
+			cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightRollingUpdate)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonVolumeNotShareable))
+			Expect(cond.Message).To(ContainSubstring(`volume "data": PVC "drain-rwo" is ReadWriteOnce`))
+		})
+
+		singleClaimKnight := func(name string, mode corev1.PersistentVolumeAccessMode) *aiv1alpha1.Knight {
+			claim := name + "-ws"
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: claim, Namespace: "default"},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{mode},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, pvc) })
+			return scalingKnight("default", name, func(s *aiv1alpha1.KnightSpec) {
+				s.Workspace = &aiv1alpha1.KnightWorkspace{ExistingClaim: claim}
+				// The operator-created memory PVC is ReadWriteMany.
+				s.Memory = &aiv1alpha1.KnightMemory{}
+			})
+		}
+
+		It("rolls a single-replica knight whose claims are all ReadWriteMany (#949)", func() {
+			k = singleClaimKnight("drain-single-rwx", corev1.ReadWriteMany)
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			d := getKnightDeployment(k)
+			Expect(*d.Spec.Replicas).To(Equal(int32(1)))
+			// maxUnavailable 0: the old pod is only taken down once the new
+			// one is Ready; maxSurge 1 allows the overlap.
+			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RollingUpdateDeploymentStrategyType))
+			Expect(d.Spec.Strategy.RollingUpdate.MaxSurge.IntValue()).To(Equal(1))
+			Expect(d.Spec.Strategy.RollingUpdate.MaxUnavailable.IntValue()).To(Equal(0))
+
+			cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightRollingUpdate)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonVolumesShareable))
+		})
+
+		It("keeps Recreate for a single-replica knight with a ReadWriteOnce existingClaim and says why (#949)", func() {
+			k = singleClaimKnight("drain-single-rwo", corev1.ReadWriteOnce)
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			d := getKnightDeployment(k)
+			Expect(d.Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
+			cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightRollingUpdate)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Message).To(ContainSubstring(`PVC "drain-single-rwo-ws" is ReadWriteOnce`))
+		})
+
+		It("keeps Recreate while a mounted claim doesn't exist yet (#949)", func() {
+			k = scalingKnight("default", "drain-single-missing", func(s *aiv1alpha1.KnightSpec) {
+				s.Workspace = &aiv1alpha1.KnightWorkspace{ExistingClaim: "not-created-yet"}
+			})
+			Expect(k8sClient.Create(ctx, k)).To(Succeed())
+			reconcileKnight(newScalingReconciler(false), k)
+
+			Expect(getKnightDeployment(k).Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
+			cond := meta.FindStatusCondition(getKnight(k).Status.Conditions, aiv1alpha1.ConditionKnightRollingUpdate)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Message).To(ContainSubstring(`access modes of PVC "not-created-yet" are unknown`))
 		})
 	})
 
