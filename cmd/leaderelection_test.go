@@ -58,7 +58,9 @@ func TestManagerOptionsReleaseOnCancel(t *testing.T) {
 	if !opts.LeaderElection || opts.LeaderElectionID == "" {
 		t.Error("leader election not configured")
 	}
-	if *opts.LeaseDuration != lt.LeaseDuration || *opts.RenewDeadline != lt.RenewDeadline || *opts.RetryPeriod != lt.RetryPeriod {
+	if *opts.LeaseDuration != lt.LeaseDuration ||
+		*opts.RenewDeadline != lt.RenewDeadline ||
+		*opts.RetryPeriod != lt.RetryPeriod {
 		t.Error("timings not propagated")
 	}
 	if shutdownTimeout >= 10*time.Second {
