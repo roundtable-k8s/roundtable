@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -103,6 +104,39 @@ type NATSBus struct {
 	nc *nats.Conn
 	js jetstream.JetStream
 	kv jetstream.KeyValue
+
+	streamMu sync.Mutex
+	streams  map[string]jetstream.Stream
+}
+
+// stream returns the cached handle for a stream, looking it up on first use.
+func (b *NATSBus) stream(ctx context.Context, name string) (jetstream.Stream, error) {
+	b.streamMu.Lock()
+	st, ok := b.streams[name]
+	b.streamMu.Unlock()
+	if ok {
+		return st, nil
+	}
+	st, err := b.js.Stream(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	b.streamMu.Lock()
+	if b.streams == nil {
+		b.streams = map[string]jetstream.Stream{}
+	}
+	b.streams[name] = st
+	b.streamMu.Unlock()
+	return st, nil
+}
+
+// dropStream forgets a cached handle once its stream is gone.
+func (b *NATSBus) dropStream(name string, err error) {
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		b.streamMu.Lock()
+		delete(b.streams, name)
+		b.streamMu.Unlock()
+	}
 }
 
 // NewNATSBus binds to (or creates) the task-record KV bucket. ttl bounds how
@@ -190,12 +224,13 @@ func (b *NATSBus) LastResult(ctx context.Context, stream, subject string) ([]byt
 	if stream == "" {
 		return nil, nil
 	}
-	st, err := b.js.Stream(ctx, stream)
+	st, err := b.stream(ctx, stream)
 	if err != nil {
 		return nil, fmt.Errorf("read %s from stream %s: %w", subject, stream, err)
 	}
 	msg, err := st.GetLastMsgForSubject(ctx, subject)
 	if err != nil {
+		b.dropStream(stream, err)
 		if errors.Is(err, jetstream.ErrMsgNotFound) {
 			return nil, nil
 		}
@@ -209,7 +244,7 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	if stream == "" {
 		return nil
 	}
-	st, err := b.js.Stream(ctx, stream)
+	st, err := b.stream(ctx, stream)
 	if err != nil {
 		return fmt.Errorf("stream info %s: %w", stream, err)
 	}
@@ -218,6 +253,7 @@ func (b *NATSBus) Discard(ctx context.Context, stream, subject string) error {
 	}
 	msg, err := lastMsgWithRetry(ctx, st, subject)
 	if err != nil {
+		b.dropStream(stream, err)
 		return err
 	}
 	if msg == nil {
@@ -329,31 +365,50 @@ func (b *NATSBus) DeleteIdempotency(ctx context.Context, key string) error {
 	return err
 }
 
-// ListRecords implements Bus.
-func (b *NATSBus) ListRecords(ctx context.Context) ([]*TaskRecord, error) {
-	lister, err := b.kv.ListKeys(ctx)
+// drainKV reads every live entry of kv with one watch: it collects entries
+// until the initial-values-done marker and then stops the watcher, so the cost
+// is one consumer rather than one request per key.
+func drainKV(ctx context.Context, kv jetstream.KeyValue) ([]jetstream.KeyValueEntry, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	w, err := kv.WatchAll(ctx, jetstream.IgnoreDeletes())
 	if err != nil {
 		return nil, err
 	}
-	// The lister closes its channel once every key is read, so there is
-	// nothing to Stop after a full drain.
-	var keys []string
-	for k := range lister.Keys() {
-		if strings.HasPrefix(k, idempotencyPrefix) {
+	defer func() { _ = w.Stop() }()
+	var out []jetstream.KeyValueEntry
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case ent, ok := <-w.Updates():
+			if !ok {
+				return nil, errors.New("KV watch closed before initial values were read")
+			}
+			if ent == nil {
+				return out, nil
+			}
+			out = append(out, ent)
+		}
+	}
+}
+
+// ListRecords implements Bus.
+func (b *NATSBus) ListRecords(ctx context.Context) ([]*TaskRecord, error) {
+	entries, err := drainKV(ctx, b.kv)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*TaskRecord, 0, len(entries))
+	for _, ent := range entries {
+		if strings.HasPrefix(ent.Key(), idempotencyPrefix) {
 			continue
 		}
-		keys = append(keys, k)
-	}
-	out := make([]*TaskRecord, 0, len(keys))
-	for _, k := range keys {
-		rec, err := b.GetRecord(ctx, k)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				continue // expired or deleted between Keys and Get
-			}
-			return nil, err
+		var rec TaskRecord
+		if err := json.Unmarshal(ent.Value(), &rec); err != nil {
+			continue // not a record we understand
 		}
-		out = append(out, rec)
+		out = append(out, &rec)
 	}
 	return out, nil
 }
@@ -374,30 +429,16 @@ func (b *NATSBus) DeadLetterRecords(ctx context.Context) ([]DeadLetterRecord, er
 	if err != nil || kv == nil {
 		return nil, err
 	}
-	lister, err := kv.ListKeys(ctx)
+	entries, err := drainKV(ctx, kv)
 	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	var keys []string
-	for k := range lister.Keys() {
-		keys = append(keys, k)
-	}
-	out := make([]DeadLetterRecord, 0, len(keys))
-	for _, k := range keys {
-		ent, err := kv.Get(ctx, k)
-		if err != nil {
-			if errors.Is(err, jetstream.ErrKeyNotFound) {
-				continue
-			}
-			return nil, err
-		}
+	out := make([]DeadLetterRecord, 0, len(entries))
+	for _, ent := range entries {
 		if op := ent.Operation(); op == jetstream.KeyValueDelete || op == jetstream.KeyValuePurge {
 			continue
 		}
-		rec := DeadLetterRecord{Key: k, Revision: ent.Revision()}
+		rec := DeadLetterRecord{Key: ent.Key(), Revision: ent.Revision()}
 		if err := json.Unmarshal(ent.Value(), &rec.Record); err != nil {
 			continue // not a record we understand
 		}

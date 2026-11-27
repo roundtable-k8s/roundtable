@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -248,5 +249,173 @@ func TestNATSBusDeadLetters(t *testing.T) {
 	}
 	if recs, err := bus.DeadLetterRecords(ctx); err != nil || len(recs) != 0 {
 		t.Fatalf("after delete: %v %v", recs, err)
+	}
+}
+
+func newListTestBus(t *testing.T, bucket string) (*NATSBus, *nats.Conn) {
+	t.Helper()
+	ns := runNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	bus, err := NewNATSBus(context.Background(), nc, bucket, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bus, nc
+}
+
+func TestNATSBusListRecords(t *testing.T) {
+	ctx := context.Background()
+	bus, _ := newListTestBus(t, "bus_list_test")
+
+	got, err := bus.ListRecords(ctx)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty bucket: got %d records, err %v", len(got), err)
+	}
+
+	for i := 0; i < 200; i++ {
+		if err := bus.PutRecord(ctx, &TaskRecord{TaskID: fmt.Sprintf("t%03d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := bus.CreateIdempotency(ctx, idempotencyPrefix+"k", IdempotencyEntry{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.kv.Put(ctx, "garbage", []byte("not json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"t000", "t199"} {
+		if err := bus.kv.Delete(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err = bus.ListRecords(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 198 {
+		t.Fatalf("got %d records, want 198", len(got))
+	}
+	for _, r := range got {
+		if r.TaskID == "t000" || r.TaskID == "t199" {
+			t.Fatalf("deleted record %s listed", r.TaskID)
+		}
+	}
+}
+
+// A record that expires from the bucket is gone from the next listing.
+func TestNATSBusListRecordsExpiry(t *testing.T) {
+	ctx := context.Background()
+	ns := runNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	bus, err := NewNATSBus(ctx, nc, "bus_ttl_test", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.PutRecord(ctx, &TaskRecord{TaskID: "short"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := bus.ListRecords(ctx); len(got) != 1 {
+		t.Fatalf("got %d records, want 1", len(got))
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := bus.ListRecords(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expired record still listed")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// Listing costs a constant number of client requests, however many records
+// the bucket holds.
+func TestNATSBusListRecordsRequestCount(t *testing.T) {
+	ctx := context.Background()
+	bus, nc := newListTestBus(t, "bus_count_test")
+	measure := func() uint64 {
+		before := nc.Stats().OutMsgs
+		if _, err := bus.ListRecords(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return nc.Stats().OutMsgs - before
+	}
+	put := func(from, to int) {
+		for i := from; i < to; i++ {
+			if err := bus.PutRecord(ctx, &TaskRecord{TaskID: fmt.Sprintf("t%03d", i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	put(0, 10)
+	small := measure()
+	put(10, 200)
+	large := measure()
+	if large > small+5 || large > 20 {
+		t.Fatalf("requests grew with records: %d for 10, %d for 200", small, large)
+	}
+}
+
+func TestNATSBusDeadLetterRecordsWatch(t *testing.T) {
+	ctx := context.Background()
+	bus, _ := newListTestBus(t, "bus_dlw_test")
+	got, err := bus.DeadLetterRecords(ctx)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("no bucket: %v %v", got, err)
+	}
+	kv, err := bus.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: deadletter.KVBucket, History: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = bus.DeadLetterRecords(ctx)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty bucket: %v %v", got, err)
+	}
+	for _, k := range []string{"a", "b", "c"} {
+		if _, err := kv.Put(ctx, k, []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = kv.Delete(ctx, "b")
+	_ = kv.Purge(ctx, "c")
+	got, err = bus.DeadLetterRecords(ctx)
+	if err != nil || len(got) != 1 || got[0].Key != "a" || got[0].Revision == 0 {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
+func TestNATSBusStreamCacheDroppedWhenStreamGone(t *testing.T) {
+	ctx := context.Background()
+	bus, _ := newListTestBus(t, "bus_cache_test")
+	if _, err := bus.js.CreateStream(ctx, jetstream.StreamConfig{Name: "cache_s", Subjects: []string{"cache.>"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.LastResult(ctx, "cache_s", "cache.x"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.streams) != 1 {
+		t.Fatalf("stream not cached")
+	}
+	if err := bus.js.DeleteStream(ctx, "cache_s"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.LastResult(ctx, "cache_s", "cache.x"); err == nil {
+		t.Fatal("want error for deleted stream")
+	}
+	if len(bus.streams) != 0 {
+		t.Fatal("stale stream handle kept")
 	}
 }
