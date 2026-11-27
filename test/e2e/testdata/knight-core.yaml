@@ -16,8 +16,6 @@ spec:
   env:
     - name: OPENAI_BASE_URL
       value: http://stubllm.roundtable-core.svc:8080/v1
-    - name: OPENAI_API_KEY
-      value: stub-placeholder-not-a-key
   nats:
     url: nats://nats.database.svc:4222
     stream: core_tasks

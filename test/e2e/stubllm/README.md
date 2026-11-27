@@ -32,6 +32,11 @@ env:
 model: stubllm/e2e
 ```
 
+If `KNIGHT_MODEL_BASE_URL` is also set it takes precedence over `OPENAI_BASE_URL`
+and `OPENAI_API_BASE` (`localBaseUrlFromEnv` in `packages/pi-knight/src/model.ts`
+in roundtable-k8s/knights). No API key is needed: with no auth configured
+pi-knight sets a dummy runtime key itself.
+
 ## Build and run locally
 
 ```bash
@@ -47,5 +52,4 @@ curl -s localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
 go test ./test/e2e/stubllm/...
 ```
 
-The package sits under `test/e2e`, so `make test` (which excludes `/e2e`) does not
-run it.
+`make test` runs it; only the Ginkgo suite package `./test/e2e` is excluded.

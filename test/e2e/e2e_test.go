@@ -156,16 +156,7 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		// Let the operator reconcile for a minute, then scan its log (JSON
 		// lines from zap; error-level lines carry "level":"error").
 		time.Sleep(time.Minute)
-		out, err := utils.Run(exec.Command("kubectl", "logs", "deployment/"+coreOperator,
-			"-n", coreNamespace, "--since=5m"))
-		Expect(err).NotTo(HaveOccurred())
-		var errs []string
-		for _, line := range utils.GetNonEmptyLines(out) {
-			if strings.Contains(line, `"level":"error"`) || strings.Contains(line, "\tERROR\t") {
-				errs = append(errs, line)
-			}
-		}
-		Expect(errs).To(BeEmpty(), "operator logged errors:\n%s", strings.Join(errs, "\n"))
+		expectNoOperatorErrors("--since=5m")
 	})
 
 	It("gives a minimal Knight a Deployment with an available replica", func() {
@@ -229,4 +220,30 @@ var _ = Describe("Core install", Ordered, Label(tierCore), func() {
 		Expect(result.GetError()).To(BeEmpty(), "task failed")
 		Expect(result.GetOutput()).To(ContainSubstring(stubGreeting))
 	})
+
+	// The first scan runs before any Knight exists; scan again so errors the
+	// operator logs while reconciling the Knights fail the tier too.
+	It("logs no errors after the Knight specs", func() {
+		expectNoOperatorErrors("")
+	})
 })
+
+// expectNoOperatorErrors fails when the operator log holds an error-level line
+// (JSON from zap: "level":"error"; console: a tab-delimited ERROR). since is a
+// kubectl --since flag such as "--since=5m"; empty scans the whole log.
+func expectNoOperatorErrors(since string) {
+	GinkgoHelper()
+	args := []string{"logs", "deployment/" + coreOperator, "-n", coreNamespace}
+	if since != "" {
+		args = append(args, since)
+	}
+	out, err := utils.Run(exec.Command("kubectl", args...))
+	Expect(err).NotTo(HaveOccurred())
+	var errs []string
+	for _, line := range utils.GetNonEmptyLines(out) {
+		if strings.Contains(line, `"level":"error"`) || strings.Contains(line, "\tERROR\t") {
+			errs = append(errs, line)
+		}
+	}
+	Expect(errs).To(BeEmpty(), "operator logged errors:\n%s", strings.Join(errs, "\n"))
+}
