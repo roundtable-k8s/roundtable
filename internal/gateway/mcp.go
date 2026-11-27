@@ -59,6 +59,12 @@ type ListTasksOutput struct {
 	Tasks []*TaskRecord `json:"tasks"`
 }
 
+// GetDeadLetterInput is the input of the get_dead_letter tool.
+type GetDeadLetterInput struct {
+	TaskID string `json:"taskId" jsonschema:"taskId of the dead-lettered task (from list_dead_letters)"`
+	Table  string `json:"table,omitempty" jsonschema:"RoundTable of the entry; needed only when the task is dead-lettered in several"`
+}
+
 // ListDeadLettersOutput is the output of the list_dead_letters tool.
 type ListDeadLettersOutput struct {
 	DeadLetters []*DeadLetterView `json:"deadLetters"`
@@ -176,10 +182,23 @@ func NewMCPServer(svc *Service) *mcp.Server {
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "get_dead_letter",
+		Description: "Get one dead-lettered task with its state, failure reason and the original task payload (what was asked). " +
+			"Use it to inspect a dead letter from list_dead_letters before retrying it.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetDeadLetterInput) (*mcp.CallToolResult, *DeadLetterView, error) {
+		v, err := svc.GetDeadLetter(ctx, in.TaskID, in.Table)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, v, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "retry_task",
 		Description: "Retry an open dead-lettered task: republish it to the same knight as a new task with attempt number + 1, " +
-			"so the knight checks for partial work. Poll the returned taskId with get_task. A task already retried or resolved, " +
-			"or one owned by a chain (unless force is set), is refused.",
+			"so the knight checks for partial work. Inspect first with get_dead_letter. Poll the returned taskId with get_task. " +
+			"A task already retried or resolved, or one owned by a chain (unless force is set), is refused.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RetryRequest) (*mcp.CallToolResult, *RetryResult, error) {
 		res, err := svc.RetryDeadLetter(ctx, in)
 		if err != nil {
