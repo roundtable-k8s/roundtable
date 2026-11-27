@@ -59,7 +59,7 @@ func (r *ChainReconciler) handleCancel(ctx context.Context, chain *aiv1alpha1.Ch
 	}
 	r.cancelRun(ctx, chain, reason)
 	chain.Status.ObservedGeneration = chain.Generation
-	if err := r.Status().Update(ctx, chain); err != nil {
+	if err := writeStatus(ctx, r.Client, chain); err != nil {
 		if apierrors.IsConflict(err) {
 			return true, ctrl.Result{RequeueAfter: RequeueFast}, nil
 		}

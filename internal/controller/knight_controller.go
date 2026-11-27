@@ -199,6 +199,11 @@ const runtimeDeployment = "deployment"
 // +kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes;sandboxes/status,verbs=get;list;watch;create;update;patch;delete
 
 func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return quietConflict(ctx, res, err)
+}
+
+func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Count table-less knights (roundtable_knights{table="none"}); the
@@ -256,7 +261,7 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Set initial status
 	if knight.Status.Phase == "" {
 		knight.Status.Phase = aiv1alpha1.KnightPhaseProvisioning
-		if err := r.Status().Update(ctx, knight); err != nil {
+		if err := writeStatus(ctx, r.Client, knight); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -452,6 +457,9 @@ func (r *KnightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Update status based on reconciliation results
 	if err := r.updateStatus(ctx, knight, plan.Scaling, reconcileErr); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{}, err
+		}
 		log.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -640,7 +648,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 		knight.Status.Phase = aiv1alpha1.KnightPhaseDegraded
 		knight.Status.Ready = false
 		knight.Status.ObservedGeneration = knight.Generation
-		if err := r.Status().Update(ctx, knight); err != nil {
+		if err := writeStatus(ctx, r.Client, knight); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -691,7 +699,7 @@ func (r *KnightReconciler) reconcileSuspended(ctx context.Context, knight *aiv1a
 		ObservedGeneration: knight.Generation,
 	})
 	knight.Status.ObservedGeneration = knight.Generation
-	if err := r.Status().Update(ctx, knight); err != nil {
+	if err := writeStatus(ctx, r.Client, knight); err != nil {
 		return err
 	}
 
@@ -714,7 +722,7 @@ func (r *KnightReconciler) finishSuspended(ctx context.Context, knight *aiv1alph
 		ObservedGeneration: knight.Generation,
 	})
 	knight.Status.ObservedGeneration = knight.Generation
-	if err := r.Status().Update(ctx, knight); err != nil {
+	if err := writeStatus(ctx, r.Client, knight); err != nil {
 		return err
 	}
 	return nil
@@ -1205,7 +1213,7 @@ func (r *KnightReconciler) updateStatus(ctx context.Context, knight *aiv1alpha1.
 	knight.Status.NATSConsumer = consumerName
 	knight.Status.ObservedGeneration = knight.Generation
 
-	if err := r.Status().Update(ctx, knight); err != nil {
+	if err := writeStatus(ctx, r.Client, knight); err != nil {
 		return err
 	}
 	if observeWake {

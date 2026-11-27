@@ -126,6 +126,11 @@ const requeuePriority = 0
 
 // Reconcile runs one reconcile of a Chain and resets the requeue priority.
 func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return quietConflict(ctx, res, err)
+}
+
+func (r *ChainReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	return resetRequeuePriority(r.reconcileOnce(ctx, req))
 }
 
@@ -310,7 +315,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 // conflicts into a requeue instead of a reconcile error. On success the
 // result carries requeueAfter (zero means no requeue).
 func (r *ChainReconciler) updateStatus(ctx context.Context, chain *aiv1alpha1.Chain, requeueAfter time.Duration) (ctrl.Result, error) {
-	if err := r.Status().Update(ctx, chain); err != nil {
+	if err := writeStatus(ctx, r.Client, chain); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -500,7 +505,7 @@ func (r *ChainReconciler) startOrResumeRun(ctx context.Context, chain *aiv1alpha
 			})
 			r.Recorder.Eventf(chain, corev1.EventTypeWarning, "Failed", "Chain timed out after %ds", chain.Spec.TimeoutSeconds)
 			chain.Status.ObservedGeneration = chain.Generation
-			return nil, ctrl.Result{}, r.Status().Update(ctx, chain)
+			return nil, ctrl.Result{}, writeStatus(ctx, r.Client, chain)
 		}
 	}
 

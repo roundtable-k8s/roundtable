@@ -94,6 +94,11 @@ func (r *RoundTableReconciler) natsClient() (natspkg.Client, error) {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return quietConflict(ctx, res, err)
+}
+
+func (r *RoundTableReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	rt := &aiv1alpha1.RoundTable{}
@@ -137,7 +142,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			ObservedGeneration: rt.Generation,
 		})
 		rt.Status.ObservedGeneration = rt.Generation
-		if err := r.Status().Update(ctx, rt); err != nil {
+		if err := writeStatus(ctx, r.Client, rt); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: RequeueVerySlow}, nil
@@ -259,7 +264,7 @@ func (r *RoundTableReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Update Prometheus metrics
 	r.updateMetrics(ctx, rt, knights, totalCost)
 
-	if err := r.Status().Update(ctx, rt); err != nil {
+	if err := writeStatus(ctx, r.Client, rt); err != nil {
 		return ctrl.Result{}, err
 	}
 

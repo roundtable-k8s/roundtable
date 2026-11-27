@@ -1253,7 +1253,7 @@ func (r *TriggerReconciler) recordFiring(ctx context.Context, nn types.Namespace
 		if mutate != nil {
 			mutate(&trg.Status)
 		}
-		return r.Status().Update(ctx, trg)
+		return writeStatus(ctx, r.Client, trg)
 	})
 }
 

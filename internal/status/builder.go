@@ -90,7 +90,7 @@ func (u *MissionUpdate) Condition(typ, reason, msg string, status metav1.Conditi
 
 // Apply commits the status update to the API server.
 func (u *MissionUpdate) Apply(ctx context.Context, c client.Client) error {
-	return c.Status().Update(ctx, u.mission)
+	return Update(ctx, c, u.mission)
 }
 
 // ChainUpdate provides fluent status updates for Chain resources.
@@ -148,7 +148,7 @@ func (u *ChainUpdate) Condition(typ, reason, msg string, status metav1.Condition
 
 // Apply commits the status update to the API server.
 func (u *ChainUpdate) Apply(ctx context.Context, c client.Client) error {
-	return c.Status().Update(ctx, u.chain)
+	return Update(ctx, c, u.chain)
 }
 
 // KnightUpdate provides fluent status updates for Knight resources.
@@ -189,7 +189,7 @@ func (u *KnightUpdate) Condition(typ, reason, msg string, status metav1.Conditio
 
 // Apply commits the status update to the API server.
 func (u *KnightUpdate) Apply(ctx context.Context, c client.Client) error {
-	return c.Status().Update(ctx, u.knight)
+	return Update(ctx, c, u.knight)
 }
 
 // RoundTableUpdate provides fluent status updates for RoundTable resources.
@@ -223,5 +223,5 @@ func (u *RoundTableUpdate) Condition(typ, reason, msg string, status metav1.Cond
 
 // Apply commits the status update to the API server.
 func (u *RoundTableUpdate) Apply(ctx context.Context, c client.Client) error {
-	return c.Status().Update(ctx, u.roundTable)
+	return Update(ctx, c, u.roundTable)
 }
