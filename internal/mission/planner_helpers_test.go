@@ -111,12 +111,17 @@ func TestTemplatesOnlyGuard(t *testing.T) {
 		Name:          "k",
 		EphemeralSpec: &aiv1alpha1.KnightSpec{},
 		SpecOverrides: &aiv1alpha1.KnightSpecOverrides{
-			Env:   nil,
+			Env:   []corev1.EnvVar{{Name: "A", Value: "b"}},
 			Tools: &aiv1alpha1.KnightTools{},
 		},
 	}
 	if err := checkTemplatesOnly(other, everything); err != nil {
 		t.Errorf("checkTemplatesOnly(non-gateway) = %v, want nil", err)
+	}
+
+	// Env fires before tools, and the messages name only the arm that fired.
+	if err := checkTemplatesOnly(gateway, everything); err == nil || strings.Contains(err.Error(), "specOverrides.tools") {
+		t.Errorf("checkTemplatesOnly(everything) = %v, want the env error only", err)
 	}
 
 	tests := []struct {
@@ -128,12 +133,12 @@ func TestTemplatesOnlyGuard(t *testing.T) {
 		{
 			name:    "specOverrides.env rejected",
 			k:       PlannerKnight{Name: "k", SpecOverrides: &aiv1alpha1.KnightSpecOverrides{Env: []corev1.EnvVar{{Name: "A", Value: "b"}}}},
-			wantErr: "specOverrides.env",
+			wantErr: "specOverrides.env is not allowed",
 		},
 		{
 			name:    "specOverrides.tools rejected",
 			k:       PlannerKnight{Name: "k", SpecOverrides: &aiv1alpha1.KnightSpecOverrides{Tools: &aiv1alpha1.KnightTools{}}},
-			wantErr: "specOverrides.tools",
+			wantErr: "specOverrides.tools is not allowed",
 		},
 		{name: "templateName allowed", k: PlannerKnight{Name: "k", TemplateName: "base"}},
 		{

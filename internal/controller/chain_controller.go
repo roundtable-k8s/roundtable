@@ -126,7 +126,12 @@ const requeuePriority = 0
 
 // Reconcile runs one reconcile of a Chain and resets the requeue priority.
 func (r *ChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	res, err := r.reconcileOnce(ctx, req)
+	return resetRequeuePriority(r.reconcileOnce(ctx, req))
+}
+
+// resetRequeuePriority sets the requeue priority of a result that requeues
+// (or errors); shared by the Chain and Mission reconcilers.
+func resetRequeuePriority(res ctrl.Result, err error) (ctrl.Result, error) {
 	if err != nil || res.RequeueAfter > 0 || res.Requeue { //nolint:staticcheck // Requeue is still honoured by controller-runtime
 		p := requeuePriority
 		res.Priority = &p
