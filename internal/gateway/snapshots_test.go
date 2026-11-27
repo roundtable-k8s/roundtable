@@ -279,9 +279,15 @@ func TestSnapshotKnightWait(t *testing.T) {
 
 func TestSnapshotRouteDisabled(t *testing.T) {
 	e := newSnapEnv(t, false)
-	resp, _ := e.do(t, http.MethodPost, "/v1/knights/galahad/snapshot", testToken, nil)
-	if resp.StatusCode == http.StatusAccepted {
-		t.Error("snapshot served although disabled")
+	resp, body := e.do(t, http.MethodPost, "/v1/knights/galahad/snapshot", testToken, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("snapshot: status %d, want 403", resp.StatusCode)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "gateway.knightSnapshots.enabled=true") {
+		t.Errorf("snapshot: error = %v", body["error"])
+	}
+	if e.knight(t, "galahad").Annotations[aiv1alpha1.AnnotationKnightSnapshot] != "" {
+		t.Error("annotation set although disabled")
 	}
 	resp, _ = e.do(t, http.MethodGet, "/v1/knights/galahad/snapshots", testToken, nil)
 	if resp.StatusCode != http.StatusOK {
@@ -395,5 +401,23 @@ func TestWaitSnapshotEnds(t *testing.T) {
 				t.Errorf("early = %v, waited %s of %s", tc.early, took, wait)
 			}
 		})
+	}
+}
+
+func TestSnapshotMCPToolsDisabled(t *testing.T) {
+	e := newSnapEnv(t, false)
+	ctx := t.Context()
+	cs := connectMCP(ctx, t, e.server.URL)
+	defer func() { _ = cs.Close() }()
+	tools, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for _, tl := range tools.Tools {
+		have[tl.Name] = true
+	}
+	if !have["list_knight_snapshots"] || have["snapshot_knight"] {
+		t.Errorf("tools = %v, want list_knight_snapshots without snapshot_knight", have)
 	}
 }

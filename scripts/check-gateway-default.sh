@@ -2,7 +2,8 @@
 # Renders the chart and checks the gateway is on by default with a generated,
 # kept token Secret wired into the dashboard and the webhook endpoint with
 # get-only Secret access and the schedule endpoints with get, list, watch,
-# create, update, patch and delete on Triggers, and that a user-supplied Secret or
+# create, update, patch and delete on Triggers, no write verb on Knights unless
+# gateway.knightSnapshots.enabled=true, and that a user-supplied Secret or
 # gateway.enabled=false suppress the generated one.
 #
 # Usage: HELM=bin/helm scripts/check-gateway-default.sh
@@ -98,6 +99,39 @@ has "$sa" '--trigger-gateway-audience=other$' "trigger audience does not follow 
 ext="$(render --set gateway.enabled=false --set triggers.gatewayURL=https://gw.example)"
 has "$ext" '--trigger-gateway-url=https://gw.example$' "triggers.gatewayURL ignored"
 
+# Knight snapshots: off by default, so the gateway has no write verb on
+# Knights; opting in renders the -snapshots Role with get and patch.
+lacks "$def" 'name: rt-roundtable-operator-gateway-snapshots' "snapshot Role rendered by default"
+has "$def" '--knight-snapshots=false' "knight snapshots not disabled by default"
+# knight_writes prints "<role>: <verbs>" for each rule, in a Role or
+# ClusterRole bound to the gateway ServiceAccount, that covers knights.
+knight_writes() {
+  local roles
+  roles="$(awk 'BEGIN{RS="\n---\n"} /\nkind: (Cluster)?RoleBinding\n/ && /\n    name: rt-roundtable-operator-gateway\n    namespace: roundtable($|\n)/' <<<"$1" |
+    awk '/^roleRef:/{r=1} r && /^  name:/{print $2; r=0}' | sort -u)"
+  [ -n "$roles" ] || fail "no Role bound to the gateway ServiceAccount found"
+  awk -v roles=" $(tr '\n' ' ' <<<"$roles") " 'BEGIN{RS="\n---\n"}
+    /\nkind: (Cluster)?Role\n/ {
+      if (!match($0, /\n  name: [^\n]*/)) next
+      name = substr($0, RSTART + 9, RLENGTH - 9)
+      if (index(roles, " " name " ") == 0) next
+      n = split($0, rules, "\n  - ")
+      for (i = 2; i <= n; i++) if (rules[i] ~ /resources: \[[^]]*"knights"/ && match(rules[i], /verbs: \[[^]]*\]/))
+        print name ": " substr(rules[i], RSTART, RLENGTH)
+    }' <<<"$1"
+}
+def_knights="$(knight_writes "$def")"
+has "$def_knights" '"get"' "gateway lost read access to knights"
+lacks "$def_knights" '"\(create\|update\|patch\|delete\|deletecollection\|\*\)"' "default gateway Roles grant a write verb on knights: $def_knights"
+snap="$(render --set gateway.knightSnapshots.enabled=true)"
+has "$snap" '--knight-snapshots=true' "knight snapshots flag not passed when enabled"
+snap_role="$(awk 'BEGIN{RS="\n---\n"} /kind: Role\n/ && /name: rt-roundtable-operator-gateway-snapshots\n/' <<<"$snap")"
+has "$snap_role" 'resources: \["knights"\]' "snapshot Role missing or not on Knights"
+[ "$(grep 'verbs:' <<<"$snap_role")" = '    verbs: ["get","patch"]' ] || fail "snapshot Role must grant get and patch only"
+has "$(knight_writes "$snap")" 'gateway-snapshots: verbs: \["get","patch"\]' "snapshot Role not bound to the gateway"
+snapall="$(render --set gateway.knightSnapshots.enabled=true --set 'gateway.allowedNamespaces={*}')"
+has "$(knight_writes "$snapall")" 'gateway-snapshots: verbs: \["get","patch"\]' "snapshot ClusterRole missing with allowedNamespaces=*"
+lacks "$(knight_writes "$(render --set 'gateway.allowedNamespaces={*}')")" '"patch"' "patch on knights granted by default with allowedNamespaces=*"
 off="$(render --set gateway.enabled=false)"
 lacks "$off" '--trigger-gateway-url' "trigger gateway URL passed with the gateway disabled"
 # The operator still records knight-target Trigger tasks in the gateway's task

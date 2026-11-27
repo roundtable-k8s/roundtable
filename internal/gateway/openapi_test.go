@@ -142,8 +142,10 @@ func TestOpenAPIFeatureGroups(t *testing.T) {
 	if !slices.Contains(documented(t, roundTrip(t, withKnights(openAPIService(t, false, false, false)))), snapshotOp) {
 		t.Error("snapshot route missing with only knights enabled")
 	}
-	if slices.Contains(documented(t, roundTrip(t, openAPIService(t, true, true, true))), snapshotOp) {
-		t.Error("snapshot route documented without knights")
+	// The route is always served (403 when snapshots are off), so it is
+	// always documented.
+	if !slices.Contains(documented(t, roundTrip(t, openAPIService(t, true, true, true))), snapshotOp) {
+		t.Error("snapshot route missing without knights; it answers 403 and must be documented")
 	}
 	if has(roundTrip(t, openAPIService(t, true, false, false)), "/v1/runs") {
 		t.Error("runs documented with only missions enabled")

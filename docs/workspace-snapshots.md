@@ -171,6 +171,12 @@ An existing PVC is kept: to get a restored workspace, create a new knight (a for
 `GET /v1/knights/{name}/snapshots` (MCP: `list_knight_snapshots`) lists the snapshots and the
 `WorkspaceSnapshots` condition. See [Knight snapshots](gateway.md#knight-snapshots).
 
+Requesting a snapshot through the gateway needs the chart value
+`gateway.knightSnapshots.enabled=true` (default `false`), which gives the gateway
+`get` and `patch` on Knights. While it is off, the `POST` route answers `403` with
+an error naming the value and `snapshot_knight` is not listed; listing snapshots
+works either way, and the annotation can still be set with `kubectl`.
+
 ## Where each name comes from
 
 | Name | Defined in |

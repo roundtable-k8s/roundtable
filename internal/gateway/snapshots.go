@@ -39,8 +39,15 @@ import (
 // annotation the Knight controller already serves (docs/workspace-snapshots.md)
 // and reads status.workspace back.
 
-// SnapshotsEnabled reports whether the snapshot request endpoint is served.
+// SnapshotsEnabled reports whether snapshot requests are served. When off,
+// POST /v1/knights/{name}/snapshot answers 403 with snapshotsDisabledMessage
+// and the snapshot_knight tool is not listed.
 func (s *Service) SnapshotsEnabled() bool { return s.Knights != nil }
+
+// snapshotsDisabledMessage is the error a snapshot request gets when the
+// gateway runs without --knight-snapshots.
+const snapshotsDisabledMessage = "snapshot requests are disabled: the gateway was installed without " +
+	"gateway.knightSnapshots.enabled=true (--knight-snapshots)"
 
 // snapshotPatchRetries bounds re-reads after a write conflict.
 const snapshotPatchRetries = 5
@@ -285,6 +292,10 @@ func (s *Service) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSnapshotKnight(w http.ResponseWriter, r *http.Request) {
+	if !s.SnapshotsEnabled() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": snapshotsDisabledMessage})
+		return
+	}
 	wait, err := queryInt(r, "waitSeconds")
 	if err != nil {
 		writeError(w, err)

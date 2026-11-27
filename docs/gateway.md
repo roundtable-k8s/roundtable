@@ -492,8 +492,12 @@ Workspace snapshots of a knight (see [workspace-snapshots.md](workspace-snapshot
 can be listed and requested without `kubectl`. Taking one only sets the Knight
 annotation `ai.roundtable.io/snapshot` to a fresh value (unix nanoseconds) and
 records the caller in `ai.roundtable.io/snapshot-caller`; the operator does the
-rest. Taking one needs `gateway.knightSnapshots.enabled` (default true), which
-lets the gateway `get` and `patch` Knights.
+rest. Taking one needs `gateway.knightSnapshots.enabled=true` (default `false`,
+gateway flag `--knight-snapshots`), which lets the gateway `get` and `patch`
+Knights. While it is off, `POST /v1/knights/{name}/snapshot` answers `403` with
+an `error` saying the gateway was installed without
+`gateway.knightSnapshots.enabled=true`, and the `snapshot_knight` MCP tool is not
+listed. Listing snapshots is always served.
 
 #### `GET /v1/knights/{name}/snapshots?namespace=`
 
@@ -511,6 +515,7 @@ snapshot with its own clock, so confirm with the list.
 | Status | Meaning |
 |---|---|
 | `202` | Requested. A suspended knight answers with a `note`: the snapshot is taken when it resumes. |
+| `403` | Snapshot requests are off: the gateway was installed without `gateway.knightSnapshots.enabled=true`. |
 | `404` | Unknown knight. |
 | `409` | Another request came in during the same second (the snapshot name has second resolution); retry shortly. |
 | `422` | `workspace.mode` is `ephemeral`: only `pvc` workspaces can be snapshotted. |
@@ -1438,7 +1443,7 @@ The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:
 | `cancel_run` | `run`, `namespace?`, `reason?` | Cancels an unfinished run (see `POST /v1/runs/{namespace}/{run}/cancel`) and returns its record; a finished run is an error |
 | `list_runs` | `namespace?`, `chain?`, `phase?`, `source?`, `active?`, `issue?`, `limit?` | `{runs: [...]}`, the same filters and records as `GET /v1/runs` |
 | `list_knight_snapshots` | `name`, `namespace?` | The `GET /v1/knights/{name}/snapshots` answer |
-| `snapshot_knight` | `name`, `namespace?`, `waitSeconds?` | Requests a workspace snapshot (see `POST /v1/knights/{name}/snapshot`); listed when `gateway.knightSnapshots.enabled` is true |
+| `snapshot_knight` | `name`, `namespace?`, `waitSeconds?` | Requests a workspace snapshot (see `POST /v1/knights/{name}/snapshot`); listed only when `gateway.knightSnapshots.enabled` is true (default `false`); when off the REST route answers `403` |
 | `list_schedules` | `namespace?`, `table?` | `{schedules: [...]}`: the same list as `GET /v1/schedules` |
 | `get_schedule` | `name`, `namespace?` | The schedule projection |
 | `schedule_next_runs` | `name`, `namespace?` or `cron`, `timeZone?`; `count?` | The same as `GET .../next` or `GET /v1/schedules/preview`: the next fire times (cron ticks only) |

@@ -518,9 +518,11 @@ gateway:
   # POST /v1/knights/<name>/snapshot, which takes a workspace snapshot of a
   # knight (docs/workspace-snapshots.md) by setting its ai.roundtable.io/snapshot
   # annotation. When enabled, the gateway may get and patch Knights in its
-  # namespace and allowedNamespaces. Listing snapshots needs no extra RBAC.
+  # namespace and allowedNamespaces. Off by default (it is a write verb on
+  # Knights): the route then answers 403 and the snapshot_knight MCP tool is
+  # not listed. Listing snapshots needs no extra RBAC and is always served.
   knightSnapshots:
-    enabled: true
+    enabled: false
   # Webhook Triggers (POST /v1/hooks/<namespace>/<trigger>, see
   # docs/triggers.md). Outside the bearer-token auth: each delivery must carry
   # the Trigger's own bearer token or HMAC signature, from a Secret in the

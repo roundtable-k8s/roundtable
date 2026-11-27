@@ -205,11 +205,11 @@ var openAPIOperations = map[string]obj{
 	},
 	"POST /v1/knights/{name}/snapshot": {
 		"summary": "Take a workspace snapshot of a knight", "tags": []any{"knights"},
-		"description": "Sets the ai.roundtable.io/snapshot annotation to a fresh value; the operator takes a VolumeSnapshot named <knight>-ws-<unix seconds>. 409 for a second request within the same second, 422 for an ephemeral workspace. A suspended knight answers 202 with a note: the snapshot runs on resume. With waitSeconds the call waits (capped) until the snapshot is readyToUse.",
+		"description": "Sets the ai.roundtable.io/snapshot annotation to a fresh value; the operator takes a VolumeSnapshot named <knight>-ws-<unix seconds>. 409 for a second request within the same second, 422 for an ephemeral workspace. A suspended knight answers 202 with a note: the snapshot runs on resume. With waitSeconds the call waits (capped) until the snapshot is readyToUse. 403 when the gateway was installed without gateway.knightSnapshots.enabled=true.",
 		"parameters": []any{pathParam("name", "Knight name."), queryParam("namespace", "Knight namespace; omit for the gateway's default."),
 			queryInteger("waitSeconds", "Seconds to wait for the snapshot to be readyToUse (default 0).")},
 		"responses": errs(obj{"202": jsonResp("Snapshot requested.", schemaRef("SnapshotRequest"))},
-			"400", "401", "404", "409", "422", "503"),
+			"400", "401", "403", "404", "409", "422", "503"),
 	},
 	"POST /v1/knights/{name}/invoke": {
 		"summary": "Invoke a knight and wait for the answer", "tags": []any{"tasks"},
