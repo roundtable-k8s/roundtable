@@ -69,8 +69,9 @@ type ChainReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// conflictWarned holds, per Chain UID, the generation a
-	// ScheduleTriggerConflict event was last recorded for.
+	// conflictWarned holds, per Chain (types.NamespacedName), the generation a
+	// ScheduleTriggerConflict event was last recorded for. Entries are dropped
+	// when the Chain is gone, has no schedule or leaves trigger mode.
 	conflictWarned sync.Map
 
 	NATS   *natspkg.Provider
@@ -152,6 +153,7 @@ func (r *ChainReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (
 		if client.IgnoreNotFound(err) == nil {
 			// Chain is gone — make sure no cron entry outlives it.
 			r.removeCronEntry(req.NamespacedName)
+			r.conflictWarned.Delete(req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err

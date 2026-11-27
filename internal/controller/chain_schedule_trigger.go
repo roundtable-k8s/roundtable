@@ -118,7 +118,8 @@ func (r *ChainReconciler) reconcileScheduleTrigger(ctx context.Context, chain *a
 	trg, err := r.ensureScheduleTrigger(ctx, chain)
 	if err != nil || trg == nil {
 		if trg == nil && err == nil {
-			// A Trigger of that name exists but is not ours: leave it alone.
+			// Either a Trigger of that name exists but is not ours, or ours is
+			// being deleted: leave it alone in both cases.
 			return setNextScheduledAt(chain, nil), nil
 		}
 		return false, err
@@ -136,7 +137,8 @@ func (r *ChainReconciler) reconcileScheduleTrigger(ctx context.Context, chain *a
 
 // ensureScheduleTrigger creates or updates the Chain's schedule Trigger. It
 // returns nil, nil when a Trigger of that name exists that the Chain does not
-// control (a Warning event says so).
+// control (a Warning event says so) and when the Chain's own Trigger is being
+// deleted (it is left alone until it is gone, then recreated).
 func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1alpha1.Chain) (*aiv1alpha1.Trigger, error) {
 	log := logf.FromContext(ctx)
 	name := chainScheduleTriggerName(chain)
@@ -166,17 +168,18 @@ func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1
 	if err != nil {
 		return nil, err
 	}
+	key := client.ObjectKeyFromObject(chain)
 	if !metav1.IsControlledBy(trg, chain) {
 		// Warn once per Chain generation: reconciles that follow without a
 		// spec change would only repeat the event.
-		if last, ok := r.conflictWarned.Load(chain.UID); !ok || last != chain.Generation {
-			r.conflictWarned.Store(chain.UID, chain.Generation)
+		if last, ok := r.conflictWarned.Load(key); !ok || last != chain.Generation {
+			r.conflictWarned.Store(key, chain.Generation)
 			r.event(chain, corev1.EventTypeWarning, "ScheduleTriggerConflict",
 				"Trigger %s exists and is not controlled by this Chain; spec.schedule is not run. Rename or delete that Trigger", name)
 		}
 		return nil, nil
 	}
-	r.conflictWarned.Delete(chain.UID)
+	r.conflictWarned.Delete(key)
 	if !trg.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
@@ -198,6 +201,9 @@ func (r *ChainReconciler) ensureScheduleTrigger(ctx context.Context, chain *aiv1
 // deleteScheduleTrigger deletes the Chain's schedule Trigger if the Chain
 // controls it; a Trigger of that name it does not control is left alone.
 func (r *ChainReconciler) deleteScheduleTrigger(ctx context.Context, chain *aiv1alpha1.Chain) error {
+	// Callers reach here when the Chain has no schedule or is not in trigger
+	// mode, so a recorded conflict warning no longer applies.
+	r.conflictWarned.Delete(client.ObjectKeyFromObject(chain))
 	trg := &aiv1alpha1.Trigger{}
 	name := chainScheduleTriggerName(chain)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: chain.Namespace, Name: name}, trg); err != nil {

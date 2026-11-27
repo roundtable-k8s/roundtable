@@ -93,6 +93,14 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		mut(&c.Spec)
 		Expect(k8sClient.Update(ctx, c)).To(Succeed())
 	}
+	conflicts := func(evs []string) (n int) {
+		for _, e := range evs {
+			if strings.Contains(e, "ScheduleTriggerConflict") {
+				n++
+			}
+		}
+		return n
+	}
 	deadline := int64(600)
 	create := func() {
 		Expect(k8sClient.Create(ctx, &aiv1alpha1.Chain{
@@ -158,6 +166,12 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 			c.Finalizers = nil
 			_ = k8sClient.Update(ctx, c)
 			_ = k8sClient.Delete(ctx, c)
+		}
+		// Release any test finalizer first, so a failed expectation in a spec
+		// cannot leave the Trigger stuck in deletion.
+		if t := (&aiv1alpha1.Trigger{}); k8sClient.Get(ctx, trgNN, t) == nil && len(t.Finalizers) > 0 {
+			t.Finalizers = nil
+			_ = k8sClient.Update(ctx, t)
 		}
 		_ = k8sClient.Delete(ctx, &aiv1alpha1.Trigger{ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: namespace}})
 		Eventually(triggerGone).Should(BeTrue())
@@ -251,9 +265,6 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(got.DeletionTimestamp.IsZero()).To(BeFalse())
 		Expect(got.Spec.Source.Schedule.Cron).To(Equal("0 7 * * 1-5"))
 
-		// Release it so AfterEach sees it gone.
-		got.Finalizers = nil
-		Expect(k8sClient.Update(ctx, got)).To(Succeed())
 	})
 
 	It("deletes the Trigger when spec.schedule is cleared", func() {
@@ -316,18 +327,20 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(trg.Spec.Source.Schedule.Cron).To(Equal("0 12 * * *"))
 		Expect(trg.Spec.Target.ChainRef.Name).To(Equal("other"))
 		// create() reconciled three times; the clash is reported once.
-		conflicts := func(evs []string) (n int) {
-			for _, e := range evs {
-				if strings.Contains(e, "ScheduleTriggerConflict") {
-					n++
-				}
-			}
-			return n
-		}
 		Expect(conflicts(events())).To(Equal(1))
 		reconcileN(2)
 		Expect(conflicts(events())).To(BeZero())
 		Expect(r.cronEntries).NotTo(HaveKey(nn.String()))
+		last, ok := r.conflictWarned.Load(nn)
+		Expect(ok).To(BeTrue())
+		Expect(last).To(Equal(getChain().Generation))
+
+		// A generation bump re-emits the warning once; a repeat does not.
+		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Input = "changed" })
+		reconcileN(1)
+		Expect(conflicts(events())).To(Equal(1))
+		reconcileN(2)
+		Expect(conflicts(events())).To(BeZero())
 
 		// Clearing the schedule, switching to inprocess or deleting the Chain
 		// never deletes it.
@@ -338,5 +351,43 @@ var _ = Describe("Chain schedule through an owned Trigger", func() {
 		Expect(k8sClient.Delete(ctx, getChain())).To(Succeed())
 		reconcileN(1)
 		Expect(triggerGone()).To(BeFalse())
+		// ...and each of those forgets the recorded warning.
+		_, ok = r.conflictWarned.Load(nn)
+		Expect(ok).To(BeFalse())
+	})
+
+	It("forgets the conflict warning when the schedule is cleared, the mode changes or the Chain goes", func() {
+		foreign := &aiv1alpha1.Trigger{
+			ObjectMeta: metav1.ObjectMeta{Name: trgName, Namespace: namespace},
+			Spec: aiv1alpha1.TriggerSpec{
+				Source: aiv1alpha1.TriggerSource{Schedule: &aiv1alpha1.TriggerScheduleSource{Cron: "0 12 * * *"}},
+				Target: aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: "other"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, foreign)).To(Succeed())
+		create()
+		warned := func() bool { _, ok := r.conflictWarned.Load(nn); return ok }
+		Expect(warned()).To(BeTrue())
+
+		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Schedule = "" })
+		reconcileN(1)
+		Expect(warned()).To(BeFalse())
+
+		updateSpec(func(s *aiv1alpha1.ChainSpec) { s.Schedule = "0 7 * * 1-5" })
+		reconcileN(1)
+		Expect(warned()).To(BeTrue())
+		r.ScheduleMode = ChainScheduleModeInProcess
+		reconcileN(1)
+		Expect(warned()).To(BeFalse())
+
+		r.ScheduleMode = ChainScheduleModeTrigger
+		reconcileN(1)
+		Expect(warned()).To(BeTrue())
+		c := getChain()
+		c.Finalizers = nil
+		Expect(k8sClient.Update(ctx, c)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, c)).To(Succeed())
+		reconcileN(1)
+		Expect(warned()).To(BeFalse())
 	})
 })
