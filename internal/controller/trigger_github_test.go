@@ -564,43 +564,6 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(keys).To(ConsistOf("acme/widgets#1", "acme/widgets#2"))
 	})
 
-	It("shares the total cap across repositories with fairShare", func() {
-		addTo := func(r string, n int) {
-			gh.mu.Lock()
-			defer gh.mu.Unlock()
-			gh.items[r] = append(gh.items[r], &triggerGitHubItem{number: n, title: "item", author: "alice", labels: []string{"rt:ready"}})
-		}
-		for n := 1; n <= 3; n++ {
-			addTo("acme/widgets", n)
-		}
-		addTo("acme/gadgets", 7)
-		repoKeys := func(name string) []string {
-			runs := runsOf(name)
-			keys := make([]string, 0, len(runs))
-			for _, c := range runs {
-				keys = append(keys, c.Annotations[aiv1alpha1.AnnotationTriggerKey])
-			}
-			return keys
-		}
-		githubTrigger("unfair", func(s *aiv1alpha1.TriggerSpec) {
-			s.Source.GitHub.Repositories = []string{"acme/widgets", "acme/gadgets"}
-			s.Concurrency.MaxActive = 2
-		})
-		poll("unfair")
-		Eventually(func() []string { return repoKeys("unfair") }, 10*time.Second, 100*time.Millisecond).
-			Should(ConsistOf("acme/widgets#1", "acme/widgets#2"))
-
-		githubTrigger("fair", func(s *aiv1alpha1.TriggerSpec) {
-			// An empty repository first must not waste a pass.
-			s.Source.GitHub.Repositories = []string{"acme/empty", "acme/widgets", "acme/gadgets"}
-			s.Source.GitHub.FairShare = true
-			s.Concurrency.MaxActive = 2
-		})
-		poll("fair")
-		Eventually(func() []string { return repoKeys("fair") }, 10*time.Second, 100*time.Millisecond).
-			Should(ConsistOf("acme/widgets#1", "acme/gadgets#7"))
-	})
-
 	It("reports a repository held by a breaking pull request and clears it when the pull request closes", func() {
 		gh.add(&triggerGitHubItem{number: 1, title: "item", author: "alice", labels: []string{"rt:ready"}})
 		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
@@ -645,6 +608,86 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerNoHold))
 		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHeldItems)).To(BeZero())
 		Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(BeZero())
+	})
+
+	It("drops hold state when the label is removed, the Trigger is suspended or the repository is removed", func() {
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held2", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held2") })
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("held2").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		update := func(mutate func(*aiv1alpha1.Trigger)) {
+			t := getTrigger("held2")
+			mutate(t)
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+		}
+		hold := func() {
+			poll("held2")
+			Expect(heldCond().Status).To(Equal(metav1.ConditionTrue))
+			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(Equal(1))
+		}
+		cleared := func() {
+			Expect(heldCond().Status).To(Equal(metav1.ConditionFalse))
+			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHeldItems)).To(BeZero())
+			Expect(testutil.CollectAndCount(metrics.TriggerGitHubHoldStartedTimestampSeconds)).To(BeZero())
+		}
+
+		hold()
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.HoldWhilePullRequestLabeled = "" })
+		poll("held2")
+		cleared()
+
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.HoldWhilePullRequestLabeled = "breaking" })
+		hold()
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = true })
+		poll("held2")
+		cleared()
+
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = false })
+		hold()
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.Repositories = []string{"acme/other"} })
+		poll("held2")
+		cleared()
+	})
+
+	It("shares the total cap across repositories with fairShare", func() {
+		addTo := func(r string, n int) {
+			gh.mu.Lock()
+			defer gh.mu.Unlock()
+			gh.items[r] = append(gh.items[r], &triggerGitHubItem{number: n, title: "item", author: "alice", labels: []string{"rt:ready"}})
+		}
+		for n := 1; n <= 3; n++ {
+			addTo("acme/widgets", n)
+		}
+		addTo("acme/gadgets", 7)
+		repoKeys := func(name string) []string {
+			runs := runsOf(name)
+			keys := make([]string, 0, len(runs))
+			for _, c := range runs {
+				keys = append(keys, c.Annotations[aiv1alpha1.AnnotationTriggerKey])
+			}
+			return keys
+		}
+		githubTrigger("unfair", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.Repositories = []string{"acme/widgets", "acme/gadgets"}
+			s.Concurrency.MaxActive = 2
+		})
+		poll("unfair")
+		Eventually(func() []string { return repoKeys("unfair") }, 10*time.Second, 100*time.Millisecond).
+			Should(ConsistOf("acme/widgets#1", "acme/widgets#2"))
+
+		githubTrigger("fair", func(s *aiv1alpha1.TriggerSpec) {
+			// An empty repository first must not waste a pass.
+			s.Source.GitHub.Repositories = []string{"acme/empty", "acme/widgets", "acme/gadgets"}
+			s.Source.GitHub.FairShare = true
+			s.Concurrency.MaxActive = 2
+		})
+		poll("fair")
+		Eventually(func() []string { return repoKeys("fair") }, 10*time.Second, 100*time.Millisecond).
+			Should(ConsistOf("acme/widgets#1", "acme/gadgets#7"))
 	})
 
 	It("selects pull requests with kind pullRequest", func() {

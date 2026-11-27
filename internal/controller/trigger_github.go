@@ -445,6 +445,10 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 	}
 	src := trg.Spec.Source.GitHub
 	if src == nil || trg.Suspended() || !trg.DeletionTimestamp.IsZero() {
+		if src != nil && trg.DeletionTimestamp.IsZero() {
+			// Suspended: polling stops, so the hold no longer applies.
+			r.recordRepositoryHolds(ctx, trg, nil, nil, nil, nil, r.now())
+		}
 		return triggerGitHubDefaultInterval
 	}
 	interval := githubPollInterval(src)
@@ -507,6 +511,21 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 		prHeldBy                                 = map[string]int{}
 		prHoldUnknown                            = map[string]bool{}
 	)
+	// The hold is checked every poll for every repository, whatever its
+	// candidates or whether its item listing worked, so the RepositoryHeld
+	// condition and gauges follow the pull requests alone.
+	if label := src.HoldWhilePullRequestLabeled; label != "" {
+		for _, repo := range src.Repositories {
+			hold, err := breakingHold(ctx, gh, repo, label)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("list %s pull requests in %s: %v", label, repo, err))
+				hold = "could not list " + label + " pull requests"
+				prHoldUnknown[repo] = true
+			}
+			prHolds[repo] = hold
+		}
+	}
+	prHeldEvent := map[string]bool{}
 	stateSource := githubStateSource(src)
 	feedbackTable := prFeedbackTable(trg)
 	// Default: one repository after the other, listed lazily. fairShare:
@@ -538,17 +557,6 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 			return nil, 0, false
 		}
 		problems = append(problems, repoProblems...)
-		if label := src.HoldWhilePullRequestLabeled; label != "" {
-			hold, err := breakingHold(ctx, gh, repo, label)
-			if err != nil {
-				problems = append(problems, fmt.Sprintf("list %s pull requests in %s: %v", label, repo, err))
-				hold = "could not list " + label + " pull requests"
-				prHoldUnknown[repo] = true
-			} else if hold != "" && len(candidates) > 0 {
-				r.event(trg, corev1.EventTypeNormal, "Held", "%s: new items held, open %s pull request(s): %s", repo, label, hold)
-			}
-			prHolds[repo] = hold
-		}
 		return candidates, 0, false
 	}
 	if src.FairShare {
@@ -653,6 +661,10 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 				if src.HoldWhilePullRequestLabeled != "" && prHolds[repo] != "" {
 					prHeld++
 					prHeldBy[repo]++
+					if !prHeldEvent[repo] && !prHoldUnknown[repo] {
+						prHeldEvent[repo] = true
+						r.event(trg, corev1.EventTypeNormal, "Held", "%s: new items held, open %s pull request(s): %s", repo, src.HoldWhilePullRequestLabeled, prHolds[repo])
+					}
 					continue
 				}
 				if feedbackTable != "" {
@@ -677,9 +689,11 @@ func (r *TriggerReconciler) pollGitHub(ctx context.Context, nn types.NamespacedN
 		}
 	}
 
-	if src.HoldWhilePullRequestLabeled != "" {
-		r.recordRepositoryHolds(ctx, trg, src.Repositories, prHolds, prHeldBy, prHoldUnknown, now)
+	holdRepos := src.Repositories
+	if src.HoldWhilePullRequestLabeled == "" {
+		holdRepos = nil // no hold configured: drop any state left from one
 	}
+	r.recordRepositoryHolds(ctx, trg, holdRepos, prHolds, prHeldBy, prHoldUnknown, now)
 
 	msg := fmt.Sprintf("%d matching %s(s) in %d repositories: %d published, %d claim retries, %d held back by concurrency",
 		matched, githubKindNoun(src.Kind), len(src.Repositories), published, claims, held)
@@ -935,6 +949,22 @@ func holdKey(namespace, name, repo string) string { return namespace + "/" + nam
 // requests could not be listed keeps its previous state.
 func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1alpha1.Trigger, repos []string, holds map[string]string, heldBy map[string]int, unknown map[string]bool, now time.Time) {
 	var lines []string
+	// Series of repositories no longer listed (or of a Trigger whose hold
+	// label was removed or that is suspended) are dropped.
+	listed := make(map[string]bool, len(repos))
+	for _, repo := range repos {
+		listed[repo] = true
+	}
+	prefix := holdKey(trg.Namespace, trg.Name, "")
+	r.holdSince.Range(func(k, _ any) bool {
+		if key := k.(string); strings.HasPrefix(key, prefix) && !listed[strings.TrimPrefix(key, prefix)] {
+			r.holdSince.Delete(key)
+			labels := prometheus.Labels{"namespace": trg.Namespace, "trigger": trg.Name, "repository": strings.TrimPrefix(key, prefix)}
+			metrics.TriggerGitHubHeldItems.Delete(labels)
+			metrics.TriggerGitHubHoldStartedTimestampSeconds.Delete(labels)
+		}
+		return true
+	})
 	for _, repo := range repos {
 		key := holdKey(trg.Namespace, trg.Name, repo)
 		labels := prometheus.Labels{"namespace": trg.Namespace, "trigger": trg.Name, "repository": repo}
@@ -971,7 +1001,7 @@ func (r *TriggerReconciler) recordRepositoryHolds(ctx context.Context, trg *aiv1
 		if err := r.reader().Get(ctx, types.NamespacedName{Namespace: trg.Namespace, Name: trg.Name}, cur); err != nil {
 			return err
 		}
-		if cur.Spec.Source.GitHub == nil || cur.Suspended() {
+		if cur.Spec.Source.GitHub == nil {
 			return nil
 		}
 		old := meta.FindStatusCondition(cur.Status.Conditions, cond.Type)
