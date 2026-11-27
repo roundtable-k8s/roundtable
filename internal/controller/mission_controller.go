@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -691,6 +692,13 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 		return ctrl.Result{}, err
 	}
 
+	// The budget check already read every chain; remember what it saw so the
+	// breakdown below is only recomputed when the chain statuses changed.
+	var aggregatedFrom []aiv1alpha1.MissionChainStatus
+	if err == nil && budget.Aggregated {
+		aggregatedFrom = append(aggregatedFrom, mission.Status.ChainStatuses...)
+	}
+
 	// Create Chain CRs for any referenced chains that don't exist yet
 	if len(mission.Spec.Chains) > 0 {
 		allChainsComplete, anyChainFailed, err := r.Chains.ReconcileChains(ctx, mission)
@@ -702,8 +710,12 @@ func (r *MissionReconciler) reconcileActive(ctx context.Context, mission *aiv1al
 		// Expose the chains' cost and tokens on the mission.
 		missionpkg.ApplyChainUsage(mission)
 		// Per-knight cost breakdown, with or without a budget.
-		if _, err := r.CostTracker.AggregateMissionCost(ctx, mission); err != nil {
-			log.Error(err, "Failed to aggregate mission cost breakdown")
+		// ReconcileChains may have changed the chain statuses since the budget
+		// check; reuse its breakdown only when it did not.
+		if aggregatedFrom == nil || !apiequality.Semantic.DeepEqual(aggregatedFrom, mission.Status.ChainStatuses) {
+			if _, err := r.CostTracker.AggregateMissionCost(ctx, mission); err != nil {
+				log.Error(err, "Failed to aggregate mission cost breakdown")
+			}
 		}
 
 		// FIX #2: Guard transition to terminal state - ensure all chains in status.chainStatuses
