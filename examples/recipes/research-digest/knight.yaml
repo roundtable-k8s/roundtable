@@ -1,4 +1,5 @@
-# The research-digest persona knight: no cluster access, no tools, egress to
+# The research-digest persona knight: no RBAC beyond the namespace default
+# ServiceAccount, no tools, egress to
 # three feed hosts only, and a small persistent memory volume. See README.md
 # for what it may and may not do.
 apiVersion: ai.roundtable.io/v1alpha1

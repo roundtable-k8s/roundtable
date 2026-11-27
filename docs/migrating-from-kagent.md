@@ -234,8 +234,9 @@ and [See and control schedules](scheduled-work.md#see-and-control-schedules).
    `OUTPUT_DIR=/vault/Reports/nightly-new python3 job.py --file answers.json`.
    Leave the old cron job running.
 2. Let both run for 3 to 7 runs, then compare them with the arsenal `shared`
-   skill `side-by-side`: `compare-outputs <old-dir> <new-dir>` prints one line
-   per day for the last N days (same days written or not). The skill checks
+   skill `side-by-side`: `bash /skills/shared/side-by-side/scripts/compare-outputs <old-dir> <new-dir>`
+   prints one line per day for the last N days (`--days N`, default 7; `--diff DATE` shows the
+   content diff for one day) (same days written or not). The skill checks
    the days, not the content, so the owner still reads a few days by hand:
    same items, differences you can explain. Check `status.recentFirings` for
    failed or skipped firings.
@@ -402,7 +403,7 @@ For a cron job (a scheduled knight):
 3. Add the Trigger: the task names the skill and both commands, and says to end
    with `Outcome: failed <reason>` when `--file` rejects the answer.
 4. Run side by side for 3 to 7 runs into the separate folder; compare with
-   `compare-outputs <old-dir> <new-dir>` (arsenal `shared/side-by-side`) and
+   `bash /skills/shared/side-by-side/scripts/compare-outputs <old-dir> <new-dir>` (arsenal `shared/side-by-side`; `--days N`, `--diff DATE`) and
    read a few days of content yourself.
 5. Cut over: suspend the old cron job first (in Git if Flux or Helm manages
    it), then switch the folder (keep paths other jobs link to), and delete the

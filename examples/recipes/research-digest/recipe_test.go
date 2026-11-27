@@ -125,8 +125,13 @@ func TestKnightIsolation(t *testing.T) {
 	if err := yaml.Unmarshal(data, &knight); err != nil {
 		t.Fatal(err)
 	}
-	if len(knight.Spec.Egress.AllowedHosts) != 3 {
-		t.Errorf("allowedHosts = %v, want 3 hosts", knight.Spec.Egress.AllowedHosts)
+	if len(knight.Spec.Egress.AllowedHosts) == 0 {
+		t.Error("spec.egress.allowedHosts is empty")
+	}
+	for _, h := range knight.Spec.Egress.AllowedHosts {
+		if strings.Trim(h, "*.") == "" {
+			t.Errorf("allowedHosts entry %q is a wildcard-only entry", h)
+		}
 	}
 	if knight.Spec.Memory == nil {
 		t.Error("spec.memory is not set")

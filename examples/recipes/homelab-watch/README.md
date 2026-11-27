@@ -120,7 +120,9 @@ May:
   on most namespaced resources, so it can run `kubectl get`, `describe`,
   `logs` and read events.
 - Talk to NATS, its model provider and the Kubernetes API (the baseline). The
-  manifest sets no `spec.egress`, so there are no extra hosts; `kubectl` and
+  manifest sets no `spec.egress`, so there are no extra hosts as long as the
+  RoundTable sets no `defaults.egress` (the knight inherits the table
+  allowlist); `kubectl` and
   `stern` come from `spec.tools.nix` and need no egress at pod start.
 - Write a finding as the chain's output.
 

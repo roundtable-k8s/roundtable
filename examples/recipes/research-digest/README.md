@@ -20,7 +20,7 @@ Knight digest-reader (isolated, egress to 3 feed hosts, memory)
 
 | File | What |
 |---|---|
-| [`knight.yaml`](knight.yaml) | The `digest-reader` Knight: `spec.egress.allowedHosts`, `spec.memory`, no ServiceAccount |
+| [`knight.yaml`](knight.yaml) | The `digest-reader` Knight: `spec.egress.allowedHosts`, `spec.memory`, no RBAC beyond the namespace default ServiceAccount |
 | [`trigger.yaml`](trigger.yaml) | The schedule Trigger: weekly `cron`, `startingDeadlineSeconds`, `Forbid`, one task, `timeoutSeconds` |
 | [`skill/research-digest/`](skill/research-digest/) | The skill: `SKILL.md`, `scripts/seen`, `tests/run.sh` |
 
@@ -72,7 +72,7 @@ An OCI arsenal works too; see the
 ## Fire it once now
 
 ```bash
-GW=http://roundtable-operator-gateway.roundtable.svc:8080
+GW=http://roundtable-operator-gateway.roundtable.svc:80
 AUTH="Authorization: Bearer $(cat /var/run/secrets/roundtable/gateway/token)"
 curl -s -X POST -H "$AUTH" "$GW/v1/schedules/roundtable/research-digest/run"
 
@@ -110,9 +110,10 @@ line must be the last non-empty line.
   policy; see [`docs/egress.md`](../../../docs/egress.md). Replace them with
   your feeds.
 - May write only to its memory directory `/memory/digest-reader`
-  (`seen.txt`, `digests/`) and its own workspace. It has no ServiceAccount
-  and no tools beyond the image's, so no cluster access and no write access
-  elsewhere. The memory volume is the only thing that persists between runs.
+  (`seen.txt`, `digests/`) and its own workspace. It has no RBAC beyond the
+  namespace `default` ServiceAccount (its token is mounted, but grants
+  nothing) and no tools beyond the image's, so no cluster access and no write
+  access elsewhere. The memory volume is the only thing that persists between runs.
 - May not reach other hosts, change the cluster, send the digest anywhere
   (mail, chat), or follow instructions found in feeds and pages. That last one
   is a prompt rule, not a limit: a hostile feed can still make the digest

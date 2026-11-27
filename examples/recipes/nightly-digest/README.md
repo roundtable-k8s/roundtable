@@ -134,10 +134,12 @@ kubectl -n roundtable get trigger nightly-digest -o jsonpath='{.status.recentFir
 
 `runs` lists each firing with its `outcome` and the run ID in `run` (for a
 knight target, the task ID); the result is the knight's answer, ending in the
-last line `file` printed. Fetch it with the schedule's run endpoint:
+last line `file` printed. A skipped firing has an empty `run`, so the command lists 20 firings and takes
+the first with a non-empty one. Fetch the result with the schedule's run
+endpoint:
 
 ```bash
-run=$(curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs?limit=1" | jq -r '[.runs[] | select(.run != "")][0].run')
+run=$(curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs?limit=20" | jq -r '[.runs[] | select(.run != "")][0].run')
 curl -s -H "$AUTH" "$GW/v1/schedules/roundtable/nightly-digest/runs/$run" | jq -r '.task.output'
 ```
 

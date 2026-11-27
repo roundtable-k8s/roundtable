@@ -21,6 +21,8 @@ awk -v known="$file" 'FILENAME == known { seen[$0]=1; next }
      { sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") }
      $0 != "" && !($0 in seen) { seen[$0]=1; print }' "$file" - >"$tmp.new"
 
-cat "$file" "$tmp.new" >"$tmp"
+# sed appends a missing final newline so two URLs never merge.
+sed -e '$a\' "$file" >"$tmp"
+cat "$tmp.new" >>"$tmp"
 mv "$tmp" "$file" # atomic: same directory, so same filesystem
 cat "$tmp.new"
