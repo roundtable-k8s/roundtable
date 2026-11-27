@@ -135,7 +135,7 @@ needs nothing else: see [dependencies.md](dependencies.md) for the optional add-
 
 Annotate the Chain with `ai.roundtable.io/run`, using the command in [step 4](#4-run-the-chain).
 Any value works, and it starts a **new run** (new `runId`, all steps reset) whenever the value
-differs from `status.lastRunTrigger`:
+differs from `status.lastRunTrigger`.
 
 Re-applying the same value never re-triggers. If a run is still in flight the trigger waits
 and fires when it finishes. Changing `spec.input` never resumes an old run either; it resets

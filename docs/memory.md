@@ -186,9 +186,6 @@ Memory consolidation (a "dream" pass that tidies and summarises what a knight
 has written) needs no code. Schedule a Chain step that asks the knight to
 tidy its own memory:
 
-The step below tidies the vault layout. On a shared claim the same task can
-name `/memory/researcher` instead, the knight's own directory.
-
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
 kind: Chain
@@ -206,6 +203,9 @@ spec:
       task: "Review Memory/researcher/ in the vault. Merge duplicate notes, drop stale facts, and write a short index at Memory/researcher/INDEX.md. Touch only your own directory."
       timeoutSeconds: 540
 ```
+
+The step above tidies the vault layout. On a shared claim the same task can
+name `/memory/researcher` instead, the knight's own directory.
 
 ## Plug-in points
 

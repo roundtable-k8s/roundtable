@@ -31,7 +31,7 @@ A cause marked "inferred" is not stated by the code; it is the likely reason.
 | `KEDAUnavailable` | Knight controller | Autoscaling is requested but the operator started without KEDA; a fixed replica count runs | Install KEDA and restart the operator, or set `--enable-keda` |
 | `InvalidFlakeRef` | Knight controller | A `spec.tools.flakes` ref is invalid (it got past admission) | Fix the ref; the message names the problem |
 | `ToolsImageNotConfigured` | Knight controller | `spec.tools` is set but the operator has no `toolsImage.repository`; the tools are not installed | Set `toolsImage.repository` in the chart ([troubleshooting](troubleshooting.md)) |
-| `ToolsImageMissing` | Knight controller | A published tools image is gone from the registry; it is rebuilt | Registry retention (cause inferred: garbage collection); wait for the rebuild |
+| `ToolsImageMissing` | Knight controller | A published tools image is gone from the registry; it is rebuilt | The registry lost its volume, garbage collection removed the image, or it was deleted by hand; wait for the rebuild |
 | `ToolsImageBuildFailed` | Knight controller | The tools image build Job failed; the pod rollout is held | `kubectl logs job/<job>`; fix `spec.tools` |
 
 ## RoundTable
@@ -76,13 +76,17 @@ A cause marked "inferred" is not stated by the code; it is the likely reason.
 
 | Reason | Emitted by | When it fires | Look at next |
 | --- | --- | --- | --- |
-| `EventRejected` | Trigger controller | A trigger firing was skipped; the message has the skip reason | [triggers](triggers.md) |
+| `EventRejected` | Trigger controller | A trigger firing was rejected because its input, `dedupeKey` or `target.knight.task` template could not render; counted as an error. Ordinary skips are the Normal `FiringSkipped` event | The Trigger's templates; the message has the render error; [triggers](triggers.md) |
 | `FireJobFailed` | Trigger controller | The CronJob-backed trigger's Job failed | `kubectl get jobs,pods`; the Job logs |
 | `ClaimFailed` | Trigger controller | Claiming a GitHub item failed; retried on the next poll | The GitHub token and its scopes; [triggers](triggers.md) |
 | `TaskFailed` | Trigger controller | The knight task a firing sent failed | The knight's logs; the dead-letter entry |
 | `TaskLost` | Trigger controller | A firing's task was lost (never answered) | The dead-letter stream ([knight task contract](knight-task-contract.md#delivery-and-failure)) |
 
 ## Mission
+
+A Mission's `Failed` event (planning or the mission failed; the message says
+which) is the `Failed` row under [Chain](#chain): the reason is shared, so read
+the kind and the message. Its look-at-next is the Mission's status.
 
 | Reason | Emitted by | When it fires | Look at next |
 | --- | --- | --- | --- |

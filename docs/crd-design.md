@@ -820,7 +820,7 @@ CRD field gone, a manifest that still sets either one fails to apply.
 
 ## 9. Health semantics (kstatus, Helm `--wait`, Flux)
 
-Helm 3.13+ `--wait` and Flux health checks read custom resources with kstatus
+Helm 4 `--wait` and Flux health checks read custom resources with kstatus (Helm 3 does not)
 (`sigs.k8s.io/cli-utils/pkg/kstatus/status`): an object is `InProgress` while
 `status.observedGeneration` lags `metadata.generation` or a `Reconciling`
 condition is True, `Failed` when `Stalled` is True, otherwise `Current`.
