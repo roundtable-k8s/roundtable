@@ -641,6 +641,8 @@ func TestDeploymentBackend_Reconcile_RolloutWhenIdle(t *testing.T) {
 		waitingSince(k, start.Add(-30*time.Second))
 		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
 
+		// A fresh backend (operator restart) seeds the start from the condition.
+		b = setup(t, true)
 		waitingSince(k, start.Add(-60*time.Second))
 		require.NoError(t, b.Reconcile(ctx, k))
 		assert.Contains(t, image(b), ":v2")
@@ -662,6 +664,31 @@ func TestDeploymentBackend_Reconcile_RolloutWhenIdle(t *testing.T) {
 			Reason: aiv1alpha1.ReasonWaitingForOtherRollouts, LastTransitionTime: metav1.NewTime(start.Add(-time.Hour)),
 		}}
 		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
+	})
+
+	t.Run("a gate deferral does not restart the wait", func(t *testing.T) {
+		b := setup(t, true)
+		now := start
+		b.Now = func() time.Time { return now }
+		k := whenIdle(new(int32(60)))
+		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle) // wait starts at start
+
+		// Deferred by other rollouts: the condition's reason and time change.
+		now = start.Add(40 * time.Second)
+		k.Status.Conditions = []metav1.Condition{{
+			Type: aiv1alpha1.ConditionKnightRolloutPending, Status: metav1.ConditionTrue,
+			Reason: aiv1alpha1.ReasonWaitingForOtherRollouts, LastTransitionTime: metav1.NewTime(now),
+		}}
+
+		// Back to idle waiting; the condition restarts at now, the maximum does not.
+		now = start.Add(50 * time.Second)
+		waitingSince(k, now)
+		require.ErrorIs(t, b.Reconcile(ctx, k), ErrRolloutWaitingForIdle)
+
+		now = start.Add(60 * time.Second)
+		waitingSince(k, start.Add(50*time.Second))
+		require.NoError(t, b.Reconcile(ctx, k))
+		assert.Contains(t, image(b), ":v2")
 	})
 
 	t.Run("field unset rolls a busy knight at once", func(t *testing.T) {

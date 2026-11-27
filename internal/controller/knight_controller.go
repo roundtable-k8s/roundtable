@@ -468,6 +468,8 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Update status based on reconciliation results
 	if err := r.updateStatus(ctx, knight, plan.Scaling, reconcileErr); err != nil {
 		if apierrors.IsConflict(err) {
+			// Returned as is: Reconcile wraps this function in quietConflict,
+			// which turns the conflict into a quiet requeue (no error).
 			return ctrl.Result{}, err
 		}
 		log.Error(err, "Failed to update status")
@@ -518,7 +520,8 @@ func (r *KnightReconciler) now() time.Time {
 }
 
 // setRolloutPending sets the RolloutPending condition. A change of reason
-// restarts LastTransitionTime, which the whenIdle maximum wait counts from.
+// restarts LastTransitionTime. The whenIdle maximum wait does not rely on it
+// across reasons: the deployment backend remembers the wait start per spec hash.
 func setRolloutPending(knight *aiv1alpha1.Knight, reason string, now time.Time, msg string) {
 	if c := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRolloutPending); c != nil &&
 		c.Reason != reason {
