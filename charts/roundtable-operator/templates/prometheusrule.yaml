@@ -194,6 +194,14 @@ spec:
             sum by (table, trigger, source) (increase(roundtable_trigger_runs_finished_total{outcome=~"failed|lost"}[1h])) > 0
           labels:
             {{- toYaml $labels | nindent 12 }}
+        - alert: RoundtableRepositoryHeld
+          annotations:
+            summary: >-
+              Trigger {{`{{ $labels.trigger }}`}} has held new items of {{`{{ $labels.repository }}`}} for more than {{ .Values.alerts.repositoryHeldMinutes }} minutes because of an open breaking pull request.
+          expr: |
+            time() - roundtable_trigger_github_hold_started_timestamp_seconds > {{ mul .Values.alerts.repositoryHeldMinutes 60 }}
+          labels:
+            {{- toYaml $labels | nindent 12 }}
     - name: roundtable.pods
       rules:
         - alert: RoundtablePodRestarting

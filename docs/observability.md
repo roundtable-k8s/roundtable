@@ -352,6 +352,7 @@ Every dashboard has a `table` variable applied to every `roundtable_*` query
 | `RoundtableGatewayErrors` | a gateway route's 5xx share over 15m exceeds `alerts.gatewayErrorRatio` (routes with fewer than 20 requests are ignored) |
 | `RoundtableReconcileErrors` | a controller in the release namespace has a `controller_runtime_reconcile_errors_total` rate above 0 for 15m (other operators' controllers are not covered) |
 | `RoundtableScheduleMissed` | a scheduled Trigger's CronJob (`trigger-*`, not suspended) is more than `alerts.scheduleMissedSeconds` past its next scheduled time (kube-state-metrics) |
+| `RoundtableRepositoryHeld` | a github-source Trigger has held a repository back for more than `alerts.repositoryHeldMinutes` (30) because of an open breaking pull request; the Trigger shows it in its `RepositoryHeld` condition |
 | `RoundtableScheduledRunFailed` | a scheduled knight or mission run finished `failed` or `lost` in the last hour (`roundtable_trigger_runs_finished_total`) |
 | `RoundtableScheduleJobFailed` | a scheduled Trigger's run Job failed (kube-state-metrics) |
 | `RoundtableTriggerFiringErrors` | a Trigger's firings reported `outcome="error"` in the last hour (10m) |
@@ -393,6 +394,8 @@ below with their label values.
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source`, `outcome` | Trigger events by source (`schedule`, `nats`, `webhook`, `github`) and outcome (`started`, `deduped`, `skipped`, `error`) |
 | `roundtable_trigger_runs_finished_total` | counter | `table`, `trigger`, `source`, `outcome` | Knight and mission Trigger runs that finished, by `outcome` (`succeeded`, `failed`, `lost`); chain targets are in `roundtable_chain_runs_total` |
 | `roundtable_trigger_last_fired_timestamp_seconds` | gauge | `table`, `trigger` | Unix time a Trigger last started a run |
+| `roundtable_trigger_github_held_items` | gauge | `namespace`, `trigger`, `repository` | Items a github-source Trigger held back in its last poll because an open pull request with its `holdWhilePullRequestLabeled` label exists in the repository; the series exists only while the repository is held |
+| `roundtable_trigger_github_hold_started_timestamp_seconds` | gauge | `namespace`, `trigger`, `repository` | Unix time that hold began; the series is removed when the hold ends or the Trigger is deleted |
 | `roundtable_gateway_requests_total` | counter | `route`, `code`, `table`, `caller_kind` | Invoke gateway HTTP requests by route template, status code, table and caller kind |
 | `roundtable_github_pagination_truncated_total` | counter | `call` | GitHub list calls that stopped at the page cap (5 pages of 100) with more results available; the rest of the result set was not read |
 | `roundtable_gateway_request_duration_seconds` | histogram | `route` | Invoke gateway HTTP request duration |

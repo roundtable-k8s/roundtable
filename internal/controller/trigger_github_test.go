@@ -34,6 +34,9 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +48,7 @@ import (
 	aiv1alpha1 "github.com/roundtable-k8s/roundtable/api/v1alpha1"
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/github"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 	natspkg "github.com/roundtable-k8s/roundtable/pkg/nats"
 )
 
@@ -55,6 +59,7 @@ type triggerGitHubItem struct {
 	author string
 	pull   bool
 	closed bool
+	branch string
 	labels []string
 }
 
@@ -77,6 +82,8 @@ type triggerFakeGitHub struct {
 
 // triggerTestRepo is the repository the github-source tests poll.
 const triggerTestRepo = "acme/widgets"
+
+var triggerPullsRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/pulls$`)
 
 var triggerIssuesRoute = regexp.MustCompile(`^/repos/([^/]+/[^/]+)/issues(?:/(\d+)/labels(?:/(.+))?)?$`)
 
@@ -116,6 +123,25 @@ func (f *triggerFakeGitHub) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	if req.Header.Get("Authorization") != "Bearer "+f.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		return
+	}
+	if pm := triggerPullsRoute.FindStringSubmatch(req.URL.EscapedPath()); pm != nil && req.Method == http.MethodGet {
+		repo, _ := url.PathUnescape(pm[1])
+		out := []map[string]any{}
+		for _, it := range f.items[repo] {
+			if !it.pull || it.closed {
+				continue
+			}
+			labels := []map[string]string{}
+			for _, l := range it.labels {
+				labels = append(labels, map[string]string{"name": l})
+			}
+			out = append(out, map[string]any{
+				"number": it.number, "title": it.title, "state": "open", "labels": labels,
+				"head": map[string]string{"ref": it.branch}, "user": map[string]string{"login": it.author},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	m := triggerIssuesRoute.FindStringSubmatch(req.URL.EscapedPath())
@@ -539,6 +565,127 @@ var _ = Describe("Trigger GitHub source", func() {
 		Expect(keys).To(ConsistOf("acme/widgets#1", "acme/widgets#2"))
 	})
 
+	It("reports a repository held by a breaking pull request and clears it when the pull request closes", func() {
+		gh.add(&triggerGitHubItem{number: 1, title: "item", author: "alice", labels: []string{"rt:ready"}})
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("held").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		labels := prometheus.Labels{"namespace": ns, "trigger": "held", "repository": repo}
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held") })
+
+		Expect(poll("held")).To(BeNumerically(">", 0))
+		Expect(runsOf("held")).To(BeEmpty())
+		c := heldCond()
+		Expect(c).NotTo(BeNil())
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerBreakingPullRequest))
+		Expect(c.Message).To(Equal("acme/widgets: #7 (rt/7-big) for 0s"))
+		started := clock.Unix()
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHeldItems.With(labels))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
+		transition := c.LastTransitionTime
+
+		// Still held later: the age grows, the transition time and start do not.
+		clock = clock.Add(45 * time.Minute)
+		poll("held")
+		c = heldCond()
+		Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		Expect(c.Message).To(Equal("acme/widgets: #7 (rt/7-big) for 45m0s"))
+		Expect(c.LastTransitionTime).To(Equal(transition))
+		Expect(testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(labels))).To(Equal(float64(started)))
+
+		// The pull request closes: condition False, series gone, item published.
+		gh.mu.Lock()
+		gh.items[repo][1].closed = true
+		gh.mu.Unlock()
+		poll("held")
+		Eventually(func() int { return len(runsOf("held")) }, 10*time.Second, 100*time.Millisecond).Should(Equal(1))
+		c = heldCond()
+		Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		Expect(c.Reason).To(Equal(aiv1alpha1.ReasonTriggerNoHold))
+		Expect(triggerSeries(metrics.TriggerGitHubHeldItems, "held")).To(BeZero())
+		Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held")).To(BeZero())
+	})
+
+	It("drops hold state when the label is removed, the Trigger is suspended or the repository is removed", func() {
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held2", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held2") })
+		heldCond := func() *metav1.Condition {
+			return meta.FindStatusCondition(getTrigger("held2").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld)
+		}
+		update := func(mutate func(*aiv1alpha1.Trigger)) {
+			t := getTrigger("held2")
+			mutate(t)
+			Expect(k8sClient.Update(ctx, t)).To(Succeed())
+		}
+		hold := func() {
+			poll("held2")
+			Expect(heldCond().Status).To(Equal(metav1.ConditionTrue))
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held2")).To(Equal(1))
+		}
+		noSeries := func() {
+			Expect(triggerSeries(metrics.TriggerGitHubHeldItems, "held2")).To(BeZero())
+			Expect(triggerSeries(metrics.TriggerGitHubHoldStartedTimestampSeconds, "held2")).To(BeZero())
+		}
+		cleared := func() {
+			Expect(heldCond().Status).To(Equal(metav1.ConditionFalse))
+			noSeries()
+		}
+
+		hold()
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.HoldWhilePullRequestLabeled = "" })
+		poll("held2")
+		cleared()
+
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.HoldWhilePullRequestLabeled = "breaking" })
+		hold()
+		// Suspending stops the poller, so Reconcile does the clearing.
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = true })
+		reconcileTrigger("held2")
+		Expect(heldCond()).To(BeNil())
+		noSeries()
+
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Suspend = false })
+		hold()
+		update(func(t *aiv1alpha1.Trigger) { t.Spec.Source.GitHub.Repositories = []string{"acme/other"} })
+		poll("held2")
+		cleared()
+	})
+
+	It("starts a second held repository's hold when it becomes held, not at the first one's start", func() {
+		const other = "acme/gadgets"
+		gh.add(&triggerGitHubItem{number: 7, title: "big change", author: "bob", pull: true, branch: "rt/7-big", labels: []string{"breaking"}})
+		githubTrigger("held3", func(s *aiv1alpha1.TriggerSpec) {
+			s.Source.GitHub.Repositories = []string{repo, other}
+			s.Source.GitHub.HoldWhilePullRequestLabeled = "breaking"
+		})
+		DeferCleanup(func() { r.clearRepositoryHolds(ns, "held3") })
+		series := func(name string) float64 {
+			return testutil.ToFloat64(metrics.TriggerGitHubHoldStartedTimestampSeconds.With(prometheus.Labels{"namespace": ns, "trigger": "held3", "repository": name}))
+		}
+
+		poll("held3")
+		first := clock.Unix()
+		Expect(series(repo)).To(Equal(float64(first)))
+
+		clock = clock.Add(2 * time.Hour)
+		gh.mu.Lock()
+		gh.items[other] = append(gh.items[other], &triggerGitHubItem{number: 9, title: "other", author: "bob", pull: true, branch: "rt/9-x", labels: []string{"breaking"}})
+		gh.mu.Unlock()
+		poll("held3")
+		Expect(series(repo)).To(Equal(float64(first)))
+		Expect(series(other)).To(Equal(float64(clock.Unix())))
+		msg := meta.FindStatusCondition(getTrigger("held3").Status.Conditions, aiv1alpha1.ConditionTriggerRepositoryHeld).Message
+		Expect(msg).To(ContainSubstring(other + ": #9 (rt/9-x) for 0s"))
+	})
+
 	It("shares the total cap across repositories with fairShare", func() {
 		addTo := func(r string, n int) {
 			gh.mu.Lock()
@@ -736,4 +883,29 @@ func TestGithubRepoListed(t *testing.T) {
 			t.Errorf("githubRepoListed(%q) = %v, want %v", tc.repo, got, tc.want)
 		}
 	}
+}
+
+// triggerSeries counts a collector's series for one Trigger, so specs do not
+// depend on series other specs left in the shared gauges.
+func triggerSeries(c prometheus.Collector, trigger string) int {
+	ch := make(chan prometheus.Metric, 64)
+	go func() { c.Collect(ch); close(ch) }()
+	n := 0
+	for m := range ch {
+		d := &dto.Metric{}
+		_ = m.Write(d)
+		var ns, tr string
+		for _, l := range d.Label {
+			switch l.GetName() {
+			case "namespace":
+				ns = l.GetValue()
+			case "trigger":
+				tr = l.GetValue()
+			}
+		}
+		if ns == "default" && tr == trigger {
+			n++
+		}
+	}
+	return n
 }

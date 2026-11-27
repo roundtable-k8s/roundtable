@@ -600,6 +600,7 @@ scaling rules are scoped to the release namespace.
 | `alerts.scheduleMissedSeconds` | number | `600` | `RoundtableScheduleMissed` threshold: seconds a scheduled Trigger's CronJob (`trigger-*`, not suspended) may stay past its next scheduled time |
 | `alerts.gatewayErrorRatio` | number | `0.05` | `RoundtableGatewayErrors` threshold: 5xx share (0-1) of a gateway route's `roundtable_gateway_requests_total` over 15m; routes with fewer than 20 requests are ignored |
 | `alerts.natsReconnectsPer30m` | number | `3` | `KnightNatsFlapping` threshold: knight NATS reconnects (`roundtable_knight_nats_reconnects_total`) over 30m, per knight |
+| `alerts.repositoryHeldMinutes` | number | `30` | `RoundtableRepositoryHeld` threshold: minutes a github-source Trigger may hold a repository back because of an open pull request with its hold label |
 | `alerts.labels` | object | `{}` | Extra labels on every rule; a `severity` here overrides the default `warning` |
 | `alerts.scaling.enabled` | bool | `true` | Render the `roundtable.scaling` group (KEDA scaler errors, HPA `ScalingActive=false`) |
 | `alerts.queueBacklog.enabled` | bool | `false` | Render `RoundtableQueueBacklog` in the `roundtable.scaling` group (needs `alerts.scaling.enabled`); covers only knights with a KEDA ScaledObject |

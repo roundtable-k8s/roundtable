@@ -757,6 +757,10 @@ alerts:
   gatewayErrorRatio: 0.05
   # Knight NATS reconnects over 30m above which KnightNatsFlapping fires.
   natsReconnectsPer30m: 3
+  # Minutes a github-source Trigger may hold a repository back because of an
+  # open pull request with its hold label (breaking) before
+  # RoundtableRepositoryHeld fires.
+  repositoryHeldMinutes: 30
   # Extra labels on every rule; `severity` here overrides the default "warning".
   labels: {}
   scaling:
