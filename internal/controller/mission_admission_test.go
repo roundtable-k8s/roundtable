@@ -200,7 +200,7 @@ func TestReconcilePendingHeldSkipsChainValidation(t *testing.T) {
 		WithStatusSubresource(&aiv1alpha1.Mission{}).Build()
 	c := &getCountingClient{Client: base}
 	r := &MissionReconciler{Client: c, Scheme: s, Recorder: record.NewFakeRecorder(10)}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var subject aiv1alpha1.Mission
 		if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "b"}, &subject); err != nil {
 			t.Fatal(err)
