@@ -184,6 +184,19 @@ func (r *MissionReconciler) reconcileOnce(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	// Accept the spec in every phase, including the waiting ones that write no
+	// status for a while: kstatus (Helm --wait, Flux) reads a lagging
+	// observedGeneration as InProgress.
+	if mission.Status.ObservedGeneration != mission.Generation {
+		mission.Status.ObservedGeneration = mission.Generation
+		if err := r.Status().Update(ctx, mission); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{RequeueAfter: RequeueFast}, nil
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
 	// A mission from before tracing existed gets its trace on first reconcile
 	// (kept by the next status write).
 	hadTraceID := mission.Status.TraceID != ""

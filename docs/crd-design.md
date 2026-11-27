@@ -857,5 +857,15 @@ parked, suspended and reconcile-error paths, and the operator never sets
 `Degraded` conditions, not by kstatus. `TestKnightKstatus` pins this for Provisioning, Ready, scaled to zero, waking and a
 reconcile error (Degraded); `TestKnightKstatusSuspended` covers `spec.suspend`.
 
-Mission, Trigger and RoundTable have not been audited against kstatus
-yet; follow-ups: Mission #928, Trigger #929, RoundTable #931.
+**Mission.** A Mission in any phase (Pending, Provisioning, Planning, Assembling,
+Briefing, Active, CleaningUp, Succeeded, Failed, Expired) is healthy (`Current`):
+a running Mission is doing its job and a failed one is a finished outcome, not a
+stalled object. The operator writes `status.observedGeneration` at the start of
+every reconcile (not only on phase transitions), so a Mission that is waiting,
+for example for its RoundTable to become Ready, or that is already cleaned up
+does not stay `InProgress` after a spec change. It never sets `Reconciling` or
+`Stalled`. Mission state lives in `status.phase` and its conditions.
+`TestMissionKstatus` pins this.
+
+Trigger and RoundTable have not been audited against kstatus
+yet; follow-ups: Trigger #929, RoundTable #931.
