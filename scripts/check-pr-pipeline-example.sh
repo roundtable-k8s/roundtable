@@ -83,6 +83,8 @@ render_tiers "$tmp/all.yaml" --set 'prPipeline.implementModels={cheap,fast,deep}
 assert_plan "$tmp/all.yaml" present '"cheap" (Haiku drafts): only for'
 assert_plan "$tmp/all.yaml" present '"fast": the default.'
 assert_plan "$tmp/all.yaml" present '"deep": design-heavy'
+assert_plan "$tmp/all.yaml" absent '(the default)'
+assert_plan "$tmp/all.yaml" absent ', the default)'
 
 render_tiers "$tmp/cheap-deep.yaml" --set 'prPipeline.implementModels={cheap,deep}'
 assert_plan "$tmp/cheap-deep.yaml" present '"cheap" (Haiku drafts, the default): only for'

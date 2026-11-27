@@ -5,7 +5,8 @@
 # tunables and label overrides take effect.
 #
 # Usage: HELM=bin/helm [PROMTOOL=promtool] scripts/check-prometheusrule.sh
-# Without promtool on PATH it downloads a pinned release (linux/amd64).
+# Without promtool on PATH it downloads a pinned release (linux/amd64); if that
+# fails it skips locally but fails when CI is set.
 set -euo pipefail
 
 HELM="${HELM:-helm}"
@@ -101,6 +102,8 @@ if ! command -v "$PROMTOOL" >/dev/null 2>&1; then
     echo "$sum  $tmp/prom.tgz" | sha256sum -c - >/dev/null || fail "promtool download checksum mismatch"
     tar -xzf "$tmp/prom.tgz" -C "$tmp" --strip-components=1 "prometheus-${v}.linux-amd64/promtool"
     PROMTOOL="$tmp/promtool"
+  elif [ -n "${CI:-}" ]; then
+    fail "promtool not found and not downloadable; refusing to skip rule syntax check in CI"
   else
     echo "SKIP: promtool not found and not downloadable, rule syntax not checked"
     exit 0
