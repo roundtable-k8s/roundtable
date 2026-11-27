@@ -120,9 +120,9 @@ What happens on missed, overlapping, lost and deleted runs is in
 ## Moving a cron job
 
 A cron job that ran a script (collect some data, ask an agent to judge it,
-file the result) moves in three steps (shape the script, change the persona knight, send one
-task from a Trigger), then you run old and new side by side before the
-cutover.
+file the result) moves in three steps (shape the script, change the persona
+knight, send one task from a Trigger), then you run old and new side by side
+before the cutover.
 
 ### 1. The script contract
 
