@@ -37,8 +37,8 @@ import (
 const (
 	restartNamespace = "roundtable-restart"
 	restartRelease   = "rt-restart"
-	restartOperator  = "rt-restart" // fullnameOverride in restart-values.yaml
-	restartValues    = "test/e2e/testdata/restart-values.yaml"
+	restartOperator  = "rt-restart" // --set fullnameOverride (shared core-values.yaml)
+	restartValues    = "test/e2e/testdata/core-values.yaml"
 	restartManifests = "test/e2e/testdata/restart.yaml"
 	restartKnight    = "stub"
 	restartChain     = "restart-e2e"
@@ -54,7 +54,7 @@ var _ = Describe("Operator restart", Ordered, Label(tierRestart), func() {
 	BeforeAll(func() {
 		By("installing the operator chart")
 		_, err := utils.Run(exec.Command("helm", "upgrade", "--install", restartRelease, "charts/roundtable-operator",
-			"-n", restartNamespace, "--create-namespace", "-f", restartValues, "--wait", "--timeout", "5m"))
+			"-n", restartNamespace, "--create-namespace", "-f", restartValues, "--set", "fullnameOverride="+restartOperator, "--wait", "--timeout", "5m"))
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the operator chart")
 
 		By("creating the table, the stub knight and the two-step Chain")

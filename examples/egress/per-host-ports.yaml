@@ -5,12 +5,13 @@ kind: Knight
 metadata:
   name: per-host-ports
 spec:
-  domain: research
+  domain: per-host-ports
   skills:
     - shared
   nats:
+    stream: fleet_a_tasks
     subjects:
-      - "fleet-a.tasks.research.>"
+      - "fleet-a.tasks.per-host-ports.>"
   egress:
     allowedHosts:
       - api.github.com

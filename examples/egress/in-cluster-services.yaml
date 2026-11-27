@@ -11,7 +11,7 @@ metadata:
   name: scout
   namespace: roundtable
 spec:
-  domain: research
+  domain: scout
   skills:
     - research
   nats:
@@ -19,7 +19,7 @@ spec:
     stream: fleet_a_tasks
     resultsStream: fleet_a_results
     subjects:
-      - "fleet-a.tasks.research.>"
+      - "fleet-a.tasks.scout.>"
   egress:
     allowedHosts:
       - "en.wikipedia.org"

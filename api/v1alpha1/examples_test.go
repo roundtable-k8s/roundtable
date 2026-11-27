@@ -17,13 +17,17 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 )
 
@@ -90,6 +94,41 @@ type exampleObject struct {
 	obj  any    // *Knight, *Chain, *Mission, *RoundTable or *Trigger
 }
 
+// splitYAMLStream splits a multi-document YAML stream with the Kubernetes
+// stream reader, so a separator such as "--- # comment" splits too.
+func splitYAMLStream(data []byte) ([][]byte, error) {
+	r := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+	var docs [][]byte
+	for {
+		doc, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			return docs, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+}
+
+// TestSplitYAMLStream pins that comment separators split documents.
+func TestSplitYAMLStream(t *testing.T) {
+	in := "a: 1\n--- # second\nb: 2\n---\nc: 3\n--- \n"
+	docs, err := splitYAMLStream([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for _, d := range docs {
+		if strings.TrimSpace(string(d)) != "" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Fatalf("got %d documents, want 3: %q", n, docs)
+	}
+}
+
 // decodeExampleFile strictly decodes every Round Table document in file.
 // Documents of other API groups are skipped; a document that does not decode
 // is reported on t and left out.
@@ -99,9 +138,14 @@ func decodeExampleFile(t *testing.T, file string) []exampleObject {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sep := regexp.MustCompile(`(?m)^---\s*$`)
+	docs, err := splitYAMLStream(data)
+	if err != nil {
+		t.Errorf("%s: %v", file, err)
+		return nil
+	}
 	var out []exampleObject
-	for i, doc := range sep.Split(string(data), -1) {
+	for i, docBytes := range docs {
+		doc := string(docBytes)
 		if strings.TrimSpace(doc) == "" {
 			continue
 		}

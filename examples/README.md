@@ -89,13 +89,13 @@ To rewrite the NATS URLs that are written out in the files you copied (works
 with GNU and BSD sed; run it in the copied directory, it recurses):
 
 ```bash
-find . -name '*.yaml' -exec sed -i.bak 's#nats://nats\.\(database\|roundtable\)\.svc:4222#nats://YOUR-NATS.YOUR-NS.svc:4222#g' {} + \
+find . -name '*.yaml' -exec sed -E -i.bak 's#nats://nats\.(database|roundtable)\.svc:4222#nats://YOUR-NATS.YOUR-NS.svc:4222#g' {} + \
   && find . -name '*.yaml.bak' -delete
 ```
 
 It only changes URLs that are present. A Knight that sets no `spec.nats.url`
 still uses the CRD default (the author's server), so add
-`nats: {url: nats://YOUR-NATS.YOUR-NS.svc:4222}` to each such Knight by hand.
+`url: nats://YOUR-NATS.YOUR-NS.svc:4222` under `spec.nats` of each such Knight by hand.
 
 ## Getting started
 
