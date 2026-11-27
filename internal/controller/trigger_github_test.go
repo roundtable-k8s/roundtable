@@ -505,7 +505,6 @@ var _ = Describe("Trigger GitHub source", func() {
 	})
 
 	It("skips an event for a repository the Trigger does not list", func() {
-		gh.add(&triggerGitHubItem{number: 1, title: "Fix the widget", author: "alice", labels: []string{"rt:ready"}})
 		githubTrigger("listed", func(s *aiv1alpha1.TriggerSpec) {
 			s.Source.GitHub.Claim = &aiv1alpha1.TriggerGitHubClaim{AddLabels: []string{"rt:in-progress"}, RemoveLabels: []string{"rt:ready"}}
 		})

@@ -1452,13 +1452,7 @@ func (r *TriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.CronJob{}).
 		// The CronJob's firing Jobs carry the Trigger's label; a failed one
 		// turns ScheduleHealthy False.
-		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-			name := obj.GetLabels()[aiv1alpha1.LabelTrigger]
-			if name == "" || obj.GetLabels()[labelManagedBy] != triggerManagedBy {
-				return nil
-			}
-			return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
-		})).
+		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(fireJobToTrigger)).
 		Named("trigger").
 		Complete(r)
 }
@@ -1474,6 +1468,16 @@ func triggerForLabelledChain(_ context.Context, obj client.Object) []reconcile.R
 		if ref.Controller != nil && *ref.Controller && ref.Kind == "Trigger" {
 			return nil
 		}
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
+}
+
+// fireJobToTrigger maps a CronJob's firing Job to its Trigger; a Job the
+// operator did not create for a Trigger maps to nothing.
+func fireJobToTrigger(_ context.Context, obj client.Object) []reconcile.Request {
+	name := obj.GetLabels()[aiv1alpha1.LabelTrigger]
+	if name == "" || obj.GetLabels()[labelManagedBy] != triggerManagedBy {
+		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
 }
