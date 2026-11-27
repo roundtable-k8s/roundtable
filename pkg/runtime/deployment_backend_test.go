@@ -396,6 +396,27 @@ func TestDeploymentBackend_Reconcile_UsesSpecReplicasAndStrategy(t *testing.T) {
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, deploy.Spec.Strategy.Type)
 }
 
+// The strategy is not in the spec hash; it still follows the desired spec
+// when the pod template is unchanged (no pod roll needed to switch it).
+func TestDeploymentBackend_Reconcile_UpdatesStrategyWithoutTemplateChange(t *testing.T) {
+	ctx := context.Background()
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	knight := newTestKnight("lamorak")
+
+	b := NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(1, appsv1.RecreateDeploymentStrategyType))
+	require.NoError(t, b.Reconcile(ctx, knight))
+	before := getDeploy(t, b, "lamorak")
+	assert.Equal(t, appsv1.RecreateDeploymentStrategyType, before.Spec.Strategy.Type)
+
+	b = NewDeploymentBackend(c, s, "default:latest", scaledSpecBuilder(1, appsv1.RollingUpdateDeploymentStrategyType))
+	require.NoError(t, b.Reconcile(ctx, knight))
+	after := getDeploy(t, b, "lamorak")
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, after.Spec.Strategy.Type)
+	assert.Equal(t, before.Spec.Template.Annotations[specHashAnnotation],
+		after.Spec.Template.Annotations[specHashAnnotation])
+}
+
 func TestDeploymentBackend_Reconcile_RestoresReplicasAfterSuspend(t *testing.T) {
 	ctx := context.Background()
 	s := newTestScheme(t)

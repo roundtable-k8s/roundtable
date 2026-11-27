@@ -340,17 +340,18 @@ the knight runtime share a drain contract (#246).
 **Operator side**
 
 - `terminationGracePeriodSeconds` is `spec.taskTimeoutSeconds + 60`.
-- Strategy is `RollingUpdate` with `maxSurge: 1, maxUnavailable: 0` when more
-  than one pod can mount the workspace: `workspace.mode: ephemeral`, or a
-  `workspace.existingClaim` with `replicas`/`maxReplicas` above 1 (which the
-  Knight CEL rules require to be ReadWriteMany). The new pod starts pulling
-  while the old one drains.
-- A single-replica knight on the default PVC (or a single-replica
-  `existingClaim`, assumed ReadWriteOnce) keeps `Recreate`: two pods cannot
-  mount the volume, so the old pod must be gone first. It still gets the longer
-  grace period, so it drains before it is killed, but there is a gap with no
-  pod pulling. Use `workspace.mode: ephemeral` or an RWX claim for gap-free
-  rollouts.
+- Strategy is `RollingUpdate` with `maxSurge: 1, maxUnavailable: 0` when two
+  pods can run at once: for a knight with `replicas`/`maxReplicas` above 1,
+  `workspace.mode: ephemeral` or a `workspace.existingClaim` (which the Knight
+  CEL rules require to be ReadWriteMany); for a single-replica knight, every
+  PVC the pod mounts allows ReadWriteMany or ReadOnlyMany (or it mounts
+  none). The new pod starts pulling while the old one drains.
+- Otherwise (e.g. a single-replica knight on the default ReadWriteOnce PVC)
+  it keeps `Recreate`, and the Knight's `RollingUpdate=False` condition names
+  the volume: two pods cannot mount it, so the old pod must be gone first. It
+  still gets the longer grace period, so it drains before it is killed, but
+  there is a gap with no pod pulling. Use `workspace.mode: ephemeral` or an
+  RWX claim for gap-free rollouts.
 
 **Runtime side** (claude-knight / pi-knight; not implemented by the operator)
 
