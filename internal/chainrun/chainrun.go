@@ -165,16 +165,24 @@ func TriggerRunName(chain, trigger, key string) string {
 
 // Name joins base and parts with "-" into a DNS-safe name of at most 253
 // characters. Parts are lowercased and stripped of unsafe characters; base is
-// used as is. When too long, the base and middle parts are cut and the last
-// part is kept intact.
+// used as is. The base and middle parts are cut first when the name is too
+// long; the last part is kept whole unless it alone exceeds 253 characters,
+// in which case it is cut to fit. A last part that cleans to nothing is left
+// out, and if nothing else remains the name is a short hash of that part, so
+// different inputs do not collide on an empty name.
 func Name(base string, parts ...string) string {
 	clean := make([]string, len(parts))
 	for i, p := range parts {
 		clean[i] = strings.Trim(nonDNSChars.ReplaceAllString(strings.ToLower(p), "-"), "-")
 	}
 	suffix := ""
+	hashOf := ""
 	if n := len(clean); n > 0 {
-		suffix = "-" + clean[n-1]
+		if clean[n-1] != "" {
+			suffix = "-" + clean[n-1]
+		} else {
+			hashOf = parts[n-1]
+		}
 		clean = clean[:n-1]
 	}
 	if len(suffix) > maxNameLen {
@@ -185,6 +193,12 @@ func Name(base string, parts ...string) string {
 		prefix = strings.TrimRight(prefix[:limit], "-")
 	}
 	if prefix == "" {
+		if suffix == "" {
+			if len(parts) == 0 {
+				return ""
+			}
+			return KeyHash(hashOf)
+		}
 		// Nothing of the base survived: drop the separator so the name does
 		// not start with "-".
 		return strings.TrimPrefix(suffix, "-")
