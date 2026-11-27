@@ -816,3 +816,141 @@ func TestListRunsAllSendsLabelSelector(t *testing.T) {
 		t.Errorf("label selectors = %v, want [%s]", selectors, chainrun.LabelRunSource)
 	}
 }
+
+func TestRerunRun(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, map[string]any{"input": "original"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d %v", resp.StatusCode, out)
+	}
+	first, _ := out["run"].(string)
+	path := "/v1/runs/" + testNS + "/" + first + "/rerun"
+
+	// A running run is a conflict.
+	resp, out = e.do(t, http.MethodPost, path, testToken, nil)
+	if resp.StatusCode != http.StatusConflict || out["state"] != "Pending" {
+		t.Fatalf("rerun running: %d %v", resp.StatusCode, out)
+	}
+
+	e.finish(t, aiv1alpha1.ChainPhaseFailed, nil)
+	resp, out = e.do(t, http.MethodPost, path, testToken, nil)
+	if resp.StatusCode != http.StatusAccepted || out["rerunOf"] != first || out["chain"] != "digest" || out["done"] != false {
+		t.Fatalf("rerun: %d %v", resp.StatusCode, out)
+	}
+	second, _ := out["run"].(string)
+	if second == first {
+		t.Fatalf("rerun reused the run name %s", first)
+	}
+	var got *aiv1alpha1.Chain
+	for _, c := range e.runs(t) {
+		if c.Name == second {
+			got = &c
+		}
+	}
+	if got == nil {
+		t.Fatalf("no copy %s", second)
+	}
+	if got.Spec.Input != "original" || got.Annotations[annotationRerunOf] != first || got.Annotations[annotationRunOf] != "digest" {
+		t.Errorf("copy: input %q annotations %v", got.Spec.Input, got.Annotations)
+	}
+
+	// An input override wins. The first run is still finished.
+	resp, out = e.do(t, http.MethodPost, path, testToken, map[string]any{"input": map[string]any{"a": 1}})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("rerun override: %d %v", resp.StatusCode, out)
+	}
+	for _, c := range e.runs(t) {
+		if c.Name == out["run"] && c.Spec.Input != `{"a":1}` {
+			t.Errorf("override input %q", c.Spec.Input)
+		}
+	}
+
+	// The original run does not carry rerunOf.
+	if _, out = e.do(t, http.MethodGet, "/v1/runs/"+testNS+"/"+first, testToken, nil); out["rerunOf"] != nil {
+		t.Errorf("original rerunOf: %v", out["rerunOf"])
+	}
+}
+
+func TestRerunRunRejects(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	resp, out := e.do(t, http.MethodPost, "/v1/chains/digest/runs", testToken, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d %v", resp.StatusCode, out)
+	}
+	run, _ := out["run"].(string)
+	e.finish(t, aiv1alpha1.ChainPhaseSucceeded, nil)
+	path := "/v1/runs/" + testNS + "/" + run + "/rerun"
+
+	// Not a gateway run, or unknown: 404.
+	for _, name := range []string{"digest-pickup-1", "digest", "nope"} {
+		if resp, _ = e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/"+name+"/rerun", testToken, nil); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("rerun %s: %d, want 404", name, resp.StatusCode)
+		}
+	}
+	// A bad body is 400.
+	if resp, _ = e.do(t, http.MethodPost, path, testToken, map[string]any{"bogus": 1}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad body: %d", resp.StatusCode)
+	}
+
+	// The template is gone: 404.
+	tmpl := &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Name: "digest", Namespace: testNS}}
+	if err := e.k8s.Delete(context.Background(), tmpl); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ = e.do(t, http.MethodPost, path, testToken, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("missing template: %d, want 404", resp.StatusCode)
+	}
+
+	// The template lost its opt-in: 403.
+	if err := e.k8s.Create(context.Background(), templateChain("digest", false)); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ = e.do(t, http.MethodPost, path, testToken, nil); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("non-invokable template: %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestRerunRunDisabled(t *testing.T) {
+	e := newRunEnv(t, Options{}, false)
+	if resp, _ := e.do(t, http.MethodPost, "/v1/runs/"+testNS+"/x/rerun", testToken, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("disabled: %d", resp.StatusCode)
+	}
+}
+
+func TestMCPRerunRun(t *testing.T) {
+	e := newRunEnv(t, Options{}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	cs, err := c.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:   e.server.URL + "/mcp",
+		HTTPClient: &http.Client{Transport: bearer{http.DefaultTransport}},
+		MaxRetries: -1,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	if r, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "run_chain", Arguments: map[string]any{"chain": "digest", "input": "hello"}}); err != nil || r.IsError {
+		t.Fatalf("run_chain: %v %v", err, r)
+	}
+	run := e.runs(t)[0].Name
+	r, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "rerun_run", Arguments: map[string]any{"run": run}})
+	if err != nil || !r.IsError {
+		t.Fatalf("rerun of a running run should be a tool error: %v %v", err, r)
+	}
+	e.finish(t, aiv1alpha1.ChainPhaseSucceeded, nil)
+	r, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "rerun_run", Arguments: map[string]any{"run": run}})
+	if err != nil || r.IsError {
+		t.Fatalf("rerun_run: %v %v", err, r)
+	}
+	if len(e.runs(t)) != 2 {
+		t.Fatalf("runs: %d, want 2", len(e.runs(t)))
+	}
+	for _, rc := range e.runs(t) {
+		if rc.Name != run && (rc.Spec.Input != "hello" || rc.Annotations[annotationRerunOf] != run) {
+			t.Errorf("rerun copy: input %q annotations %v", rc.Spec.Input, rc.Annotations)
+		}
+	}
+}

@@ -107,6 +107,7 @@ func (s *Service) routes() []route {
 			route{pattern: "GET /v1/runs/{namespace}/{run}", handler: s.handleGetRun},
 			route{pattern: "GET /v1/runs/{namespace}/{run}/events", handler: s.handleRunEvents},
 			route{pattern: "POST /v1/runs/{namespace}/{run}/cancel", handler: s.handleCancelRun},
+			route{pattern: "POST /v1/runs/{namespace}/{run}/rerun", handler: s.handleRerunRun},
 		)
 	}
 	if s.SchedulesEnabled() {
@@ -395,6 +396,32 @@ func (s *Service) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	writeRun(w, rec)
+}
+
+func (s *Service) handleRerunRun(w http.ResponseWriter, r *http.Request) {
+	var req RerunRunRequest
+	if r.Body != nil {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, fmt.Errorf("%w: body: %v", ErrInvalid, err))
+			return
+		}
+		if dec.More() {
+			writeError(w, fmt.Errorf("%w: body: trailing data after the JSON object", ErrInvalid))
+			return
+		}
+	}
+	req.IdempotencyKey = r.Header.Get(idempotencyHeader)
+	rec, err := s.RerunRun(r.Context(), r.PathValue("namespace"), r.PathValue("run"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if rec.Replayed {
+		w.Header().Set(idempotentReplayHeader, "true")
 	}
 	writeRun(w, rec)
 }

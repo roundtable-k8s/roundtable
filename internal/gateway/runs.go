@@ -52,6 +52,9 @@ const (
 	// annotation, not a label: Chain names may exceed 63 characters).
 	annotationRunOf = "ai.roundtable.io/run-of"
 
+	// annotationRerunOf names the run a gateway run copy re-ran.
+	annotationRerunOf = "ai.roundtable.io/rerun-of"
+
 	// runPhasePending is the phase of a run the chain controller hasn't
 	// started yet.
 	runPhasePending = "Pending"
@@ -97,6 +100,19 @@ type RunChainRequest struct {
 	// IdempotencyKey, from the Idempotency-Key header, names the run after
 	// the key so a retry returns the existing run. Not part of the JSON body.
 	IdempotencyKey string `json:"-"`
+	// rerunOf is the run being re-run (set by RerunRun; not part of the body).
+	rerunOf string
+}
+
+// RerunRunRequest is the optional body of POST /v1/runs/{namespace}/{run}/rerun.
+type RerunRunRequest struct {
+	// Input replaces the stored input of the run; omitted or null reuses it.
+	Input json.RawMessage `json:"input,omitempty"`
+	// WaitSeconds waits for the new run to finish (capped by the gateway's
+	// maximum). 0 returns once the run is created.
+	WaitSeconds *int `json:"waitSeconds,omitempty"`
+	// IdempotencyKey, from the Idempotency-Key header. Not part of the body.
+	IdempotencyKey string `json:"-"`
 }
 
 // RunRecord is what the gateway returns for a chain run.
@@ -121,6 +137,8 @@ type RunRecord struct {
 	// on. Omitted when there are several such steps (read steps instead).
 	Output          string `json:"output,omitempty"`
 	OutputTruncated bool   `json:"outputTruncated,omitempty"`
+	// RerunOf is the run this run re-ran, when it was started by a rerun.
+	RerunOf string `json:"rerunOf,omitempty"`
 	// Replayed marks a record returned for a repeated Idempotency-Key. Not
 	// serialized.
 	Replayed bool `json:"-"`
@@ -326,6 +344,9 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 	if c := callerName(ctx); c != "" {
 		annotations[aiv1alpha1.AnnotationCaller] = c
 	}
+	if req.rerunOf != "" {
+		annotations[annotationRerunOf] = req.rerunOf
+	}
 	// A waiting call takes its slot before it creates anything, so a busy
 	// gateway answers 429 without leaving a run behind (a replay needs one too).
 	release := func() {}
@@ -357,6 +378,52 @@ func (s *Service) RunChain(ctx context.Context, chainName string, req RunChainRe
 		return s.pollRun(ctx, ns, run.Name, wait)
 	}
 	return s.record(run, true), nil
+}
+
+// RerunRun starts a new run of the template of a finished gateway run, with
+// the finished run's input unless the request overrides it. All RunChain
+// checks apply. Failed steps are not resumed: the whole chain runs again.
+func (s *Service) RerunRun(ctx context.Context, namespace, name string, req RerunRunRequest) (*RunRecord, error) {
+	if !s.RunsEnabled() {
+		return nil, errRunsDisabled
+	}
+	ns, err := s.namespace(namespace)
+	if err != nil {
+		return nil, err
+	}
+	old, err := s.fetchRun(ctx, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	if !runDone(old) {
+		phase := string(old.Status.Phase)
+		if phase == "" {
+			phase = runPhasePending
+		}
+		return nil, &ConflictError{State: phase,
+			Reason: fmt.Sprintf("run %s/%s is %s, not finished", ns, name, phase)}
+	}
+	chainName := old.Annotations[annotationRunOf]
+	if chainName == "" {
+		return nil, fmt.Errorf("%w: run %s/%s has no template chain", ErrNotFound, ns, name)
+	}
+	runReq := RunChainRequest{
+		Input:          req.Input,
+		Namespace:      ns,
+		WaitSeconds:    req.WaitSeconds,
+		IdempotencyKey: req.IdempotencyKey,
+		rerunOf:        name,
+	}
+	if _, has, err := runInput(req.Input); err != nil {
+		return nil, err
+	} else if !has {
+		stored, err := json.Marshal(old.Spec.Input)
+		if err != nil {
+			return nil, fmt.Errorf("%w: input: %v", ErrInvalid, err)
+		}
+		runReq.Input = stored
+	}
+	return s.RunChain(ctx, chainName, runReq)
 }
 
 // replayRun returns the run an earlier request with the same key started.
@@ -650,6 +717,7 @@ func runRecord(c *aiv1alpha1.Chain, withSteps bool) *RunRecord {
 		Namespace:   c.Namespace,
 		Phase:       string(st.Phase),
 		Caller:      c.Annotations[aiv1alpha1.AnnotationCaller],
+		RerunOf:     c.Annotations[annotationRerunOf],
 		Done:        runDone(c),
 		CreatedAt:   c.CreationTimestamp.UTC(),
 		StartedAt:   timePtr(st.StartedAt),

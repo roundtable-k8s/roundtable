@@ -411,6 +411,18 @@ var openAPIOperations = map[string]obj{
 			obj{"name": "count", "in": "query", "description": "How many fire times (default 5, max 50).", "schema": obj{"type": "integer", "minimum": 1, "maximum": 50}}},
 		"responses": errs(obj{"200": jsonResp("OK", schemaRef("ScheduleNextRuns"))}, "400", "401", "403", "422", "503"),
 	},
+	"POST /v1/runs/{namespace}/{run}/rerun": {
+		"summary": "Re-run a finished gateway-started chain run", "tags": []any{"runs"},
+		"description": "Starts a new run of the same invokable chain with the finished run's input unless the body gives one. The whole chain runs again; failed steps are not resumed. A run that is not finished is a conflict. The new run's `rerunOf` names the original.",
+		"parameters":  []any{pathParam("namespace", "Run namespace."), pathParam("run", "Run name."), idempotencyKeyParam},
+		"requestBody": jsonBody(schemaRef("RerunRunRequest"), false),
+		"responses": errs(obj{
+			"200": jsonResp("The new run finished.", schemaRef("Run")),
+			"202": obj{"description": "Still running; poll Location (GET /v1/runs/{namespace}/{run}).",
+				"headers": obj{"Location": obj{"schema": obj{"type": "string"}}},
+				"content": obj{"application/json": obj{"schema": schemaRef("Run")}}},
+		}, "400", "401", "403", "404", "409", "429", "503"),
+	},
 	"GET /v1/schedules/{namespace}/{name}/runs": {
 		"summary": "List a schedule's runs, newest first", "tags": []any{"schedules"},
 		"description": "Firings with their time, outcome (skips with their reason), duration and cost when known, and the run to fetch the result with. History goes back as far as results are retained (gateway.scheduleRuns.resultRetention).",
@@ -597,12 +609,17 @@ var openAPISchemas = obj{
 		"unchanged": array(object(nil, scheduleStateProps)),
 		"failed":    array(object([]string{"name", "error"}, obj{"name": str(""), "error": str("")})),
 	}),
+	"RerunRunRequest": object(nil, obj{
+		"input":       obj{"description": "Replaces the finished run's input: a JSON string is used as is, any other JSON value as its JSON text. Omit to reuse it."},
+		"waitSeconds": integer("Wait for the new run to finish (capped by the gateway). 0 returns once the run is created."),
+	}),
 	"CancelRunRequest": object(nil, obj{
 		"reason": str("Recorded on the cancelled steps and the run's Cancelled condition."),
 	}),
 	"Run": object([]string{"run", "chain", "namespace", "phase", "done", "createdAt"}, obj{
 		"run": str("Name of the run copy."), "chain": str(""), "namespace": str(""), "runId": str(""),
 		"traceId": str("Trace ID (32 hex) from status.traceID of the run's Chain; omitted when empty or invalid."),
+		"rerunOf": str("The run this run re-ran; omitted unless started by a rerun."),
 		"phase":   str(""), "done": boolean(""),
 		"createdAt":   obj{"type": "string", "format": "date-time"},
 		"startedAt":   obj{"type": "string", "format": "date-time"},

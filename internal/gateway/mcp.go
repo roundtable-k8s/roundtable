@@ -119,6 +119,14 @@ type CancelRunInput struct {
 	Reason    string `json:"reason,omitempty" jsonschema:"why the run is cancelled; recorded on its unfinished steps"`
 }
 
+// RerunRunInput is the input of the rerun_run tool.
+type RerunRunInput struct {
+	Run         string `json:"run" jsonschema:"name of the finished run to re-run"`
+	Namespace   string `json:"namespace,omitempty" jsonschema:"namespace of the run; omit for the default"`
+	Input       any    `json:"input,omitempty" jsonschema:"new input (a string or any JSON value); omit to reuse the run's input"`
+	WaitSeconds *int   `json:"waitSeconds,omitempty" jsonschema:"seconds to wait for the new run to finish before returning (default 0)"`
+}
+
 // ListRunsOutput is the output of the list_runs tool.
 type ListRunsOutput struct {
 	Runs []*RunRecord `json:"runs"`
@@ -490,6 +498,26 @@ func addRunTools(s *mcp.Server, svc *Service) {
 			return nil, nil, err
 		}
 		return cancelResult(rec), rec, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "rerun_run",
+		Description: "Re-run a finished chain run started by run_chain, with the same input unless you give a new one. " +
+			"The whole chain runs again (failed steps are not resumed). A run that is not finished is an error.",
+	}, func(ctx context.Context, mreq *mcp.CallToolRequest, in RerunRunInput) (*mcp.CallToolResult, *RunRecord, error) {
+		ctx = withMCPProgress(ctx, mreq)
+		req := RerunRunRequest{WaitSeconds: in.WaitSeconds}
+		if in.Input != nil {
+			raw, err := json.Marshal(in.Input)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: input: %v", ErrInvalid, err)
+			}
+			req.Input = raw
+		}
+		rec, err := svc.RerunRun(ctx, in.Namespace, in.Run, req)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runResult(rec), rec, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_runs",
