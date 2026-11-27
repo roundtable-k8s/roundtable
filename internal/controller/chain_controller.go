@@ -69,9 +69,10 @@ type ChainReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// conflictWarned holds, per Chain (types.NamespacedName), the generation a
-	// ScheduleTriggerConflict event was last recorded for. Entries are dropped
-	// when the Chain is gone, has no schedule or leaves trigger mode.
+	// conflictWarned holds, per Chain (types.NamespacedName), the conflictWarning
+	// (Chain UID and generation) a ScheduleTriggerConflict event was last recorded
+	// for. Entries are dropped when the Chain is gone, has no schedule or leaves
+	// trigger mode.
 	conflictWarned sync.Map
 
 	NATS   *natspkg.Provider

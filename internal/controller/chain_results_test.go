@@ -264,6 +264,11 @@ func TestPollResult_DoesNotBlock(t *testing.T) {
 func TestChainReconciler_ConcurrentChains(t *testing.T) {
 	fake := &lockedWaitNATS{fakeNATSClient: newFakeNATSClient()}
 	r := &ChainReconciler{NATS: natspkg.NewProviderWithClient(fake, logr.Discard())}
+	t.Cleanup(func() {
+		if r.cron != nil {
+			<-r.cron.Stop().Done()
+		}
+	})
 	nc := natsConfig{SubjectPrefix: "p", ResultsStream: "res"}
 
 	var wg sync.WaitGroup

@@ -183,8 +183,7 @@ func prURLs(v any) string {
 // structured result (KV entry, else the prose fallback over out).
 func (r *ChainReconciler) fillStructured(ctx context.Context, chain *aiv1alpha1.Chain, d map[string]any, key, out string) {
 	prs, verdict := r.structuredVars(ctx, chain, key, out, true)
-	list := templatePRs(prs)
-	d["PRs"] = list
+	d["PRs"] = templatePRs(prs)
 	d["Verdict"] = verdict
 }
 
