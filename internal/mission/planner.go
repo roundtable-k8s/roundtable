@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-logr/logr"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	knightpkg "github.com/roundtable-k8s/roundtable/internal/knight"
 	"github.com/roundtable-k8s/roundtable/internal/util"
 	"go.opentelemetry.io/otel/trace"
