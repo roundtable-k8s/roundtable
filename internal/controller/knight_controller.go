@@ -245,6 +245,7 @@ func (r *KnightReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctr
 				return ctrl.Result{RequeueAfter: retry}, nil
 			}
 			deleteConsumerMetric(knight)
+			r.wakeBackoff.Delete(client.ObjectKeyFromObject(knight))
 			// Best effort: the RoundTable reconcile also drops the card (#393).
 			if err := deleteKnightCards(ctx, r.Client, r.NATS, r.CardsBucket, knight); err != nil {
 				log.Error(err, "Failed to delete agent cards")
@@ -556,7 +557,7 @@ type wakeBackoffState struct {
 	next    time.Time
 }
 
-func (r *KnightReconciler) wakeBackoffStep(attempt int) time.Duration {
+func wakeBackoffStep(attempt int) time.Duration {
 	if attempt >= len(wakeBackoffSteps) {
 		attempt = len(wakeBackoffSteps) - 1
 	}
@@ -576,7 +577,7 @@ func (r *KnightReconciler) advanceWakeBackoff(key client.ObjectKey) {
 	if v, ok := r.wakeBackoff.Load(key); ok {
 		st = v.(wakeBackoffState)
 	}
-	st.next = r.now().Add(r.wakeBackoffStep(st.attempt))
+	st.next = r.now().Add(wakeBackoffStep(st.attempt))
 	st.attempt++
 	r.wakeBackoff.Store(key, st)
 }
@@ -688,6 +689,9 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 	log := logf.FromContext(ctx)
 	prevRT := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightRuntimeAvailable)
 	prevAv := meta.FindStatusCondition(knight.Status.Conditions, aiv1alpha1.ConditionKnightAvailable)
+	// The Warning is raised only when the reason or message changed,
+	// not when the caller only changed e.g. the model. Every needsEvent case
+	// also sets changed, so the status write is gated on changed alone.
 	needsEvent := prevRT == nil || prevRT.Reason != reason || prevRT.Message != msg ||
 		prevAv == nil || prevAv.Reason != reason || prevAv.Message != msg
 	changed = meta.SetStatusCondition(&knight.Status.Conditions, metav1.Condition{
@@ -714,9 +718,7 @@ func (r *KnightReconciler) parkKnightWith(ctx context.Context, knight *aiv1alpha
 		needsEvent = true
 	}
 
-	if changed || needsEvent {
-		// The Warning is raised only when the reason or message changed,
-		// not when the caller only changed e.g. the model.
+	if changed {
 		if needsEvent {
 			log.Info("Runtime unavailable; knight parked", "knight", knight.Name, "reason", reason)
 			// event-reasons: RuntimeClassNotFound SandboxUnavailable
