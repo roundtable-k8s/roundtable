@@ -764,10 +764,10 @@ same 200/202 convention. `waitSeconds` long-polls (capped at
 `gateway.maxTimeout`), so a caller whose connection dropped resumes waiting
 where it left off.
 
-The record's `traceId` is the run's trace (the Chain's `status.traceID`, or the
-task record's for a knight target). It is omitted when the trace is unknown, is
-not a valid trace ID (32 hex) or the run is gone. It is the same ID the
-dashboard's "View trace" link uses.
+The record's `traceId` is the run's trace, taken only from the Chain's
+`status.traceID`. It is omitted when the trace is unknown, is not a valid trace
+ID (32 hex) or the run is still `Pending` (any trace on the Chain is from before
+the run). It is the same ID the dashboard's "View trace" link uses.
 
 ### `GET /v1/runs/{namespace}/{run}/events`
 
