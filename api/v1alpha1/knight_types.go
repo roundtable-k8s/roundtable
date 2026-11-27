@@ -279,9 +279,9 @@ type KnightSpec struct {
 	// /skills/<category>/<skill> links to the LAST arsenal that provides that
 	// skill. An arsenal may also use the flat layout, <skill>/SKILL.md at its
 	// root, where the directory is listed in spec.skills and linked as
-	// /skills/<skill>/<skill>. Each git entry runs its own git-sync-<name> sidecar. When empty
-	// (and no RoundTable default applies) it defaults to one entry
-	// {name: platform, repo: https://github.com/roundtable-k8s/arsenal}.
+	// /skills/<skill>/<skill>. Each git entry runs its own git-sync-<name>
+	// sidecar. When empty (and no RoundTable default applies) it defaults to
+	// one entry {name: platform, repo: https://github.com/roundtable-k8s/arsenal}.
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=8
