@@ -154,7 +154,7 @@ What each policy allows:
 Limits and caveats:
 
 - Policies only cover pods in the release namespace. Knights in other namespaces are not covered; write their policies yourself.
-- Kubelet probes come from the node, not from a pod. With Cilium they are allowed by default. Other CNIs may need an `ipBlock` for the node CIDRs in the operator's policy; the chart does not guess node CIDRs.
+- Kubelet probes come from the node, not from a pod. With Cilium they are allowed by default. Other CNIs may need an `ipBlock` for the node CIDRs; the chart does not guess node CIDRs. This applies to every policy here that opens a port the kubelet probes, not only the operator's: add the `ipBlock` peer to `networkPolicy.metricsFrom` (which feeds the operator, dashboard and knight policies) or the probed pods are reported unready.
 - Egress is not restricted here (see #168) and NATS-level authorization is not covered (see #234).
 - The gateway has its own NetworkPolicy (`gateway.networkPolicy`), separate from this one.
 
@@ -432,7 +432,7 @@ is rendered only with `planner.enabled: true`.
 | `planner.tolerations` | list | `[]` | Install-wide planner knight `spec.tolerations` |
 | `planner.topologySpreadConstraints` | list | `[]` | Install-wide planner knight `spec.topologySpreadConstraints` |
 | `planner.priorityClassName` | string | `""` | Install-wide planner knight `spec.priorityClassName` |
-| `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Default for table planners |
+| `planner.arsenals` | list | `[{name: platform, repo: https://github.com/roundtable-k8s/arsenal.git, ref: main, periodSeconds: 300}]` | Ordered skill sources (`name`, `repo`, `ref`, `periodSeconds`, `image`, `oci`); first = base, later entries override per skill. Default for table planners. A table's own `arsenals` (planner, defaults) replaces this list, it is not merged with it, so repeat `platform` there if the planner still needs it |
 | `planner.github` | object | `{}` | Install-wide planner GitHub token: `tokenSecretRef.name` (Secret holding the token, mounted at `/var/run/secrets/roundtable/github/token`, `GITHUB_TOKEN_FILE`; unset by default) and `tokenSecretRef.key` (required; key within that Secret, a `corev1.SecretKeySelector` so `optional` is honoured too). Table planners use their table's `spec.github` instead. See [GitHub token file](#github-token-file) |
 
 #### Upgrade note: table planners (#566)

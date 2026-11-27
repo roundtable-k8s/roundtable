@@ -387,7 +387,7 @@ below with their label values.
 | `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` | Duration of finished chain steps; `status` is `succeeded`, `failed` or `skipped` |
 | `roundtable_chain_step_cost_usd_total` | counter | `table`, `chain`, `step`, `knight`, `billing` | Cost in USD of finished chain step attempts |
 | `roundtable_chain_step_tokens_total` | counter | `table`, `chain`, `step`, `knight`, `type` | Tokens of finished chain step attempts; `type` is `input`, `output`, `cacheRead` or `cacheWrite` |
-| `roundtable_missions` | gauge | `table`, `phase` | Missions per table and phase; missions with no `roundTableRef`, or one naming a table that does not exist, are counted under `table="none"` |
+| `roundtable_missions` | gauge | `table`, `phase` | Missions per table and phase; missions with no `roundTableRef`, or one naming a table that does not exist, are counted under `table="none"`; this includes finished missions whose ephemeral table was deleted with the mission's cleanup |
 | `roundtable_mission_cost_usd_total` | counter | `table`, `mission`, `billing` | Cost in USD of a mission's finished step attempts |
 | `roundtable_table_cost_usd` | gauge | `table` | Cumulative cost in USD of a table, set from `RoundTable.status.totalCost` |
 | `roundtable_trigger_firings_total` | counter | `table`, `trigger`, `source`, `outcome` | Trigger events by source (`schedule`, `nats`, `webhook`, `github`) and outcome (`started`, `deduped`, `skipped`, `error`) |

@@ -119,6 +119,7 @@ Published to `<prefix>.results.<taskId>`. Both spellings are accepted:
 | `taskId` / `task_id` | Echo of the task ID. |
 | `output` / `result` | Task output. Empty output counts as a failure. |
 | `error` / `success: false` | Task failed. |
+| `transient` / `transientReason` | Optional: `transient: true` marks a failure caused by the model provider rather than the task (overloaded, 5xx, network); `transientReason` is `overloaded`, `provider_5xx` or `network`. A Chain may retry such a step after a backoff (`providerOverload.maxRetries` in [helm-values.md](helm-values.md)); the reason becomes the `reason` label of `roundtable_chain_provider_retries_total`. Absent or `false` means the failure is not retried. |
 | `model` | Optional: the model actually used. The chain controller records it in `status.stepStatuses[].model`. Report it whether or not the task carried an override. |
 
 ### Structured results: `prs` and `verdict`

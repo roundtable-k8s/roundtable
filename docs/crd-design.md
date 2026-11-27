@@ -259,6 +259,8 @@ the operator does not commit results to git.
    | `spec.priorityClassName` | `spec.defaults.priorityClassName` | none |
    | `spec.vault` | `spec.vault` | no vault |
 
+   A knight whose effective `arsenals` is empty gets the default `platform` arsenal: a `git-sync-platform` sidecar, and so `github.com:443` in its egress allowlist (see [egress.md](egress.md)). A list set on the knight, the table's defaults or the planner replaces that default entirely rather than adding to it.
+
    The Knight CRD has no schema defaults for these fields, so "unset" means unset. `status.model` (the `Model` column of `kubectl get knight`) shows the effective model. A change to a table's defaults or vault re-reconciles the knights labelled with it, and their pods roll when the rendered pod template changes. Chains and the gateway read knights with the same defaults applied (effective image, concurrency and model).
 4. **Policy Enforcement:**
    - `policies.costBudgetUSD`: aggregate costs. If exceeding it, the table goes `OverBudget`, `Available` is set to `False` and a `BudgetExceeded` event is recorded. Knights are not suspended or otherwise limited.
@@ -352,7 +354,11 @@ consumer `<Knight>-consumer`, so JetStream hands each pod different tasks.
   (`KNIGHT_MEMORY_DIR`), and `/memory` (`KNIGHT_MEMORY_ROOT`) is its parent.
   Without `existingClaim` the operator creates the ReadWriteMany PVC
   `<knight>-memory` (`size`, default 1Gi; `storageClassName`), owned by the
-  Knight and deleted with it, and mounts it at `/memory/<knight>`. With
+  Knight and deleted with it, and mounts it at `/memory/<knight>`. `size` and
+  `storageClassName` apply only when the PVC is created; changing them later
+  does not resize or recreate it. A pre-existing `<knight>-memory` claim with
+  no controller owner is adopted silently (mounted as is, not given an owner
+  reference, never deleted); one owned by another object is refused. With
   `existingClaim` (for example one RWX claim for a whole table) the claim is
   mounted read-only at `/memory` and its `<knight>` sub-directory read-write
   at `/memory/<knight>`: each knight writes only its own directory and reads
