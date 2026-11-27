@@ -47,13 +47,13 @@ for a in RoundtableGatewayErrors KnightNatsFlapping RoundtableReconcileErrors; d
 done
 grep -q 'roundtable_knight_nats_reconnects_total\[30m\]' <<<"$on" || fail "KnightNatsFlapping expr missing"
 grep -q '> 9$' <<<"$on" || fail "natsReconnectsPer30m not applied"
-grep -q '> 0.3 and on' <<<"$on" || fail "gatewayErrorRatio not applied"
+grep -q '> 0.3$' <<<"$on" || fail "gatewayErrorRatio not applied"
 grep -q 'code=~"5\.\."' <<<"$on" || fail "gateway rule does not count 5xx"
 grep -q 'sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code' <<<"$on" \
   || fail "gateway rule does not keep route and table"
 ! grep -qE 'sum by \(namespace, table\) \(increase\(roundtable_gateway' <<<"$on" \
   || fail "gateway rule aggregates away route"
-grep -q 'sum by (controller) (rate(controller_runtime_reconcile_errors_total\[10m\])) > 0' <<<"$on" \
+grep -q 'sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="rtns"}\[10m\])) > 0' <<<"$on" \
   || fail "RoundtableReconcileErrors expr missing"
 grep -q 'roundtable.operator' <<<"$on" || fail "roundtable.operator group missing"
 grep -q 'roundtable.platform' <<<"$on" || fail "roundtable.platform group missing"

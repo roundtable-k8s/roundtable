@@ -151,7 +151,9 @@ spec:
               Gateway route {{`{{ $labels.route }}`}} on table {{`{{ $labels.table }}`}}: {{`{{ $value | humanizePercentage }}`}} of requests in 15m were 5xx,
               above {{ .Values.alerts.gatewayErrorRatio }}.
           expr: |
-            sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code=~"5.."}[15m])) / sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) > {{ .Values.alerts.gatewayErrorRatio }} and on (namespace, table, route) sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) >= 20
+            sum by (namespace, table, route) (increase(roundtable_gateway_requests_total{code=~"5.."}[15m]))
+              / sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) > {{ .Values.alerts.gatewayErrorRatio }}
+              and on (namespace, table, route) sum by (namespace, table, route) (increase(roundtable_gateway_requests_total[15m])) >= 20
           for: 5m
           labels:
             {{- toYaml $labels | nindent 12 }}
@@ -239,7 +241,7 @@ spec:
               Controller {{`{{ $labels.controller }}`}} has been failing reconciles at {{`{{ $value | humanize }}`}} per second for 15m;
               check the operator log for the failing resource.
           expr: |
-            sum by (controller) (rate(controller_runtime_reconcile_errors_total[10m])) > 0
+            sum by (namespace, controller) (rate(controller_runtime_reconcile_errors_total{namespace="{{ $ns }}"}[10m])) > 0
           for: 15m
           labels:
             {{- toYaml $labels | nindent 12 }}
