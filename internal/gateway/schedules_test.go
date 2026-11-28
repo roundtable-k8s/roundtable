@@ -449,9 +449,10 @@ func TestListSchedulesDoesNotListChains(t *testing.T) {
 	_ = aiv1alpha1.AddToScheme(scheme)
 	digest := templateChain("digest", false)
 	digest.Spec.RoundTableRef = aiv1alpha1.LocalRef("fleet-a")
-	objs := []client.Object{digest,
+	objs := make([]client.Object, 0, 803)
+	objs = append(objs, digest,
 		scheduleTrigger(testNS, "a", "0 7 * * *", "digest"),
-		scheduleTrigger(testNS, "b", "0 8 * * *", "digest")}
+		scheduleTrigger(testNS, "b", "0 8 * * *", "digest"))
 	for i := range 300 {
 		objs = append(objs, templateChain(fmt.Sprintf("run-%d", i), false))
 	}
@@ -478,9 +479,10 @@ func BenchmarkListSchedules800Chains(b *testing.B) {
 	_ = aiv1alpha1.AddToScheme(scheme)
 	digest := templateChain("digest", false)
 	digest.Spec.RoundTableRef = aiv1alpha1.LocalRef("fleet-a")
-	objs := []client.Object{digest,
+	objs := make([]client.Object, 0, 803)
+	objs = append(objs, digest,
 		scheduleTrigger(testNS, "a", "0 7 * * *", "digest"),
-		scheduleTrigger(testNS, "b", "0 8 * * *", "digest")}
+		scheduleTrigger(testNS, "b", "0 8 * * *", "digest"))
 	big := strings.Repeat("x", 32<<10)
 	for i := range 800 {
 		c := templateChain(fmt.Sprintf("run-%d", i), false)
