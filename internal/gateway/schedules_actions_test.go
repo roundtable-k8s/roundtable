@@ -470,7 +470,10 @@ type countingClient struct {
 }
 
 func (c *countingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	c.gets++
+	// Only schedule reads count; a Chain Get resolves a schedule's table.
+	if _, ok := obj.(*aiv1alpha1.Chain); !ok {
+		c.gets++
+	}
 	return c.Client.Get(ctx, key, obj, opts...)
 }
 
