@@ -723,7 +723,7 @@ var _ = Describe("Trigger controller", func() {
 					Annotations: map[string]string{aiv1alpha1.AnnotationChainRun: name},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "Trigger", Name: trg.Name,
-						UID: trg.UID, Controller: ptr.To(true), BlockOwnerDeletion: ptr.To(true),
+						UID: trg.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 					}},
 				},
 				Spec: aiv1alpha1.ChainSpec{
@@ -757,7 +757,7 @@ var _ = Describe("Trigger controller", func() {
 		}
 
 		It("keeps the newest runs, deleting failed ones last, and never an active run", func() {
-			t := plain("cap", func(s *aiv1alpha1.TriggerSpec) { s.MaxFinishedRuns = ptr.To[int32](2) })
+			t := plain("cap", func(s *aiv1alpha1.TriggerSpec) { s.MaxFinishedRuns = new(int32(2)) })
 			seedRun(t, "", "cap-old-ok", aiv1alpha1.ChainPhaseSucceeded, 5*time.Hour)
 			seedRun(t, "", "cap-old-failed", aiv1alpha1.ChainPhaseFailed, 4*time.Hour)
 			seedRun(t, "", "cap-mid-ok", aiv1alpha1.ChainPhaseSucceeded, 3*time.Hour)
@@ -771,7 +771,7 @@ var _ = Describe("Trigger controller", func() {
 
 		It("applies the cap together with the TTL in one pass", func() {
 			t := plain("both", func(s *aiv1alpha1.TriggerSpec) {
-				s.MaxFinishedRuns = ptr.To[int32](1)
+				s.MaxFinishedRuns = new(int32(1))
 				s.TTLSecondsAfterFinished = ptr.To[int32](3600)
 			})
 			seedRun(t, "", "both-expired", aiv1alpha1.ChainPhaseSucceeded, 2*time.Hour)
@@ -804,7 +804,7 @@ var _ = Describe("Trigger controller", func() {
 					Labels: map[string]string{aiv1alpha1.LabelPickupRoundTable: rtName},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "RoundTable", Name: rtName,
-						UID: rt.UID, Controller: ptr.To(true), BlockOwnerDeletion: ptr.To(true),
+						UID: rt.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 					}},
 				},
 				Spec: aiv1alpha1.TriggerSpec{
@@ -812,10 +812,11 @@ var _ = Describe("Trigger controller", func() {
 					Target:          aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
 					Input:           `{}`,
 					RoundTableRef:   &corev1.LocalObjectReference{Name: rtName},
-					MaxFinishedRuns: ptr.To[int32](1),
+					MaxFinishedRuns: new(int32(1)),
 				},
 			}
 			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			DeferCleanup(func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, t))).To(Succeed()) })
 			for i := range 3 {
 				seedRun(t, rtName, fmt.Sprintf("pg-%d", i), aiv1alpha1.ChainPhaseSucceeded, time.Duration(i+1)*time.Minute)
 			}

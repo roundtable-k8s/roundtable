@@ -616,8 +616,9 @@ var _ = Describe("IssuePickup controller", func() {
 			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
 		}
 		left := func() []string {
-			var out []string
-			for _, c := range pickupChains() {
+			chains := pickupChains()
+			out := make([]string, 0, len(chains))
+			for _, c := range chains {
 				out = append(out, c.Name)
 			}
 			return out

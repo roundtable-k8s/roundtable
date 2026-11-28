@@ -1411,8 +1411,8 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 	}
 	ttl = scheduleRunTTL(trg, ttl, r.ScheduleRetention)
 	var active []string
-	var next time.Duration
 	var finished []*aiv1alpha1.Chain
+	lefts := map[*aiv1alpha1.Chain]time.Duration{}
 	ttlDeleted := 0
 	for i := range runs {
 		c := &runs[i]
@@ -1438,10 +1438,7 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 		if chainrun.Finished(c) {
 			finished = append(finished, c)
 		}
-		left := c.Status.CompletedAt.Add(time.Duration(*ttl) * time.Second).Sub(now)
-		if next == 0 || left < next {
-			next = left
-		}
+		lefts[c] = c.Status.CompletedAt.Add(time.Duration(*ttl) * time.Second).Sub(now)
 	}
 	countDeleted := 0
 	if pickupTable(trg) == "" {
@@ -1449,8 +1446,15 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				return nil, 0, fmt.Errorf("delete finished run %s: %w", c.Name, err)
 			}
+			delete(lefts, c)
 			countDeleted++
 			metrics.FinishedChainsDeletedTotal.WithLabelValues("trigger", "count").Inc()
+		}
+	}
+	var next time.Duration
+	for _, left := range lefts {
+		if next == 0 || left < next {
+			next = left
 		}
 	}
 	if ttlDeleted+countDeleted > 0 {
