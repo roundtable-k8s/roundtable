@@ -1451,6 +1451,15 @@ unreachable gateway or no answer within `--timeout` (default 30 s) exits 1
 with the reason on stderr; bad arguments exit 2. `--gateway` defaults to
 `$ROUNDTABLE_GATEWAY_URL`.
 
+## NATS credentials
+
+When the NATS server requires credentials, the gateway and the operator connect
+with a `.creds` file (nkey and JWT). Set `--nats-creds <path>` or the
+environment variable `NATS_CREDS_FILE` (the flag wins); empty means no
+credentials, which is the default. A missing or unreadable file stops the
+start-up with an error naming the path; there is no fallback to an
+unauthenticated connection. Knight pods are not affected.
+
 ## MCP endpoint
 
 The endpoint is `POST /mcp` (streamable HTTP, stateless). Its tools are:

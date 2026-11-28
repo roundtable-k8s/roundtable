@@ -178,6 +178,14 @@ func (c *JetStreamClient) Connect() error {
 		opts = append(opts, nats.ReconnectWait(c.config.ReconnectWait))
 	}
 
+	credsOpt, err := CredsOption(c.config.CredsFile)
+	if err != nil {
+		return err
+	}
+	if credsOpt != nil {
+		opts = append(opts, credsOpt)
+	}
+
 	nc, err := nats.Connect(c.config.URL, opts...)
 	if err != nil {
 		return fmt.Errorf("NATS connect to %s failed: %w", c.config.URL, err)

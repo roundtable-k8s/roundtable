@@ -110,7 +110,7 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 	var sandboxBackendMode string
 	var kedaMode string
-	var natsMonitoringEndpoint string
+	var natsMonitoringEndpoint, natsCredsFile string
 	var githubAPIURL string
 	var providerMaxRetries int
 	var chainMaxConcurrentReconciles int
@@ -202,6 +202,9 @@ func main() {
 		"Render KEDA ScaledObjects for autoscaled knights (maxReplicas > 1 or suspendPolicy: auto): "+
 			"auto (only if keda.sh/v1alpha1 ScaledObject is served), true or false. "+
 			"When disabled, such knights run spec.replicas pods and report Autoscaled=False.")
+	flag.StringVar(&natsCredsFile, "nats-creds", os.Getenv(natspkg.CredsEnv),
+		"Path of a NATS credentials file (.creds) the operator connects with. "+
+			"Defaults to $NATS_CREDS_FILE; empty means no credentials. An unreadable file stops the start-up.")
 	flag.StringVar(&natsMonitoringEndpoint, "nats-monitoring-endpoint", os.Getenv("NATS_MONITORING_ENDPOINT"),
 		"NATS HTTP monitoring endpoint (host:port) for KEDA's JetStream scaler. "+
 			"Empty derives it from each knight's spec.nats.url host on port 8222.")
@@ -411,6 +414,15 @@ func main() {
 	// Allow override via environment variable
 	if natsURL := os.Getenv("NATS_URL"); natsURL != "" {
 		natsConfig.URL = natsURL
+	}
+	natsConfig.CredsFile = natsCredsFile
+	if natsConfig.CredsFile != "" {
+		// A configured file that cannot be read stops the start-up; it never
+		// falls back to an unauthenticated connection.
+		if _, err := natspkg.CredsOption(natsConfig.CredsFile); err != nil {
+			setupLog.Error(err, "Unable to use the NATS credentials file")
+			os.Exit(1)
+		}
 	}
 	natsConfig.ResultsTTL = missionResultsTTL
 	natsProvider := natspkg.NewProvider(natsConfig, ctrl.Log.WithName("nats"))

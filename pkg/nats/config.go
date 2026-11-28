@@ -17,15 +17,42 @@ limitations under the License.
 package nats
 
 import (
+	"fmt"
+	"os"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+// CredsEnv is the environment variable that names the NATS credentials file.
+// The --nats-creds flag of the operator and the gateway wins over it.
+const CredsEnv = "NATS_CREDS_FILE"
+
+// CredsOption returns the connection option that authenticates with the NATS
+// credentials file (.creds, nkey and JWT) at path. An empty path returns nil
+// (no credentials). A file that cannot be read is an error naming the path;
+// it never degrades to an unauthenticated connection.
+func CredsOption(path string) (nats.Option, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("NATS credentials file %q: %w", path, err)
+	}
+	_ = f.Close()
+	return nats.UserCredentials(path), nil
+}
 
 // Config holds NATS connection configuration.
 type Config struct {
 	// URL is the NATS server URL (e.g., "nats://nats.database.svc:4222").
 	URL string
+
+	// CredsFile is the path of a NATS credentials file. Empty means no
+	// credentials.
+	CredsFile string
 
 	// RetryOnFailedConnect enables automatic retry on initial connection failure.
 	RetryOnFailedConnect bool
