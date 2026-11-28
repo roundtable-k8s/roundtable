@@ -229,7 +229,7 @@ func TestFinishedAndOverCap(t *testing.T) {
 		mk("partial", aiv1alpha1.ChainPhasePartiallySucceeded, 8*time.Hour),
 	}
 	names := func(cs []*aiv1alpha1.Chain) []string {
-		var out []string
+		out := make([]string, 0, len(cs))
 		for _, c := range cs {
 			out = append(out, c.Name)
 		}
