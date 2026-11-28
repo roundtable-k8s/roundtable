@@ -1627,17 +1627,87 @@ spec:
                 description: |-
                   github configures GitHub credentials inherited by the table's knights
                   (including mission knights). A Knight's own
-                  spec.github.tokenSecretRef takes precedence.
+                  spec.github.tokenSecretRef takes precedence. additionalTokens adds
+                  per-owner tokens (see docs/github-tokens.md).
                 properties:
+                  additionalTokens:
+                    description: |-
+                      additionalTokens are extra GitHub tokens, each for one owner or
+                      owner/repo, mounted read-only into the table's knights at
+                      /var/run/secrets/roundtable/github-additional/<index>/token. The
+                      operator sets GITHUB_ADDITIONAL_TOKENS to a JSON array of
+                      {"match","file"} objects in list order (paths only, never a token).
+                      Each item applies to the knights it names, or to every knight of the
+                      table when knights is empty. Mission knights get only the items with an
+                      empty knights list. A Knight opts out with
+                      spec.github.disableAdditionalTokens. See docs/github-tokens.md.
+                    items:
+                      description: GitHubAdditionalToken is one extra GitHub token
+                        for an owner or owner/repo.
+                      properties:
+                        knights:
+                          description: |-
+                            knights limits the token to the Knights with these names. Empty means
+                            every knight of the table. Mission knights never match a name, so they
+                            get the token only when this list is empty.
+                          items:
+                            maxLength: 253
+                            type: string
+                          maxItems: 64
+                          type: array
+                          x-kubernetes-list-type: set
+                        match:
+                          description: |-
+                            match is the GitHub owner ("dapperdivers") or repository
+                            ("dapperdivers/dapper-cluster") this token is for.
+                          maxLength: 200
+                          pattern: ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$
+                          type: string
+                        tokenSecretRef:
+                          description: |-
+                            tokenSecretRef selects the key of a Secret (in the table's namespace)
+                            holding the token. It is mounted as a volume, so a rotated Secret
+                            reaches the file without a pod restart. With optional: true the pod
+                            starts even if the Secret or key is missing.
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - match
+                      - tokenSecretRef
+                      type: object
+                    maxItems: 10
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - match
+                    x-kubernetes-list-type: map
                   tokenSecretRef:
                     description: |-
-                      tokenSecretRef selects the key of a Secret (in the knight's namespace)
-                      holding a GitHub token, for example a GitHub App installation token that
-                      an external controller refreshes. The operator mounts it read-only into
-                      the knight at /var/run/secrets/roundtable/github/token and sets
-                      GITHUB_TOKEN_FILE to that path. Because it is a volume, not an env var,
-                      the kubelet refreshes the file in place when the Secret changes. With
-                      optional: true the pod starts even if the Secret or key is missing.
+                      tokenSecretRef selects the key of a Secret (in the table's namespace)
+                      holding the default GitHub token for the table's knights. The operator
+                      mounts it read-only into each knight at
+                      /var/run/secrets/roundtable/github/token and sets GITHUB_TOKEN_FILE to
+                      that path. A Knight's own spec.github.tokenSecretRef takes precedence.
+                      With optional: true the pod starts even if the Secret or key is missing.
                     properties:
                       key:
                         description: The key of the secret to select from.  Must be
@@ -3323,6 +3393,12 @@ spec:
                         github.tokenSecretRef is set it overrides the RoundTable's
                         spec.github.tokenSecretRef.
                       properties:
+                        disableAdditionalTokens:
+                          description: |-
+                            disableAdditionalTokens, if true, keeps the RoundTable's
+                            spec.github.additionalTokens out of this knight: no extra token volumes
+                            are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+                          type: boolean
                         tokenSecretRef:
                           description: |-
                             tokenSecretRef selects the key of a Secret (in the knight's namespace)

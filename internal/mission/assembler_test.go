@@ -129,7 +129,7 @@ func TestBuildEphemeralKnightDedupesSecrets(t *testing.T) {
 
 func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
 	mission, mk, rt := ephemeralFixtures()
-	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+	rt.Spec.GitHub = &aiv1alpha1.RoundTableGitHubConfig{
 		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: testGitHubTokenSecret}, Key: "token"},
 	}
 	a := &KnightAssembler{}
@@ -151,7 +151,7 @@ func TestBuildEphemeralKnightInheritsGitHubTokenSecret(t *testing.T) {
 
 func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
 	mission, mk, rt := ephemeralFixtures()
-	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+	rt.Spec.GitHub = &aiv1alpha1.RoundTableGitHubConfig{
 		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "table-token"}},
 	}
 	tmpl := rt.Spec.KnightTemplates["base"]
@@ -172,8 +172,12 @@ func TestBuildEphemeralKnightKeepsTemplateGitHubTokenSecret(t *testing.T) {
 
 func TestBuildEphemeralRoundTableInheritsParentGitHub(t *testing.T) {
 	mission, _, parent := ephemeralFixtures()
-	parent.Spec.GitHub = &aiv1alpha1.GitHubConfig{
+	parent.Spec.GitHub = &aiv1alpha1.RoundTableGitHubConfig{
 		TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: testGitHubTokenSecret}, Key: "token"},
+		AdditionalTokens: []aiv1alpha1.GitHubAdditionalToken{{
+			Match:          "dapperdivers/dapper-cluster",
+			TokenSecretRef: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "dc-token"}, Key: "token"},
+		}},
 	}
 	s := k8sruntime.NewScheme()
 	if err := aiv1alpha1.AddToScheme(s); err != nil {
@@ -185,6 +189,10 @@ func TestBuildEphemeralRoundTableInheritsParentGitHub(t *testing.T) {
 	if rt.Spec.GitHub == nil || rt.Spec.GitHub.TokenSecretRef == nil ||
 		rt.Spec.GitHub.TokenSecretRef.Name != testGitHubTokenSecret {
 		t.Fatalf("ephemeral table github = %+v, want parent's tokenSecretRef", rt.Spec.GitHub)
+	}
+	// Mission knights read additionalTokens from their (ephemeral) table.
+	if len(rt.Spec.GitHub.AdditionalTokens) != 1 || rt.Spec.GitHub.AdditionalTokens[0].Match != "dapperdivers/dapper-cluster" {
+		t.Fatalf("ephemeral table additionalTokens = %+v, want the parent's", rt.Spec.GitHub.AdditionalTokens)
 	}
 }
 

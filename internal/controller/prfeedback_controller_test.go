@@ -199,7 +199,7 @@ var _ = Describe("PR feedback watcher", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: rtName, Namespace: ns},
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS:   aiv1alpha1.RoundTableNATS{URL: "nats://localhost:4222", SubjectPrefix: "fb", TasksStream: "fb_tasks", ResultsStream: "fb_results"},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "fb-gh"}, Key: "token"}},
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "fb-gh"}, Key: "token"}},
 				PRFeedback: &aiv1alpha1.PRFeedbackSpec{
 					Enabled:           true,
 					Repos:             []string{"o/r"},

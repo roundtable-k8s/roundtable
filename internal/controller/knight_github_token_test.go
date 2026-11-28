@@ -113,7 +113,7 @@ var _ = Describe("Knight GitHub token file", func() {
 			Spec: aiv1alpha1.RoundTableSpec{
 				NATS: aiv1alpha1.RoundTableNATS{SubjectPrefix: "gh", TasksStream: "gh_tasks", ResultsStream: "gh_results"},
 				// key omitted: the CRD defaults it to "token".
-				GitHub: &aiv1alpha1.GitHubConfig{
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{
 					TokenSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "roundtable-github-token"}, Key: "token"},
 				},
 			},
@@ -167,6 +167,65 @@ var _ = Describe("Knight GitHub token file", func() {
 		for _, e := range spec.Containers[0].Env {
 			Expect(e.Name).NotTo(Equal("GITHUB_TOKEN_FILE"))
 		}
+	})
+
+	It("mounts additionalTokens only into the knights they name", func() {
+		rt := &aiv1alpha1.RoundTable{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rtName, Namespace: "default"}, rt)).To(Succeed())
+		rt.Spec.GitHub.AdditionalTokens = []aiv1alpha1.GitHubAdditionalToken{{
+			Match:          "dapperdivers/dapper-cluster",
+			TokenSecretRef: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "dapper-cluster-github-token"}, Key: "token"},
+			Knights:        []string{knightName},
+		}}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+
+		other := knightName + "-own"
+		for _, name := range []string{knightName, other} {
+			Expect(k8sClient.Create(ctx, newKnight(name, map[string]string{aiv1alpha1.LabelRoundTable: rtName}, nil))).To(Succeed())
+			reconcileTwice(name)
+		}
+
+		spec := getDeployment(knightName).Spec.Template.Spec
+		var vol *corev1.Volume
+		for i := range spec.Volumes {
+			if spec.Volumes[i].Name == "github-additional-0" {
+				vol = &spec.Volumes[i]
+			}
+		}
+		Expect(vol).NotTo(BeNil(), "github-additional-0 volume")
+		Expect(vol.Secret).NotTo(BeNil())
+		Expect(vol.Secret.SecretName).To(Equal("dapper-cluster-github-token"))
+		Expect(vol.Secret.Items).To(ConsistOf(corev1.KeyToPath{Key: "token", Path: "token"}))
+		Expect(spec.Containers[0].VolumeMounts).To(ContainElement(corev1.VolumeMount{
+			Name: "github-additional-0", MountPath: "/var/run/secrets/roundtable/github-additional/0", ReadOnly: true,
+		}))
+		Expect(spec.Containers[0].Env).To(ContainElement(corev1.EnvVar{
+			Name:  "GITHUB_ADDITIONAL_TOKENS",
+			Value: `[{"match":"dapperdivers/dapper-cluster","file":"/var/run/secrets/roundtable/github-additional/0/token"}]`,
+		}))
+
+		otherSpec := getDeployment(other).Spec.Template.Spec
+		for _, v := range otherSpec.Volumes {
+			Expect(v.Name).NotTo(HavePrefix("github-additional-"))
+		}
+		for _, e := range otherSpec.Containers[0].Env {
+			Expect(e.Name).NotTo(Equal("GITHUB_ADDITIONAL_TOKENS"))
+		}
+		// The default token is still mounted for both.
+		expectGitHubTokenMount(spec, "roundtable-github-token", "token")
+		expectGitHubTokenMount(otherSpec, "roundtable-github-token", "token")
+
+		// Moving the token to the other knight rolls both pod templates.
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rtName, Namespace: "default"}, rt)).To(Succeed())
+		rt.Spec.GitHub.AdditionalTokens[0].Knights = []string{other}
+		Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		reconcileTwice(knightName)
+		reconcileTwice(other)
+		for _, e := range getDeployment(knightName).Spec.Template.Spec.Containers[0].Env {
+			Expect(e.Name).NotTo(Equal("GITHUB_ADDITIONAL_TOKENS"))
+		}
+		Expect(getDeployment(other).Spec.Template.Spec.Containers[0].Env).To(ContainElement(
+			HaveField("Name", "GITHUB_ADDITIONAL_TOKENS")))
 	})
 
 	It("gives the Sandbox backend the same mount", func() {

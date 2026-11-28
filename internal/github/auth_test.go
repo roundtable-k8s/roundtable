@@ -96,7 +96,7 @@ func TestReadToken(t *testing.T) {
 
 func TestInheritGitHub(t *testing.T) {
 	rt := &aiv1alpha1.RoundTable{}
-	rt.Spec.GitHub = &aiv1alpha1.GitHubConfig{TokenSecretRef: ref("table", "")}
+	rt.Spec.GitHub = &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: ref("table", "")}
 
 	spec := &aiv1alpha1.KnightSpec{}
 	InheritGitHub(spec, rt)

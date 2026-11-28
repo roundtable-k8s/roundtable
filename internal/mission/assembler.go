@@ -577,7 +577,7 @@ func (a *KnightAssembler) BuildEphemeralRoundTable(
 	// Get parent RoundTable for defaults (if specified)
 	var parentDefaults *aiv1alpha1.RoundTableDefaults
 	var parentPolicies *aiv1alpha1.RoundTablePolicies
-	var parentGitHub *aiv1alpha1.GitHubConfig
+	var parentGitHub *aiv1alpha1.RoundTableGitHubConfig
 	natsURL := DefaultMissionNATSURL()
 
 	if aiv1alpha1.RefName(mission.Spec.RoundTableRef) != "" {

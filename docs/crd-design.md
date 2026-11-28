@@ -501,10 +501,16 @@ spec:
   secrets:
     - name: anthropic-api-key
   # Short-lived GitHub token, mounted as a refreshing file (GITHUB_TOKEN_FILE).
+  # additionalTokens adds per-owner tokens (GITHUB_ADDITIONAL_TOKENS); see
+  # docs/github-tokens.md.
   github:
     tokenSecretRef:
       name: roundtable-github-token
       key: token
+    additionalTokens:
+      - match: dapperdivers/dapper-cluster
+        tokenSecretRef: {name: dapper-cluster-github-token, key: token}
+        knights: [rt-operator, rt-lead]
   vault:
     claimName: obsidian-vault
     readOnly: true
@@ -520,7 +526,7 @@ spec:
 | Field | Standing knights (labelled `ai.roundtable.io/round-table`, or legacy `ai.roundtable.io/table`) | Mission knights |
 |-------|------|------|
 | `secrets` | Added to the pod's `envFrom` (deduplicated against the knight's own `envFrom`) | Injected by the mission assembler, followed by `mission.spec.secrets` |
-| `github` | Inherited unless the knight sets its own `spec.github` | Inherited unless the template sets its own |
+| `github` | `tokenSecretRef` inherited unless the knight sets its own; `additionalTokens` mounted per [GitHub tokens](github-tokens.md) unless the knight sets `disableAdditionalTokens` | `tokenSecretRef` inherited unless the template sets its own; only `additionalTokens` items with an empty `knights` list |
 | `sharedWorkspace` | Mounted (legacy `table` label only) | Not applied |
 
 Standing knights without a table label get none of these.

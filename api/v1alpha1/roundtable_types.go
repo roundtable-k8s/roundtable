@@ -54,9 +54,10 @@ type RoundTableSpec struct {
 
 	// github configures GitHub credentials inherited by the table's knights
 	// (including mission knights). A Knight's own
-	// spec.github.tokenSecretRef takes precedence.
+	// spec.github.tokenSecretRef takes precedence. additionalTokens adds
+	// per-owner tokens (see docs/github-tokens.md).
 	// +optional
-	GitHub *GitHubConfig `json:"github,omitempty"`
+	GitHub *RoundTableGitHubConfig `json:"github,omitempty"`
 
 	// issuePickup polls GitHub for issues labelled ready and starts one copy
 	// of a Chain (the PR pipeline) per issue. Unset means off.

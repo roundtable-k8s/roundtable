@@ -76,11 +76,18 @@ func TableTokenRef(rt *aiv1alpha1.RoundTable) *corev1.SecretKeySelector {
 	return rt.Spec.GitHub.TokenSecretRef
 }
 
-// InheritGitHub copies the table's spec.github into a generated knight spec
-// unless the spec already names its own token Secret.
+// InheritGitHub copies the table's spec.github.tokenSecretRef into a
+// generated knight spec unless the spec already names its own token Secret.
+// additionalTokens are not copied: the pod builder reads them from the table.
 func InheritGitHub(spec *aiv1alpha1.KnightSpec, rt *aiv1alpha1.RoundTable) {
-	if (spec.GitHub == nil || spec.GitHub.TokenSecretRef == nil) && rt.Spec.GitHub != nil {
-		spec.GitHub = rt.Spec.GitHub.DeepCopy()
+	if rt.Spec.GitHub == nil || rt.Spec.GitHub.TokenSecretRef == nil {
+		return
+	}
+	if spec.GitHub == nil {
+		spec.GitHub = &aiv1alpha1.GitHubConfig{}
+	}
+	if spec.GitHub.TokenSecretRef == nil {
+		spec.GitHub.TokenSecretRef = rt.Spec.GitHub.TokenSecretRef.DeepCopy()
 	}
 }
 

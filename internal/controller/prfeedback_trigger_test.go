@@ -200,7 +200,7 @@ var _ = Describe("PR feedback trigger engine", func() {
 				NATS: aiv1alpha1.RoundTableNATS{
 					SubjectPrefix: "fbt", TasksStream: "fbt_tasks", ResultsStream: "fbt_results", CreateStreams: true,
 				},
-				GitHub: &aiv1alpha1.GitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
+				GitHub: &aiv1alpha1.RoundTableGitHubConfig{TokenSecretRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: "fbt-gh"}, Key: "token"}},
 				PRFeedback: &aiv1alpha1.PRFeedbackSpec{
 					Engine:      aiv1alpha1.PRFeedbackEngineTrigger,

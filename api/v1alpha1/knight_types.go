@@ -647,6 +647,67 @@ type GitHubConfig struct {
 	// optional: true the pod starts even if the Secret or key is missing.
 	// +optional
 	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
+
+	// disableAdditionalTokens, if true, keeps the RoundTable's
+	// spec.github.additionalTokens out of this knight: no extra token volumes
+	// are mounted and GITHUB_ADDITIONAL_TOKENS is not set.
+	// +optional
+	DisableAdditionalTokens bool `json:"disableAdditionalTokens,omitempty"`
+}
+
+// RoundTableGitHubConfig configures GitHub credentials for a RoundTable's
+// knights. It has the Knight's tokenSecretRef plus additionalTokens, which
+// only a RoundTable can set (a Knight has no such field).
+type RoundTableGitHubConfig struct {
+	// tokenSecretRef selects the key of a Secret (in the table's namespace)
+	// holding the default GitHub token for the table's knights. The operator
+	// mounts it read-only into each knight at
+	// /var/run/secrets/roundtable/github/token and sets GITHUB_TOKEN_FILE to
+	// that path. A Knight's own spec.github.tokenSecretRef takes precedence.
+	// With optional: true the pod starts even if the Secret or key is missing.
+	// +optional
+	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
+
+	// additionalTokens are extra GitHub tokens, each for one owner or
+	// owner/repo, mounted read-only into the table's knights at
+	// /var/run/secrets/roundtable/github-additional/<index>/token. The
+	// operator sets GITHUB_ADDITIONAL_TOKENS to a JSON array of
+	// {"match","file"} objects in list order (paths only, never a token).
+	// Each item applies to the knights it names, or to every knight of the
+	// table when knights is empty. Mission knights get only the items with an
+	// empty knights list. A Knight opts out with
+	// spec.github.disableAdditionalTokens. See docs/github-tokens.md.
+	// +listType=map
+	// +listMapKey=match
+	// +kubebuilder:validation:MaxItems=10
+	// +optional
+	AdditionalTokens []GitHubAdditionalToken `json:"additionalTokens,omitempty"`
+}
+
+// GitHubAdditionalToken is one extra GitHub token for an owner or owner/repo.
+type GitHubAdditionalToken struct {
+	// match is the GitHub owner ("dapperdivers") or repository
+	// ("dapperdivers/dapper-cluster") this token is for.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$`
+	// +kubebuilder:validation:MaxLength=200
+	// +required
+	Match string `json:"match"`
+
+	// tokenSecretRef selects the key of a Secret (in the table's namespace)
+	// holding the token. It is mounted as a volume, so a rotated Secret
+	// reaches the file without a pod restart. With optional: true the pod
+	// starts even if the Secret or key is missing.
+	// +required
+	TokenSecretRef corev1.SecretKeySelector `json:"tokenSecretRef"`
+
+	// knights limits the token to the Knights with these names. Empty means
+	// every knight of the table. Mission knights never match a name, so they
+	// get the token only when this list is empty.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=253
+	// +listType=set
+	// +optional
+	Knights []string `json:"knights,omitempty"`
 }
 
 // KnightCapabilities defines optional runtime capabilities for the knight pod.
