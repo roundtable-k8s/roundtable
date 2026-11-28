@@ -125,6 +125,16 @@ spec:
                   missing map key is an error. toJson encodes a value as JSON. Empty
                   keeps the target Chain's own spec.input.
                 type: string
+              maxFinishedRuns:
+                description: |-
+                  maxFinishedRuns caps how many finished runs are kept. Beyond it the
+                  oldest finished runs (by completion time) are deleted, failed and
+                  partially succeeded ones last. Running runs are never deleted. 0 or
+                  unset means no cap. Not used by the Triggers issue pickup generates;
+                  set issuePickup.maxFinishedChains instead.
+                format: int32
+                minimum: 0
+                type: integer
               roundTableRef:
                 description: |-
                   roundTableRef names the RoundTable (same namespace) whose events

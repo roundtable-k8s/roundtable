@@ -814,6 +814,15 @@ type TriggerSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// maxFinishedRuns caps how many finished runs are kept. Beyond it the
+	// oldest finished runs (by completion time) are deleted, failed and
+	// partially succeeded ones last. Running runs are never deleted. 0 or
+	// unset means no cap. Not used by the Triggers issue pickup generates;
+	// set issuePickup.maxFinishedChains instead.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxFinishedRuns *int32 `json:"maxFinishedRuns,omitempty"`
 }
 
 // TriggerFiring records one event a Trigger handled.

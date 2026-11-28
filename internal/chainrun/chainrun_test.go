@@ -205,3 +205,57 @@ func TestActiveExpired(t *testing.T) {
 		t.Fatal("not yet expired")
 	}
 }
+
+func TestFinishedAndOverCap(t *testing.T) {
+	now := time.Now()
+	mk := func(name string, phase aiv1alpha1.ChainPhase, age time.Duration) *aiv1alpha1.Chain {
+		done := metav1.NewTime(now.Add(-age))
+		c := &aiv1alpha1.Chain{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		c.Status.Phase = phase
+		c.Status.CompletedAt = &done
+		return c
+	}
+	running := mk("running", aiv1alpha1.ChainPhaseRunning, time.Hour)
+	idle := mk("idle", aiv1alpha1.ChainPhaseIdle, time.Hour)
+	if Finished(running) || Finished(idle) || !Finished(mk("ok", aiv1alpha1.ChainPhaseSucceeded, 0)) {
+		t.Fatal("only terminal phases are finished")
+	}
+
+	chains := []*aiv1alpha1.Chain{
+		mk("new-ok", aiv1alpha1.ChainPhaseSucceeded, time.Minute),
+		mk("old-fail", aiv1alpha1.ChainPhaseFailed, 10*time.Hour),
+		mk("old-ok", aiv1alpha1.ChainPhaseSucceeded, 9*time.Hour),
+		mk("mid-ok", aiv1alpha1.ChainPhaseSucceeded, time.Hour),
+		mk("partial", aiv1alpha1.ChainPhasePartiallySucceeded, 8*time.Hour),
+	}
+	names := func(cs []*aiv1alpha1.Chain) []string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.Name)
+		}
+		return out
+	}
+	two, zero, ten := int32(2), int32(0), int32(10)
+	if got := OverCap(chains, nil); got != nil {
+		t.Fatalf("nil cap: %v", names(got))
+	}
+	if got := OverCap(chains, &zero); got != nil {
+		t.Fatalf("zero cap: %v", names(got))
+	}
+	if got := OverCap(chains, &ten); got != nil {
+		t.Fatalf("under cap: %v", names(got))
+	}
+	// Oldest successes first, failures last: keeps the 2 failures.
+	got := names(OverCap(chains, &two))
+	if want := []string{"old-ok", "mid-ok", "new-ok"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	one := int32(1)
+	got = names(OverCap(chains, &one))
+	if want := []string{"old-ok", "mid-ok", "new-ok", "old-fail"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	if chains[0].Name != "new-ok" {
+		t.Fatal("input reordered")
+	}
+}

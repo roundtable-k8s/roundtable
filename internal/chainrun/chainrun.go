@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -145,6 +146,46 @@ func Expired(c *aiv1alpha1.Chain, ttl *int32, now time.Time) bool {
 		return false
 	}
 	return now.Sub(c.Status.CompletedAt.Time) >= time.Duration(*ttl)*time.Second
+}
+
+// Finished reports whether a Chain is in a terminal phase with no run pending,
+// so retention may delete it.
+func Finished(c *aiv1alpha1.Chain) bool {
+	switch c.Status.Phase {
+	case aiv1alpha1.ChainPhaseSucceeded, aiv1alpha1.ChainPhaseFailed, aiv1alpha1.ChainPhasePartiallySucceeded:
+		return !Active(c)
+	}
+	return false
+}
+
+// OverCap returns the finished Chains to delete so that at most max remain.
+// finished must hold only Chains that may be deleted (terminal, not active).
+// Oldest completedAt goes first; Failed and PartiallySucceeded Chains go
+// after every other Chain. A nil or non-positive max returns nil.
+func OverCap(finished []*aiv1alpha1.Chain, max *int32) []*aiv1alpha1.Chain {
+	if max == nil || *max <= 0 || len(finished) <= int(*max) {
+		return nil
+	}
+	sorted := slices.Clone(finished)
+	failed := func(c *aiv1alpha1.Chain) bool {
+		return c.Status.Phase == aiv1alpha1.ChainPhaseFailed || c.Status.Phase == aiv1alpha1.ChainPhasePartiallySucceeded
+	}
+	done := func(c *aiv1alpha1.Chain) time.Time {
+		if c.Status.CompletedAt != nil {
+			return c.Status.CompletedAt.Time
+		}
+		return c.CreationTimestamp.Time
+	}
+	slices.SortStableFunc(sorted, func(a, b *aiv1alpha1.Chain) int {
+		if fa, fb := failed(a), failed(b); fa != fb {
+			if fa {
+				return 1
+			}
+			return -1
+		}
+		return done(a).Compare(done(b))
+	})
+	return sorted[:len(sorted)-int(*max)]
 }
 
 var nonDNSChars = regexp.MustCompile(`[^a-z0-9-]+`)
