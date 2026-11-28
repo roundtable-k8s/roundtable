@@ -1227,7 +1227,7 @@ var _ = Describe("Trigger controller", func() {
 			Expect(t.Status.NextScheduledAt).To(BeNil())
 			Expect(consumerExists(natspkg.TriggerConsumerName(ns, "annsuspend"))).To(BeFalse())
 			cond := meta.FindStatusCondition(t.Status.Conditions, aiv1alpha1.ConditionTriggerReady)
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(cond.Reason).To(Equal(aiv1alpha1.ReasonTriggerSuspended))
 			Expect(cond.Message).To(ContainSubstring(aiv1alpha1.AnnotationTriggerSuspended))
 			Expect(cond.Message).To(ContainSubstring("by token"))

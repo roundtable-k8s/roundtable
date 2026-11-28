@@ -419,7 +419,10 @@ func (r *TriggerReconciler) suspend(ctx context.Context, trg *aiv1alpha1.Trigger
 			}
 		}
 	}
-	return triggerCondition(metav1.ConditionFalse, aiv1alpha1.ReasonTriggerSuspended, msg), nil
+	// True, not False: a deliberately suspended Trigger is in the state its
+	// spec asks for, and kstatus (Helm --wait, Flux) reads Ready=False as
+	// InProgress. The reason and suspendedBy say it is paused.
+	return triggerCondition(metav1.ConditionTrue, aiv1alpha1.ReasonTriggerSuspended, msg), nil
 }
 
 // suspendedMessage says what suspends the Trigger.
