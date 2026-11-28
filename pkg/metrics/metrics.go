@@ -56,6 +56,16 @@ var (
 		[]string{"table", "chain", "status"},
 	)
 
+	// FinishedChainsDeletedTotal counts finished Chains the operator deleted
+	// to enforce retention. reason: ttl, count.
+	FinishedChainsDeletedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "roundtable_finished_chains_deleted_total",
+			Help: "Total finished Chains deleted by retention, by reason (ttl, count)",
+		},
+		[]string{"source", "reason"},
+	)
+
 	// ChainNoOpRunsTotal tracks chain runs that completed without executing
 	// a single step (all outputs restored from cache). A nonzero rate usually
 	// means stale KV entries are masking a real problem.
@@ -298,6 +308,7 @@ func init() {
 		Knights,
 		KnightWakeSeconds,
 		ChainRunsTotal,
+		FinishedChainsDeletedTotal,
 		ChainNoOpRunsTotal,
 		ChainProviderRetriesTotal,
 		ChainStepDurationSeconds,

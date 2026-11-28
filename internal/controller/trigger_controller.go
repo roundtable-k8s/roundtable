@@ -1411,7 +1411,9 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 	}
 	ttl = scheduleRunTTL(trg, ttl, r.ScheduleRetention)
 	var active []string
-	var next time.Duration
+	var finished []*aiv1alpha1.Chain
+	lefts := map[*aiv1alpha1.Chain]time.Duration{}
+	ttlDeleted := 0
 	for i := range runs {
 		c := &runs[i]
 		if chainrun.Active(c) {
@@ -1419,19 +1421,44 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 			continue
 		}
 		if ttl == nil || *ttl <= 0 || c.Status.CompletedAt == nil {
+			if chainrun.Finished(c) {
+				finished = append(finished, c)
+			}
 			continue
 		}
 		if chainrun.Expired(c, ttl, now) {
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				return nil, 0, fmt.Errorf("delete finished run %s: %w", c.Name, err)
 			}
-			logf.FromContext(ctx).Info("Deleted finished Trigger run", "run", c.Name)
+			logf.FromContext(ctx).Info("Deleted finished Trigger run", "run", c.Name, "reason", "ttl")
+			metrics.FinishedChainsDeletedTotal.WithLabelValues("trigger", "ttl").Inc()
+			ttlDeleted++
 			continue
 		}
-		left := c.Status.CompletedAt.Add(time.Duration(*ttl) * time.Second).Sub(now)
+		if chainrun.Finished(c) {
+			finished = append(finished, c)
+		}
+		lefts[c] = c.Status.CompletedAt.Add(time.Duration(*ttl) * time.Second).Sub(now)
+	}
+	countDeleted := 0
+	if pickupTable(trg) == "" {
+		for _, c := range chainrun.OverCap(finished, trg.Spec.MaxFinishedRuns) {
+			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
+				return nil, 0, fmt.Errorf("delete finished run %s: %w", c.Name, err)
+			}
+			delete(lefts, c)
+			countDeleted++
+			metrics.FinishedChainsDeletedTotal.WithLabelValues("trigger", "count").Inc()
+		}
+	}
+	var next time.Duration
+	for _, left := range lefts {
 		if next == 0 || left < next {
 			next = left
 		}
+	}
+	if ttlDeleted+countDeleted > 0 {
+		logf.FromContext(ctx).Info("Deleted finished Trigger runs", "ttl", ttlDeleted, "count", countDeleted)
 	}
 	return active, next, nil
 }

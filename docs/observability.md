@@ -391,6 +391,7 @@ below with their label values.
 | `roundtable_tasks_dead_lettered_total` | counter | `table`, `knight`, `reason` | Tasks written to the dead-letter stream; `reason` is `lost`, `failed`, `timeout`, `usage_limited` or `refused` |
 | `roundtable_dead_letters_open` | gauge | `table`, `knight` | Dead-letter entries still open (neither resolved by a later success nor retried) |
 | `roundtable_chain_runs_total` | counter | `table`, `chain`, `status` | Chain runs that reached a terminal phase; `status` is `succeeded`, `partially_succeeded` or `failed` |
+| `roundtable_finished_chains_deleted_total` | counter | `source`, `reason` | Finished Chains deleted by retention; `source` is `issuepickup` or `trigger`, `reason` is `ttl` or `count` |
 | `roundtable_chain_noop_runs_total` | counter | `table`, `chain` | Chain runs that completed without executing any step (all outputs restored from cache) |
 | `roundtable_chain_provider_retries_total` | counter | `table`, `chain`, `step`, `reason` | Chain step retries after a transient model provider failure; `reason` is `overloaded`, `provider_5xx`, `network` or `unknown` |
 | `roundtable_chain_step_duration_seconds` | histogram | `table`, `chain`, `step`, `status` | Duration of finished chain steps; `status` is `succeeded`, `failed` or `skipped` |

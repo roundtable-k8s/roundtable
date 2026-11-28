@@ -1772,6 +1772,16 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
+                  maxFinishedChains:
+                    description: |-
+                      maxFinishedChains caps how many finished pickup Chains are kept. Beyond
+                      it the oldest finished Chains (by completion time) are deleted, failed
+                      and partially succeeded ones last so recent failures stay inspectable.
+                      Running Chains and Chains with post-run work pending are never
+                      deleted. 0 or unset means no cap. Recommended for a busy table: 200.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   needsHumanLabel:
                     default: needs-human
                     description: |-

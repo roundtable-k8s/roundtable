@@ -87,6 +87,12 @@ var _ = Describe("Trigger controller", func() {
 			client.MatchingLabels{aiv1alpha1.LabelTrigger: trigger})).To(Succeed())
 		return list.Items
 	}
+	runsOfPickup := func(table string) []aiv1alpha1.Chain {
+		list := &aiv1alpha1.ChainList{}
+		Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+			client.MatchingLabels{aiv1alpha1.LabelPickupRoundTable: table})).To(Succeed())
+		return list.Items
+	}
 	getTrigger := func(name string) *aiv1alpha1.Trigger {
 		t := &aiv1alpha1.Trigger{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, t)).To(Succeed())
@@ -703,6 +709,121 @@ var _ = Describe("Trigger controller", func() {
 			clock = clock.Add(61 * time.Second)
 			reconcileTrigger("ttl")
 			Eventually(func() int { return len(runsOf("ttl")) }, 5*time.Second, 100*time.Millisecond).Should(BeZero())
+		})
+	})
+
+	Context("maxFinishedRuns", func() {
+		// seedRun creates a Chain run of trg (or of the pickup table when
+		// table is set) in the given phase, completed age ago.
+		seedRun := func(trg *aiv1alpha1.Trigger, table, name string, phase aiv1alpha1.ChainPhase, age time.Duration) {
+			c := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name, Namespace: ns,
+					Labels:      map[string]string{aiv1alpha1.LabelTrigger: trg.Name},
+					Annotations: map[string]string{aiv1alpha1.AnnotationChainRun: name},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "Trigger", Name: trg.Name,
+						UID: trg.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+					}},
+				},
+				Spec: aiv1alpha1.ChainSpec{
+					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+					Input:         `{}`,
+					Schedule:      "0 * * * *",
+					Steps:         []aiv1alpha1.ChainStep{{Name: "do", KnightRef: corev1.LocalObjectReference{Name: "lead"}, Task: "do", TimeoutSeconds: 120}},
+				},
+			}
+			if table != "" {
+				c.Labels[aiv1alpha1.LabelPickupRoundTable] = table
+			}
+			Expect(k8sClient.Create(ctx, c)).To(Succeed())
+			DeferCleanup(func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, c))).To(Succeed()) })
+			c.Status.Phase = phase
+			if phase != aiv1alpha1.ChainPhaseRunning {
+				c.Status.LastRunTrigger = name
+				c.Status.CompletedAt = &metav1.Time{Time: clock.Add(-age)}
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+		}
+		names := func(cs []aiv1alpha1.Chain) []string {
+			out := make([]string, 0, len(cs))
+			for _, c := range cs {
+				out = append(out, c.Name)
+			}
+			return out
+		}
+		plain := func(name string, mutate func(*aiv1alpha1.TriggerSpec)) *aiv1alpha1.Trigger {
+			return natsTrigger(name, prefix+".events."+name, mutate)
+		}
+
+		It("keeps the newest runs, deleting failed ones last, and never an active run", func() {
+			t := plain("cap", func(s *aiv1alpha1.TriggerSpec) { s.MaxFinishedRuns = new(int32(2)) })
+			seedRun(t, "", "cap-old-ok", aiv1alpha1.ChainPhaseSucceeded, 5*time.Hour)
+			seedRun(t, "", "cap-old-failed", aiv1alpha1.ChainPhaseFailed, 4*time.Hour)
+			seedRun(t, "", "cap-mid-ok", aiv1alpha1.ChainPhaseSucceeded, 3*time.Hour)
+			seedRun(t, "", "cap-new-ok", aiv1alpha1.ChainPhaseSucceeded, time.Hour)
+			seedRun(t, "", "cap-running", aiv1alpha1.ChainPhaseRunning, 0)
+
+			reconcileTrigger("cap")
+			Eventually(func() []string { return names(runsOf("cap")) }, 5*time.Second, 100*time.Millisecond).
+				Should(ConsistOf("cap-old-failed", "cap-new-ok", "cap-running"))
+		})
+
+		It("applies the cap together with the TTL in one pass", func() {
+			t := plain("both", func(s *aiv1alpha1.TriggerSpec) {
+				s.MaxFinishedRuns = new(int32(1))
+				s.TTLSecondsAfterFinished = ptr.To[int32](3600)
+			})
+			seedRun(t, "", "both-expired", aiv1alpha1.ChainPhaseSucceeded, 2*time.Hour)
+			seedRun(t, "", "both-a", aiv1alpha1.ChainPhaseSucceeded, 20*time.Minute)
+			seedRun(t, "", "both-b", aiv1alpha1.ChainPhaseSucceeded, 10*time.Minute)
+
+			reconcileTrigger("both")
+			Eventually(func() []string { return names(runsOf("both")) }, 5*time.Second, 100*time.Millisecond).
+				Should(ConsistOf("both-b"))
+		})
+
+		It("deletes nothing beyond the TTL when no cap is set", func() {
+			t := plain("nocap", func(s *aiv1alpha1.TriggerSpec) { s.TTLSecondsAfterFinished = ptr.To[int32](3600) })
+			for i := range 5 {
+				seedRun(t, "", fmt.Sprintf("nocap-%d", i), aiv1alpha1.ChainPhaseSucceeded, time.Duration(i+1)*time.Minute)
+			}
+			seedRun(t, "", "nocap-expired", aiv1alpha1.ChainPhaseFailed, 2*time.Hour)
+
+			reconcileTrigger("nocap")
+			Eventually(func() int { return len(runsOf("nocap")) }, 5*time.Second, 100*time.Millisecond).Should(Equal(5))
+			Consistently(func() int { return len(runsOf("nocap")) }, time.Second, 100*time.Millisecond).Should(Equal(5))
+		})
+
+		It("ignores maxFinishedRuns on a pickup-generated Trigger", func() {
+			rt := &aiv1alpha1.RoundTable{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: rtName}, rt)).To(Succeed())
+			t := &aiv1alpha1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pickup-gen", Namespace: ns,
+					Labels: map[string]string{aiv1alpha1.LabelPickupRoundTable: rtName},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: aiv1alpha1.GroupVersion.String(), Kind: "RoundTable", Name: rtName,
+						UID: rt.UID, Controller: new(true), BlockOwnerDeletion: new(true),
+					}},
+				},
+				Spec: aiv1alpha1.TriggerSpec{
+					Source:          aiv1alpha1.TriggerSource{NATS: &aiv1alpha1.TriggerNATSSource{Subject: prefix + ".events.pickup-gen"}},
+					Target:          aiv1alpha1.TriggerTarget{ChainRef: &corev1.LocalObjectReference{Name: tmplName}},
+					Input:           `{}`,
+					RoundTableRef:   &corev1.LocalObjectReference{Name: rtName},
+					MaxFinishedRuns: new(int32(1)),
+				},
+			}
+			Expect(k8sClient.Create(ctx, t)).To(Succeed())
+			DeferCleanup(func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, t))).To(Succeed()) })
+			for i := range 3 {
+				seedRun(t, rtName, fmt.Sprintf("pg-%d", i), aiv1alpha1.ChainPhaseSucceeded, time.Duration(i+1)*time.Minute)
+			}
+
+			_, _, err := r.collectRuns(ctx, getTrigger("pickup-gen"), clock)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runsOfPickup(rtName)).To(HaveLen(3))
 		})
 	})
 

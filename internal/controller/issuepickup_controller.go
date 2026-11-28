@@ -43,6 +43,7 @@ import (
 	"github.com/roundtable-k8s/roundtable/internal/chainrun"
 	"github.com/roundtable-k8s/roundtable/internal/deadletter"
 	"github.com/roundtable-k8s/roundtable/internal/github"
+	"github.com/roundtable-k8s/roundtable/pkg/metrics"
 )
 
 const (
@@ -205,6 +206,8 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 	}
 	byName := make(map[string]*aiv1alpha1.Chain, len(chains.Items))
 	activeByRepo := map[string]int32{}
+	var deleted struct{ ttl, count int }
+	var deletable []*aiv1alpha1.Chain
 	for i := range chains.Items {
 		c := &chains.Items[i]
 		if pickupChainActive(c) {
@@ -214,11 +217,27 @@ func (r *IssuePickupReconciler) poll(ctx context.Context, rt *aiv1alpha1.RoundTa
 			if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
 				res.fail("delete finished chain %s: %v", c.Name, err)
 			} else {
-				log.Info("Deleted finished pickup chain", "chain", c.Name)
+				log.Info("Deleted finished pickup chain", "chain", c.Name, "reason", "ttl")
+				metrics.FinishedChainsDeletedTotal.WithLabelValues("issuepickup", "ttl").Inc()
+				deleted.ttl++
 			}
 			continue
+		} else if chainrun.Finished(c) && !pickupPostRunPending(c, postRun) {
+			deletable = append(deletable, c)
 		}
 		byName[c.Name] = c
+	}
+	for _, c := range chainrun.OverCap(deletable, spec.MaxFinishedChains) {
+		if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
+			res.fail("delete finished chain %s: %v", c.Name, err)
+			continue
+		}
+		delete(byName, c.Name)
+		deleted.count++
+		metrics.FinishedChainsDeletedTotal.WithLabelValues("issuepickup", "count").Inc()
+	}
+	if deleted.ttl+deleted.count > 0 {
+		log.Info("Deleted finished pickup chains", "ttl", deleted.ttl, "count", deleted.count)
 	}
 
 	tmpl := &aiv1alpha1.Chain{}

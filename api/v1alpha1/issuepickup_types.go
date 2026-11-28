@@ -217,6 +217,15 @@ type IssuePickupSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// maxFinishedChains caps how many finished pickup Chains are kept. Beyond
+	// it the oldest finished Chains (by completion time) are deleted, failed
+	// and partially succeeded ones last so recent failures stay inspectable.
+	// Running Chains and Chains with post-run work pending are never
+	// deleted. 0 or unset means no cap. Recommended for a busy table: 200.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxFinishedChains *int32 `json:"maxFinishedChains,omitempty"`
 }
 
 // IssuePickupStatus is the observed state of a RoundTable's issue pickup.
