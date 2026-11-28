@@ -1420,10 +1420,10 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 			active = append(active, c.Name)
 			continue
 		}
-		if chainrun.Finished(c) {
-			finished = append(finished, c)
-		}
 		if ttl == nil || *ttl <= 0 || c.Status.CompletedAt == nil {
+			if chainrun.Finished(c) {
+				finished = append(finished, c)
+			}
 			continue
 		}
 		if chainrun.Expired(c, ttl, now) {
@@ -1433,8 +1433,10 @@ func (r *TriggerReconciler) collectRuns(ctx context.Context, trg *aiv1alpha1.Tri
 			logf.FromContext(ctx).Info("Deleted finished Trigger run", "run", c.Name, "reason", "ttl")
 			metrics.FinishedChainsDeletedTotal.WithLabelValues("trigger", "ttl").Inc()
 			ttlDeleted++
-			finished = slices.DeleteFunc(finished, func(f *aiv1alpha1.Chain) bool { return f == c })
 			continue
+		}
+		if chainrun.Finished(c) {
+			finished = append(finished, c)
 		}
 		left := c.Status.CompletedAt.Add(time.Duration(*ttl) * time.Second).Sub(now)
 		if next == 0 || left < next {

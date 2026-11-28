@@ -576,6 +576,89 @@ var _ = Describe("IssuePickup controller", func() {
 		Expect(names).To(ConsistOf(c.Name), "#8 finished 8 days ago; #7 is running again")
 	})
 
+	Context("maxFinishedChains", func() {
+		// seed creates a pickup Chain in phase completed age ago. A chain with
+		// pending post-run work carries the repo annotation and a succeeded
+		// merge step, so the builtin post-run still has to verify it.
+		seed := func(name string, phase aiv1alpha1.ChainPhase, age time.Duration, pending bool) {
+			c := &aiv1alpha1.Chain{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name, Namespace: ns,
+					Labels:      map[string]string{aiv1alpha1.LabelPickupRoundTable: rtName},
+					Annotations: map[string]string{aiv1alpha1.AnnotationChainRun: name},
+				},
+				Spec: aiv1alpha1.ChainSpec{
+					RoundTableRef: &corev1.LocalObjectReference{Name: rtName},
+					Input:         `{}`,
+					Schedule:      "0 * * * *",
+					Steps:         []aiv1alpha1.ChainStep{{Name: "plan", KnightRef: corev1.LocalObjectReference{Name: "lead"}, Task: "plan", TimeoutSeconds: 120}},
+				},
+			}
+			if pending {
+				c.Annotations[aiv1alpha1.AnnotationPickupRepo] = repo
+			}
+			Expect(k8sClient.Create(ctx, c)).To(Succeed())
+			DeferCleanup(func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, c))).To(Succeed()) })
+			c.Status.Phase = phase
+			if phase != aiv1alpha1.ChainPhaseRunning {
+				c.Status.LastRunTrigger = name
+				c.Status.CompletedAt = &metav1.Time{Time: clock.Add(-age)}
+			}
+			if pending {
+				c.Status.StepStatuses = []aiv1alpha1.ChainStepStatus{{Name: mergeStepName, Phase: aiv1alpha1.ChainStepPhaseSucceeded}}
+			}
+			Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+		}
+		setCaps := func(ttl, maxChains *int32) {
+			rt := getRT()
+			rt.Spec.IssuePickup.TTLSecondsAfterFinished = ttl
+			rt.Spec.IssuePickup.MaxFinishedChains = maxChains
+			Expect(k8sClient.Update(ctx, rt)).To(Succeed())
+		}
+		left := func() []string {
+			var out []string
+			for _, c := range pickupChains() {
+				out = append(out, c.Name)
+			}
+			return out
+		}
+
+		It("keeps the newest chains, deletes failed ones last, never active or post-run pending ones", func() {
+			setCaps(nil, new(int32(2)))
+			seed("pu-cap-old-ok", aiv1alpha1.ChainPhaseSucceeded, 5*time.Hour, false)
+			seed("pu-cap-old-failed", aiv1alpha1.ChainPhaseFailed, 4*time.Hour, false)
+			seed("pu-cap-mid-ok", aiv1alpha1.ChainPhaseSucceeded, 3*time.Hour, false)
+			seed("pu-cap-new-ok", aiv1alpha1.ChainPhaseSucceeded, time.Hour, false)
+			seed("pu-cap-running", aiv1alpha1.ChainPhaseRunning, 0, false)
+			seed("pu-cap-pending", aiv1alpha1.ChainPhaseSucceeded, 10*time.Hour, true)
+
+			reconcileOnce()
+			Expect(left()).To(ConsistOf("pu-cap-old-failed", "pu-cap-new-ok", "pu-cap-running", "pu-cap-pending"))
+		})
+
+		It("applies the TTL and the cap in the same pass", func() {
+			setCaps(new(int32(3600)), new(int32(1)))
+			seed("pu-both-expired", aiv1alpha1.ChainPhaseSucceeded, 2*time.Hour, false)
+			seed("pu-both-a", aiv1alpha1.ChainPhaseSucceeded, 20*time.Minute, false)
+			seed("pu-both-b", aiv1alpha1.ChainPhaseSucceeded, 10*time.Minute, false)
+
+			reconcileOnce()
+			Expect(left()).To(ConsistOf("pu-both-b"))
+		})
+
+		It("deletes nothing beyond the TTL when no cap is set", func() {
+			setCaps(new(int32(3600)), nil)
+			for i := range 5 {
+				seed(fmt.Sprintf("pu-nocap-%d", i), aiv1alpha1.ChainPhaseSucceeded, time.Duration(i+1)*time.Minute, false)
+			}
+			seed("pu-nocap-expired", aiv1alpha1.ChainPhaseFailed, 2*time.Hour, false)
+
+			reconcileOnce()
+			Expect(left()).To(HaveLen(5))
+			Expect(left()).NotTo(ContainElement("pu-nocap-expired"))
+		})
+	})
+
 	It("creates missing pickup labels once, never touching existing ones", func() {
 		gh.repoLabels[repo] = map[string]string{"needs-human": "custom|123456"}
 

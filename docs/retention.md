@@ -24,5 +24,11 @@ cap but are deleted last, so recent failures stay inspectable. Running or
 pending Chains, and pickup Chains whose post-run work is not done, are never
 deleted. `0` or unset means no cap. The TTL still applies on top of the cap.
 
+A Trigger treats an event as already handled while a run with its key exists.
+When the count cap (or the TTL) deletes a run, that key is free again, so a
+polled source (for example a GitHub source) can fire the same event again if it
+still returns it. Set the cap well above the number of events a source can
+still return, or keep the TTL longer than the source's look-back window.
+
 Each pass logs how many Chains it deleted by reason (`ttl`, `count`) and
 increments `roundtable_finished_chains_deleted_total{source,reason}`.
